@@ -35,6 +35,20 @@ class User(AbstractUser):
     email = models.EmailField(unique=True)
     middle_initial = models.CharField(max_length=5, blank=True)
     contact_details = models.CharField(max_length=50, blank=True)
+    # The number a text message goes to, stored the way a gateway wants it
+    # (+639XXXXXXXXX) rather than the way somebody typed it. contact_details
+    # stays for anything else worth recording — a landline, an extension —
+    # because a field that has to be machine-readable and a field that has to
+    # be human-readable are not the same field.
+    #
+    # Never write to this directly. accounts.phone.normalise_ph_mobile is the
+    # one thing that decides what a valid number is.
+    phone = models.CharField(max_length=16, blank=True, default="")
+    # Whether the person has proved they can receive at that number, by
+    # entering a code sent to it. An unverified number is a number somebody
+    # typed — texting a temporary password to a typo is worse than not
+    # texting at all, so the senders check this.
+    phone_verified = models.BooleanField(default=False)
     role = models.ForeignKey(
         Role, on_delete=models.PROTECT, null=True, blank=True, related_name="users"
     )

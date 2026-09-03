@@ -3,6 +3,7 @@ import { Card, Badge, Input, FormField, Switch, Button, Alert, Icon, PAGE } from
 import { useToast } from '../context/ToastContext';
 import { getAssistantSettings, saveAssistantSettings, getAssistantMetrics, checkAssistant } from '../api/assistant';
 import { testEmailDelivery } from '../api/email';
+import { testSmsDelivery } from '../api/sms';
 
 const FEATURE_LABELS = {
   brief: 'Pre-session briefs',
@@ -28,6 +29,8 @@ export default function Settings() {
   // sends the whole cfg as its payload) can never ship a half-typed value.
   const [draft, setDraft] = useState({ ollama_url: '', model_name: '' });
   const [mailTesting, setMailTesting] = useState(false);
+  const [smsTesting, setSmsTesting] = useState(false);
+  const [smsResult, setSmsResult] = useState(null);   // { ok, detail, provider, sender, recipient }
   const [mailResult, setMailResult] = useState(null);   // { ok, detail, sender, recipient }
 
   useEffect(() => {
@@ -112,6 +115,55 @@ export default function Settings() {
                   <div style={{ fontSize: 12, marginTop: 6, color: 'var(--text-muted)' }}>
                     Sending from <strong>{mailResult.sender}</strong>
                     {mailResult.recipient ? <> to <strong>{mailResult.recipient}</strong></> : null}
+                  </div>
+                )}
+              </Alert>
+            )}
+          </div>
+        </Card>
+
+        {/* The same reasoning as the email card beside it, and the same
+            failure it guards against: every notification send happens on a
+            background thread, so a gateway refusing a message looks exactly
+            like one delivering it. This asks and prints the answer. */}
+        <Card eyebrow="Notifications" title="Text messages" padding="22px">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ fontSize: 13.5, lineHeight: 1.6, color: 'var(--text-muted)' }}>
+              Staff who have verified a mobile number get a text for a new case
+              assignment, a temporary password, and the next day&rsquo;s sessions.
+              This sends one message to <strong>your own</strong> verified number
+              and reports what the gateway replied.
+            </div>
+            <div>
+              <Button variant="secondary" disabled={smsTesting}
+                      iconLeft={<Icon name="message-square" size={16} />}
+                      onClick={async () => {
+                        setSmsTesting(true);
+                        setSmsResult(null);
+                        try {
+                          setSmsResult(await testSmsDelivery());
+                        } catch (err) {
+                          setSmsResult({
+                            ok: false,
+                            detail: err.response?.data?.detail
+                              || 'The test could not be run.',
+                          });
+                        } finally {
+                          setSmsTesting(false);
+                        }
+                      }}>
+                {smsTesting ? 'Sending…' : 'Send a test text'}
+              </Button>
+            </div>
+            {smsResult && (
+              <Alert tone={smsResult.ok ? 'success' : 'danger'}
+                     icon={<Icon name={smsResult.ok ? 'message-square' : 'alert-triangle'} size={18} />}>
+                <div style={{ lineHeight: 1.6 }}>{smsResult.detail}</div>
+                {smsResult.provider && (
+                  <div style={{ fontSize: 12, marginTop: 6, color: 'var(--text-muted)' }}>
+                    Gateway <strong>{smsResult.provider}</strong>
+                    {smsResult.sender ? <> · sender <strong>{smsResult.sender}</strong></> : null}
+                    {smsResult.recipient ? <> · to <strong>{smsResult.recipient}</strong></> : null}
                   </div>
                 )}
               </Alert>

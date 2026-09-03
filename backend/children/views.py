@@ -12,6 +12,7 @@ from activity.models import ActivityLog
 from activity.services import log_activity
 from children.models import Child, TerminationRecord
 from children.notifications import send_assignment_notification
+from accounts.sms_notifications import notify_new_assignment
 from children.serializers import ChildSerializer
 
 
@@ -68,6 +69,7 @@ class ChildViewSet(_ArchivableViewSet):
         self._log(obj, ActivityLog.CREATED)
         if getattr(obj, "assigned_psychologist", None) is not None:
             send_assignment_notification(obj)
+            notify_new_assignment(obj)
 
     def perform_update(self, serializer):
         # Read the old assignee before save() overwrites it: the email is for a
@@ -77,6 +79,7 @@ class ChildViewSet(_ArchivableViewSet):
         self._log(obj, ActivityLog.UPDATED)
         if obj.assigned_psychologist_id and obj.assigned_psychologist_id != old:
             send_assignment_notification(obj)
+            notify_new_assignment(obj)
 
     def get_queryset(self):
         # Inactive (terminated) cases stay reachable by id - the profile view

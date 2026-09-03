@@ -383,6 +383,28 @@ BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL", "racco1nacc@gmail.com")
 BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "NACC RACCO1")
 
+# --- SMS (temporary passwords, assignments, session reminders) -------------
+#
+# Unset provider = "console": messages are written to the log and no gateway is
+# contacted. That is the default on purpose. A missing key should not crash a
+# save, and it should not silently do nothing either — the log line says
+# exactly what would have been sent.
+#
+# SMS_PROVIDER is the only thing that changes to move gateways. "semaphore" is
+# a Philippine aggregator reaching every local network over domestic
+# interconnects; a global CPaaS charges roughly ten times as much per message
+# into the Philippines for the same delivery, because international A2P
+# termination here is expensive.
+#
+# The same data rule as the mail applies, and harder: no child names, no case
+# details, no passwords. A text sits unencrypted on a lock screen.
+SMS_PROVIDER = os.getenv("SMS_PROVIDER", "console")
+SMS_API_KEY = os.getenv("SMS_API_KEY", "")
+SMS_ENDPOINT = os.getenv("SMS_ENDPOINT", "https://api.semaphore.co/api/v4/messages")
+# The name a message appears to come from. Has to be registered with the
+# gateway first; unset means their default shared sender.
+SMS_SENDER_NAME = os.getenv("SMS_SENDER_NAME", "")
+
 
 # ---- Hosted model (optional; the demo deployment only) --------------------
 # The assistant normally talks to a local Ollama and nothing leaves the

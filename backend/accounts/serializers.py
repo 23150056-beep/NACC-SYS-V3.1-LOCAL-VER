@@ -33,12 +33,17 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             "id", "email", "username", "first_name", "last_name",
-            "middle_initial", "contact_details", "role", "role_name",
+            "middle_initial", "contact_details", "phone", "phone_verified",
+            "role", "role_name",
             "requested_role", "requested_role_name",
             "fullname", "status", "must_change_password", "admin_takeover_pending",
             "google_linked", "last_login", "created_at",
         ]
         read_only_fields = [
+            # Only the person holding the handset can change these, through
+            # /api/auth/me/phone/. An administrator typing a number into
+            # somebody's record must not be able to mark it verified.
+            "phone", "phone_verified",
             "must_change_password", "admin_takeover_pending",
             "requested_role", "requested_role_name",
             "google_linked", "last_login", "created_at",

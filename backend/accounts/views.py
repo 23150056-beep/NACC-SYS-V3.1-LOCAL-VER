@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db.models import Count, Q
 
@@ -28,6 +29,12 @@ from activity.models import ActivityLog
 from activity.serializers import ActivityLogSerializer
 from activity.services import log_activity
 from children.notifications import send_temporary_password_notification
+from accounts.sms_notifications import (
+    notify_temporary_password, start_phone_verification,
+    confirm_phone_verification)
+from accounts.sms import send_sms
+from accounts.phone import (normalise_ph_mobile, InvalidPhilippineMobile,
+                            as_typed as phone_as_typed)
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +292,111 @@ class MyProfileView(generics.RetrieveUpdateAPIView):
         return profile
 
 
+class MyPhoneView(generics.GenericAPIView):
+    """Your own mobile number: set it, and prove it is yours.
+
+    Bound to request.user and taking no id, like the profile endpoint beside
+    it. POST starts verification by texting a code; PUT confirms one.
+
+    Kept off the ordinary user-edit path on purpose. An administrator can type
+    a number into somebody's record, but only the person holding the handset
+    can mark it verified, and only a verified number ever gets a message.
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = None
+
+    def get(self, request):
+        user = request.user
+        return Response({
+            "phone": user.phone,
+            "phone_display": phone_as_typed(user.phone),
+            "phone_verified": user.phone_verified,
+        })
+
+    def post(self, request):
+        """Send a code to the number supplied."""
+        try:
+            number = normalise_ph_mobile(request.data.get("phone"))
+        except InvalidPhilippineMobile as exc:
+            return Response({"phone": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if not number:
+            return Response({"phone": "Enter your mobile number."},
+                            status=status.HTTP_400_BAD_REQUEST)
+
+        result = start_phone_verification(request.user, number)
+        if not result.ok:
+            # The gateway's own words. A code that never arrives with no
+            # explanation is how the mail integration cost a day.
+            return Response({"detail": result.detail},
+                            status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"detail": f"We sent a code to {phone_as_typed(number)}. "
+                                   f"It expires in 10 minutes."},
+                        status=status.HTTP_200_OK)
+
+    def put(self, request):
+        """Confirm the code, which is what marks the number usable."""
+        ok, message = confirm_phone_verification(
+            request.user, request.data.get("code"))
+        if not ok:
+            return Response({"code": message}, status=status.HTTP_400_BAD_REQUEST)
+        log_activity(request.user, ActivityLog.UPDATED, ActivityLog.SECURITY,
+                     entity_type="User", entity_label="Verified own mobile number",
+                     entity_id=request.user.id)
+        return Response({"detail": message,
+                         "phone": request.user.phone,
+                         "phone_display": phone_as_typed(request.user.phone),
+                         "phone_verified": True}, status=status.HTTP_200_OK)
+
+    def delete(self, request):
+        """Stop texts without waiting for an administrator."""
+        user = request.user
+        user.phone = ""
+        user.phone_verified = False
+        user.save(update_fields=["phone", "phone_verified", "updated_at"])
+        return Response({"detail": "Number removed. You will not get text "
+                                   "notifications.", "phone": "",
+                         "phone_verified": False}, status=status.HTTP_200_OK)
+
+
+class SmsConfigTestView(generics.GenericAPIView):
+    """Ask the gateway, and print exactly what it says.
+
+    The mirror of the email test button, and it exists for the same reason:
+    every SMS send is fire-and-forget on a background thread, so a refused
+    message looks precisely like a delivered one from the outside. This is
+    synchronous, and it reports the gateway's own words.
+
+    Sends only to the administrator's own verified number — a diagnostic that
+    can text arbitrary numbers is a diagnostic somebody will point at a
+    stranger.
+    """
+
+    permission_classes = [IsAdministrator]
+    serializer_class = None
+
+    def post(self, request):
+        user = request.user
+        if not user.phone:
+            return Response(
+                {"ok": False,
+                 "detail": "Add your own mobile number first — this sends the "
+                           "test to you, not to anyone else."},
+                status=status.HTTP_400_BAD_REQUEST)
+        result = send_sms(
+            user.phone,
+            "NACC SYS: this is a test message. If you can read this, text "
+            "notifications are working.",
+            "configuration test")
+        return Response({
+            "ok": result.ok,
+            "detail": result.detail,
+            "provider": settings.SMS_PROVIDER,
+            "sender": settings.SMS_SENDER_NAME or "(the gateway default)",
+            "recipient": phone_as_typed(user.phone),
+        }, status=status.HTTP_200_OK)
+
+
 class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdministrator]
 
@@ -348,10 +460,13 @@ class UserViewSet(viewsets.ModelViewSet):
             update_fields.append("admin_takeover_pending")
         user.save(update_fields=update_fields)
         email_queued = send_temporary_password_notification(user, temp_password)
+        # The password travels by email only. This says one is waiting.
+        sms_queued = notify_temporary_password(user)
         self._log(user, ActivityLog.CREATED)
         data = UserSerializer(user).data
         data["temp_password"] = temp_password
         data["email_queued"] = email_queued
+        data["sms_queued"] = sms_queued
         return Response(data, status=status.HTTP_201_CREATED)
 
     def perform_update(self, serializer):
@@ -523,9 +638,13 @@ class UserViewSet(viewsets.ModelViewSet):
         user.must_change_password = True
         user.save(update_fields=["password", "must_change_password", "updated_at"])
         email_queued = send_temporary_password_notification(user, temp_password)
+        # The password travels by email only. This says one is waiting.
+        sms_queued = notify_temporary_password(user)
         self._log(user, ActivityLog.UPDATED)
-        return Response({"temp_password": temp_password, "email_queued": email_queued},
-                status=status.HTTP_200_OK)
+        return Response({"temp_password": temp_password,
+                         "email_queued": email_queued,
+                         "sms_queued": sms_queued},
+                        status=status.HTTP_200_OK)
 
 
 class RoleListView(generics.ListAPIView):

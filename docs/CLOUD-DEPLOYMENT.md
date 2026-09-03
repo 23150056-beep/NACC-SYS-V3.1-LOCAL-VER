@@ -197,6 +197,9 @@ reproduce a deployment problem.
 |---|---|---|
 | `BREVO_API_KEY` | — | Unset = no assignment emails are sent; nothing else changes. |
 | `BREVO_SENDER_EMAIL` | `racco1nacc@gmail.com` | Must be a verified sender in the Brevo account. |
+| `SMS_PROVIDER` | unset | Unset = messages go to the log, nothing is sent. Set to `semaphore` to switch texts on. See §9b. |
+| `SMS_API_KEY` | — | Semaphore API key. Required when SMS_PROVIDER is set. |
+| `SMS_SENDER_NAME` | unset | An approved Semaphore sender name, e.g. NACC. Unset uses their shared sender. |
 | `BREVO_SENDER_NAME` | `NACC RACCO1` | |
 
 The email carries the **case number only** — see
@@ -321,6 +324,7 @@ once the contracts exist.
 | Object storage | Cloudflare R2, bucket `nacc-v3-media` | Set by the bucket's location hint — **confirm this in the R2 dashboard** | Uploaded reports, consent scans |
 | Sign-in | Google Identity Services | Google global | Email and display name of staff and psychologists only. **No child data reaches Google.** |
 | Transactional mail | Brevo | Brevo (EU) | One message: "a case has been assigned to you", carrying the **case number only**. No child name, no case type, no clinical detail. |
+| Text messages | Semaphore | Philippines | Three messages, each a prompt to sign in: a new assignment (**case number only**), a temporary password *notice* (never the password), and a count of tomorrow's sessions. No child name, no case detail. |
 | AI (writing assistant) | None — does not run on this deployment (see below) | — | — |
 
 **State it plainly, because a panel will ask:** under this deployment, no
@@ -429,6 +433,7 @@ to reach.
 - [ ] Data-processing agreement executed with **Neon**
 - [ ] Data-processing agreement executed with **Cloudflare**
 - [ ] Data-processing agreement executed with **Brevo** (transactional mail)
+- [ ] Data-processing agreement executed with **Semaphore** (text messages), if SMS is switched on
 - [ ] R2 bucket location hint confirmed and recorded in the table above
 - [ ] All three providers listed as sub-processors in the agency's NPC records
 - [ ] Hosting arrangement reviewed by the agency's Data Protection Officer
@@ -754,6 +759,98 @@ curl -X POST https://api.brevo.com/v3/smtp/email \
   messages needs the same consideration.
 
 ---
+
+## 9b. Text messages (Semaphore) setup
+
+What this switches on: staff who have **verified their own mobile number**
+receive a text for three things — a new case assignment, a notice that a
+temporary password is waiting, and a count of the next day's sessions.
+
+Nothing confidential travels this way. No child's name, no case detail, no
+password. Each message says to sign in. That is not caution for its own sake:
+a text is unencrypted, passes through a telco, and sits on a lock screen
+anyone standing nearby can read. The rule the mail already follows (case
+number, never a name) is applied harder here, not relaxed.
+
+**It is off until configured.** With no gateway set, messages are written to
+the server log and nothing is sent. That is the default on purpose — a missing
+key should neither crash a save nor silently do nothing.
+
+### Why Semaphore rather than a global provider
+
+International A2P termination into the Philippines is expensive, so a global
+CPaaS charges roughly **₱10 per message** here. A Philippine aggregator on
+domestic interconnects is **well under ₱1** for the same delivery to the same
+handset. At this office's volume — around a hundred messages a month — that is
+the difference between roughly ₱1,000/month and under ₱100/month.
+
+Coverage is identical: Semaphore reaches Globe, Smart, DITO and the sub-brands
+(TM, TNT, Sun, GOMO).
+
+### Step 1 — Get an API key
+
+1. <https://semaphore.co> → sign up → **API** in the dashboard.
+2. Copy the API key.
+3. Load credit. There is a minimum top-up; a small one lasts months at this
+   volume.
+
+### Step 2 — Register a sender name (optional, recommended)
+
+Without one, messages arrive from Semaphore's shared sender. With one they
+arrive from `NACC`. Register it in the dashboard under **Sender Names** — it
+needs their approval before it works, and an unapproved name is rejected at
+send time with a message the test button will show you verbatim.
+
+### Step 3 — Set four variables on the API service
+
+| Variable | Value |
+|---|---|
+| `SMS_PROVIDER` | `semaphore` |
+| `SMS_API_KEY` | the key from step 1 |
+| `SMS_SENDER_NAME` | your approved sender name, or leave unset |
+| `SMS_ENDPOINT` | leave unset — it defaults to Semaphore's v4 endpoint |
+
+Leaving `SMS_PROVIDER` unset keeps the console behaviour, which is what you
+want on the demo.
+
+### Step 4 — Prove it works before trusting it
+
+Every notification send happens on a background thread, so a gateway refusing
+a message looks exactly like one delivering it. There is a button for this,
+for the same reason the mail has one.
+
+1. Sign in as an administrator → **My Profile** → add and verify your own
+   mobile number. You will receive a six-digit code.
+2. **Settings** → **Text messages** → **Send a test text**.
+3. The screen prints what the gateway actually replied — a bad key, an
+   unapproved sender name and an empty balance all say so in their own words.
+
+If no code arrives at step 1, the gateway is refusing and step 2 will say why.
+
+### What breaks it, in order of likelihood
+
+- **`SMS_PROVIDER` still unset.** Messages go to the log, not to a handset.
+  The test button says so plainly rather than reporting success.
+- **Sender name not approved.** Rejected at send time, named in the error.
+- **No credit.** Rejected with a balance message.
+- **The recipient never verified their number.** An unverified number is
+  skipped silently by design — a number somebody typed may be a typo, and a
+  typo is a stranger's handset. Check **Users** for who has a verified number.
+
+### Sending the daily reminder
+
+The other two messages fire from the actions that cause them. The session
+reminder is a scheduled job:
+
+```
+manage.py send_session_reminders             # tomorrow
+manage.py send_session_reminders --dry-run   # print, send nothing
+```
+
+Run it once a day. It is safe to run twice — it records who it has already
+told and will not double-text. On Render's free plan there is no cron, so this
+is either a paid add-on or somebody running it; `--dry-run` first is a good
+habit either way.
 
 ## 10. Troubleshooting
 
