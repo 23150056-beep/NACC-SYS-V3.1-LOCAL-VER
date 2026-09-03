@@ -405,6 +405,14 @@ SMS_ENDPOINT = os.getenv("SMS_ENDPOINT", "https://api.semaphore.co/api/v4/messag
 # gateway first; unset means their default shared sender.
 SMS_SENDER_NAME = os.getenv("SMS_SENDER_NAME", "")
 
+# The shared token that lets a scheduler trigger the daily session reminder.
+# Render's free plan has no cron, so the job is exposed as an endpoint and
+# something free calls it — see docs/CLOUD-DEPLOYMENT.md §9c.
+#
+# Unset means the endpoint 404s. An unconfigured deployment has no extra
+# surface, which is the right default for a route that takes no login.
+SESSION_REMINDER_TOKEN = os.getenv("SESSION_REMINDER_TOKEN", "")
+
 
 # ---- Hosted model (optional; the demo deployment only) --------------------
 # The assistant normally talks to a local Ollama and nothing leaves the

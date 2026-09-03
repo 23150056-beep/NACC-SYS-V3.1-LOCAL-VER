@@ -200,6 +200,7 @@ reproduce a deployment problem.
 | `SMS_PROVIDER` | unset | Unset = messages go to the log, nothing is sent. Set to `semaphore` to switch texts on. See §9b. |
 | `SMS_API_KEY` | — | Semaphore API key. Required when SMS_PROVIDER is set. |
 | `SMS_SENDER_NAME` | unset | An approved Semaphore sender name, e.g. NACC. Unset uses their shared sender. |
+| `SESSION_REMINDER_TOKEN` | unset | Lets a scheduler trigger the daily reminder. Unset = that endpoint 404s. See §9c. |
 | `BREVO_SENDER_NAME` | `NACC RACCO1` | |
 
 The email carries the **case number only** — see
@@ -851,6 +852,69 @@ Run it once a day. It is safe to run twice — it records who it has already
 told and will not double-text. On Render's free plan there is no cron, so this
 is either a paid add-on or somebody running it; `--dry-run` first is a good
 habit either way.
+
+## 9c. Running the daily reminder without paying for cron
+
+Two of the three text messages fire from the action that causes them — an
+assignment, a password reset. The session reminder is the odd one: it has to
+happen at a time, and Render's free plan runs no scheduled jobs.
+
+The paid add-on is not worth buying for one text a day, so the job is exposed
+as an endpoint and something free calls it. **The schedule lives outside; the
+work stays on the server.** Whatever calls it knows a URL and a token, and
+never touches the database.
+
+### Recommended: GitHub Actions (free, and you already have it)
+
+`.github/workflows/session-reminders.yml` is committed and ready. It runs at
+09:00 UTC, which is 17:00 in Manila.
+
+1. Make a token: `openssl rand -hex 32` — or any long random string.
+2. **Render** → the API service → **Environment** → add
+   `SESSION_REMINDER_TOKEN` = that value. Until this is set the endpoint 404s.
+3. **GitHub** → the repo → **Settings → Secrets and variables → Actions** →
+   add two repository secrets:
+   - `SESSION_REMINDER_TOKEN` — the same value
+   - `SESSION_REMINDER_URL` — `https://<your-api>.onrender.com/api/tasks/session-reminders/`
+4. **Actions** tab → **Daily session reminders** → **Run workflow**, with
+   *dry run* ticked. It reports how many people would be texted without
+   sending anything.
+
+Two things to know about free scheduled workflows. They are **best effort** and
+can be delayed by tens of minutes at busy times — fine for "your sessions
+tomorrow", not fine for anything time-critical. And GitHub **disables
+scheduled workflows on a repository with no activity for 60 days**, with an
+email first; any push re-enables it.
+
+### Alternative: a free cron pinger
+
+Anything that can POST on a schedule works — cron-job.org and UptimeRobot both
+have free tiers. Point it at the same URL with the header
+`X-Task-Token: <your token>`. Same two setup steps on the Render side.
+
+Use this if you would rather not have the token in GitHub, or if the repository
+goes quiet enough to trip the 60-day rule.
+
+### Alternative: nobody schedules it
+
+The reminder is a convenience, not a safety feature — the schedule screen is
+the source of truth and it is always right. If nothing is scheduling this, the
+other two messages still work, and somebody can run:
+
+```
+manage.py send_session_reminders --dry-run
+manage.py send_session_reminders
+```
+
+### Why calling it twice is safe
+
+It records who it has told, for 36 hours. A second call the same day sends
+nothing and reports `skipped`. That is deliberate: free schedulers retry, and
+the workflow itself retries a cold start, so being called more than once is
+the normal case rather than the exception.
+
+The reply counts people and never names them — it lands in a CI log, and a
+caseload has no business there.
 
 ## 10. Troubleshooting
 

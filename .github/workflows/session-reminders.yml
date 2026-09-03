@@ -1,0 +1,75 @@
+name: Daily session reminders
+
+# Render's free plan has no cron, and the paid add-on is not worth buying for
+# one text a day. GitHub Actions schedules are free, so the schedule lives here
+# and the work stays on the server: this job knows a URL and a token, and never
+# touches the database.
+#
+# Set up (once):
+#   1. Pick a long random token, e.g. `openssl rand -hex 32`
+#   2. Render → the API service → Environment → SESSION_REMINDER_TOKEN = that
+#   3. GitHub → repo → Settings → Secrets and variables → Actions →
+#        SESSION_REMINDER_TOKEN  = the same value
+#        SESSION_REMINDER_URL    = https://<your-api>.onrender.com/api/tasks/session-reminders/
+#
+# Until SESSION_REMINDER_TOKEN is set on the server the endpoint 404s, so this
+# workflow failing loudly is the correct behaviour for a half-finished setup.
+
+on:
+  schedule:
+    # 09:00 UTC = 17:00 Asia/Manila. GitHub runs schedules in UTC and does not
+    # observe the repository's timezone. Free-tier schedules are best effort
+    # and can be delayed by tens of minutes at busy times — fine for "your
+    # sessions tomorrow", not fine for anything time-critical.
+    - cron: "0 9 * * *"
+  # So it can be run by hand from the Actions tab, which is also how you test
+  # it without waiting until 5pm.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Report who would be texted, and send nothing"
+        type: boolean
+        default: false
+
+jobs:
+  remind:
+    name: Ask the API to send today's reminders
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger
+        env:
+          URL: ${{ secrets.SESSION_REMINDER_URL }}
+          TOKEN: ${{ secrets.SESSION_REMINDER_TOKEN }}
+          DRY: ${{ inputs.dry_run && '?dry_run=1' || '' }}
+        run: |
+          if [ -z "$URL" ] || [ -z "$TOKEN" ]; then
+            echo "SESSION_REMINDER_URL or SESSION_REMINDER_TOKEN is not set."
+            echo "See the comment at the top of this workflow."
+            exit 1
+          fi
+
+          # --max-time 180: the API is on Render's free plan and sleeps after
+          # ~15 minutes idle, so the first request of the day pays a cold start
+          # of up to a minute. Retry twice for the same reason — a timeout here
+          # is far more likely to be a waking container than a real failure.
+          for attempt in 1 2 3; do
+            echo "Attempt $attempt"
+            code=$(curl -sS -o response.json -w '%{http_code}' \
+                        --max-time 180 \
+                        -X POST "$URL$DRY" \
+                        -H "X-Task-Token: $TOKEN") && break || true
+            sleep 20
+          done
+
+          echo "HTTP $code"
+          cat response.json || true
+          echo
+
+          # The response counts people; it never names them. A caseload has no
+          # business in a CI log.
+          case "$code" in
+            200) echo "Reminders processed." ;;
+            404) echo "The endpoint is off — SESSION_REMINDER_TOKEN is not set on the server."; exit 1 ;;
+            403) echo "The server rejected the token. The two values do not match."; exit 1 ;;
+            *)   echo "Unexpected reply."; exit 1 ;;
+          esac
