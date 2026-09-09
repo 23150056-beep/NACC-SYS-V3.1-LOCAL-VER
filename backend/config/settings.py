@@ -78,6 +78,7 @@ INSTALLED_APPS = [
     "activity",
     "samd",
     "assistant",
+    "adoption",
 ]
 
 MIDDLEWARE = [
