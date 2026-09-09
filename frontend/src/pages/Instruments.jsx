@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react';
 import api from '../api/client';
 import { useActivity } from '../context/ActivityContext';
 import { useAuth } from '../context/AuthContext';
-import { Card, Button, Badge, Input, Select, FormField, Alert, EmptyState, Icon, iconBtn, hoverLift, PAGE } from '../ui';
+import {
+  Alert, Badge, Button, EmptyState, FormField, hoverLift, Icon, iconBtn, Input, PAGE, PageHeader,
+  Segmented, Select, TD, TH, THEAD_ROW, TR,
+} from '../ui';
 import { useToast } from '../context/ToastContext';
 import { printBlankForm } from '../utils/printForm';
 import InstrumentFormDrawer, { CATEGORIES, EMPTY_INSTRUMENT } from '../components/InstrumentFormDrawer';
@@ -103,60 +106,58 @@ export default function Instruments() {
     catch { toast.error('Could not deactivate.'); }
   };
 
-  const th = { textAlign: 'left', padding: '12px 16px', fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)', whiteSpace: 'nowrap' };
-  const td = { padding: '12px 16px', fontSize: 13, color: 'var(--text-body)' };
-
   return (
     <div style={{ ...PAGE, position: 'relative' }}>
-      {showCatalog ? (
-        <Alert tone="info" icon={<Icon name="shield-check" size={18} />} style={{ marginBottom: 16 }} title="Copyright-safe by design">
-          The catalog stores instrument <strong>titles and metadata only</strong> — never questions, scales, or scoring keys.
-          Published instruments are administered on paper using the psychologist&apos;s own materials.
-        </Alert>
-      ) : (
-        <Alert tone="info" icon={<Icon name="file-text" size={18} />} style={{ marginBottom: 16 }}>
-          Manage your consent and interview form templates. Instrument titles are managed inside the Pre-Assessment wizard (step 4).
-        </Alert>
-      )}
-
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        {showCatalog ? (
-          <div role="tablist" aria-label="Instrument sections" style={{ display: 'inline-flex', gap: 4, background: 'var(--ink-50)', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', padding: 3 }}>
-            {[['catalog', 'Instrument Catalog'], ['forms', 'Agency Form Templates']].map(([k, label]) => (
-              <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
-                style={{ padding: '6px 16px', borderRadius: 'var(--radius-pill)', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12.5, background: tab === k ? 'var(--blue-600)' : 'transparent', color: tab === k ? '#fff' : 'var(--text-muted)', transition: 'var(--transition-base)' }}>{label}</button>
-            ))}
-          </div>
-        ) : (
-          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>Pre-Assessment Instruments</div>
+      <PageHeader
+        title={showCatalog ? 'Instruments & Agency Forms' : 'Pre-Assessment Instruments'}
+        subtitle="RACCO I · titles and metadata only"
+      >
+        {showCatalog && (
+          <Segmented
+            label="Instrument sections"
+            value={tab} onChange={setTab}
+            options={[{ value: 'catalog', label: 'Instrument catalog' }, { value: 'forms', label: 'Agency forms' }]}
+          />
         )}
         {tab === 'catalog'
-          ? <Button variant="primary" onClick={() => { setError(''); setForm({ ...EMPTY_INSTRUMENT }); }} iconLeft={<Icon name="plus" size={17} />}>Add Instrument Title</Button>
-          : <Button variant="primary" onClick={() => { setError(''); setTpl({ ...EMPTY_TEMPLATE, fields: [blankField()] }); }} iconLeft={<Icon name="plus" size={17} />}>New Agency Form</Button>}
+          ? <Button variant="primary" onClick={() => { setError(''); setForm({ ...EMPTY_INSTRUMENT }); }} iconLeft={<Icon name="plus" size={18} />}>Add instrument title</Button>
+          : <Button variant="primary" onClick={() => { setError(''); setTpl({ ...EMPTY_TEMPLATE, fields: [blankField()] }); }} iconLeft={<Icon name="plus" size={18} />}>New agency form</Button>}
+      </PageHeader>
+
+      {/* The copyright rule, at the top of the screen it constrains. It is the
+          reason this catalog holds titles and nothing else, and it belongs
+          where someone is about to add a row — not in a help page. */}
+      <div style={{ display: 'flex', gap: 11, padding: '12px 14px', background: 'var(--blue-50)', border: '1px solid var(--blue-100)', borderRadius: 11 }}>
+        <Icon name={showCatalog ? 'shield-check' : 'file-text'} size={19} style={{ color: 'var(--blue-600)', flex: 'none', marginTop: 1 }} />
+        <p style={{ fontSize: 12.5, lineHeight: 1.6, color: 'var(--text-body)' }}>
+          {showCatalog
+            ? <>The catalog stores instrument <strong>titles and metadata only</strong> — never questions, scales, or scoring keys. Published instruments are administered on paper using the psychologist&apos;s own materials.</>
+            : <>Manage your consent and interview form templates. Instrument titles are managed inside the Pre-Assessment wizard, step 4.</>}
+        </p>
       </div>
 
-      {tab === 'catalog' ? (
-        <Card padding="0">
-          {instruments.length === 0 ? (
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
+        {tab === 'catalog' ? (
+          instruments.length === 0 ? (
             <EmptyState icon={<Icon name="clipboard-pen" size={24} />} title="No instruments in the catalog" description="Add the titles of the instruments you administer on paper." />
           ) : (
             <div className="racco-scroll" style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', minWidth: 680, borderCollapse: 'collapse' }}>
-                <thead><tr style={{ background: 'var(--ink-50)', borderBottom: '1px solid var(--border)' }}>
-                  {['Title', 'Publisher', 'Category', 'Age Range', ...(isAdmin ? ['Owner'] : []), 'Actions'].map((h) => <th key={h} style={th}>{h}</th>)}
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr style={THEAD_ROW}>
+                  {['Instrument title', 'Publisher', 'Category', 'Age range', ...(isAdmin ? ['Owner'] : []), ''].map((h, i) => <th key={h || i} scope="col" style={TH}>{h}</th>)}
                 </tr></thead>
                 <tbody>
                   {instruments.map((i) => (
-                    <tr key={i.id} style={{ borderBottom: '1px solid var(--ink-100)' }}>
-                      <td style={{ ...td, fontWeight: 700, color: 'var(--text-strong)' }}>{i.title}</td>
-                      <td style={td}>{i.publisher || '—'}</td>
-                      <td style={td}><Badge tone="neutral" size="sm">{CATEGORIES.find((c) => c.v === i.category)?.label || i.category}</Badge></td>
-                      <td style={td}>{i.age_range || '—'}</td>
-                      {isAdmin && <td style={td}>{i.owner_name || '—'}</td>}
-                      <td style={td}>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button title="Edit" onClick={() => { setError(''); setForm({ ...i, owner: i.owner || '' }); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={15} /></button>
-                          <button title="Deactivate" onClick={() => deactivateInstrument(i)} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--red-500)')}><Icon name="archive" size={15} /></button>
+                    <tr key={i.id} style={TR}>
+                      <td style={{ ...TD, fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{i.title}</td>
+                      <td style={TD}>{i.publisher || '—'}</td>
+                      <td style={TD}><Badge tone="neutral" size="sm">{CATEGORIES.find((c) => c.v === i.category)?.label || i.category}</Badge></td>
+                      <td style={TD}>{i.age_range || '—'}</td>
+                      {isAdmin && <td style={TD}>{i.owner_name || '—'}</td>}
+                      <td style={{ ...TD, textAlign: 'right' }}>
+                        <div style={{ display: 'inline-flex', gap: 6 }}>
+                          <button title={`Edit ${i.title}`} aria-label={`Edit ${i.title}`} onClick={() => { setError(''); setForm({ ...i, owner: i.owner || '' }); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={15} /></button>
+                          <button title={`Deactivate ${i.title}`} aria-label={`Deactivate ${i.title}`} onClick={() => deactivateInstrument(i)} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--red-700)')}><Icon name="archive" size={15} /></button>
                         </div>
                       </td>
                     </tr>
@@ -164,33 +165,31 @@ export default function Instruments() {
                 </tbody>
               </table>
             </div>
-          )}
-        </Card>
-      ) : (
-        <Card padding="0">
-          {templates.length === 0 ? (
+          )
+        ) : (
+          templates.length === 0 ? (
             <EmptyState icon={<Icon name="file-text" size={24} />} title="No agency forms yet" description="Create your consent form or clinical interview form template." />
           ) : (
             <div className="racco-scroll" style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', minWidth: 680, borderCollapse: 'collapse' }}>
-                <thead><tr style={{ background: 'var(--ink-50)', borderBottom: '1px solid var(--border)' }}>
-                  {['Title', 'Type', 'Fields', 'Version', ...(isAdmin ? ['Owner'] : []), 'Actions'].map((h) => <th key={h} style={th}>{h}</th>)}
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr style={THEAD_ROW}>
+                  {['Form title', 'Type', 'Fields', 'Version', ...(isAdmin ? ['Owner'] : []), ''].map((h, i) => <th key={h || i} scope="col" style={TH}>{h}</th>)}
                 </tr></thead>
                 <tbody>
                   {templates.map((t) => (
-                    <tr key={t.id} style={{ borderBottom: '1px solid var(--ink-100)' }}>
-                      <td style={{ ...td, fontWeight: 700, color: 'var(--text-strong)' }}>{t.title}</td>
-                      <td style={td}><Badge tone="brand" size="sm">{FORM_TYPES.find((f) => f.v === t.form_type)?.label || t.form_type}</Badge></td>
-                      <td style={td}>{t.fields?.length ?? 0}</td>
-                      <td style={td} className="racco-mono">v{t.version}</td>
-                      {isAdmin && <td style={td}>{t.owner_name || '—'}</td>}
-                      <td style={td}>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button title="Print blank form (e.g. for guardians to sign)" onClick={() => printBlankForm(t)} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--text-muted)')}><Icon name="printer" size={15} /></button>
+                    <tr key={t.id} style={TR}>
+                      <td style={{ ...TD, fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{t.title}</td>
+                      <td style={TD}><Badge tone="brand" size="sm">{FORM_TYPES.find((f) => f.v === t.form_type)?.label || t.form_type}</Badge></td>
+                      <td className="racco-mono" style={TD}>{t.fields?.length ?? 0}</td>
+                      <td className="racco-mono" style={TD}>v{t.version}</td>
+                      {isAdmin && <td style={TD}>{t.owner_name || '—'}</td>}
+                      <td style={{ ...TD, textAlign: 'right' }}>
+                        <div style={{ display: 'inline-flex', gap: 6 }}>
+                          <button title="Print blank form (e.g. for guardians to sign)" aria-label={`Print ${t.title}`} onClick={() => printBlankForm(t)} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--text-muted)')}><Icon name="printer" size={15} /></button>
                           {(isAdmin || t.owner !== null) && (
                             <>
-                              <button title="Edit" onClick={() => { setError(''); setTpl({ ...t, fields: t.fields?.length ? t.fields : [blankField()], attestation: false }); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={15} /></button>
-                              <button title="Deactivate" onClick={() => deactivateTemplate(t)} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--red-500)')}><Icon name="archive" size={15} /></button>
+                              <button title={`Edit ${t.title}`} aria-label={`Edit ${t.title}`} onClick={() => { setError(''); setTpl({ ...t, fields: t.fields?.length ? t.fields : [blankField()], attestation: false }); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={15} /></button>
+                              <button title={`Deactivate ${t.title}`} aria-label={`Deactivate ${t.title}`} onClick={() => deactivateTemplate(t)} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--red-700)')}><Icon name="archive" size={15} /></button>
                             </>
                           )}
                         </div>
@@ -200,10 +199,9 @@ export default function Instruments() {
                 </tbody>
               </table>
             </div>
-          )}
-        </Card>
-      )}
-
+          )
+        )}
+      </div>
       {form && (
         <InstrumentFormDrawer
           form={form} setForm={setForm}

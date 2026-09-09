@@ -4,8 +4,8 @@ import { exactDate, timeAgo } from '../utils/time';
 import { useActivity } from '../context/ActivityContext';
 import { useToast } from '../context/ToastContext';
 import {
-  Card, Button, Alert, Select, FormField, Avatar, EmptyState, Icon, Skeleton,
-  ConfirmDialog, RoleAccessPanel,
+  Alert, Avatar, Button, ConfirmDialog, EmptyState, FormField, Icon, ROLE_ACCESS,
+  RoleAccessPanel, Select, Skeleton,
 } from '../ui';
 
 // People who asked for access and are waiting on a decision. Rendered as a
@@ -72,6 +72,7 @@ export default function AccessRequests({ onChange }) {
   const [loadError, setLoadError] = useState('');
   const [confirm, setConfirm] = useState(null);   // { kind, user }
   const [grantRole, setGrantRole] = useState('');
+  const [picked, setPicked] = useState({});   // user id -> role id chosen in the row
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
@@ -95,11 +96,11 @@ export default function AccessRequests({ onChange }) {
       .catch(() => setRoles([]));
   }, []);
 
-  const openApprove = (u) => {
-    // Pre-filled from the claim, which is what makes the queue quick — but the
-    // administrator's submission is what the server acts on, and it refuses to
-    // act at all without one.
-    setGrantRole(u.requested_role ? String(u.requested_role) : '');
+  const openApprove = (u, roleId) => {
+    // Whatever the row's picker is showing, which is pre-filled from the claim
+    // — but the administrator's submission is what the server acts on, and it
+    // refuses to act at all without one.
+    setGrantRole(roleId ? String(roleId) : (u.requested_role ? String(u.requested_role) : ''));
     setConfirm({ kind: 'approve', user: u });
   };
 
@@ -127,100 +128,119 @@ export default function AccessRequests({ onChange }) {
     }
   };
 
-  const TH = { textAlign: 'left', padding: '11px 16px', fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)', whiteSpace: 'nowrap', background: 'var(--surface)', borderBottom: '1px solid var(--border)' };
-  const TD = { padding: '13px 16px', fontSize: 13, color: 'var(--text-body)', verticalAlign: 'middle' };
-
   const granting = confirm?.kind === 'approve'
     ? roles.find((r) => String(r.id) === String(grantRole))
     : null;
   const claimed = confirm?.user?.requested_role_name || null;
 
+  // Pre-filled from the claim so the queue moves quickly, but it is a form
+  // field the administrator has to look at rather than a default that acts on
+  // its own — approve/ on the server has no fallback to the claim either.
+  const pickedFor = (u) => picked[u.id] ?? (roles.find((r) => r.role_name === u.requested_role_name)?.id ?? '');
+  const nameOfRole = (id) => roles.find((r) => String(r.id) === String(id))?.role_name || '';
+
   return (
     <>
-      <Alert tone="warning" icon={<Icon name="shield-alert" size={18} />} style={{ marginBottom: 16 }}>
-        Anyone on the internet can send a request — with a Google account or
-        the sign-up form. Approving one is what grants access to child case
-        records, so approve only people you know work here, and set the role
-        yourself rather than trusting what they typed.
-      </Alert>
+      <div style={{ padding: '12px 15px', display: 'flex', gap: 11, background: 'var(--warning-50)', borderBottom: '1px solid var(--warning-100)' }}>
+        <Icon name="shield-alert" size={19} style={{ color: 'var(--warning-700)', flex: 'none', marginTop: 1 }} />
+        <p style={{ fontSize: 12.5, lineHeight: 1.6, color: 'var(--text-body)' }}>
+          <strong style={{ color: 'var(--text-strong)' }}>Read each row before you approve it.</strong> Anyone on the
+          internet can send a request — with a Google account or the sign-up form. A stated role is a claim, not a
+          grant; you assign the real one. Approving cannot create another Administrator, and declining archives the
+          address so it cannot ask again.
+        </p>
+      </div>
 
-      <Card padding="0">
-        {loadError ? (
-          <div style={{ padding: 20 }}>
-            <Alert tone="danger" title="Requests could not be loaded" icon={<Icon name="wifi-off" size={18} />}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
-                <span>{loadError} Nothing has been changed.</span>
-                <Button variant="secondary" size="sm" onClick={() => { setLoading(true); load(); }} iconLeft={<Icon name="refresh-cw" size={15} />}>Try again</Button>
+      {loadError ? (
+        <div style={{ padding: 20 }}>
+          <Alert tone="danger" title="Requests could not be loaded" icon={<Icon name="wifi-off" size={18} />}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start' }}>
+              <span>{loadError} Nothing has been changed.</span>
+              <Button variant="secondary" size="sm" onClick={() => { setLoading(true); load(); }} iconLeft={<Icon name="refresh-cw" size={15} />}>Try again</Button>
+            </div>
+          </Alert>
+        </div>
+      ) : loading ? (
+        <div style={{ padding: '14px 15px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {Array.from({ length: 2 }).map((_, i) => (
+            <div key={`sk-${i}`} style={{ border: '1px solid var(--border)', borderRadius: 11, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Skeleton width={38} height={38} radius="50%" />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 7, flex: 1 }}>
+                <Skeleton width="38%" height={12} />
+                <Skeleton width="58%" height={10} />
               </div>
-            </Alert>
-          </div>
-        ) : (
-          <div className="racco-scroll" style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', minWidth: 780, borderCollapse: 'collapse' }}>
-              <thead>
-                <tr>
-                  {['Person', 'They say they are', 'Requested', ''].map((h, i) => (
-                    <th key={h || i} scope="col" style={TH}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {loading && Array.from({ length: 3 }).map((_, i) => (
-                  <tr key={`sk-${i}`} style={{ borderBottom: '1px solid var(--ink-100)' }}>
-                    <td style={TD}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-                        <Skeleton width={30} height={30} radius="50%" />
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
-                          <Skeleton width="46%" height={11} />
-                          <Skeleton width="66%" height={9} />
-                        </div>
-                      </div>
-                    </td>
-                    <td style={TD}><Skeleton width={124} height={18} radius="var(--radius-pill)" /></td>
-                    <td style={TD}><Skeleton width={70} height={11} /></td>
-                    <td style={TD}><Skeleton width={150} height={30} radius="var(--radius-sm)" /></td>
-                  </tr>
-                ))}
+              <Skeleton width={124} height={20} radius="var(--radius-pill)" />
+            </div>
+          ))}
+        </div>
+      ) : rows.length === 0 ? (
+        <EmptyState
+          icon={<Icon name="inbox" size={24} />}
+          title="No one is waiting"
+          description="When a staff member or psychologist asks for access — with Google or the sign-up form — their request appears here for you to approve."
+        />
+      ) : (
+        <div style={{ padding: '14px 15px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {rows.map((u) => {
+            const pick = pickedFor(u);
+            const grantName = nameOfRole(pick);
+            const gains = ROLE_ACCESS[grantName] || [];
+            return (
+              <div key={u.id} style={{ border: '1px solid var(--border)', borderRadius: 11, overflow: 'hidden' }}>
+                <div style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  <Avatar name={nameOf(u)} tone="neutral" size={38} />
+                  <span style={{ flex: 1, minWidth: 160 }}>
+                    <span style={{ display: 'block', fontWeight: 800, fontSize: 14, color: 'var(--text-strong)' }}>{nameOf(u)}</span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2, flexWrap: 'wrap' }}>
+                      <span className="racco-mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{u.email}</span>
+                      <DoorChip google={!!u.google_linked} />
+                    </span>
+                  </span>
+                  <ClaimChip role={u.requested_role_name} />
+                  <span style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--text-faint)', flex: 'none' }} title={exactDate(u.created_at)}>{timeAgo(u.created_at)}</span>
+                </div>
 
-                {!loading && rows.map((u) => (
-                  <tr key={u.id} style={{ borderBottom: '1px solid var(--ink-100)' }}>
-                    <td style={TD}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
-                        <Avatar name={nameOf(u)} tone="neutral" size="sm" />
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameOf(u)}</div>
-                          <div className="racco-mono" style={{ fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
-                          <DoorChip google={!!u.google_linked} />
-                        </div>
-                      </div>
-                    </td>
-                    <td style={TD}><ClaimChip role={u.requested_role_name} /></td>
-                    <td style={{ ...TD, whiteSpace: 'nowrap' }} title={exactDate(u.created_at)}>{timeAgo(u.created_at)}</td>
-                    <td style={{ ...TD, textAlign: 'right' }}>
-                      <div style={{ display: 'inline-flex', gap: 8 }}>
-                        <Button variant="ghost" size="sm" style={{ color: 'var(--red-600)' }} onClick={() => setConfirm({ kind: 'decline', user: u })}>Decline</Button>
-                        <Button variant="primary" size="sm" iconLeft={<Icon name="user-check" size={15} />} onClick={() => openApprove(u)}>Approve</Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-
-                {!loading && rows.length === 0 && (
-                  <tr>
-                    <td colSpan={4} style={{ padding: 0 }}>
-                      <EmptyState
-                        icon={<Icon name="inbox" size={24} />}
-                        title="No one is waiting"
-                        description="When a staff member or psychologist asks for access — with Google or the sign-up form — their request appears here for you to approve."
-                      />
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
+                <div style={{ padding: '11px 14px', background: 'var(--ink-25)', borderTop: '1px solid var(--divider)', display: 'flex', alignItems: 'flex-end', gap: 14, flexWrap: 'wrap' }}>
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <span className="racco-eyebrow" style={{ display: 'block', fontSize: 'var(--text-3xs)', marginBottom: 5 }}>
+                      {grantName ? `Assigning ${grantName} gives them` : 'Choose a role to see what it gives them'}
+                    </span>
+                    <span style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+                      {gains.map((g) => (
+                        <span key={g} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 9px', borderRadius: 'var(--radius-pill)', background: 'var(--success-50)', color: 'var(--success-700)', fontWeight: 700, fontSize: 11 }}>
+                          <Icon name="plus" size={12} />{g}
+                        </span>
+                      ))}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 5, width: 190, flex: 'none' }}>
+                    <span className="racco-eyebrow" style={{ fontSize: 'var(--text-3xs)' }}>Role to assign</span>
+                    <Select
+                      size="sm" value={pick} aria-label={`Role to assign to ${nameOf(u)}`}
+                      onChange={(e) => setPicked((p) => ({ ...p, [u.id]: e.target.value }))}
+                    >
+                      <option value="">— Select role —</option>
+                      {roles.map((r) => <option key={r.id} value={r.id}>{r.role_name}</option>)}
+                    </Select>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flex: 'none' }}>
+                    <Button variant="secondary" size="sm" style={{ color: 'var(--red-700)', borderColor: 'var(--red-200)' }} onClick={() => setConfirm({ kind: 'decline', user: u })}>Decline</Button>
+                    {/* Still a confirmed action. The inline picker makes the
+                        role visible; the dialog is what makes granting access
+                        to child records a decision rather than a click. */}
+                    <Button
+                      variant="primary" size="sm" iconLeft={<Icon name="user-check" size={15} />}
+                      disabled={!pick} onClick={() => openApprove(u, pick)}
+                    >
+                      {grantName ? `Approve as ${grantName}` : 'Approve'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {confirm?.kind === 'approve' && (
         <ConfirmDialog

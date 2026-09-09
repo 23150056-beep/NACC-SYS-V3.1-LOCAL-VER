@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Card, Badge, Input, FormField, Switch, Button, Alert, Icon, PAGE } from '../ui';
+import {
+  Alert, Badge, Button, Card, FormField, Icon, Input, PAGE, PageHeader, Switch, TD, TH, THEAD_ROW, TR,
+} from '../ui';
 import { useToast } from '../context/ToastContext';
 import { getAssistantSettings, saveAssistantSettings, getAssistantMetrics, checkAssistant } from '../api/assistant';
 import { testEmailDelivery } from '../api/email';
@@ -12,8 +14,6 @@ const FEATURE_LABELS = {
   census_narrative: 'Census narrative',
 };
 
-const th = { textAlign: 'left', padding: '8px 10px', fontSize: 12, color: 'var(--text-muted)', fontWeight: 600 };
-const td = { padding: '8px 10px', fontSize: 13, color: 'var(--text-body)' };
 
 export default function Settings() {
   const toast = useToast();
@@ -61,9 +61,10 @@ export default function Settings() {
   };
 
   return (
-    <div style={{ ...PAGE, maxWidth: 760 }}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-        <Card eyebrow="Agency" title="Configuration" padding="22px">
+    <div style={{ ...PAGE, maxWidth: 780 }}>
+      <PageHeader title="Settings" subtitle="Administrator only · agency-wide" />
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <Card eyebrow="Agency" title="Configuration" padding="16px">
           {/* Display-only. These have never had a backend. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             <FormField label="RCPC" hint="Set by the national office — not editable here yet."><Input value={agency} disabled /></FormField>
@@ -79,7 +80,7 @@ export default function Settings() {
             message looks exactly like a delivered one. Diagnosing it meant
             reading server logs, which Render's free plan does not give an
             administrator. This asks Brevo and prints the answer. */}
-        <Card eyebrow="Notifications" title="Email delivery" padding="22px">
+        <Card eyebrow="Notifications" title="Email delivery" padding="16px">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ fontSize: 13.5, lineHeight: 1.6, color: 'var(--text-muted)' }}>
               Temporary passwords are emailed to the person whose account it is.
@@ -126,7 +127,7 @@ export default function Settings() {
             failure it guards against: every notification send happens on a
             background thread, so a gateway refusing a message looks exactly
             like one delivering it. This asks and prints the answer. */}
-        <Card eyebrow="Notifications" title="Text messages" padding="22px">
+        <Card eyebrow="Notifications" title="Text messages" padding="16px">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ fontSize: 13.5, lineHeight: 1.6, color: 'var(--text-muted)' }}>
               Staff who have verified a mobile number get a text for a new case
@@ -171,7 +172,7 @@ export default function Settings() {
           </div>
         </Card>
 
-        <Card eyebrow="Assistant" title="Local writing assistant" padding="22px">
+        <Card eyebrow="Assistant" title="Local writing assistant" padding="16px">
           {cfg === 'error' && <Alert tone="warning">Could not load the assistant settings.</Alert>}
           {cfg && cfg !== 'error' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -225,27 +226,27 @@ export default function Settings() {
         </Card>
 
         {metrics && (
-          <Card eyebrow="Assistant" title={`Usage — last ${metrics.window_days} days`} padding="22px">
+          <Card eyebrow="Assistant" title={`Usage — last ${metrics.window_days} days`} padding="16px">
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
-                  <tr>
-                    <th style={th}>Feature</th><th style={th}>Runs</th>
-                    <th style={th}>Errors</th><th style={th}>Avg</th>
-                    <th style={th}>Kept</th><th style={th}>Edited</th>
-                    <th style={th}>Discarded</th>
+                  <tr style={THEAD_ROW}>
+                    <th scope="col" style={TH}>Feature</th><th scope="col" style={TH}>Runs</th>
+                    <th scope="col" style={TH}>Errors</th><th scope="col" style={TH}>Avg</th>
+                    <th scope="col" style={TH}>Kept</th><th scope="col" style={TH}>Edited</th>
+                    <th scope="col" style={TH}>Discarded</th>
                   </tr>
                 </thead>
                 <tbody>
                   {metrics.features.map((f) => (
-                    <tr key={f.job_type}>
-                      <td style={td}>{FEATURE_LABELS[f.job_type] || f.job_type}</td>
-                      <td style={td}>{f.runs}</td>
-                      <td style={td}>{f.errors}</td>
-                      <td style={td}>{f.avg_latency_ms === null ? '—' : `${(f.avg_latency_ms / 1000).toFixed(1)}s`}</td>
-                      <td style={td}>{f.accepted}</td>
-                      <td style={td}>{f.edited}</td>
-                      <td style={td}>{f.discarded}</td>
+                    <tr key={f.job_type} style={TR}>
+                      <td style={TD}>{FEATURE_LABELS[f.job_type] || f.job_type}</td>
+                      <td style={TD}>{f.runs}</td>
+                      <td style={TD}>{f.errors}</td>
+                      <td style={TD}>{f.avg_latency_ms === null ? '—' : `${(f.avg_latency_ms / 1000).toFixed(1)}s`}</td>
+                      <td style={TD}>{f.accepted}</td>
+                      <td style={TD}>{f.edited}</td>
+                      <td style={TD}>{f.discarded}</td>
                     </tr>
                   ))}
                 </tbody>

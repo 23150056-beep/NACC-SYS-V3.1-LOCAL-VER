@@ -1,11 +1,15 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
+import { caseRef } from '../utils/child';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { Card, Button, Badge, Alert, Input, Select, FormField, FileUpload, EmptyState, Icon, PAGE } from '../ui';
+import {
+  Alert, Avatar, Badge, Button, EmptyState, FileUpload, FormField, Icon, iconBtn, IconChip, Input, Note,
+  PAGE, PageHeader, Select, Tabs,
+} from '../ui';
+import { useOpenFromLink } from '../utils/links';
 
-function caseRef(id) { return `C-${String(id).padStart(4, '0')}`; }
 
 const REPORT_TYPES = [
   { v: 'initial', label: 'Initial Evaluation' },
@@ -30,6 +34,10 @@ export default function Report() {
   const [upload, setUpload] = useState(null); // upload drawer state (report or case referral)
   const [error, setError] = useState('');
   const [openChild, setOpenChild] = useState(null);
+
+  const openReportUpload = () => { setError(''); setUpload({ kind: 'report', child: '', report_type: 'progress', coverage: '', fileObj: null }); };
+  const openReferralUpload = () => { setError(''); setUpload({ kind: 'case_referral', child: '', coverage: '', fileObj: null }); };
+  useOpenFromLink('upload', '1', isPsych ? openReportUpload : openReferralUpload, !!upload);
 
   const load = () => {
     api.get('/result-entries/').then((r) => setEntries(r.data)).catch(() => {});
@@ -106,161 +114,158 @@ export default function Report() {
     } catch { toast.error('Could not download the file.'); }
   };
 
-  const th = { textAlign: 'left', padding: '12px 16px', fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)', whiteSpace: 'nowrap' };
-  const td = { padding: '12px 16px', fontSize: 13, color: 'var(--text-body)' };
 
   return (
     <div style={{ ...PAGE, position: 'relative' }} className="racco-print-area">
-      <Alert tone="info" icon={<Icon name="users" size={18} />} style={{ marginBottom: 16 }} title="Results & reports" className="racco-no-print">
-        Manual result entries and uploaded psychological reports across the caseload. Each psychologist keeps her own report format.
-      </Alert>
+      <PageHeader
+        title="Results &amp; Reports"
+        subtitle="Manually entered results, uploaded psychological reports and case referrals"
+      >
+        {tab === 'results' && <Button variant="secondary" onClick={exportCsv} iconLeft={<Icon name="download" size={17} />}>Export CSV</Button>}
+        <Button variant="secondary" onClick={() => window.print()} iconLeft={<Icon name="printer" size={17} />}>Print</Button>
+        {isPsych && <Button variant="primary" onClick={openReportUpload} iconLeft={<Icon name="upload" size={18} />}>Upload report</Button>}
+        {isStaffOrAdmin && <Button variant="primary" onClick={openReferralUpload} iconLeft={<Icon name="folder-heart" size={18} />}>Upload case referral</Button>}
+      </PageHeader>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14, flexWrap: 'wrap' }} className="racco-no-print">
-        <div style={{ display: 'inline-flex', gap: 4, background: 'var(--ink-50)', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', padding: 3 }}>
-          {[['results', `Result Entries (${entries.length})`], ['files', `Reports (${files.length})`], ['case-referrals', `Case Referrals (${caseReferrals.length})`]].map(([k, label]) => (
-            <button key={k} onClick={() => setTab(k)} style={{ padding: '6px 16px', borderRadius: 'var(--radius-pill)', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12.5, background: tab === k ? 'var(--blue-600)' : 'transparent', color: tab === k ? '#fff' : 'var(--text-muted)' }}>{label}</button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <div style={{ width: 240 }}>
-            <Input placeholder="Search by child…" value={q} onChange={(e) => setQ(e.target.value)} leading={<Icon name="search" size={16} />} />
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
+        {/* Tabs and the filter share one strip: the filter applies to whichever
+            tab is open, and putting it anywhere else implied otherwise. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', borderBottom: '1px solid var(--divider)' }} className="racco-no-print">
+          <Tabs
+            style={{ borderBottom: 'none', flex: 1, minWidth: 0 }}
+            active={tab} onChange={setTab}
+            tabs={[
+              { id: 'results', label: 'Results', count: entries.length || undefined },
+              { id: 'files', label: 'Reports', count: files.length || undefined },
+              { id: 'case-referrals', label: 'Referrals', count: caseReferrals.length || undefined },
+            ]}
+          />
+          <div style={{ padding: '8px 14px' }}>
+            <Input
+              size="sm" style={{ width: 210 }} fullWidth={false}
+              placeholder="Filter by child…" value={q} onChange={(e) => setQ(e.target.value)}
+              leading={<Icon name="search" size={16} />} aria-label="Filter by child"
+            />
           </div>
-          {tab === 'results' && <Button variant="secondary" onClick={exportCsv} iconLeft={<Icon name="download" size={16} />}>CSV</Button>}
-          <Button variant="secondary" onClick={() => window.print()} iconLeft={<Icon name="printer" size={16} />}>Print</Button>
-          {isPsych && <Button variant="primary" onClick={() => { setError(''); setUpload({ kind: 'report', child: '', report_type: 'progress', coverage: '', fileObj: null }); }} iconLeft={<Icon name="file-up" size={16} />}>Upload Report</Button>}
-          {isStaffOrAdmin && <Button variant="primary" onClick={() => { setError(''); setUpload({ kind: 'case_referral', child: '', coverage: '', fileObj: null }); }} iconLeft={<Icon name="folder-heart" size={16} />}>Upload Case Referral</Button>}
         </div>
-      </div>
 
-      {tab === 'results' ? (
-        <Card padding="0">
-          {visibleEntries.length === 0 ? (
+        {tab === 'results' ? (
+          visibleEntries.length === 0 ? (
             <EmptyState icon={<Icon name="folder-search" size={24} />} title="No result entries yet" description="Psychologists record findings from the per-child report page." />
           ) : (
-            <div className="racco-scroll" style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
-                <thead><tr style={{ background: 'var(--ink-50)', borderBottom: '1px solid var(--border)' }}>
-                  {['Child', 'Entries', 'Latest Entry', 'Latest Classification', ''].map((h, i) => <th key={i} style={th}>{h}</th>)}
-                </tr></thead>
-                <tbody>
-                  {grouped.map((g) => {
-                    const open = openChild === g.child;
-                    const latest = g.entries[0]; // visibleEntries already sorted newest-first
-                    return (
-                      <React.Fragment key={g.child}>
-                        <tr tabIndex={0} role="button" aria-expanded={open}
-                          onClick={() => setOpenChild(open ? null : g.child)}
-                          onKeyDown={(ev) => { if (ev.key === 'Enter') setOpenChild(open ? null : g.child); }}
-                          style={{ borderBottom: '1px solid var(--ink-100)', cursor: 'pointer' }}
-                          onMouseEnter={(ev) => (ev.currentTarget.style.background = 'var(--blue-50)')}
-                          onMouseLeave={(ev) => (ev.currentTarget.style.background = 'transparent')}>
-                          <td style={{ padding: '12px 16px' }}>
-                            <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--blue-700)' }}>{g.child_name}</div>
-                            <div className="racco-mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{caseRef(g.child)}</div>
-                          </td>
-                          <td style={td}><Badge tone="brand" size="sm">{g.entries.length}</Badge></td>
-                          <td style={td}>{latest?.date || '—'}</td>
-                          <td style={{ ...td, fontWeight: 600, color: 'var(--text-strong)' }}>{latest?.classification || '—'}</td>
-                          <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                            <Icon name={open ? 'chevron-down' : 'chevron-right'} size={16} style={{ color: 'var(--text-faint)' }} />
-                          </td>
-                        </tr>
-                        {open && g.entries.map((e) => (
-                          <tr key={e.id} onClick={() => navigate(`/report/child/${e.child}`)}
-                            style={{ borderBottom: '1px solid var(--ink-100)', cursor: 'pointer', background: 'var(--ink-50)' }}>
-                            <td style={{ ...td, paddingLeft: 34, fontSize: 12.5 }}>{e.instrument_title || 'No instrument'}</td>
-                            <td style={td}></td>
-                            <td style={{ ...td, fontSize: 12.5 }}>{e.date}</td>
-                            <td style={{ ...td, fontSize: 12.5 }}>{e.classification || '—'}</td>
-                            <td style={{ ...td, fontSize: 12, color: 'var(--text-muted)', textAlign: 'right' }}>{e.entered_by_name || ''}</td>
-                          </tr>
-                        ))}
-                      </React.Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      ) : tab === 'files' ? (
-        <Card padding="0">
-          {visibleFiles.length === 0 ? (
+            <>
+              {grouped.map((g) => {
+                const open = openChild === g.child;
+                const latest = g.entries[0]; // visibleEntries is already newest-first
+                return (
+                  <div key={g.child} style={{ borderBottom: '1px solid var(--divider)' }}>
+                    <button
+                      type="button" aria-expanded={open}
+                      onClick={() => setOpenChild(open ? null : g.child)}
+                      style={{ width: '100%', padding: '10px 15px', background: 'var(--ink-25)', display: 'flex', alignItems: 'center', gap: 10, border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-sans)' }}
+                    >
+                      <Avatar name={g.child_name} size={28} />
+                      <span style={{ fontWeight: 800, fontSize: 13.5, color: 'var(--text-strong)' }}>{g.child_name}</span>
+                      <span className="racco-mono" style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--text-faint)' }}>{caseRef(g.child)}</span>
+                      <span style={{ flex: 1 }} />
+                      <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)' }}>
+                        {g.entries.length} {g.entries.length === 1 ? 'entry' : 'entries'}
+                        {latest?.date ? ` · latest ${latest.date}` : ''}
+                      </span>
+                      <Icon name={open ? 'chevron-up' : 'chevron-down'} size={18} style={{ color: 'var(--text-faint)' }} />
+                    </button>
+                    {open && g.entries.map((e) => (
+                      <button
+                        key={e.id} type="button" onClick={() => navigate(`/report/child/${e.child}`)}
+                        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 14, padding: '10px 15px 10px 53px', borderTop: '1px solid var(--divider-row)', border: 'none', borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--divider-row)', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-sans)' }}
+                        onMouseEnter={(ev) => { ev.currentTarget.style.background = 'var(--blue-50)'; }}
+                        onMouseLeave={(ev) => { ev.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <span style={{ flex: 1, minWidth: 0 }}>
+                          <span style={{ display: 'block', fontWeight: 700, fontSize: 13, color: 'var(--text-strong)' }}>{e.instrument_title || 'No instrument named'}</span>
+                          <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)' }}>entered by {e.entered_by_name || '—'}</span>
+                        </span>
+                        {e.classification && <Badge tone="brand" size="sm">{e.classification}</Badge>}
+                        <span className="racco-mono" style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-body)', width: 86, textAlign: 'right', flex: 'none' }}>{e.date}</span>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })}
+              <Note icon="info">
+                Classifications are typed in by the psychologist from their own paper scoring. The system
+                computes no scores and stores no scoring keys.
+              </Note>
+            </>
+          )
+        ) : tab === 'files' ? (
+          visibleFiles.length === 0 ? (
             <EmptyState icon={<Icon name="file-text" size={24} />} title="No reports uploaded yet" description="Psychologists upload their reports in their own format." />
-          ) : (
-            <div className="racco-scroll" style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', minWidth: 760, borderCollapse: 'collapse' }}>
-                <thead><tr style={{ background: 'var(--ink-50)', borderBottom: '1px solid var(--border)' }}>
-                  {['Child', 'File', 'Type', 'Coverage', 'Uploaded By', 'Date', ''].map((h, i) => <th key={i} style={th}>{h}</th>)}
-                </tr></thead>
-                <tbody>
-                  {visibleFiles.map((f) => (
-                    <tr key={f.id} style={{ borderBottom: '1px solid var(--ink-100)' }}>
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{f.child_name}</div>
-                        <div className="racco-mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{caseRef(f.child)}</div>
-                      </td>
-                      <td style={td}>{f.original_filename}</td>
-                      <td style={td}><Badge tone="brand" size="sm">{REPORT_TYPES.find((t) => t.v === f.report_type)?.label || f.report_type}</Badge></td>
-                      <td style={td}>{f.coverage || '—'}</td>
-                      <td style={td}>{f.author_name || '—'}</td>
-                      <td style={td}>{(f.created_at || '').slice(0, 10)}</td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <Button variant="ghost" onClick={() => download(f)} iconLeft={<Icon name="download" size={15} />}>Download</Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          ) : visibleFiles.map((f) => (
+            <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '11px 15px', borderBottom: '1px solid var(--divider-row)', flexWrap: 'wrap' }}>
+              <IconChip icon="file-text" tone="brand" size={34} />
+              <span style={{ flex: 1, minWidth: 160 }}>
+                <span style={{ display: 'block', fontWeight: 700, fontSize: 13, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.original_filename}</span>
+                <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)' }}>{f.child_name} · {caseRef(f.child)} · {f.author_name || 'unknown author'}</span>
+              </span>
+              <Badge tone="brand" size="sm">{REPORT_TYPES.find((t) => t.v === f.report_type)?.label || f.report_type}</Badge>
+              <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)', width: 120, flex: 'none' }}>{f.coverage || '—'}</span>
+              <span className="racco-mono" style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-body)', width: 86, textAlign: 'right', flex: 'none' }}>{(f.created_at || '').slice(0, 10)}</span>
+              <button
+                type="button" onClick={() => download(f)} title={`Download ${f.original_filename}`} aria-label={`Download ${f.original_filename}`}
+                style={iconBtn('var(--text-body)')} className="racco-no-print"
+              >
+                <Icon name="download" size={16} />
+              </button>
             </div>
-          )}
-        </Card>
-      ) : (
-        <Card padding="0">
-          {visibleCaseReferrals.length === 0 ? (
+          ))
+        ) : (
+          visibleCaseReferrals.length === 0 ? (
             <EmptyState icon={<Icon name="folder-heart" size={24} />} title="No case referrals yet" description="Social workers upload the official case referral at intake." />
           ) : (
-            <div className="racco-scroll" style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', minWidth: 720, borderCollapse: 'collapse' }}>
-                <thead><tr style={{ background: 'var(--ink-50)', borderBottom: '1px solid var(--border)' }}>
-                  {['Child', 'File', 'Description', 'Uploaded By', 'Date', ''].map((h, i) => <th key={i} style={th}>{h}</th>)}
-                </tr></thead>
-                <tbody>
-                  {visibleCaseReferrals.map((f) => (
-                    <tr key={f.id} style={{ borderBottom: '1px solid var(--ink-100)' }}>
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{f.child_name}</div>
-                        <div className="racco-mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{caseRef(f.child)}</div>
-                      </td>
-                      <td style={td}>
-                        {f.original_filename}
-                        {f.ai_summary && (
-                          <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 'var(--radius-md)', background: 'var(--blue-50)', border: '1px solid var(--blue-100)' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                              <Icon name="sparkles" size={12} style={{ color: 'var(--blue-600)' }} />
-                              <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--blue-700)' }}>
-                                AI summary {f.ai_summary_confirmed ? '· confirmed' : '· draft (unconfirmed)'}
-                              </span>
-                            </div>
-                            <p style={{ fontSize: 12.5, color: 'var(--text-body)', margin: 0, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{f.ai_summary}</p>
-                          </div>
-                        )}
-                      </td>
-                      <td style={td}>{f.description || '—'}</td>
-                      <td style={td}>{f.uploaded_by_name || '—'}</td>
-                      <td style={td}>{(f.created_at || '').slice(0, 10)}</td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <Button variant="ghost" onClick={() => downloadCaseReferral(f)} iconLeft={<Icon name="download" size={15} />}>Download</Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      )}
-
+            <>
+              {visibleCaseReferrals.map((f) => (
+                <div key={f.id} style={{ padding: '11px 15px', borderBottom: '1px solid var(--divider-row)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                    <Avatar name={f.child_name} size={32} />
+                    <span style={{ width: 172, flex: 'none', minWidth: 0 }}>
+                      <span style={{ display: 'block', fontWeight: 700, fontSize: 13, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.child_name}</span>
+                      <span className="racco-mono" style={{ display: 'block', fontSize: 11.5, color: 'var(--text-faint)' }}>{caseRef(f.child)}</span>
+                    </span>
+                    <span style={{ flex: 1, minWidth: 160 }}>
+                      <span style={{ display: 'block', fontWeight: 700, fontSize: 12.5, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.original_filename}</span>
+                      <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.description || 'No description given'}</span>
+                    </span>
+                    <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)', flex: 'none' }}>{f.uploaded_by_name || '—'}</span>
+                    <span className="racco-mono" style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-body)', width: 82, textAlign: 'right', flex: 'none' }}>{(f.created_at || '').slice(0, 10)}</span>
+                    <button
+                      type="button" onClick={() => downloadCaseReferral(f)} title={`Download ${f.original_filename}`} aria-label={`Download ${f.original_filename}`}
+                      style={iconBtn('var(--text-body)')} className="racco-no-print"
+                    >
+                      <Icon name="download" size={16} />
+                    </button>
+                  </div>
+                  {f.ai_summary && (
+                    <div style={{ marginTop: 8, marginLeft: 46, padding: '8px 10px', borderRadius: 'var(--radius-sm)', background: 'var(--blue-50)', border: '1px solid var(--blue-100)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <Icon name="sparkles" size={12} style={{ color: 'var(--blue-600)' }} />
+                        <span style={{ fontSize: 'var(--text-3xs)', fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--blue-700)' }}>
+                          AI summary {f.ai_summary_confirmed ? '· confirmed' : '· draft (unconfirmed)'}
+                        </span>
+                      </div>
+                      <p style={{ fontSize: 12.5, color: 'var(--text-body)', margin: 0, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{f.ai_summary}</p>
+                    </div>
+                  )}
+                </div>
+              ))}
+              <Note icon="send">
+                A referral records that a case left this office for someone else&rsquo;s desk. The child&rsquo;s
+                record stays active here until the receiving office confirms, so nobody falls between two agencies.
+              </Note>
+            </>
+          )
+        )}
+      </div>
       {upload && (
         <div onClick={() => setUpload(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.32)', display: 'flex', justifyContent: 'flex-end', zIndex: 70, animation: 'racco-fade-in var(--dur-base) var(--ease-out)' }}>
           <form onSubmit={doUpload} onClick={(e) => e.stopPropagation()} style={{ width: 440, maxWidth: '92%', height: '100%', background: 'var(--surface)', boxShadow: 'var(--shadow-xl)', display: 'flex', flexDirection: 'column', animation: 'racco-slide-left var(--dur-slow) var(--ease-out)' }}>

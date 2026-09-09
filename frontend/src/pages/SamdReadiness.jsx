@@ -114,7 +114,7 @@ function SamdItemRow({ item, answer, readOnly, onChange }) {
   };
 
   return (
-    <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--ink-100)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--divider-row)', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
         <span className="racco-mono" style={{ fontWeight: 800, fontSize: 12.5, color: 'var(--blue-600)', paddingTop: 3, flex: 'none', width: 26 }}>{item.number}.</span>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -298,7 +298,7 @@ function RoundsList({ rounds, loading, onOpen, onCreate, creating }) {
               </thead>
               <tbody>
                 {rounds.map((r) => (
-                  <tr key={r.id} style={{ borderBottom: '1px solid var(--ink-100)' }}>
+                  <tr key={r.id} style={{ borderBottom: '1px solid var(--divider-row)' }}>
                     <td style={{ padding: '12px 16px', fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{r.label}</td>
                     <td style={{ padding: '12px 16px', fontSize: 13, color: 'var(--text-body)' }}>{new Date(r.created_at).toLocaleDateString()}</td>
                     <td style={{ padding: '12px 16px' }}>

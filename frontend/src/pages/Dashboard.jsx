@@ -1,295 +1,331 @@
-import { useEffect, useState } from 'react';
+import { useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { useAuth } from '../context/AuthContext';
-import { StatCard, Button, Badge, Icon, ROLE_META } from '../ui';
-import api from '../api/client';
-import { useActivity } from '../context/ActivityContext';
-import { useAssistant } from '../context/AssistantContext';
-import { eventText, eventDestination } from '../components/Topbar';
-import { timeAgo } from '../utils/time';
-import MiniCalendar from '../components/MiniCalendar';
+import { useCensus } from '../context/CensusContext';
+import { useLayout } from '../context/LayoutContext';
+import { Icon, IconChip, MiniBar, PAGE, Segmented } from '../ui';
+import { RailCards } from '../components/RightRail';
+import { caseRef, initialsOf } from '../utils/child';
 
-const EMPTY = {
-  census: { active: 0, inactive: 0, by_case_type: {}, by_case_status: {} },
-  total_children: 0, unassessed: 0, pending_pre_assessments: 0,
-  today_schedule: [], availability_today: [], intake_vs_termination: [],
-  trend: [], per_psychologist: [], by_case_type: {}, care_gaps: [],
-  counseling_per_psychologist: [],
+/* One prioritised stream, not eleven equal tiles.
+ *
+ * The old dashboard laid every source of information out at the same size, so
+ * "four children need a decision today" sat beside a mini calendar with the
+ * same visual weight. This reads top to bottom in the order the day actually
+ * runs: what needs a decision, then the shape of the caseload, then the
+ * pipeline, then the team.
+ *
+ * The day's schedule, the live census figures and the activity stream are not
+ * here — they are the right rail, which stays put while this column scrolls.
+ * When the window is too narrow for a third column they come back in along the
+ * bottom, so nothing is ever simply missing.
+ */
+
+const RANGES = [
+  { value: 'weekly', label: 'Weekly' },
+  { value: 'monthly', label: 'Monthly' },
+  { value: 'quarterly', label: 'Quarterly' },
+  { value: 'yearly', label: 'Annual' },
+];
+
+/* Each deterministic care-gap rule, in the words the person acting on it would
+ * use, plus where that action happens. The rules themselves live in
+ * backend/clinical/care_gaps.py — this only names them. */
+const GAP_META = {
+  consent_missing: { chip: 'No consent', action: 'Attach', to: '/pre-assessment', tone: 'danger' },
+  pre_assessment_overdue: { chip: 'Stalled', action: 'Start', to: '/pre-assessment', tone: 'warning' },
+  report_missing: { chip: 'Report due', action: 'Upload', to: '/reports', tone: 'warning' },
+  follow_up_overdue: { chip: 'Overdue', action: 'Book', to: '/schedule', tone: 'danger' },
+  no_upcoming_appointment: { chip: 'Unbooked', action: 'Book', to: '/schedule', tone: 'info' },
+  self_report_concern: { chip: 'Unread words', action: 'Read', to: null, tone: 'danger' },
 };
-const PURPOSE_LABEL = { pre_assessment: 'Pre-Assessment', session: 'Session', follow_up: 'Follow-up' };
-const GAP_TONE = { danger: 'var(--red-500)', warning: 'var(--amber-500)', info: 'var(--blue-400)' };
+const GAP_CHIP = {
+  danger: ['var(--red-50)', 'var(--red-700)'],
+  warning: ['var(--warning-50)', 'var(--warning-700)'],
+  info: ['var(--blue-50)', 'var(--blue-700)'],
+};
 
-// Self-contained tile: mirrors Card's visual chrome (border/shadow/radius/eyebrow/title
-// tokens) but owns its own header + scroll-body divs directly, rather than nesting a
-// scrolling child inside Card's opaque content wrapper. Card's internal `<div style={{padding}}>`
-// has neither `min-height: 0` nor non-visible overflow, so a `flex:1` scroll child dropped
-// inside it hits the classic flexbox "won't shrink below content size" trap and never
-// actually scrolls — it just grows the tile past the grid row instead. Owning the whole
-// chain here lets `minHeight: 0` genuinely take effect on the scrolling element.
-const Tile = ({ eyebrow, title, span = 1, actions = null, children, style = {} }) => (
-  <div style={{
-    background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)',
-    boxShadow: 'var(--shadow-sm)', overflow: 'hidden', position: 'relative',
-    gridColumn: `span ${span}`, minHeight: 0, display: 'flex', flexDirection: 'column', ...style,
-  }}>
-    <div style={{ flex: 'none', padding: '13px 14px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
-      <div>
-        {eyebrow && <div className="racco-eyebrow" style={{ marginBottom: 3 }}>{eyebrow}</div>}
-        {title && <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-strong)', margin: 0 }}>{title}</h3>}
-      </div>
-      {actions}
-    </div>
-    <div className="racco-scroll" style={{ flex: '1 1 auto', minHeight: 0, overflowY: 'auto', padding: 14 }}>
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+const cardStyle = {
+  background: 'var(--surface)', border: '1px solid var(--border)',
+  borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', overflow: 'hidden',
+};
+
+function CardHead({ icon, tone, title, meta, children }) {
+  return (
+    <div style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 10, borderBottom: '1px solid var(--divider)' }}>
+      {icon && <IconChip icon={icon} tone={tone} />}
+      <h3 style={{ flex: 1, fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 15, letterSpacing: '-0.01em', color: 'var(--text-strong)' }}>{title}</h3>
+      {meta && <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)' }}>{meta}</span>}
       {children}
     </div>
-  </div>
-);
-
-// Census range selector: label → backend `range` value (reports.bucket).
-const RANGES = [
-  ['Weekly', 'weekly'],
-  ['Monthly', 'monthly'],
-  ['Quarterly', 'quarterly'],
-  ['Annual', 'yearly'],
-];
+  );
+}
 
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { openAssistant } = useAssistant();
+  const layout = useLayout();
+  const { stats, range, setRange, pendingAccess } = useCensus();
+
   const role = user?.role_name || 'Staff';
-  const isPsychologist = role === 'Psychologist';
-  const m = ROLE_META[role] || ROLE_META.Staff;
-  const [stats, setStats] = useState(EMPTY);
-  const [range, setRange] = useState('monthly');
-  const [appointments, setAppointments] = useState([]);
-  const { events } = useActivity();
-  const feed = events.slice(0, 15);
+  const isPsych = role === 'Psychologist';
+  const name = user?.fullname || user?.username || '';
+  const firstName = name.split(' ')[0] || 'there';
 
-  useEffect(() => {
-    api.get(`/reports/dashboard/?range=${range}`).then((r) => setStats({ ...EMPTY, ...r.data })).catch(() => setStats(EMPTY));
-  }, [range]);
-
-  useEffect(() => {
-    api.get('/appointments/').then((r) => setAppointments(r.data)).catch(() => {});
-  }, []);
-
-  const census = stats.census || EMPTY.census;
-  const caseMix = Object.entries(census.by_case_type || {});
+  const census = stats.census || {};
   const gaps = stats.care_gaps || [];
+  const caseMix = Object.entries(census.by_case_type || {}).sort((a, b) => b[1] - a[1]);
+  const mixMax = caseMix.length ? caseMix[0][1] : 1;
+  const trend = stats.intake_vs_termination || [];
+  const trendMax = Math.max(1, ...trend.map((b) => Math.max(b.intake, b.terminations)));
+  const perPsych = stats.per_psychologist || [];
+  const perPsychMax = Math.max(1, ...perPsych.map((p) => p.count ?? 0));
+  // The `|| []` stays INSIDE the callback: outside it, a missing key builds a
+  // fresh array every render and the memo never holds.
+  const caseload = useMemo(
+    () => Object.fromEntries(
+      (stats.counseling_per_psychologist || []).map((c) => [c.name, c.count]),
+    ),
+    [stats.counseling_per_psychologist],
+  );
 
-  const actions = [
-    // ?openCreate=1 is honoured by Children.jsx — without this entry the
-    // parameter was live with nothing pointing at it.
-    { label: 'Add Record', icon: 'plus', variant: 'primary', to: '/children?openCreate=1', roles: ['Administrator', 'Staff'] },
-    { label: 'Records', icon: 'folder-heart', variant: 'secondary', to: '/children', roles: ['Administrator', 'Psychologist', 'Staff'] },
-    // Not a second chatbot — the same panel, reachable without hunting for
-    // the floating button. `sparkles` is already this row's own header icon,
-    // so repeating it would read as decoration.
-    { label: 'Ask AI', icon: 'bot', variant: 'secondary', onClick: openAssistant, roles: ['Administrator', 'Psychologist', 'Staff'] },
-    { label: 'Start Pre-Assessment', icon: 'clipboard-list', variant: 'primary', to: '/pre-assessment', roles: ['Psychologist'] },
-    { label: 'Calendar', icon: 'calendar', variant: 'secondary', to: '/schedule', roles: ['Administrator', 'Psychologist', 'Staff'] },
-    { label: 'Agency Summary', icon: 'bar-chart-3', variant: 'primary', to: '/reports/summary', roles: ['Administrator', 'Staff'] },
-  ].filter((a) => a.roles.includes(role));
+  const dueToday = gaps.filter((g) => g.severity === 'danger').length;
+  const shownGaps = gaps.slice(0, 4);
+
+  /* Quick actions. Every one of these OPENS something — the form, the booking
+   * drawer, the upload drawer, the queue.
+   *
+   * That is the whole rule, and it is what keeps the row from being redundant.
+   * A button that only navigates is a link, and every destination in this app
+   * is already two clicks away in the rail on the left and the tab strip
+   * above — so a row of links here would be a third copy of the same
+   * navigation, wearing verbs. "Agency summary" and "Enter a result" were
+   * exactly that and are gone; the rest now carry the deep link that finishes
+   * the job (see utils/links.js).
+   *
+   * Nothing here opens the assistant either: the bubble that does is on this
+   * same screen, bottom right, 60px across with a live dot on it. */
+  const actions = isPsych ? [
+    { label: 'Start pre-assessment', icon: 'clipboard-list', to: '/pre-assessment', primary: true },
+    { label: 'Add my availability', icon: 'clock', to: '/schedule?availability=1' },
+    { label: 'Upload report', icon: 'upload', to: '/reports?upload=1' },
+  ] : [
+    { label: 'Add record', icon: 'user-plus', to: '/children?openCreate=1', primary: true },
+    { label: 'Book appointment', icon: 'calendar-plus', to: '/schedule?book=1' },
+    { label: 'Upload case referral', icon: 'upload', to: '/reports?upload=1' },
+    // Only when somebody is actually waiting. A permanent "Review access"
+    // leading to an empty queue is a button that cries wolf, and the count is
+    // the only part of it worth reading.
+    ...(role === 'Administrator' && pendingAccess > 0
+      ? [{ label: `Review access (${pendingAccess})`, icon: 'user-check', to: '/users?tab=requests' }]
+      : []),
+  ];
+
+  const today = new Date().toLocaleDateString(undefined, {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+  });
 
   return (
-    <div style={{ padding: '14px 20px', height: 'calc(100vh - var(--topbar-h, 64px))', display: 'flex', flexDirection: 'column', gap: 10, overflow: 'hidden auto' }}>
-      {/* Row 1 — slim quick actions */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', flex: 'none' }}>
-        <span style={{ width: 28, height: 28, borderRadius: 'var(--radius-md)', background: m.soft, color: m.color, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flex: 'none' }}><Icon name="sparkles" size={15} /></span>
-        <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 14, color: 'var(--text-strong)', marginRight: 4 }}>Quick actions</span>
-        {actions.map((a) => (
-          <Button key={a.label} variant={a.variant}
-                  onClick={a.onClick ? a.onClick : () => navigate(a.to)}
-                  iconLeft={<Icon name={a.icon} size={16} />}>{a.label}</Button>
-        ))}
+    <div style={PAGE}>
+      {/* Greeting + the things you came here to do. */}
+      <div style={{ ...cardStyle, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 11 }}>
+        <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+          <h2 style={{ fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 16, lineHeight: 1.2, letterSpacing: '-0.01em', color: 'var(--text-strong)' }}>
+            {greeting()}, {firstName}
+          </h2>
+          <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)' }}>{today}</span>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {actions.map((a) => (
+            <button
+              key={a.label} type="button" onClick={() => navigate(a.to)}
+              style={{
+                display: 'inline-flex', alignItems: 'center', gap: 8, height: 38, padding: '0 15px',
+                border: `1px solid ${a.primary ? 'var(--blue-600)' : 'var(--border-strong)'}`,
+                borderRadius: 'var(--radius-control)',
+                background: a.primary ? 'var(--blue-600)' : 'var(--surface)',
+                color: a.primary ? '#fff' : 'var(--text-body)',
+                fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 13.5,
+                cursor: 'pointer', whiteSpace: 'nowrap',
+                boxShadow: a.primary ? 'var(--shadow-brand)' : 'none',
+              }}
+            >
+              <Icon name={a.icon} size={18} />{a.label}
+            </button>
+          ))}
+        </div>
       </div>
 
-      {/* Row 2 — census stat tiles. Compact padding (Dashboard-only, via the
-          style prop — AgencySummary's own StatCard usage is untouched)
-          frees up real height for the Census chart row below. */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 10, flex: 'none' }}>
-        <StatCard label={isPsychologist ? 'My Active Cases' : 'Active Children'} value={census.active} tone="success" icon={<Icon name="users" size={18} />} style={{ padding: '12px 16px', gap: 4 }} />
-        <StatCard label="In Counseling" value={(census.by_case_status || {}).counseling || 0} tone="brand" icon={<Icon name="heart-pulse" size={18} />} hint={`${(census.by_case_status || {}).pre_assessment || 0} in pre-assessment`} style={{ padding: '12px 16px', gap: 4 }} />
-        <StatCard label="Inactive (Terminated)" value={census.inactive} tone="brand" icon={<Icon name="archive" size={18} />} style={{ padding: '12px 16px', gap: 4 }} />
-        <StatCard label="Pending Pre-Assessments" value={stats.pending_pre_assessments} tone="amber" icon={<Icon name="loader" size={18} />} hint={stats.unassessed ? `${stats.unassessed} not yet assessed` : undefined} style={{ padding: '12px 16px', gap: 4 }} />
-      </div>
-
-      {/* Bento body — three rows. Census gets its own full-width row at the
-          top so the Intake vs. termination chart + case-mix badges are
-          unmistakably the dashboard's most prominent element — the
-          remaining five tiles compact into two denser rows below.
-
-          Each row has a real pixel floor (via minmax(Npx, …fr)), and the
-          grid is NOT forced to minHeight:0 — its natural min-height is the
-          sum of those floors. On a tall window the flex:1/fr weighting
-          still lets it grow to fill the screen with no page scroll (as
-          verified at 1440x900); on a short window (a maximized Chrome
-          window on a 1366x768 laptop typically leaves well under 700px of
-          actual content height once the tab/address bars and taskbar are
-          subtracted) the grid can no longer be crushed below the point
-          where a bar chart stops rendering or a calendar becomes unusable
-          — the page scrolls instead, which is a far better failure mode
-          than invisible charts or badly clipped tiles.
-
-          The floor lives on the GRID CONTAINER (minHeight:580px), not on
-          individual rows: per-row px floors (minmax(180px,1.1fr) etc.)
-          turned out to distort the fr distribution unpredictably once a
-          row's floor exceeds its proportional fr share — measured on a
-          real browser, that produced WORSE per-tile fits than plain fr
-          weights despite an identical total pool. Plain `minmax(0,Nfr)`
-          rows plus one minHeight on the container reproduces the exact
-          1:1.25:0.75 proportions already verified to fit every tile with
-          zero clipping at a 596px pool, while still giving `fr` a
-          definite number to resolve against on short screens (container
-          clamped to 580px) instead of falling back to unclipped
-          max-content sizing, which is what broke chart rendering
-          entirely on short windows before this fix. */}
-      <div style={{ flex: 1, minHeight: 580, display: 'grid', gap: 10, gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gridTemplateRows: 'minmax(0,1fr) minmax(0,1.25fr) minmax(0,0.75fr)' }}>
-        {/* Intake vs. termination — full width, top priority */}
-        <Tile eyebrow="Census" title="Intake vs. termination" span={4}
-          actions={(
-            <div role="tablist" aria-label="Census date range" style={{ display: 'flex', gap: 4 }}>
-              {RANGES.map(([label, value]) => (
-                <button key={value} role="tab" aria-selected={range === value} onClick={() => setRange(value)}
-                  style={{ padding: '4px 11px', borderRadius: 'var(--radius-pill)', fontSize: 11.5, fontWeight: 700, cursor: 'pointer', fontFamily: 'var(--font-sans)', background: range === value ? 'var(--blue-600)' : 'var(--ink-50)', color: range === value ? '#fff' : 'var(--text-muted)', border: `1px solid ${range === value ? 'var(--blue-600)' : 'var(--border)'}` }}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          )}>
-          {stats.intake_vs_termination.length === 0 ? (
-            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No intake activity yet.</div>
-          ) : (
-            <div style={{ display: 'flex', height: '100%', gap: 14 }}>
-              <div style={{ flex: '1 1 auto', minWidth: 0, minHeight: 120 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={stats.intake_vs_termination}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                    <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                    <Tooltip />
-                    <Legend wrapperStyle={{ fontSize: 12 }} />
-                    <Bar dataKey="intake" name="Intake" fill="var(--blue-600)" radius={[4, 4, 0, 0]} />
-                    <Bar dataKey="terminations" name="Terminations" fill="var(--amber-500)" radius={[4, 4, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-              {caseMix.length > 0 && (
-                <div style={{ flex: '0 0 180px', paddingLeft: 14, borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto' }}>
-                  <span className="racco-eyebrow" style={{ fontSize: 10 }}>Active case mix</span>
-                  {caseMix.map(([type, n]) => <Badge key={type} tone="success" size="sm" dot>{type} — {n}</Badge>)}
-                </div>
-              )}
-            </div>
-          )}
-        </Tile>
-
-        {/* Today's schedule strip (athena scheduling-tile pattern) */}
-        <Tile eyebrow="Today" title="Schedule" span={2}>
-          {stats.today_schedule.length === 0 ? (
-            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No appointments today.</div>
-          ) : (
-            <div className="racco-scroll" style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 4 }}>
-              {stats.today_schedule.map((a) => (
-                <button key={a.id} onClick={() => navigate('/schedule')}
-                  style={{ flex: 'none', width: 190, textAlign: 'left', padding: '12px 14px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', background: a.status === 'completed' ? 'var(--success-50)' : 'var(--surface)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                    <span className="racco-mono" style={{ fontWeight: 800, fontSize: 14, color: 'var(--blue-700)' }}>{a.time}</span>
-                    <Badge tone={a.status === 'completed' ? 'success' : a.status === 'no_show' ? 'amber' : 'brand'} size="sm">{a.status.replace('_', '-')}</Badge>
-                  </div>
-                  <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.child_name}{a.age != null ? `, ${a.age}` : ''}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{PURPOSE_LABEL[a.purpose] || a.purpose}{!isPsychologist && a.psychologist ? ` · ${a.psychologist}` : ''}</div>
-                </button>
-              ))}
-            </div>
-          )}
-          {stats.availability_today.length > 0 && (
-            <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)', display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              <span className="racco-eyebrow" style={{ fontSize: 10 }}>Available today</span>
-              {stats.availability_today.map((b, i) => (
-                <Badge key={i} tone="success" size="sm" dot>{b.psychologist} · {b.start}–{b.end}</Badge>
-              ))}
-            </div>
-          )}
-        </Tile>
-
-        {/* Mini calendar — click opens the full schedule page */}
-        <Tile eyebrow="Schedule" title="Calendar">
-          <MiniCalendar appointments={appointments} onOpen={() => navigate('/schedule')} />
-        </Tile>
-
-        {/* Care-gap alerts */}
-        <Tile eyebrow="Follow-up needed" title="Care-gap alerts">
-          {gaps.length === 0 ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--success-600)' }}>
-              <Icon name="check-circle-2" size={16} /> No gaps detected.
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {gaps.map((g, i) => (
-                <button key={i} onClick={() => navigate(`/report/child/${g.child_id}`)}
-                  style={{ display: 'flex', gap: 10, alignItems: 'flex-start', textAlign: 'left', padding: '7px 10px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', background: 'var(--surface)', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--blue-50)')}
-                  onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--surface)')}>
-                  <span style={{ width: 8, height: 8, borderRadius: '50%', marginTop: 5, flex: 'none', background: GAP_TONE[g.severity] || 'var(--blue-400)' }} />
-                  <span>
-                    <span style={{ display: 'block', fontWeight: 700, fontSize: 12.5, color: 'var(--text-strong)' }}>{g.child_name}</span>
-                    <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4 }}>{g.message}</span>
+      {/* Care gaps. First, and bordered in red, because it is the only block
+          on the page that is asking for a decision today. */}
+      {gaps.length > 0 && (
+        <div style={{ ...cardStyle, border: '1px solid var(--red-200)' }}>
+          <div style={{ padding: '11px 14px', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--red-50)', borderBottom: '1px solid var(--red-100)' }}>
+            <IconChip icon="siren" tone="danger" style={{ background: 'var(--red-100)' }} />
+            <span style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ display: 'block', fontWeight: 800, fontSize: 14, color: 'var(--text-strong)' }}>
+                {dueToday > 0
+                  ? `${dueToday} case${dueToday === 1 ? '' : 's'} need${dueToday === 1 ? 's' : ''} a decision today`
+                  : `${gaps.length} case${gaps.length === 1 ? '' : 's'} need${gaps.length === 1 ? 's' : ''} following up`}
+              </span>
+              <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>
+                Deterministic care-gap rules over dates and case state &mdash; no model involved.
+              </span>
+            </span>
+            {gaps.length > shownGaps.length && (
+              <button
+                type="button" onClick={() => navigate('/monitoring')}
+                style={{ height: 32, padding: '0 13px', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', background: 'var(--surface)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12.5, color: 'var(--text-body)', cursor: 'pointer', flex: 'none' }}
+              >
+                View all {gaps.length}
+              </button>
+            )}
+          </div>
+          {shownGaps.map((g, i) => {
+            const meta = GAP_META[g.type] || { chip: 'Follow up', action: 'Open', to: null, tone: g.severity };
+            const [chipBg, chipFg] = GAP_CHIP[meta.tone] || GAP_CHIP.info;
+            return (
+              <div
+                key={`${g.child_id}-${g.type}-${i}`}
+                style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderBottom: i < shownGaps.length - 1 ? '1px solid var(--divider-row)' : 'none' }}
+              >
+                <button
+                  type="button" onClick={() => navigate(`/report/child/${g.child_id}`)}
+                  style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 12, border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', padding: 0, fontFamily: 'var(--font-sans)' }}
+                >
+                  <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: '50%', flex: 'none', background: 'var(--blue-100)', color: 'var(--blue-700)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 11.5 }}>
+                    {initialsOf(g.child_name)}
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ display: 'block', fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{g.child_name}</span>
+                    <span style={{ display: 'block', fontSize: 12.5, color: 'var(--text-body)' }}>{g.message}</span>
                   </span>
                 </button>
-              ))}
-            </div>
-          )}
-        </Tile>
-
-        {/* Sessions by psychologist */}
-        <Tile eyebrow="Clinical team" title="Sessions by psychologist" span={2}>
-          {(stats.per_psychologist || []).length === 0 ? (
-            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No completed sessions yet.</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {stats.per_psychologist.map((p) => (
-                <div key={p.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', borderRadius: 'var(--radius-md)', background: 'var(--ink-50)', border: '1px solid var(--border)' }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-strong)' }}>{p.name}</span>
-                  <span className="racco-mono" style={{ fontSize: 13, fontWeight: 700, color: 'var(--blue-600)' }}>{p.count}</span>
-                </div>
-              ))}
-            </div>
-          )}
-          {(stats.counseling_per_psychologist || []).length > 0 && (
-            <div style={{ marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--border)' }}>
-              <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 6 }}>Cases in counseling</div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {stats.counseling_per_psychologist.map((p) => (
-                  <Badge key={p.name} tone="brand" size="sm" dot>{p.name} · {p.count}</Badge>
-                ))}
-              </div>
-            </div>
-          )}
-        </Tile>
-
-        {/* Activity feed */}
-        <Tile eyebrow="Live" title="Activity Feed" span={2}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
-            {feed.length === 0 ? (
-              <div style={{ fontSize: 13, color: 'var(--text-faint)', padding: '8px 0' }}>No recent activity.</div>
-            ) : feed.map((a, i) => (
-              <button key={a.id ?? i} onClick={() => navigate(eventDestination(a, role))}
-                style={{ display: 'flex', gap: 11, padding: '10px 0', borderBottom: i < feed.length - 1 ? '1px solid var(--ink-100)' : 'none', width: '100%', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'var(--font-sans)' }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--blue-50)')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
-                <span style={{ width: 8, height: 8, borderRadius: '50%', marginTop: 5, flex: 'none', background: a.action === 'archived' ? 'var(--red-500)' : a.action === 'created' ? 'var(--success-500)' : a.action === 'login' ? 'var(--amber-500)' : 'var(--blue-500)' }} />
-                <span>
-                  <span style={{ display: 'block', fontSize: 13, color: 'var(--text-strong)', fontWeight: 600, lineHeight: 1.4 }}>{eventText(a)}</span>
-                  <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-faint)', marginTop: 2 }}>{a.actor_label} · {timeAgo(a.created_at)}</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', height: 22, padding: '0 10px', borderRadius: 'var(--radius-pill)', background: chipBg, color: chipFg, fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 11, flex: 'none' }}>
+                  {meta.chip}
                 </span>
-              </button>
+                <span className="racco-mono" style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--text-faint)', flex: 'none', width: 56, textAlign: 'right' }}>
+                  {caseRef(g.child_id)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => navigate(meta.to || `/report/child/${g.child_id}`)}
+                  style={{ height: 30, padding: '0 12px', border: '1px solid var(--blue-200)', borderRadius: 'var(--radius-sm)', background: 'var(--surface)', color: 'var(--blue-700)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12, cursor: 'pointer', flex: 'none' }}
+                >
+                  {meta.action}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Census. */}
+      <div style={cardStyle}>
+        <div style={{ padding: '12px 14px 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>
+          <div>
+            <div className="racco-eyebrow" style={{ fontSize: 'var(--text-3xs)', marginBottom: 3 }}>Census</div>
+            <h3 style={{ fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 16, lineHeight: 1.2, letterSpacing: '-0.01em', color: 'var(--text-strong)' }}>Intake vs. termination</h3>
+          </div>
+          <Segmented options={RANGES} value={range} onChange={setRange} label="Census range" />
+        </div>
+        <div style={{ padding: 14, display: 'flex', gap: 18, flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 320px', minWidth: 0 }}>
+            {trend.length === 0 ? (
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '40px 0' }}>No intake or termination recorded in this range.</p>
+            ) : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, height: 150, borderBottom: '1px solid var(--border)', padding: '0 4px' }}>
+                  {trend.map((b) => (
+                    <div key={b.bucket} style={{ flex: 1, display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 4, height: '100%' }}>
+                      <div title={`${b.intake} intake`} style={{ width: 18, background: 'var(--blue-600)', borderRadius: '4px 4px 0 0', height: `${Math.round((b.intake / trendMax) * 100)}%` }} />
+                      <div title={`${b.terminations} terminations`} style={{ width: 18, background: 'var(--amber-500)', borderRadius: '4px 4px 0 0', height: `${Math.round((b.terminations / trendMax) * 100)}%` }} />
+                    </div>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 10, padding: '5px 4px 0' }}>
+                  {trend.map((b) => (
+                    <span key={b.bucket} style={{ flex: 1, textAlign: 'center', fontWeight: 600, fontSize: 11, color: 'var(--text-muted)' }}>{b.bucket}</span>
+                  ))}
+                </div>
+                <div style={{ display: 'flex', gap: 16, paddingTop: 10 }}>
+                  {[['Intake', 'var(--blue-600)'], ['Terminations', 'var(--amber-500)']].map(([label, c]) => (
+                    <span key={label} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 11.5, color: 'var(--text-body)' }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 3, background: c }} />{label}
+                    </span>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          <div style={{ flex: '0 1 210px', minWidth: 180, paddingLeft: 18, borderLeft: '1px solid var(--divider)', display: 'flex', flexDirection: 'column', gap: 9 }}>
+            <span className="racco-eyebrow" style={{ fontSize: 'var(--text-3xs)' }}>Active case mix</span>
+            {caseMix.length === 0
+              ? <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>No active cases.</span>
+              : caseMix.map(([label, n]) => (
+                <MiniBar key={label} label={label} value={n} pct={`${Math.round((n / mixMax) * 100)}%`} />
+              ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Pipeline. */}
+      <div style={cardStyle}>
+        <CardHead icon="hourglass" tone="warning" title="Pre-assessments waiting on someone" meta={`${stats.pending_pre_assessments ?? 0} open`} />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1, background: 'var(--divider)' }}>
+          {[
+            { label: 'Not yet started', n: stats.unassessed ?? 0, hint: 'Active children with no completed pre-assessment', fg: 'var(--red-700)' },
+            { label: 'In progress', n: stats.pending_pre_assessments ?? 0, hint: 'Started, waiting on interview or instrument titles', fg: 'var(--warning-700)' },
+            { label: 'In counseling', n: (census.by_case_status || {}).counseling ?? 0, hint: 'Pre-assessment closed; the case moved on', fg: 'var(--blue-700)' },
+          ].map((b) => (
+            <div key={b.label} style={{ background: 'var(--surface)', padding: '13px 14px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 'var(--text-3xs)', letterSpacing: '0.08em', textTransform: 'uppercase', color: b.fg }}>{b.label}</span>
+              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 26, lineHeight: 1, color: 'var(--text-strong)', fontVariantNumeric: 'tabular-nums' }}>{b.n}</span>
+              <span style={{ fontSize: 12, lineHeight: 1.45, color: 'var(--text-muted)' }}>{b.hint}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* The team. A psychologist has no business reading their colleagues'
+          throughput, so this is the one block they do not get. */}
+      {!isPsych && perPsych.length > 0 && (
+        <div style={cardStyle}>
+          <CardHead title="Clinical team this range" meta="completed sessions" />
+          <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {perPsych.map((p) => (
+              <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: '50%', flex: 'none', background: 'var(--ink-50)', color: 'var(--text-body)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 11 }}>
+                  {initialsOf(p.name)}
+                </span>
+                <span style={{ width: 170, flex: 'none', fontWeight: 700, fontSize: 13, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+                <span style={{ flex: 1, minWidth: 40, height: 8, borderRadius: 'var(--radius-pill)', background: 'var(--divider)', overflow: 'hidden' }}>
+                  <span style={{ display: 'block', height: '100%', borderRadius: 'var(--radius-pill)', background: 'var(--blue-600)', width: `${Math.round(((p.count ?? 0) / perPsychMax) * 100)}%` }} />
+                </span>
+                <span className="racco-mono" style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-strong)', width: 28, textAlign: 'right', flex: 'none' }}>{p.count ?? 0}</span>
+                <span style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)', width: 96, textAlign: 'right', flex: 'none' }}>
+                  {caseload[p.name] != null ? `${caseload[p.name]} active` : '—'}
+                </span>
+              </div>
             ))}
           </div>
-        </Tile>
-      </div>
+        </div>
+      )}
+
+      {/* No third column at this width, so the rail's three cards come back in
+          here. They are the same components, not a second copy. */}
+      {!layout.rightRailOn && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, alignItems: 'start' }}>
+          <RailCards />
+        </div>
+      )}
     </div>
   );
 }

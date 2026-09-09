@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as Lucide from 'lucide-react';
+import { initialsOf } from '../utils/child';
 
 /* ----------------------------- Icon ----------------------------- */
 function toPascal(name) {
@@ -17,9 +18,13 @@ export function Icon({ name, size = 20, strokeWidth = 2, style = {}, ...rest }) 
 }
 
 /* ----------------------- Role / severity meta ----------------------- */
+/* `color` is the identity DOT, not a fill. The psychologist's used to be
+ * --red-500, which put "this is a psychologist" and "something is wrong" in
+ * the same colour on the same screen; red is now reserved for genuine alerts
+ * and identity reads as a neutral chip with a coloured dot beside it. */
 export const ROLE_META = {
   Administrator: { color: 'var(--blue-600)', soft: 'var(--blue-50)', tone: 'brand', icon: 'shield', desc: 'Full system access — users, records, clinical oversight, compliance.' },
-  Psychologist: { color: 'var(--red-500)', soft: 'var(--red-50)', tone: 'red', icon: 'heart-handshake', desc: 'Assessment tools, clinical questionnaires & psychologist reporting.' },
+  Psychologist: { color: 'var(--blue-400)', soft: 'var(--blue-50)', tone: 'brand', icon: 'heart-handshake', desc: 'Assessment tools, clinical questionnaires & psychologist reporting.' },
   Staff: { color: 'var(--amber-500)', soft: 'var(--amber-50)', tone: 'amber', icon: 'folder-heart', desc: 'Child & guardian records, plus read-only counseling results.' },
 };
 
@@ -28,7 +33,7 @@ export const ROLE_META = {
  * queue grants one, User Management corrects one — and they must not describe
  * the same role differently. Mirrors the RBAC matrix in
  * docs/CLOUD-DEPLOYMENT.md; if that matrix moves, this has to move with it. */
-const ROLE_ACCESS = {
+export const ROLE_ACCESS = {
   Administrator: [
     'User accounts, roles and access requests',
     'Settings, AI switches and catalogue governance',
@@ -54,12 +59,12 @@ export function Avatar({ name = '', initials = '', tone = 'brand', size = 'md', 
     brand: ['var(--blue-100)', 'var(--blue-700)'],
     amber: ['var(--amber-100)', 'var(--amber-700)'],
     red: ['var(--red-100)', 'var(--red-700)'],
-    neutral: ['var(--ink-100)', 'var(--ink-600)'],
+    neutral: ['var(--divider-row)', 'var(--ink-600)'],
   };
   const [bg, fg] = tones[tone] || tones.brand;
   const sizes = { sm: 28, md: 38, lg: 48, xl: 64 };
   const dim = sizes[size] || (typeof size === 'number' ? size : 38);
-  const text = (initials || name.split(' ').filter(Boolean).slice(0, 2).map((w) => w[0]).join('') || '?').toUpperCase();
+  const text = (initials || initialsOf(name) || '?').toUpperCase();
   return (
     <span
       style={{
@@ -78,7 +83,7 @@ export function Avatar({ name = '', initials = '', tone = 'brand', size = 'md', 
 /* ----------------------------- Badge ----------------------------- */
 export function Badge({ children, tone = 'neutral', solid = false, size = 'md', dot = false, style = {} }) {
   const tones = {
-    neutral: { soft: ['var(--ink-100)', 'var(--ink-700)'], solid: ['var(--ink-600)', '#fff'] },
+    neutral: { soft: ['var(--divider-row)', 'var(--ink-700)'], solid: ['var(--ink-600)', '#fff'] },
     brand: { soft: ['var(--blue-50)', 'var(--blue-700)'], solid: ['var(--blue-600)', '#fff'] },
     success: { soft: ['var(--success-50)', 'var(--success-700)'], solid: ['var(--success-500)', '#fff'] },
     warning: { soft: ['var(--warning-50)', 'var(--warning-700)'], solid: ['var(--warning-500)', '#fff'] },
@@ -100,13 +105,19 @@ export function Badge({ children, tone = 'neutral', solid = false, size = 'md', 
 /* ----------------------------- Button ----------------------------- */
 export function Button({ children, variant = 'primary', size = 'md', iconLeft = null, iconRight = null, fullWidth = false, disabled = false, type = 'button', onClick, style = {}, ...rest }) {
   const sizes = {
-    sm: { height: 34, padding: '0 14px', fontSize: 13, gap: 6, radius: 'var(--radius-sm)' },
-    md: { height: 42, padding: '0 18px', fontSize: 15, gap: 8, radius: 'var(--radius-md)' },
-    lg: { height: 50, padding: '0 26px', fontSize: 17, gap: 10, radius: 'var(--radius-lg)' },
+    sm: { height: 32, padding: '0 13px', fontSize: 12.5, gap: 6, radius: 'var(--radius-sm)' },
+    md: { height: 38, padding: '0 15px', fontSize: 13.5, gap: 8, radius: 'var(--radius-control)' },
+    lg: { height: 46, padding: '0 20px', fontSize: 15, gap: 9, radius: 'var(--radius-control)' },
   };
+  /* `secondary` is a plain white button, not a blue-tinted one. Beside a
+   * filled primary it is the thing you are NOT meant to press first, and a
+   * blue outline made the pair read as two primaries. `outline` is the
+   * blue-edged row action — small, repeated down a list, and never adjacent
+   * to a filled button. */
   const variants = {
     primary: { background: 'var(--blue-600)', color: '#fff', border: '1px solid var(--blue-600)', boxShadow: 'var(--shadow-brand)' },
-    secondary: { background: 'var(--surface)', color: 'var(--blue-700)', border: '1px solid var(--blue-200)', boxShadow: 'var(--shadow-xs)' },
+    secondary: { background: 'var(--surface)', color: 'var(--text-body)', border: '1px solid var(--border-strong)', boxShadow: 'none' },
+    outline: { background: 'var(--surface)', color: 'var(--blue-700)', border: '1px solid var(--blue-200)', boxShadow: 'none' },
     accent: { background: 'var(--amber-400)', color: 'var(--amber-900)', border: '1px solid var(--amber-400)', boxShadow: 'var(--shadow-sm)' },
     danger: { background: 'var(--red-500)', color: '#fff', border: '1px solid var(--red-500)', boxShadow: 'var(--shadow-sm)' },
     ghost: { background: 'transparent', color: 'var(--text-body)', border: '1px solid transparent', boxShadow: 'none' },
@@ -134,22 +145,25 @@ export function Button({ children, variant = 'primary', size = 'md', iconLeft = 
 export function Card({ children, title = null, eyebrow = null, actions = null, footer = null, padding = 'var(--space-6)', interactive = false, accent = null, style = {} }) {
   return (
     <div
-      style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', overflow: 'hidden', position: 'relative', transition: interactive ? 'box-shadow var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out)' : 'none', ...style }}
+      style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', overflow: 'hidden', position: 'relative', transition: interactive ? 'box-shadow var(--dur-base) var(--ease-out), transform var(--dur-base) var(--ease-out)' : 'none', ...style }}
       onMouseEnter={interactive ? (e) => { e.currentTarget.style.boxShadow = 'var(--shadow-lg)'; e.currentTarget.style.transform = 'translateY(-2px)'; } : undefined}
-      onMouseLeave={interactive ? (e) => { e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; e.currentTarget.style.transform = 'translateY(0)'; } : undefined}
+      onMouseLeave={interactive ? (e) => { e.currentTarget.style.boxShadow = 'var(--shadow-card)'; e.currentTarget.style.transform = 'translateY(0)'; } : undefined}
     >
       {accent && <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: accent }} />}
+      {/* The header is a BAR with a rule under it, not text floating above the
+          body. That is what lets a card hold a table or a tab strip without
+          the heading looking like the first row of it. */}
       {(title || actions || eyebrow) && (
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, padding: `var(--space-5) ${padding} 0` }}>
-          <div>
-            {eyebrow && <div className="racco-eyebrow" style={{ marginBottom: 4 }}>{eyebrow}</div>}
-            {title && <h3 style={{ fontFamily: 'var(--font-display)', fontSize: 'var(--text-lg)', fontWeight: 700, color: 'var(--text-strong)', margin: 0 }}>{title}</h3>}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '12px 15px', borderBottom: '1px solid var(--divider)' }}>
+          <div style={{ minWidth: 0 }}>
+            {eyebrow && <div className="racco-eyebrow" style={{ fontSize: 'var(--text-3xs)', marginBottom: 3 }}>{eyebrow}</div>}
+            {title && <h3 style={{ fontFamily: 'var(--font-sans)', fontSize: 14.5, fontWeight: 800, color: 'var(--text-strong)', margin: 0, letterSpacing: '-0.005em' }}>{title}</h3>}
           </div>
-          {actions && <div style={{ flex: 'none' }}>{actions}</div>}
+          {actions && <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: 8 }}>{actions}</div>}
         </div>
       )}
       <div style={{ padding }}>{children}</div>
-      {footer && <div style={{ padding: `0 ${padding} var(--space-5)`, borderTop: '1px solid var(--border)', marginTop: -4, paddingTop: 'var(--space-4)' }}>{footer}</div>}
+      {footer && <div style={{ padding: `12px ${padding}`, borderTop: '1px solid var(--divider)', background: 'var(--ink-25)' }}>{footer}</div>}
     </div>
   );
 }
@@ -157,20 +171,22 @@ export function Card({ children, title = null, eyebrow = null, actions = null, f
 /* ----------------------------- StatCard ----------------------------- */
 export function StatCard({ label, value, tone = 'brand', icon = null, trend = null, trendDir = 'up', hint = null, style = {} }) {
   const tones = { brand: 'var(--blue-600)', red: 'var(--red-500)', amber: 'var(--amber-500)', success: 'var(--success-500)', neutral: 'var(--ink-700)' };
-  const chipBg = { brand: 'var(--blue-50)', red: 'var(--red-50)', amber: 'var(--amber-50)', success: 'var(--success-50)', neutral: 'var(--ink-100)' };
+  const chipBg = { brand: 'var(--blue-50)', red: 'var(--red-50)', amber: 'var(--amber-50)', success: 'var(--success-50)', neutral: 'var(--divider-row)' };
   const c = tones[tone] || tones.brand;
   const up = trendDir === 'up';
   return (
-    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-sm)', padding: 'var(--space-5)', display: 'flex', flexDirection: 'column', gap: 10, ...style }}>
+    <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 7, ...style }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 'var(--text-xs)', letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{label}</span>
-        {icon && <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: 'var(--radius-md)', background: chipBg[tone] || chipBg.brand, color: c }}>{icon}</span>}
+        <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 'var(--text-3xs)', letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{label}</span>
+        {icon && <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 'var(--radius-control)', background: chipBg[tone] || chipBg.brand, color: c }}>{icon}</span>}
       </div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
-        <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 'var(--text-4xl)', lineHeight: 1, color: c, fontVariantNumeric: 'tabular-nums' }}>{value}</span>
-        {trend && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 'var(--text-xs)', fontWeight: 700, marginBottom: 6, whiteSpace: 'nowrap', color: up ? 'var(--success-600)' : 'var(--red-600)' }}>{up ? '▲' : '▼'} {trend}</span>}
+      {/* The figure is ink, and the tone lives in the icon chip. Colouring the
+          number made every tile read as a status when most are just counts. */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 9 }}>
+        <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 34, lineHeight: 1, color: 'var(--text-strong)', fontVariantNumeric: 'tabular-nums' }}>{value}</span>
+        {trend && <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontSize: 12, fontWeight: 800, marginBottom: 5, whiteSpace: 'nowrap', color: up ? 'var(--success-700)' : 'var(--red-700)' }}>{up ? '▲' : '▼'} {trend}</span>}
       </div>
-      {hint && <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-faint)' }}>{hint}</span>}
+      {hint && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{hint}</span>}
     </div>
   );
 }
@@ -186,7 +202,7 @@ export function ConfidenceMeter({ value = 0, tone = 'brand', label = 'Confidence
         <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 'var(--text-xs)', letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{label}</span>
         {showValue && <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 'var(--text-base)', color: c, fontVariantNumeric: 'tabular-nums' }}>{v}%</span>}
       </div>
-      <div style={{ position: 'relative', height: 9, borderRadius: 'var(--radius-pill)', background: 'var(--ink-100)', overflow: 'hidden' }}>
+      <div style={{ position: 'relative', height: 9, borderRadius: 'var(--radius-pill)', background: 'var(--divider-row)', overflow: 'hidden' }}>
         <div style={{ width: `${v}%`, height: '100%', borderRadius: 'var(--radius-pill)', background: c, transition: 'width var(--dur-slow) var(--ease-out)' }} />
       </div>
       {threshold != null && (
@@ -274,6 +290,52 @@ export function Input({ value, onChange, placeholder, type = 'text', size = 'md'
       />
       {trailing && <span style={{ display: 'inline-flex', color: 'var(--text-faint)', flex: 'none' }}>{trailing}</span>}
     </div>
+  );
+}
+
+/* ----------------------------- PasswordInput ----------------------------- *
+ * A password field with one reveal control, which submits on Enter.
+ *
+ * Both halves of that sentence were bugs. The toggle was hand-written twice
+ * (sign-in and request-access) and absent from the three change-password
+ * forms, so the app had one eye on some screens and none on others — and on
+ * Edge, which draws its own reveal button inside every password field, the two
+ * screens with a toggle showed TWO eyes side by side. The browser's control is
+ * hidden in index.css; this is the one that stays.
+ *
+ * `onMouseDown` preventing default is the important line. Without it, clicking
+ * the eye moves focus off the password field and onto the button — so the next
+ * Enter activates the button and toggles the eye again instead of submitting
+ * the form. Somebody who reveals their password to check it before signing in
+ * then finds that the Enter key "does nothing", which is exactly what was
+ * reported. Preventing the mousedown default leaves the caret where it was.
+ */
+export function PasswordInput({ value, onChange, leading = <Icon name="lock" size={16} />, ...rest }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <Input
+      type={shown ? 'text' : 'password'}
+      value={value}
+      onChange={onChange}
+      leading={leading}
+      trailing={(
+        <button
+          type="button"
+          onMouseDown={(e) => e.preventDefault()}
+          onClick={() => setShown((v) => !v)}
+          title={shown ? 'Hide password' : 'Show password'}
+          aria-label={shown ? 'Hide password' : 'Show password'}
+          aria-pressed={shown}
+          style={{
+            display: 'inline-flex', alignItems: 'center', padding: 2, border: 'none',
+            background: 'none', color: 'var(--text-faint)', cursor: 'pointer',
+          }}
+        >
+          <Icon name={shown ? 'eye-off' : 'eye'} size={17} />
+        </button>
+      )}
+      {...rest}
+    />
   );
 }
 
@@ -369,18 +431,21 @@ export function Switch({ checked = false, onChange, size = 'md', disabled = fals
 }
 
 /* ----------------------------- RoleBadge ----------------------------- */
+/* One neutral chip for all three, distinguished by the dot. Tinting the whole
+ * chip per role meant three saturated pills competing on a screen where the
+ * only thing that should be shouting is an alert. */
 const ROLES = {
-  Administrator: { color: 'var(--blue-600)', bg: 'var(--blue-50)', fg: 'var(--blue-700)' },
-  Staff: { color: 'var(--amber-500)', bg: 'var(--amber-50)', fg: 'var(--amber-700)' },
-  Psychologist: { color: 'var(--red-500)', bg: 'var(--red-50)', fg: 'var(--red-700)' },
+  Administrator: { color: 'var(--blue-600)' },
+  Staff: { color: 'var(--amber-500)' },
+  Psychologist: { color: 'var(--blue-400)' },
 };
 export function RoleBadge({ role = 'Staff', size = 'md', solid = false, style = {} }) {
   const r = ROLES[role] || ROLES.Staff;
   const sizes = { sm: { fs: 11, pad: '3px 9px', dot: 6 }, md: { fs: 12, pad: '4px 11px', dot: 7 } };
   const s = sizes[size] || sizes.md;
   return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: s.pad, background: solid ? r.color : r.bg, color: solid ? '#fff' : r.fg, borderRadius: 'var(--radius-pill)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: s.fs, lineHeight: 1, whiteSpace: 'nowrap', ...style }}>
-      <span style={{ width: s.dot, height: s.dot, borderRadius: '50%', background: solid ? '#fff' : r.color, flex: 'none' }} />
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: s.pad, background: solid ? 'var(--ink-600)' : 'var(--ink-50)', color: solid ? '#fff' : 'var(--text-body)', border: `1px solid ${solid ? 'transparent' : 'var(--border)'}`, borderRadius: 'var(--radius-pill)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: s.fs, lineHeight: 1, whiteSpace: 'nowrap', ...style }}>
+      <span style={{ width: s.dot, height: s.dot, borderRadius: '50%', background: r.color, flex: 'none' }} />
       {role}
     </span>
   );
@@ -425,16 +490,19 @@ export function RoleAccessPanel({ from = null, to, style = {} }) {
 /* ----------------------------- Tabs ----------------------------- */
 export function Tabs({ tabs = [], active, onChange, style = {} }) {
   return (
-    <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--border)', ...style }}>
+    <div style={{ display: 'flex', gap: 2, padding: '0 14px', borderBottom: '1px solid var(--divider)', ...style }}>
       {tabs.map((t) => {
         const on = t.id === active;
         return (
           <button key={t.id} type="button" onClick={() => onChange && onChange(t.id)}
-            onMouseEnter={(e) => { if (!on) { e.currentTarget.style.color = 'var(--text-strong)'; e.currentTarget.style.borderBottomColor = 'var(--ink-300)'; } }}
-            onMouseLeave={(e) => { if (!on) { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.borderBottomColor = 'transparent'; } }}
-            style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 7, padding: '10px 14px', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 'var(--text-base)', color: on ? 'var(--blue-700)' : 'var(--text-muted)', marginBottom: -1, borderBottom: `2px solid ${on ? 'var(--blue-600)' : 'transparent'}`, transition: 'color var(--dur-fast), border-color var(--dur-fast)' }}>
+            onMouseEnter={(e) => { if (!on) e.currentTarget.style.color = 'var(--text-strong)'; }}
+            onMouseLeave={(e) => { if (!on) e.currentTarget.style.color = 'var(--text-muted)'; }}
+            style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 8, padding: '12px 14px', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontWeight: on ? 800 : 700, fontSize: 13.5, color: on ? 'var(--blue-700)' : 'var(--text-muted)', transition: 'color var(--dur-fast)' }}>
             {t.label}
-            {t.count != null && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, padding: '1px 7px', borderRadius: 'var(--radius-pill)', background: on ? 'var(--blue-100)' : 'var(--ink-100)', color: on ? 'var(--blue-700)' : 'var(--text-muted)' }}>{t.count}</span>}
+            {t.count != null && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, fontWeight: 600, padding: '1px 7px', borderRadius: 'var(--radius-pill)', background: on ? 'var(--blue-100)' : 'var(--ink-75)', color: on ? 'var(--blue-700)' : 'var(--text-muted)' }}>{t.count}</span>}
+            {/* The bar sits ON the card's own rule rather than replacing it —
+                a 2px bottom-border left a 1px seam showing through. */}
+            <span style={{ position: 'absolute', left: 8, right: 8, bottom: 0, height: 3, borderRadius: '3px 3px 0 0', background: on ? 'var(--blue-600)' : 'transparent' }} />
           </button>
         );
       })}
@@ -516,7 +584,7 @@ export function Modal({ open = true, onClose, title, subtitle = null, icon = nul
   const titleId = useId();
   if (!open) return null;
   const tones = {
-    neutral: ['var(--ink-100)', 'var(--ink-600)'],
+    neutral: ['var(--divider-row)', 'var(--ink-600)'],
     brand: ['var(--blue-50)', 'var(--blue-600)'],
     warning: ['var(--warning-50)', 'var(--warning-600)'],
     danger: ['var(--red-50)', 'var(--red-600)'],
@@ -689,9 +757,9 @@ export function Menu({ items = [], label = 'More actions', trigger = null, align
         ref={btnRef} type="button" aria-label={label} aria-haspopup="menu" aria-expanded={open}
         disabled={!enabled.length}
         onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
-        onMouseEnter={(e) => { if (!open) e.currentTarget.style.background = 'var(--ink-100)'; }}
+        onMouseEnter={(e) => { if (!open) e.currentTarget.style.background = 'var(--divider-row)'; }}
         onMouseLeave={(e) => { if (!open) e.currentTarget.style.background = 'transparent'; }}
-        style={{ ...iconBtn('var(--text-muted)', size), border: '1px solid transparent', background: open ? 'var(--ink-100)' : 'transparent', color: open ? 'var(--text-strong)' : 'var(--text-muted)', opacity: enabled.length ? 1 : 0.35, cursor: enabled.length ? 'pointer' : 'not-allowed' }}
+        style={{ ...iconBtn('var(--text-muted)', size), border: '1px solid transparent', background: open ? 'var(--divider-row)' : 'transparent', color: open ? 'var(--text-strong)' : 'var(--text-muted)', opacity: enabled.length ? 1 : 0.35, cursor: enabled.length ? 'pointer' : 'not-allowed' }}
       >
         {trigger || <Icon name="more-horizontal" size={17} />}
       </button>
@@ -790,4 +858,121 @@ export function hoverTint(tint = 'var(--blue-50)') {
   };
 }
 
-export const PAGE = { padding: '24px 26px', maxWidth: 'var(--content-max)', margin: '0 auto' };
+/* Every screen's outer element.
+ *
+ * No padding and no max-width any more: the shell owns the gutter (see the
+ * note in App.jsx) and the centre pane is already narrowed by whichever rails
+ * are up. A screen that padded itself could not sit next to a rail without the
+ * two disagreeing about the margin. */
+export const PAGE = { display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0 };
+
+/* ----------------------------- PageHeader ----------------------------- *
+ * Title, one line of what the screen is, and the buttons that act on it —
+ * all on one row above the first card. This used to live in the top bar,
+ * where the title sat 300px away from the button that acted on it. */
+export function PageHeader({ title, subtitle = null, children = null, style = {} }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', ...style }}>
+      <div style={{ minWidth: 0 }}>
+        <h2 style={{ fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 19, lineHeight: 1.2, letterSpacing: '-0.015em', color: 'var(--text-strong)' }}>{title}</h2>
+        {subtitle && <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>{subtitle}</p>}
+      </div>
+      <span style={{ flex: 1 }} />
+      {children}
+    </div>
+  );
+}
+
+/* ----------------------------- IconChip ----------------------------- *
+ * The tinted rounded square that opens a card header. Its colour is the only
+ * place tone is expressed in a header — the heading itself stays ink. */
+const CHIP_TONES = {
+  brand: ['var(--blue-50)', 'var(--blue-600)'],
+  success: ['var(--success-50)', 'var(--success-700)'],
+  warning: ['var(--warning-50)', 'var(--warning-700)'],
+  danger: ['var(--red-50)', 'var(--red-700)'],
+  neutral: ['var(--ink-50)', 'var(--text-body)'],
+};
+export function IconChip({ icon, tone = 'brand', size = 30, style = {} }) {
+  const [bg, fg] = CHIP_TONES[tone] || CHIP_TONES.brand;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: size, height: size, borderRadius: 'var(--radius-control)', flex: 'none', background: bg, color: fg, ...style }}>
+      {typeof icon === 'string' ? <Icon name={icon} size={Math.round(size * 0.62)} /> : icon}
+    </span>
+  );
+}
+
+/* ----------------------------- Segmented ----------------------------- *
+ * The range/view switch: a pill group where exactly one option is on. Distinct
+ * from FilterPills, which is a row of independent counted filters. */
+export function Segmented({ options = [], value, onChange, label = 'View', style = {} }) {
+  return (
+    <div role="tablist" aria-label={label} style={{ display: 'inline-flex', gap: 3, background: 'var(--ink-50)', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', padding: 3, ...style }}>
+      {options.map((o) => {
+        const on = o.value === value;
+        return (
+          <button
+            key={o.value} type="button" role="tab" aria-selected={on} onClick={() => onChange?.(o.value)}
+            style={{ padding: '5px 14px', border: 'none', borderRadius: 'var(--radius-pill)', background: on ? 'var(--blue-600)' : 'transparent', color: on ? '#fff' : 'var(--text-muted)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap', transition: 'background var(--dur-fast) var(--ease-out)' }}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ----------------------------- Note ----------------------------- *
+ * The quiet strip at the foot of a card that says what the system deliberately
+ * does NOT do — no scoring keys, no invented prose, no emailed credentials.
+ * These sentences are compliance, not decoration, so they get one consistent
+ * shape rather than being retyped as ordinary paragraphs. */
+export function Note({ icon = 'info', children, tone = 'muted', style = {} }) {
+  const bg = tone === 'warning' ? 'var(--warning-50)' : tone === 'brand' ? 'var(--blue-50)' : 'var(--ink-50)';
+  const bd = tone === 'warning' ? 'var(--warning-100)' : tone === 'brand' ? 'var(--blue-100)' : 'transparent';
+  const fg = tone === 'warning' ? 'var(--warning-700)' : tone === 'brand' ? 'var(--blue-600)' : 'var(--text-muted)';
+  return (
+    <div style={{ display: 'flex', gap: 11, padding: '11px 15px', background: bg, borderTop: bd === 'transparent' ? 'none' : `1px solid ${bd}`, ...style }}>
+      <Icon name={icon} size={17} style={{ color: fg, flex: 'none', marginTop: 1 }} />
+      <p style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--text-muted)', fontStyle: tone === 'muted' ? 'italic' : 'normal' }}>{children}</p>
+    </div>
+  );
+}
+
+/* ----------------------------- MiniBar ----------------------------- *
+ * Label, count, and a proportion bar. The redesign uses this shape for case
+ * mix, terminations by reason and sessions per psychologist — three lists that
+ * were three different charts and are the same question. */
+export function MiniBar({ label, value, pct, color = 'var(--blue-600)', style = {} }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 5, ...style }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 12.5, color: 'var(--text-body)' }}>
+        <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+        <span className="racco-mono" style={{ color: 'var(--text-strong)', flex: 'none' }}>{value}</span>
+      </div>
+      <div style={{ height: 6, borderRadius: 'var(--radius-pill)', background: 'var(--divider)', overflow: 'hidden' }}>
+        <div style={{ height: '100%', borderRadius: 'var(--radius-pill)', background: color, width: pct }} />
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------- Table styles ----------------------------- *
+ * Shared so every table in the app has the same header weight, row rule and
+ * cell rhythm. They were retyped per screen and had drifted to four different
+ * header sizes. */
+export const TH = {
+  textAlign: 'left', padding: '9px 12px', fontFamily: 'var(--font-sans)', fontWeight: 800,
+  fontSize: 'var(--text-3xs)', letterSpacing: '0.07em', textTransform: 'uppercase',
+  color: 'var(--text-muted)', whiteSpace: 'nowrap', borderBottom: '1px solid var(--border)',
+};
+export const THEAD_ROW = { background: 'var(--ink-25)' };
+export const TD = { padding: '9px 12px', fontFamily: 'var(--font-sans)', fontSize: 12.5, color: 'var(--text-body)' };
+export const TR = { borderBottom: '1px solid var(--divider-row)' };
+
+/* The filter strip that sits above a table inside the same card. */
+export const TOOLBAR = {
+  padding: '8px 10px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+  background: 'var(--ink-25)', borderBottom: '1px solid var(--divider)',
+};

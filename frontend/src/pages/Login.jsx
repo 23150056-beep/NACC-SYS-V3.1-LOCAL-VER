@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { Button, FormField, Input, Alert, Icon, Modal, ROLE_META } from '../ui';
+import { Button, FormField, Input, PasswordInput, Alert, Icon, Modal, ROLE_META } from '../ui';
 import AuthLayout, { AuthLink } from '../components/AuthLayout';
 import PasswordChangeGate from '../components/PasswordChangeGate';
 import GoogleSignInButton from '../components/GoogleSignInButton';
@@ -18,7 +18,6 @@ export default function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [capsLock, setCapsLock] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -164,24 +163,11 @@ export default function Login() {
               <div onKeyUp={(e) => setCapsLock(e.getModifierState?.('CapsLock') || false)}
                    onBlur={() => setCapsLock(false)}>
               <FormField label="Password">
-                <Input
-                  type={showPassword ? 'text' : 'password'}
+                <PasswordInput
                   value={password}
                   onChange={(e) => setPassword(e.target.value.replace(/\s/g, ''))}
                   placeholder="••••••••"
                   autoComplete="current-password"
-                  leading={<Icon name="lock" size={16} />}
-                  trailing={(
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword((visible) => !visible)}
-                      title={showPassword ? 'Hide password' : 'Show password'}
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      style={{ display: 'inline-flex', alignItems: 'center', padding: 2, border: 'none', background: 'none', color: 'var(--text-faint)', cursor: 'pointer' }}
-                    >
-                      <Icon name={showPassword ? 'eye-off' : 'eye'} size={17} />
-                    </button>
-                  )}
                   required
                 />
               </FormField>

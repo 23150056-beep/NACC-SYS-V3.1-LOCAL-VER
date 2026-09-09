@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useToast } from '../context/ToastContext';
 import { useAuth } from '../context/AuthContext';
+import { caseRef } from '../utils/child';
 import { Card, Button, Badge, Input, Select, FormField, FileUpload, Alert, EmptyState, Avatar, Icon, iconBtn, hoverLift, PAGE } from '../ui';
 import { PA_STATUSES, PA_STATUS_TONES } from '../config/caseData';
 import { printBlankForm } from '../utils/printForm';
@@ -129,22 +130,68 @@ export default function PreAssessment() {
   };
 
   return (
-    <div style={{ ...PAGE, maxWidth: 860 }}>
-      {/* Step rail — click any visited step to look back at it */}
-      <div style={{ display: 'flex', gap: 6, marginBottom: 20, flexWrap: 'wrap' }}>
-        {STEPS.map((s, i) => {
-          const reachable = i <= maxStep && i < 5;
-          return (
-            <div key={s} onClick={() => reachable && goToStep(i)} title={reachable ? `Go to ${s}` : undefined}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 13px', borderRadius: 'var(--radius-pill)', fontSize: 12.5, fontWeight: 700, cursor: reachable ? 'pointer' : 'default', background: i === step ? 'var(--blue-600)' : i < step ? 'var(--success-50)' : 'var(--ink-50)', color: i === step ? '#fff' : i < step ? 'var(--success-600)' : 'var(--text-muted)', border: `1px solid ${i === step ? 'var(--blue-600)' : i < step ? 'var(--success-100)' : 'var(--border)'}` }}>
-              {i < step ? <Icon name="check" size={13} /> : <span className="racco-mono" style={{ fontSize: 11 }}>{i + 1}</span>}
-              {s}
-            </div>
-          );
-        })}
+    <div style={{ ...PAGE, maxWidth: 880 }}>
+      {/* Who this is, and how far through. A wizard's worst failure is the
+          person losing track of which child they are recording — so the name
+          sits above the stepper on every step, not only the first. */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 13 }}>
+        {child ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <Avatar name={child.fullname} tone="brand" size={38} />
+            <span style={{ flex: 1, minWidth: 160 }}>
+              <span style={{ display: 'block', fontWeight: 800, fontSize: 15.5, color: 'var(--text-strong)' }}>{child.fullname}</span>
+              <span style={{ display: 'block', fontWeight: 600, fontSize: 12, color: 'var(--text-muted)' }}>
+                {caseRef(child.id)} · {child.case_type || 'No case type'} · {child.psychologist_name || 'unassigned'}
+              </span>
+            </span>
+            <Badge tone={step >= 5 ? 'success' : 'warning'} size="md">
+              {step >= 5 ? 'Complete' : `In progress · step ${step + 1} of ${STEPS.length}`}
+            </Badge>
+          </div>
+        ) : (
+          <div>
+            <h2 style={{ fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 17, lineHeight: 1.2, letterSpacing: '-0.01em', color: 'var(--text-strong)' }}>Pre-Assessment</h2>
+            <p style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>Six steps: consent, interview, instrument titles, presenting problems, then close the flow.</p>
+          </div>
+        )}
+
+        {/* Step rail — click any visited step to look back at it. */}
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          {STEPS.map((s, i) => {
+            const done = i < step;
+            const now = i === step;
+            const reachable = i <= maxStep && i < 5;
+            const barBefore = i === 0 ? 'transparent' : i <= step ? 'var(--blue-600)' : 'var(--divider)';
+            const barAfter = i === STEPS.length - 1 ? 'transparent' : i < step ? 'var(--blue-600)' : 'var(--divider)';
+            return (
+              <div key={s} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+                  <span style={{ flex: 1, height: 3, background: barBefore }} />
+                  <button
+                    type="button" onClick={() => reachable && goToStep(i)} disabled={!reachable}
+                    title={reachable ? `Go to ${s}` : `${s} — not reached yet`} aria-current={now ? 'step' : undefined}
+                    style={{
+                      width: 28, height: 28, flex: 'none', borderRadius: '50%',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      background: done ? 'var(--success-500)' : now ? 'var(--blue-600)' : 'var(--surface)',
+                      color: done || now ? '#fff' : 'var(--text-faint)',
+                      border: `2px solid ${done ? 'var(--success-500)' : now ? 'var(--blue-600)' : 'var(--border-strong)'}`,
+                      fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 11.5,
+                      cursor: reachable ? 'pointer' : 'default', padding: 0,
+                    }}
+                  >
+                    {done ? <Icon name="check" size={15} /> : i + 1}
+                  </button>
+                  <span style={{ flex: 1, height: 3, background: barAfter }} />
+                </div>
+                <span style={{ fontWeight: now ? 800 : 600, fontSize: 11.5, color: now ? 'var(--text-strong)' : 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{s}</span>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
-      {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />} style={{ marginBottom: 14 }}>{error}</Alert>}
+      {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{error}</Alert>}
 
       {step === 0 && (() => {
         // Categorized picker: chip filter + pipeline-order sort (earliest
@@ -160,7 +207,7 @@ export default function PreAssessment() {
         const chips = [{ key: 'all', label: 'All', count: children.length },
           ...PA_STATUSES.map((s) => ({ key: s, label: s, count: counts[s] || 0 }))];
         return (
-          <Card eyebrow="Step 1" title="Select a child" padding="22px">
+          <Card eyebrow="Step 1" title="Select a child" padding="16px">
             <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px' }}>
               Start a guided pre-assessment for one of your assigned children.
             </p>
@@ -221,7 +268,7 @@ export default function PreAssessment() {
       )}
 
       {step === 3 && (
-        <Card eyebrow="Step 4" title="Select instrument titles" padding="22px">
+        <Card eyebrow="Step 4" title="Select instrument titles" padding="16px">
           <Alert disclaimer style={{ marginBottom: 14 }} title="Paper administration.">
             Instruments are administered offline using the psychologist&apos;s own printed materials. The system records titles only.
           </Alert>
@@ -281,14 +328,14 @@ export default function PreAssessment() {
         <ProblemsStep child={child} problems={problems} setProblems={setProblems} setError={setError} onNext={() => advanceTo(4.5)} />
       )}
       {step === 4.5 && (
-        <Card eyebrow="Step 6" title="Review & complete" padding="22px">
+        <Card eyebrow="Step 6" title="Review & complete" padding="16px">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
             {[['Child', child?.fullname],
               ['Consent', pa?.consent ? `Linked (${pa.consent_status || 'signed'})` : 'Missing'],
               ['Clinical interview', pa?.interview ? 'Recorded' : 'Skipped'],
               ['Instruments', (pa?.instrument_titles || []).join(', ') || selectedInstruments.length + ' selected'],
               ['Problems logged', String(problems.length)]].map(([k, v]) => (
-              <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, paddingBottom: 10, borderBottom: '1px solid var(--ink-100)' }}>
+              <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, paddingBottom: 10, borderBottom: '1px solid var(--divider-row)' }}>
                 <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>{k}</span>
                 <span style={{ fontSize: 13.5, color: 'var(--text-strong)', fontWeight: 700, textAlign: 'right' }}>{v}</span>
               </div>
@@ -370,7 +417,7 @@ function ConsentStep({ child, consents, templates, onLinked, onRefresh, setError
   const td = { padding: '9px 12px', fontSize: 12.5, color: 'var(--text-body)' };
 
   return (
-    <Card eyebrow="Step 2" title={`Consent — ${child.fullname}`} padding="22px">
+    <Card eyebrow="Step 2" title={`Consent — ${child.fullname}`} padding="16px">
       <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px' }}>
         The agency&apos;s consent document is embedded below — read it with the guardian, then upload the scanned signed paper. The consent is marked Signed automatically once the scan is attached.
       </p>
@@ -424,7 +471,7 @@ function ConsentStep({ child, consents, templates, onLinked, onRefresh, setError
               </tr></thead>
               <tbody>
                 {consents.map((c) => (
-                  <tr key={c.id} style={{ borderBottom: '1px solid var(--ink-100)' }}>
+                  <tr key={c.id} style={{ borderBottom: '1px solid var(--divider-row)' }}>
                     <td style={{ ...td, fontWeight: 700, color: 'var(--text-strong)' }}>{c.signer_name || '—'}</td>
                     <td style={td}>{c.signer_relationship || '—'}</td>
                     <td style={td}>{c.template_title || '—'}</td>
@@ -531,7 +578,7 @@ function InterviewStep({ child, templates, onDone, setError }) {
   };
 
   return (
-    <Card eyebrow="Step 3" title="Clinical interview" padding="22px">
+    <Card eyebrow="Step 3" title="Clinical interview" padding="16px">
       <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px' }}>
         Record the answers to your own Clinical Interview form, or skip if not conducted today.
         {savedCount > 0 && <strong> {savedCount} interview{savedCount > 1 ? 's' : ''} saved this session.</strong>}
@@ -614,7 +661,7 @@ function ProblemsStep({ child, problems, setProblems, setError, onNext }) {
   };
 
   return (
-    <Card eyebrow="Step 5" title="Problems encountered" padding="22px">
+    <Card eyebrow="Step 5" title="Problems encountered" padding="16px">
       <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '0 0 14px' }}>
         Log the problems observed in {child.fullname} during this session (optional).
       </p>

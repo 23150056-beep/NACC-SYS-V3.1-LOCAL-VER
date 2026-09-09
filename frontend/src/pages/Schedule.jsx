@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
 import { enUS } from 'date-fns/locale';
@@ -7,8 +6,11 @@ import 'react-big-calendar/lib/css/react-big-calendar.css';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { Card, Button, Badge, Input, Select, FormField, Alert, Avatar, Icon, iconBtn, hoverLift, PAGE } from '../ui';
+import {
+  Alert, Avatar, Badge, Button, Card, FormField, hoverLift, Icon, iconBtn, Input, PAGE, PageHeader, Select,
+} from '../ui';
 import { prefetchBriefs } from '../api/assistant';
+import { useOpenFromLink } from '../utils/links';
 
 const localizer = dateFnsLocalizer({ format, parse, startOfWeek, getDay, locales: { 'en-US': enUS } });
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -21,7 +23,6 @@ const STATUS_TONE = { scheduled: 'brand', completed: 'success', no_show: 'amber'
 const STATUS_COLOR = { scheduled: 'var(--blue-600)', completed: 'var(--success-600)', no_show: 'var(--amber-500)', cancelled: 'var(--text-faint)' };
 
 export default function Schedule() {
-  const navigate = useNavigate();
   const { user } = useAuth();
   const toast = useToast();
   const role = user?.role_name || 'Staff';
@@ -56,6 +57,12 @@ export default function Schedule() {
     prefetchBriefs();
     /* eslint-disable-next-line */
   }, []);
+
+  const openBooking = () => {
+    setError('');
+    setBooking({ child: '', psychologist: '', date: '', time: '09:00', purpose: 'session', duration: 60, notes: '' });
+  };
+  useOpenFromLink('book', '1', openBooking, !!booking);
 
   const events = useMemo(() => appointments.map((a) => {
     const start = new Date(a.start);
@@ -126,6 +133,8 @@ export default function Schedule() {
     setError('');
     setBlockForm({ mode: 'weekly', weekdays: [], date: '', start_time: '09:00', end_time: '12:00', capacity: 2, psychologist: '' });
   };
+
+  useOpenFromLink('availability', '1', openCreateBlock, !!blockForm);
 
   const openEditBlock = (b) => {
     setError('');
@@ -212,7 +221,7 @@ export default function Schedule() {
           </div>
           <Card padding="22px" style={{ marginBottom: 18 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <Avatar name={openPsy.name} tone="red" size="lg" />
+              <Avatar name={openPsy.name} tone="brand" size="lg" />
               <div>
                 <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 20, color: 'var(--text-strong)' }}>{openPsy.name}</div>
                 <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
@@ -246,7 +255,7 @@ export default function Schedule() {
                             {role === 'Administrator' && (
                               <>
                                 <button title="Edit" onClick={() => openEditBlock(b)} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={14} /></button>
-                                <button title="Remove" onClick={() => removeBlock(b)} style={iconBtn('var(--red-500)')}><Icon name="trash-2" size={14} /></button>
+                                <button title="Remove" onClick={() => removeBlock(b)} style={iconBtn('var(--red-700)')}><Icon name="trash-2" size={14} /></button>
                               </>
                             )}
                           </div>
@@ -269,7 +278,7 @@ export default function Schedule() {
                           {role === 'Administrator' && (
                             <>
                               <button title="Edit" onClick={() => openEditBlock(b)} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={14} /></button>
-                              <button title="Remove" onClick={() => removeBlock(b)} style={iconBtn('var(--red-500)')}><Icon name="trash-2" size={14} /></button>
+                              <button title="Remove" onClick={() => removeBlock(b)} style={iconBtn('var(--red-700)')}><Icon name="trash-2" size={14} /></button>
                             </>
                           )}
                         </div>
@@ -283,23 +292,20 @@ export default function Schedule() {
         </>
       ) : (
         <>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-          <Button variant="ghost" onClick={() => navigate('/')} iconLeft={<Icon name="arrow-left" size={17} />}>Back to Dashboard</Button>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {Object.entries(STATUS_TONE).map(([k, tone]) => (
-              <Badge key={k} tone={tone} size="sm" dot>{k.replace('_', '-')}</Badge>
-            ))}
-          </div>
+      <PageHeader title="Calendar &amp; booking" subtitle="Appointments and psychologist availability">
+        <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+          {Object.entries(STATUS_COLOR).map(([k, color]) => (
+            <span key={k} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 11.5, color: 'var(--text-body)' }}>
+              <span style={{ width: 9, height: 9, borderRadius: 3, background: color }} />{k.replace('_', '-')}
+            </span>
+          ))}
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          {(isPsych || role === 'Administrator') && <Button variant="secondary" onClick={openCreateBlock} iconLeft={<Icon name="clock" size={16} />}>Add Availability</Button>}
-          {canBook && <Button variant="primary" onClick={() => { setError(''); setBooking({ child: '', psychologist: isPsych ? '' : '', date: '', time: '09:00', purpose: 'session', duration: 60, notes: '' }); }} iconLeft={<Icon name="plus" size={16} />}>Book Appointment</Button>}
-        </div>
-      </div>
+        {(isPsych || role === 'Administrator') && <Button variant="secondary" onClick={openCreateBlock} iconLeft={<Icon name="clock" size={17} />}>Add availability</Button>}
+        {canBook && <Button variant="primary" onClick={() => { setError(''); setBooking({ child: '', psychologist: isPsych ? '' : '', date: '', time: '09:00', purpose: 'session', duration: 60, notes: '' }); }} iconLeft={<Icon name="calendar-plus" size={18} />}>Book appointment</Button>}
+      </PageHeader>
 
-      <Card padding="14px" style={{ marginBottom: 18 }}>
-        <div style={{ height: 560 }}>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
+        <div style={{ height: 620 }}>
           <Calendar
             localizer={localizer}
             events={events}
@@ -321,10 +327,10 @@ export default function Schedule() {
                 purpose: 'session', duration: 60, notes: '',
               });
             }}
-            style={{ fontFamily: 'var(--font-sans)', fontSize: 13 }}
+            style={{ fontFamily: 'var(--font-sans)', fontSize: 13, height: '100%' }}
           />
         </div>
-      </Card>
+      </div>
 
       <Card eyebrow={isPsych ? 'Your availability' : 'Psychologist availability'} title="Availability blocks" padding="20px">
         {myBlocks.length === 0 ? (
@@ -343,7 +349,7 @@ export default function Schedule() {
                 </div>
                 <Badge tone="neutral" size="sm">{b.capacity} slot{b.capacity === 1 ? '' : 's'}</Badge>
                 <button title="Edit" onClick={() => openEditBlock(b)} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={14} /></button>
-                <button title="Remove" onClick={() => removeBlock(b)} style={iconBtn('var(--red-500)')}><Icon name="trash-2" size={14} /></button>
+                <button title="Remove" onClick={() => removeBlock(b)} style={iconBtn('var(--red-700)')}><Icon name="trash-2" size={14} /></button>
               </div>
             ))}
           </div>
@@ -359,7 +365,7 @@ export default function Schedule() {
                   onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); setOpenPsy({ id: g.id, name: g.name }); } }}
                   {...hoverLift()}
                   style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', background: 'var(--surface)', boxShadow: 'var(--shadow-xs)', cursor: 'pointer', transition: 'var(--transition-base)' }}>
-                  <Avatar name={g.name} tone="red" />
+                  <Avatar name={g.name} tone="brand" />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.name}</div>
                     <div style={{ fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

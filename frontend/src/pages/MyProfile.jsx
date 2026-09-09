@@ -6,7 +6,7 @@ import {
   Card, Button, Badge, Input, FormField, Avatar, RoleBadge, Icon,
   RoleAccessPanel, Skeleton, EmptyState, PAGE, hoverLift,
 } from '../ui';
-import { eventText, eventDestination } from '../components/Topbar';
+import { eventText, eventDestination } from '../utils/activity';
 import { exactDate, shortDate, timeAgo } from '../utils/time';
 import api from '../api/client';
 import {
@@ -458,7 +458,7 @@ export default function MyProfile() {
             {activity !== null && activity.length > 0 && (
               <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
                 {activity.slice(0, 12).map((e) => (
-                  <li key={e.id} style={{ borderTop: '1px solid var(--ink-100)' }}>
+                  <li key={e.id} style={{ borderTop: '1px solid var(--divider-row)' }}>
                     <Link
                       to={eventDestination(e, role)}
                       {...hoverLift({ lift: 0 })}

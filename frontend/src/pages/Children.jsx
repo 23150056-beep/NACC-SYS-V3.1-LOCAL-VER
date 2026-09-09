@@ -3,12 +3,17 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useActivity } from '../context/ActivityContext';
-import { Card, Button, Badge, Input, Select, Avatar, EmptyState, Icon, iconBtn, hoverLift, PAGE } from '../ui';
+import {
+  Avatar, Badge, Button, EmptyState, FilterPills, hoverLift, Icon, iconBtn, Input, PAGE,
+  PageHeader, Segmented, Select, TD, TH, THEAD_ROW, TOOLBAR, TR,
+} from '../ui';
 import { useToast } from '../context/ToastContext';
+import { useLayout } from '../context/LayoutContext';
 import { TERMINATION_REASONS } from '../config/caseData';
 import ChildForm, { EMPTY } from './children/ChildForm';
 import ChildDrawer, { TerminateModal } from './children/ChildDrawer';
-import { StatusChip, fmtDay, fmtTime, localDate } from './children/shared';
+import { fmtDay, fmtTime, localDate } from './children/shared';
+import { ageFrom, ageGroup, caseRef } from '../utils/child';
 
 // Live "who else has this record open" chip — polls the presence heartbeat endpoint.
 function usePresence(childId) {
@@ -25,22 +30,20 @@ function usePresence(childId) {
   return others;
 }
 
-function ageFrom(birth) {
-  if (!birth) return null;
-  const d = new Date(birth);
-  if (Number.isNaN(d.getTime())) return null;
-  const diff = Date.now() - d.getTime();
-  return Math.max(0, Math.floor(diff / (365.25 * 24 * 3600 * 1000)));
-}
-// Adviser-optimized age groups: Child 1-12, Teen 13-17.
-function ageGroup(age) {
-  if (age == null) return null;
-  if (age <= 12) return 'Child';
-  if (age <= 17) return 'Teen';
-  return 'Adult';
-}
-function caseRef(id) {
-  return `C-${String(id).padStart(4, '0')}`;
+/* The pre-assessment pipeline, as a dot. The column is one of eight and can
+ * only afford a word, so the colour carries the urgency and the word carries
+ * the state. Mirrors PA_STATUS_TONES, which drives the badge form elsewhere. */
+const PA_DOT = {
+  'No Consent Yet': 'var(--red-500)',
+  'Not Yet Pre-Assessed': 'var(--ink-300)',
+  'In Progress': 'var(--amber-500)',
+  Answered: 'var(--blue-500)',
+  Completed: 'var(--success-500)',
+};
+
+function csvCell(v) {
+  const s = v == null ? '' : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 // V2 status chip: `Active · Foster Care` / `Archived (Terminated)`.
@@ -61,6 +64,7 @@ export default function Children() {
   const { refresh: refreshActivity } = useActivity();
   const toast = useToast();
   const navigate = useNavigate();
+  const layout = useLayout();
   const canManage = ['Administrator', 'Staff'].includes(user?.role_name);
   const isAdmin = user?.role_name === 'Administrator';
   const isPsych = user?.role_name === 'Psychologist';
@@ -137,7 +141,59 @@ export default function Children() {
     { key: 'all', label: 'All' },
   ];
   const dotColor = { active: 'var(--success-500)', inactive: 'var(--text-faint)' };
-  const td = { padding: '11px 16px', fontSize: 13, color: 'var(--text-body)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' };
+
+  /* Columns fold against the CENTRE PANE, not the window. With both rails up a
+   * 1600px window leaves this table about 1000px, and sizing it against 1600
+   * is what used to push it into a horizontal scroll. */
+  const columns = showArchiveColumns
+    ? [
+      { key: 'child', label: 'Child' }, { key: 'type', label: 'Case type' },
+      { key: 'on', label: 'Terminated on' }, { key: 'reason', label: 'Reason' },
+      { key: 'by', label: 'Terminated by' }, { key: 'note', label: 'Note' },
+      { key: 'act', label: '' },
+    ]
+    : [
+      { key: 'child', label: 'Child' },
+      { key: 'type', label: 'Case type' },
+      ...(layout.recordsCategoryCol ? [{ key: 'cat', label: 'Category' }] : []),
+      { key: 'status', label: 'Case status' },
+      ...(layout.recordsPsychCol ? [{ key: 'psych', label: 'Psychologist' }] : []),
+      { key: 'pa', label: 'Pre-assessment' },
+      { key: 'next', label: 'Next appointment' },
+      { key: 'act', label: '', right: true },
+    ];
+
+  // Whatever the fold dropped is appended under the child's name, so a narrow
+  // window loses the column and never the fact.
+  const subLine = (c) => {
+    if (showArchiveColumns) return [c.ref, c.age != null ? `${c.age}y` : null].filter(Boolean).join(' · ');
+    return [
+      c.ref,
+      c.age != null ? `${c.age}y` : null,
+      !layout.recordsCategoryCol ? c.case_category : null,
+      !layout.recordsPsychCol ? (c.psychologist_name || 'no psychologist') : null,
+    ].filter(Boolean).join(' · ');
+  };
+
+  /* Built in the browser from the rows already on screen — there is no export
+   * endpoint, and adding one would put a second, differently-scoped copy of
+   * the roster behind a URL. This can only ever contain what this account is
+   * already looking at. */
+  const exportCsv = () => {
+    const head = showArchiveColumns
+      ? ['Case ref', 'Child', 'Age', 'Case type', 'Terminated on', 'Reason', 'Terminated by', 'Note']
+      : ['Case ref', 'Child', 'Age', 'Gender', 'Case type', 'Category', 'Case status', 'Psychologist', 'Pre-assessment'];
+    const body = visible.map((c) => (showArchiveColumns
+      ? [c.ref, c.fullname, c.age, c.case_type, c.termination?.date, c.termination?.reason_category, c.termination?.terminated_by, c.termination?.note]
+      : [c.ref, c.fullname, c.age, c.gender, c.case_type, c.case_category, c.status === 'active' ? 'Active' : 'Archived', c.psychologist_name, c.pre_assessment_status]));
+    const csv = [head, ...body].map((r) => r.map(csvCell).join(',')).join('\r\n');
+    const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `racco1-records-${localDate(new Date())}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const canTerminate = (c) => c.status === 'active'
     && (isAdmin || (isPsych && String(c.psychologist) === String(user?.id)));
@@ -240,104 +296,91 @@ export default function Children() {
 
   return (
     <div style={{ ...PAGE, position: 'relative' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, marginBottom: 14, flexWrap: 'wrap' }}>
-        <div style={{ width: 320, maxWidth: '100%' }}>
-          <Input placeholder="Search by name or case ID…" value={q} onChange={(e) => setQ(e.target.value)} leading={<Icon name="search" size={16} />} />
-        </div>
+      <PageHeader
+        title="Records"
+        subtitle={`${counts.all} children · ${counts.active || 0} active · ${counts.inactive || 0} archived`}
+      >
+        <Button variant="secondary" onClick={exportCsv} iconLeft={<Icon name="download" size={17} />}>Export CSV</Button>
         {canManage && (
-          <Button variant="primary" onClick={openCreate} iconLeft={<Icon name="plus" size={17} />}>Add Record</Button>
+          <Button variant="primary" onClick={openCreate} iconLeft={<Icon name="user-plus" size={18} />}>Add record</Button>
         )}
-      </div>
+      </PageHeader>
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14, flexWrap: 'wrap' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <div role="tablist" aria-label="Filter children by status" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {STATUS_FILTERS.map((f) => {
-              const on = status === f.key;
-              return (
-                <button key={f.key} role="tab" aria-selected={on} onClick={() => setStatus(f.key)} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '7px 13px', cursor: 'pointer', borderRadius: 'var(--radius-pill)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12.5, border: `1px solid ${on ? 'var(--blue-500)' : 'var(--border)'}`, background: on ? 'var(--blue-50)' : 'var(--surface)', color: on ? 'var(--blue-700)' : 'var(--text-body)', transition: 'var(--transition-base)' }}>
-                  {dotColor[f.key] && <span style={{ width: 7, height: 7, borderRadius: '50%', background: dotColor[f.key] }} />}
-                  {f.label}
-                  <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: on ? 'var(--blue-600)' : 'var(--text-faint)' }}>{counts[f.key] || 0}</span>
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ display: 'inline-flex', gap: 4, background: 'var(--ink-50)', border: '1px solid var(--border)', borderRadius: 'var(--radius-pill)', padding: 3 }}>
-            {[['newest', 'Newest first'], ['az', 'A–Z']].map(([k, label]) => (
-              <button key={k} onClick={() => setSortMode(k)} style={{ padding: '5px 12px', borderRadius: 'var(--radius-pill)', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12, background: sortMode === k ? 'var(--blue-600)' : 'transparent', color: sortMode === k ? '#fff' : 'var(--text-muted)' }}>{label}</button>
-            ))}
-          </div>
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
+        {/* Toolbar. Search, the counted status filters and the sort, all in
+            the card's own header strip rather than floating above it — the
+            filters and the rows they filter belong to the same object. */}
+        <div style={TOOLBAR}>
+          <Input
+            size="sm" style={{ width: 250 }} fullWidth={false}
+            placeholder="Name or case ref…" value={q} onChange={(e) => setQ(e.target.value)}
+            leading={<Icon name="search" size={16} />} aria-label="Search records"
+          />
+          <FilterPills
+            label="Filter children by status"
+            value={status} onChange={setStatus}
+            options={STATUS_FILTERS.map((f) => ({ ...f, dot: dotColor[f.key], count: counts[f.key] || 0 }))}
+          />
+          <span style={{ flex: 1 }} />
           {showArchiveColumns && (
-            <div style={{ width: 220 }}>
-              <Select value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)} aria-label="Filter by termination reason">
+            <div style={{ width: 210 }}>
+              <Select size="sm" value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)} aria-label="Filter by termination reason">
                 <option value="">All termination reasons</option>
                 {TERMINATION_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
               </Select>
             </div>
           )}
+          <Segmented
+            label="Sort"
+            value={sortMode} onChange={setSortMode}
+            options={[{ value: 'newest', label: 'Newest' }, { value: 'az', label: 'A–Z' }]}
+          />
         </div>
-        <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-          Showing <strong style={{ color: 'var(--text-strong)' }}>{visible.length}</strong> of {rows.length} children
-        </div>
-      </div>
 
-      {canManage && psychologists.length > 0 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 14, padding: '10px 14px', borderRadius: 'var(--radius-lg)', background: 'var(--surface)', border: '1px solid var(--border)' }}>
-          <span className="racco-eyebrow" style={{ fontSize: 10, color: 'var(--text-muted)' }}>Psychologist caseload</span>
-          {psychologists.map((p) => (
-            <span key={p.id} title={`${p.name}: ${p.caseload} active case${p.caseload === 1 ? '' : 's'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '4px 11px', borderRadius: 'var(--radius-pill)', background: 'var(--ink-50)', border: '1px solid var(--border)', fontSize: 12.5 }}>
-              <span style={{ fontWeight: 600, color: 'var(--text-strong)' }}>{p.name}</span>
-              <span className="racco-mono" style={{ fontWeight: 800, color: p.caseload >= 5 ? 'var(--red-600)' : 'var(--blue-600)' }}>{p.caseload}</span>
-            </span>
-          ))}
-        </div>
-      )}
-
-      <Card padding="0">
         {visible.length === 0 ? (
           <EmptyState icon={<Icon name="folder-search" size={24} />} title="No records found" description="Try a different name, case ID, or status filter." />
         ) : (
           <div className="racco-scroll" style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', minWidth: showArchiveColumns ? 860 : 820, borderCollapse: 'collapse' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
-                <tr style={{ background: 'var(--ink-50)', borderBottom: '1px solid var(--border)' }}>
-                  {(showArchiveColumns
-                    ? ['Child', 'Case Type', 'Terminated On', 'Reason', 'Terminated By', 'Note', 'Actions']
-                    : ['Child', 'Gender / Age', 'Psychologist', 'Schedule', 'Status']
-                  ).map((h) => (
-                    <th key={h} scope="col" style={{ textAlign: 'left', padding: '11px 16px', fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{h}</th>
+                <tr style={THEAD_ROW}>
+                  {columns.map((h) => (
+                    <th key={h.key} scope="col" style={{ ...TH, textAlign: h.right ? 'right' : 'left' }}>{h.label}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {visible.map((c) => (
-                  <tr key={c.id} tabIndex={0} role="button" aria-label={`${c.fullname}, case ${c.ref}. Open details.`}
+                  <tr
+                    key={c.id} tabIndex={0} role="button" aria-label={`${c.fullname}, case ${c.ref}. Open details.`}
                     onClick={() => setSel(c)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSel(c); } }}
-                    style={{ borderBottom: '1px solid var(--ink-100)', cursor: 'pointer', transition: 'background var(--dur-fast) var(--ease-out)', opacity: c.status === 'inactive' ? 0.72 : 1 }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--blue-50)')} onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}>
-                    <td style={{ padding: '11px 16px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
-                        <Avatar name={c.fullname} tone={showArchiveColumns ? 'neutral' : 'brand'} size="sm" />
-                        <div style={{ minWidth: 0, maxWidth: 200 }}>
-                          <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--blue-700)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.fullname}</div>
-                          <div className="racco-mono" style={{ fontSize: 11, color: 'var(--text-muted)' }}>{c.ref}</div>
+                    style={{ ...TR, cursor: 'pointer', transition: 'background var(--dur-fast) var(--ease-out)', opacity: c.status === 'inactive' ? 0.72 : 1 }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--blue-50)')} onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <td style={{ padding: '6px 12px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+                        <Avatar name={c.fullname} tone={c.status === 'inactive' ? 'neutral' : 'brand'} size={26} />
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 700, fontSize: 12.5, lineHeight: 1.25, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.fullname}</div>
+                          {/* Whatever this width dropped is appended here, so
+                              no field is ever actually lost — only moved. */}
+                          <div className="racco-mono" style={{ fontSize: 10.5, lineHeight: 1.3, color: 'var(--text-faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{subLine(c)}</div>
                         </div>
                       </div>
                     </td>
                     {showArchiveColumns ? (
                       <>
-                        <td style={{ ...td, whiteSpace: 'nowrap' }}>{c.case_type || '—'}</td>
-                        <td style={{ ...td, whiteSpace: 'nowrap' }} className="racco-mono">{c.termination?.date || '—'}</td>
-                        <td style={td}>{c.termination?.reason_category
-                          ? <Badge tone="amber" size="sm" dot>{c.termination.reason_category}</Badge> : '—'}</td>
-                        <td style={{ ...td, whiteSpace: 'nowrap' }}>{c.termination?.terminated_by || '—'}</td>
-                        <td style={{ ...td, maxWidth: 260 }}>
+                        <td style={{ ...TD, whiteSpace: 'nowrap' }}>{c.case_type || '—'}</td>
+                        <td style={{ ...TD, whiteSpace: 'nowrap' }} className="racco-mono">{c.termination?.date || '—'}</td>
+                        <td style={TD}>{c.termination?.reason_category
+                          ? <Badge tone="neutral" size="sm" dot>{c.termination.reason_category}</Badge> : '—'}</td>
+                        <td style={{ ...TD, whiteSpace: 'nowrap' }}>{c.termination?.terminated_by || '—'}</td>
+                        <td style={{ ...TD, maxWidth: 260 }}>
                           <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)' }} title={c.termination?.note || ''}>
                             {c.termination?.note || '—'}
                           </span>
                         </td>
-                        <td style={{ padding: '11px 16px' }}>
+                        <td style={{ padding: '6px 12px' }}>
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button title="View full record" aria-label={`View ${c.fullname}'s record`} onClick={(e) => { e.stopPropagation(); navigate(`/report/child/${c.id}`); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--blue-600)')}><Icon name="eye" size={15} /></button>
                             {isAdmin && (
@@ -350,22 +393,37 @@ export default function Children() {
                       </>
                     ) : (
                       <>
-                        <td style={td}>{c.gender || '—'} {c.age != null ? `· ${c.age} (${c.group})` : ''}</td>
-                        <td style={td}>
-                          {c.psychologist_name
-                            ? c.psychologist_name
-                            : canManage && c.status === 'active'
-                              ? (
-                                <button title={`Assign a psychologist to ${c.fullname}`} aria-label={`Assign psychologist to ${c.fullname}`}
-                                  onClick={(e) => { e.stopPropagation(); openEdit(c); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })}
-                                  style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 'var(--radius-pill)', border: '1px dashed var(--blue-300)', background: 'var(--blue-50)', color: 'var(--blue-700)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12, cursor: 'pointer', transition: 'var(--transition-base)' }}>
-                                  <Icon name="user-plus" size={13} /> Assign
-                                </button>
-                              )
-                              : '—'}
+                        <td style={{ ...TD, fontWeight: 600, whiteSpace: 'nowrap' }}>{c.case_type || '—'}</td>
+                        {layout.recordsCategoryCol && <td style={{ ...TD, whiteSpace: 'nowrap' }}>{c.case_category || '—'}</td>}
+                        {/* Just Active/Archived — Case type is its own column
+                            now, and the chip repeating it read as the same
+                            fact stated twice on one row. */}
+                        <td style={{ ...TD, whiteSpace: 'nowrap' }}>
+                          <Badge tone={c.status === 'active' ? 'success' : 'neutral'} size="sm" dot>
+                            {c.status === 'active' ? 'Active' : 'Archived'}
+                          </Badge>
                         </td>
-                        <td style={td}>{c.status === 'active' ? <ScheduleChip appts={apptsByChild[c.id]} /> : <span style={{ color: 'var(--text-faint)' }}>—</span>}</td>
-                        <td style={{ padding: '11px 16px' }}><StatusChip child={c} /></td>
+                        {layout.recordsPsychCol && (
+                          <td style={{ ...TD, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                            {c.psychologist_name || (canManage && c.status === 'active' ? (
+                              <button title={`Assign a psychologist to ${c.fullname}`} aria-label={`Assign psychologist to ${c.fullname}`}
+                                onClick={(e) => { e.stopPropagation(); openEdit(c); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })}
+                                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 'var(--radius-pill)', border: '1px dashed var(--blue-300)', background: 'var(--blue-50)', color: 'var(--blue-700)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 11.5, cursor: 'pointer' }}>
+                                <Icon name="user-plus" size={13} /> Assign
+                              </button>
+                            ) : '—')}
+                          </td>
+                        )}
+                        <td style={{ ...TD, whiteSpace: 'nowrap' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 700, fontSize: 11.5, color: 'var(--text-body)' }}>
+                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: PA_DOT[c.pre_assessment_status] || 'var(--ink-300)' }} />
+                            {c.pre_assessment_status || '—'}
+                          </span>
+                        </td>
+                        <td style={{ ...TD, whiteSpace: 'nowrap' }}>{c.status === 'active' ? <ScheduleChip appts={apptsByChild[c.id]} /> : <span style={{ color: 'var(--text-faint)' }}>—</span>}</td>
+                        <td style={{ padding: '6px 10px', textAlign: 'right' }}>
+                          <Icon name="more-horizontal" size={17} style={{ color: 'var(--text-faint)' }} />
+                        </td>
                       </>
                     )}
                   </tr>
@@ -374,7 +432,24 @@ export default function Children() {
             </table>
           </div>
         )}
-      </Card>
+
+        <div style={{ padding: '9px 12px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, background: 'var(--ink-25)', borderTop: '1px solid var(--divider)' }}>
+          <span style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)' }}>
+            Showing <strong style={{ color: 'var(--text-strong)' }}>{visible.length}</strong> of {rows.length} children
+          </span>
+          {canManage && psychologists.length > 0 && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <span className="racco-eyebrow" style={{ fontSize: 'var(--text-3xs)' }}>Caseload</span>
+              {psychologists.map((p) => (
+                <span key={p.id} title={`${p.name}: ${p.caseload} active case${p.caseload === 1 ? '' : 's'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 'var(--radius-pill)', background: 'var(--surface)', border: '1px solid var(--border)', fontSize: 11.5 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--text-body)' }}>{p.name}</span>
+                  <span className="racco-mono" style={{ fontWeight: 800, color: p.caseload >= 5 ? 'var(--red-700)' : 'var(--blue-600)' }}>{p.caseload}</span>
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
+      </div>
 
       {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} isAdmin={isAdmin} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => { if (window.confirm('Reopen this case? All previous records and termination history are kept, but the psychologist assignment is cleared — assign one fresh afterwards.')) reopen(sel); }} onClose={() => setSel(null)} />}
       {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} blocks={blocks} error={error} isPsych={isPsych} isAdmin={isAdmin} others={others} onSubmit={save} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}

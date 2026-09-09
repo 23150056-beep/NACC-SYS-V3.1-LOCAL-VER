@@ -108,7 +108,7 @@ export default function Survey() {
             {answered} of {survey.fields.length} answered
           </div>
           <button onClick={submit} disabled={busy || answered === 0}
-            style={{ width: '100%', padding: '15px 0', fontSize: 17, fontWeight: 800, borderRadius: 'var(--radius-pill)', border: 'none', cursor: busy || answered === 0 ? 'default' : 'pointer', fontFamily: 'var(--font-sans)', background: busy || answered === 0 ? 'var(--ink-100)' : 'var(--blue-600)', color: busy || answered === 0 ? 'var(--text-faint)' : '#fff' }}>
+            style={{ width: '100%', padding: '15px 0', fontSize: 17, fontWeight: 800, borderRadius: 'var(--radius-pill)', border: 'none', cursor: busy || answered === 0 ? 'default' : 'pointer', fontFamily: 'var(--font-sans)', background: busy || answered === 0 ? 'var(--divider-row)' : 'var(--blue-600)', color: busy || answered === 0 ? 'var(--text-faint)' : '#fff' }}>
             {busy ? 'Sending…' : 'I’m finished ✅'}
           </button>
         </div>

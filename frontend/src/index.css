@@ -127,16 +127,16 @@ img, video { max-width: 100%; height: auto; }
   --blue-600: #2236c4;
   --blue-700: #1b2aa3;
   --blue-800: #182585;
-  --blue-900: #16216a;
+  --blue-900: #14225e;
   --blue-950: #0d1444;
 
   /* ---- Heart Red (alert / official seal) ---- */
-  --red-50: #fdecec;
-  --red-100: #fbd6d7;
-  --red-200: #f6b0b2;
+  --red-50: #fdf1f1;
+  --red-100: #f7dcdd;
+  --red-200: #f2c6c8;
   --red-300: #f08387;
   --red-400: #e84e54;
-  --red-500: #ee1c25;
+  --red-500: #e8262f;
   --red-600: #cc121b;
   --red-700: #a71117;
   --red-800: #851318;
@@ -148,7 +148,7 @@ img, video { max-width: 100%; height: auto; }
   --amber-200: #ffd587;
   --amber-300: #ffc154;
   --amber-400: #ffac2a;
-  --amber-500: #f59314;
+  --amber-500: #f0a02a;
   --amber-600: #d6760a;
   --amber-700: #ad590d;
   --amber-800: #8c4711;
@@ -163,31 +163,32 @@ img, video { max-width: 100%; height: auto; }
 
   /* ---- Warm neutrals (slate w/ a faint blue cast) ---- */
   --ink-0: #ffffff;
-  --ink-25: #fbfcfe;
-  --ink-50: #f4f6fa;
-  --ink-100: #e9edf4;
-  --ink-200: #d6dde8;
-  --ink-300: #b6c0d1;
-  --ink-400: #8b97ad;
-  --ink-500: #65718a;
-  --ink-600: #4c576e;
+  --ink-25: #fafbfd;
+  --ink-50: #f6f7fb;
+  --ink-75: #f2f4f9;
+  --ink-100: #eef0f6;
+  --ink-200: #e2e6ef;
+  --ink-300: #cbd2e0;
+  --ink-400: #9aa4b6;
+  --ink-500: #7b8698;
+  --ink-600: #4a5468;
   --ink-700: #3a4356;
   --ink-800: #283041;
-  --ink-900: #18202e;
+  --ink-900: #141a29;
   --ink-950: #0e131d;
 
   /* ---- Semantic ---- */
-  --success-50: #e9f8ef;
-  --success-100: #c8edd6;
-  --success-500: #1f9d57;
-  --success-600: #167a43;
-  --success-700: #115e34;
+  --success-50: #e7f6ee;
+  --success-100: #bfe3cd;
+  --success-500: #16884b;
+  --success-600: #12703d;
+  --success-700: #0f6b3b;
 
-  --warning-50: #fff7e8;
-  --warning-100: #ffeac4;
-  --warning-500: #e08a00;
-  --warning-600: #b96f00;
-  --warning-700: #8c5400;
+  --warning-50: #fff4e2;
+  --warning-100: #f6e6c8;
+  --warning-500: #f0a02a;
+  --warning-600: #b06a00;
+  --warning-700: #9a5b0c;
 
   --danger-50: var(--red-50);
   --danger-100: var(--red-100);
@@ -208,7 +209,16 @@ img, video { max-width: 100%; height: auto; }
   --accent: var(--amber-400);
   --accent-ink: var(--amber-700);
 
-  --bg-app: var(--ink-50);
+  --bg-app: var(--ink-100);
+  /* The chrome — header and the rail behind it. Deep navy so the vivid action
+     blue below is never competing with a second vivid blue above it. */
+  --chrome: var(--blue-900);
+  --chrome-ink: #ffffff;
+  --chrome-ink-dim: var(--blue-300);
+  --chrome-ink-soft: var(--blue-200);
+  --chrome-fill: rgba(255, 255, 255, 0.1);
+  --chrome-fill-strong: rgba(255, 255, 255, 0.14);
+  --chrome-line: rgba(255, 255, 255, 0.14);
   --bg-app-tint: var(--sky-50);
   --surface: var(--ink-0);
   --surface-raised: var(--ink-0);
@@ -226,13 +236,19 @@ img, video { max-width: 100%; height: auto; }
 
   --border: var(--ink-200);
   --border-strong: var(--ink-300);
+  /* Two weights, deliberately different: a card's internal rule is heavier
+     than the hairline between two table rows. */
+  --divider: var(--ink-100);
+  --divider-row: var(--ink-75);
   --border-brand: var(--blue-200);
   --ring: color-mix(in srgb, var(--blue-500) 22%, transparent);
 
   /* Role accent chips */
   --role-admin: var(--blue-600);
   --role-staff: var(--amber-500);
-  --role-psychologist: var(--red-500);
+  /* Was --red-500. A psychologist is not a warning, and the old value made
+     "who this is" and "something is wrong" the same colour on one screen. */
+  --role-psychologist: var(--blue-400);
 
   /* Assessment severity scale */
   --sev-standard: var(--success-500);
@@ -244,6 +260,7 @@ img, video { max-width: 100%; height: auto; }
   --font-sans: 'Nunito Sans', 'Segoe UI', system-ui, -apple-system, sans-serif;
   --font-mono: 'IBM Plex Mono', 'SFMono-Regular', ui-monospace, monospace;
 
+  --text-3xs: 10.5px;
   --text-2xs: 11px;
   --text-xs: 12px;
   --text-sm: 13px;
@@ -296,16 +313,17 @@ img, video { max-width: 100%; height: auto; }
   --radius-xl: 18px;
   --radius-2xl: 24px;
   --radius-pill: 999px;
-  --radius-card: var(--radius-lg);
-  --radius-control: var(--radius-md);
+  --radius-card: 12px;
+  --radius-control: 9px;
 
   /* ---- Shadows (soft, cool-blue tinted) ---- */
-  --shadow-xs: 0 1px 2px rgba(22, 33, 106, 0.06);
+  --shadow-xs: 0 1px 2px rgba(20, 34, 94, 0.06);
+  --shadow-card: 0 1px 2px rgba(20, 34, 94, 0.06);
   --shadow-sm: 0 1px 3px rgba(22, 33, 106, 0.08), 0 1px 2px rgba(22, 33, 106, 0.05);
   --shadow-md: 0 4px 12px rgba(22, 33, 106, 0.09), 0 2px 4px rgba(22, 33, 106, 0.05);
   --shadow-lg: 0 12px 28px rgba(22, 33, 106, 0.12), 0 4px 10px rgba(22, 33, 106, 0.06);
   --shadow-xl: 0 24px 48px rgba(22, 33, 106, 0.16), 0 8px 16px rgba(22, 33, 106, 0.07);
-  --shadow-brand: 0 6px 18px rgba(34, 54, 196, 0.28);
+  --shadow-brand: 0 6px 16px rgba(34, 54, 196, 0.22);
   --shadow-focus: 0 0 0 3px var(--ring);
   --shadow-inner: inset 0 1px 2px rgba(22, 33, 106, 0.07);
 
@@ -321,10 +339,19 @@ img, video { max-width: 100%; height: auto; }
   --transition-base: all var(--dur-base) var(--ease-out);
 
   /* ---- Layout ---- */
-  --sidebar-w: 264px;
-  --topbar-h: 64px;
+  --topbar-h: 56px;
+  /* Left rail, in its three states. Which one is in play is decided by
+     LayoutContext from the measured window width, not by a media query — the
+     right rail's presence changes the centre pane's width too, and CSS cannot
+     see that. */
+  --rail-w: 234px;
+  --rail-w-icons: 60px;
+  --rail-right-w: 288px;
+  --rail-right-w-wide: 318px;
+  --shell-gap: 16px;
+  --shell-pad: 16px;
   --content-max: 1200px;
-  --field-h: 42px;
+  --field-h: 40px;
   --field-h-sm: 34px;
 }
 
@@ -741,6 +768,160 @@ tr:focus-visible {
   }
   body {
     background: #fff !important;
+  }
+}
+
+/* Edge draws its own reveal button inside every password field, so the sign-in
+   and request-access forms — which have their own eye — showed two of them
+   side by side, and the change-password forms showed a different one again.
+   Ours stays, because it is the one that keeps the caret in the field (see
+   PasswordInput); the browser's goes. `::-ms-clear` goes with it for the same
+   reason: it is a second control nobody put there on purpose. */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
+
+/* react-big-calendar, wearing this design system.
+ *
+ * The library ships its own stylesheet and its own toolbar, and both look like
+ * a different application. Rather than rebuild a month grid by hand — losing
+ * the week and day views, the slot selection and the overlap handling that
+ * come with it — its chrome is restyled here to the same rules every other
+ * table on the app follows: an ink-25 header strip, uppercase micro-labels,
+ * hairline row rules, and 32px controls with 8px corners.
+ *
+ * The toolbar's own DOM order is [nav][label][views]; `order` puts the month
+ * name first, where a reader looks for it.
+ */
+.rbc-calendar {
+  font-family: var(--font-sans);
+}
+.rbc-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  margin: 0;
+  border-bottom: 1px solid var(--divider);
+}
+.rbc-toolbar-label {
+  order: 0;
+  flex: 0 0 auto;
+  text-align: left;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+  color: var(--text-strong);
+  padding: 0;
+}
+.rbc-toolbar .rbc-btn-group:first-of-type { order: 1; }
+.rbc-toolbar .rbc-btn-group:last-of-type { order: 2; margin-left: auto; }
+
+.rbc-toolbar button {
+  height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text-body);
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 12.5px;
+}
+.rbc-toolbar button:hover,
+.rbc-toolbar button:focus {
+  background: var(--ink-50);
+  color: var(--text-strong);
+  border-color: var(--border-strong);
+}
+.rbc-toolbar button.rbc-active,
+.rbc-toolbar button.rbc-active:hover,
+.rbc-toolbar button.rbc-active:focus {
+  background: var(--blue-600);
+  border-color: var(--blue-600);
+  color: #fff;
+  box-shadow: none;
+}
+.rbc-toolbar .rbc-btn-group > button + button { margin-left: 4px; }
+.rbc-btn-group { display: inline-flex; gap: 4px; }
+
+.rbc-month-view,
+.rbc-time-view {
+  border: none;
+}
+.rbc-header {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+  border-left: none;
+  background: var(--ink-25);
+  text-align: left;
+  font-weight: 800;
+  font-size: var(--text-3xs);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.rbc-header + .rbc-header { border-left: none; }
+.rbc-month-row + .rbc-month-row,
+.rbc-day-bg + .rbc-day-bg { border-color: var(--divider-row); }
+.rbc-off-range-bg { background: var(--ink-25); }
+.rbc-today { background: var(--blue-50); }
+.rbc-date-cell {
+  padding: 6px 7px 0;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.rbc-date-cell.rbc-now { font-weight: 700; color: var(--blue-700); }
+/* Inset each day's events. Without the horizontal padding two same-coloured
+   bars in adjacent columns sit 1px apart and read as one event spanning two
+   days, which is exactly the wrong thing for a calendar to say. */
+.rbc-row-segment { padding: 0 3px 2px; }
+.rbc-event {
+  padding: 3px 6px;
+  border-radius: 5px;
+  font-weight: 700;
+  font-size: 10.5px;
+  border: none;
+}
+.rbc-event:focus { outline: 2px solid var(--blue-300); }
+.rbc-show-more {
+  font-weight: 700;
+  font-size: 10.5px;
+  color: var(--blue-600);
+  background: transparent;
+}
+.rbc-time-header-content,
+.rbc-time-content,
+.rbc-timeslot-group,
+.rbc-day-slot .rbc-time-slot { border-color: var(--divider-row); }
+.rbc-time-content > * + * > * { border-color: var(--divider-row); }
+.rbc-current-time-indicator { background: var(--red-500); }
+
+/* A tab panel on a screen that is also a document.
+ *
+ * The child's progress report is printed and filed, and splitting it into tabs
+ * would have meant "Print" emitting only whichever section happened to be open
+ * — a silent, and serious, loss. So every panel stays mounted and the inactive
+ * ones are hidden with the `hidden` attribute, which print then overrides. The
+ * display rule lives here rather than inline because an inline `display`
+ * always beats `[hidden]`, and the panel would never hide at all.
+ */
+.racco-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.racco-stack[hidden] {
+  display: none;
+}
+@media print {
+  .racco-tabpanel[hidden] {
+    display: flex !important;
   }
 }
 

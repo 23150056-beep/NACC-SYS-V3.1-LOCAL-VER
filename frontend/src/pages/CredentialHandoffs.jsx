@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import { useToast } from '../context/ToastContext';
-import { Card, Button, Badge, Alert, EmptyState, Avatar, RoleBadge, Icon, iconBtn, hoverLift } from '../ui';
+import { Avatar, Badge, Button, EmptyState, Icon, RoleBadge, TOOLBAR } from '../ui';
 
 // Admin-only list of everyone still on a temporary password (must_change_password),
 // i.e. every account whose credentials still need to be handed over physically.
@@ -48,88 +48,83 @@ export default function CredentialHandoffs() {
   };
 
   const slips = users.filter((u) => generated[u.id]);
-  const th = { textAlign: 'left', padding: '12px 16px', fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)', whiteSpace: 'nowrap' };
 
   return (
     <>
       <div className="racco-no-print">
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginBottom: 16 }}>
-          <Button variant="secondary" disabled={busy || users.length === 0} onClick={generateAll} iconLeft={<Icon name="key-round" size={16} />}>
-            {busy ? 'Generating…' : 'Generate All'}
-          </Button>
-          <Button variant="primary" disabled={slips.length === 0} onClick={() => window.print()} iconLeft={<Icon name="printer" size={16} />}>
-            Print Slips{slips.length > 0 ? ` (${slips.length})` : ''}
-          </Button>
+        <div style={{ padding: '12px 15px', display: 'flex', gap: 11, background: 'var(--warning-50)', borderBottom: '1px solid var(--warning-100)' }}>
+          <Icon name="key-round" size={19} style={{ color: 'var(--warning-700)', flex: 'none', marginTop: 1 }} />
+          <p style={{ fontSize: 12.5, lineHeight: 1.6, color: 'var(--text-body)' }}>
+            <strong style={{ color: 'var(--text-strong)' }}>A handoff is an open loop, not a record.</strong> Generate
+            a fresh temporary password at the moment you hand it over — it exists only on this screen until you
+            refresh, and the system never stores it. The row stays here until they sign in and set their own, so an
+            unclaimed credential cannot sit forgotten.
+          </p>
         </div>
 
-        <Alert tone="info" icon={<Icon name="shield-check" size={18} />} style={{ marginBottom: 16 }}>
-          These accounts are still waiting for their password handoff. Generate a fresh temporary
-          password at the moment you hand it over — passwords exist only on this screen until you
-          refresh, and are never stored by the system. Each user must set their own password at
-          first login, after which they disappear from this list.
-        </Alert>
-
-        <Card padding="0">
-          {users.length === 0 ? (
-            <EmptyState icon={<Icon name="check-circle-2" size={24} />} title="No pending handoffs" description="Everyone has set their own password. New accounts will appear here automatically." />
-          ) : (
-            <div className="racco-scroll" style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', minWidth: 720, borderCollapse: 'collapse' }}>
-                <thead>
-                  <tr style={{ background: 'var(--ink-50)', borderBottom: '1px solid var(--border)' }}>
-                    {['Name', 'Email', 'Role', 'Temporary Password', 'Actions'].map((h) => <th key={h} scope="col" style={th}>{h}</th>)}
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((u) => (
-                    <tr key={u.id} style={{ borderBottom: '1px solid var(--ink-100)' }}>
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
-                          <Avatar name={u.fullname || u.email} tone="amber" size="sm" />
-                          <span style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{u.fullname || u.username}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: '12px 16px', fontSize: 13, color: 'var(--text-body)' }} className="racco-mono">{u.email}</td>
-                      <td style={{ padding: '12px 16px' }}>{u.role_name ? <RoleBadge role={u.role_name} /> : '—'}</td>
-                      <td style={{ padding: '12px 16px' }}>
-                        {generated[u.id]
-                          ? (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                              <span className="racco-mono" style={{ fontSize: 14.5, fontWeight: 700, color: 'var(--text-strong)', letterSpacing: '0.04em' }}>{generated[u.id]}</span>
-                              {/* Whether this person was emailed decides whether
-                                  the password still has to be handed over by
-                                  hand. The screen used to leave that unsaid. */}
-                              <span className="racco-no-print" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11.5, color: 'var(--text-muted)' }}>
-                                <Icon name={mailed[u.id] ? 'mail' : 'mail-x'} size={13} />
-                                {mailed[u.id]
-                                  ? `Emailed to ${u.email}`
-                                  : 'Not emailed — hand this over yourself'}
-                              </span>
-                            </div>
-                          )
-                          : <Badge tone="amber" size="sm" dot>Awaiting handoff</Badge>}
-                      </td>
-                      <td style={{ padding: '12px 16px' }}>
-                        <div style={{ display: 'flex', gap: 6 }}>
-                          <button title={generated[u.id] ? 'Regenerate password' : 'Generate password'} aria-label={`Generate password for ${u.fullname || u.email}`}
-                            onClick={() => generate(u)} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--amber-500)')}>
-                            <Icon name={generated[u.id] ? 'rotate-ccw' : 'key-round'} size={15} />
-                          </button>
-                          {generated[u.id] && (
-                            <button title="Copy password" aria-label={`Copy password for ${u.fullname || u.email}`}
-                              onClick={() => copyPassword(u)} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--blue-600)')}>
-                              <Icon name="copy" size={15} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        {users.length === 0 ? (
+          <EmptyState icon={<Icon name="check-circle-2" size={24} />} title="No pending handoffs" description="Everyone has set their own password. New accounts will appear here automatically." />
+        ) : (
+          <>
+            <div style={TOOLBAR}>
+              <span style={{ flex: 1, fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)' }}>
+                {users.length} account{users.length === 1 ? '' : 's'} still on a temporary password
+              </span>
+              <Button variant="secondary" size="sm" disabled={busy} onClick={generateAll} iconLeft={<Icon name="key-round" size={15} />}>
+                {busy ? 'Generating…' : 'Generate all'}
+              </Button>
+              <Button variant="primary" size="sm" disabled={slips.length === 0} onClick={() => window.print()} iconLeft={<Icon name="printer" size={15} />}>
+                Print slips{slips.length > 0 ? ` (${slips.length})` : ''}
+              </Button>
             </div>
-          )}
-        </Card>
+
+            <div style={{ padding: '14px 15px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {users.map((u) => (
+                <div key={u.id} style={{ border: '1px solid var(--border)', borderRadius: 11, overflow: 'hidden' }}>
+                  <div style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <Avatar name={u.fullname || u.email} tone="amber" size={38} />
+                    <span style={{ flex: 1, minWidth: 160 }}>
+                      <span style={{ display: 'block', fontWeight: 800, fontSize: 14, color: 'var(--text-strong)' }}>{u.fullname || u.username}</span>
+                      <span className="racco-mono" style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)' }}>{u.email}</span>
+                    </span>
+                    {u.role_name ? <RoleBadge role={u.role_name} size="sm" /> : null}
+                    <Badge tone={generated[u.id] ? 'success' : 'warning'} size="sm" dot>
+                      {generated[u.id] ? 'Password generated' : 'Awaiting handoff'}
+                    </Badge>
+                  </div>
+
+                  <div style={{ padding: '11px 14px', background: 'var(--ink-25)', borderTop: '1px solid var(--divider)', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+                    <span style={{ flex: 1, minWidth: 200 }}>
+                      {generated[u.id] ? (
+                        <>
+                          <span className="racco-mono" style={{ display: 'block', fontSize: 15, fontWeight: 700, color: 'var(--text-strong)', letterSpacing: '0.04em' }}>{generated[u.id]}</span>
+                          {/* Whether this person was emailed decides whether the
+                              password still has to be handed over by hand. */}
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, marginTop: 3, fontSize: 11.5, color: mailed[u.id] ? 'var(--success-700)' : 'var(--warning-700)' }}>
+                            <Icon name={mailed[u.id] ? 'mail' : 'mail-x'} size={13} />
+                            {mailed[u.id] ? `Emailed to ${u.email}` : 'Not emailed — hand this over yourself'}
+                          </span>
+                        </>
+                      ) : (
+                        <span style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text-muted)' }}>
+                          No password on screen. Generate one when you are with them, not before.
+                        </span>
+                      )}
+                    </span>
+                    <div style={{ display: 'flex', gap: 8, flex: 'none' }}>
+                      <Button variant="secondary" size="sm" onClick={() => generate(u)} iconLeft={<Icon name={generated[u.id] ? 'rotate-ccw' : 'key-round'} size={15} />}>
+                        {generated[u.id] ? 'Re-issue' : 'Generate'}
+                      </Button>
+                      {generated[u.id] && (
+                        <Button variant="primary" size="sm" onClick={() => copyPassword(u)} iconLeft={<Icon name="copy" size={15} />}>Copy</Button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
 
       {/* Printable slips — one cut-out per generated password. Visible only in

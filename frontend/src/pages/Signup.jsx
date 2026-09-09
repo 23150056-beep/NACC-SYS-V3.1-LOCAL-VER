@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Input, FormField, Alert, Icon, ROLE_META } from '../ui';
+import { Button, Input, PasswordInput, FormField, Alert, Icon, ROLE_META } from '../ui';
 import AuthLayout, { AuthLink } from '../components/AuthLayout';
 import GoogleSignInButton from '../components/GoogleSignInButton';
 import { useAuth } from '../context/AuthContext';
@@ -59,7 +59,6 @@ export default function Signup() {
   // every psychologist who clicked Google first was silently filed as
   // claiming to be Staff.
   const [role, setRole] = useState(null);
-  const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
@@ -267,22 +266,10 @@ export default function Signup() {
           </FormField>
 
           <FormField label="Password" error={fieldErrors.password}>
-            <Input
-              type={showPassword ? 'text' : 'password'}
+            <PasswordInput
               value={form.password} onChange={set('password')}
               placeholder="••••••••"
               autoComplete="new-password"
-              leading={<Icon name="lock" size={16} />}
-              trailing={(
-                <button type="button" onClick={() => setShowPassword((v) => !v)}
-                        title={showPassword ? 'Hide password' : 'Show password'}
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                        style={{ display: 'inline-flex', alignItems: 'center', padding: 2,
-                                 border: 'none', background: 'none',
-                                 color: 'var(--text-faint)', cursor: 'pointer' }}>
-                  <Icon name={showPassword ? 'eye-off' : 'eye'} size={17} />
-                </button>
-              )}
               required
             />
           </FormField>
@@ -290,7 +277,7 @@ export default function Signup() {
           {/* Says what is still missing rather than only that it is wrong. */}
           {form.password && (
             <div style={{ marginTop: -6 }}>
-              <div style={{ height: 4, borderRadius: 3, background: 'var(--ink-100)', overflow: 'hidden' }}>
+              <div style={{ height: 4, borderRadius: 3, background: 'var(--divider-row)', overflow: 'hidden' }}>
                 <div style={{ height: '100%', width: `${strength?.pct || 0}%`,
                               background: strength?.tone, transition: 'width var(--dur-fast) var(--ease-out)' }} />
               </div>

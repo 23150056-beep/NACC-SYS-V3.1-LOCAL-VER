@@ -313,14 +313,14 @@ export default function AssistantPanel() {
         type="button"
         onClick={openAssistant}
         aria-label="Open the assistant"
+        title="Ask the assistant"
         style={{
           position: 'fixed', right: 20, bottom: 20, zIndex: 60,
-          display: 'flex', alignItems: 'center', gap: 8,
-          padding: '11px 18px', cursor: 'pointer',
+          width: 60, height: 60, cursor: 'pointer',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: 'var(--brand)', color: 'var(--text-on-brand)',
-          border: 'none', borderRadius: 'var(--radius-pill)',
-          boxShadow: 'var(--shadow-lg)',
-          fontFamily: 'var(--font-sans)', fontSize: 13.5, fontWeight: 600,
+          border: 'none', borderRadius: '50%',
+          boxShadow: '0 14px 30px rgba(20,34,94,0.3)',
           transition: 'transform var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out)',
         }}
         onMouseEnter={(e) => {
@@ -332,8 +332,9 @@ export default function AssistantPanel() {
           e.currentTarget.style.boxShadow = 'var(--shadow-lg)';
         }}
       >
-        <Icon name="sparkles" size={17} />
-        Ask
+        <Icon name="message-square" size={26} />
+        {/* Green means the runtime answered when the panel last asked. */}
+        <span style={{ position: 'absolute', top: 0, right: 0, width: 14, height: 14, borderRadius: '50%', background: 'var(--success-500)', border: '2.5px solid var(--bg-app)' }} />
       </button>
     );
   }
@@ -344,13 +345,13 @@ export default function AssistantPanel() {
     <div
       style={{
         position: 'fixed', right: 20, bottom: 20, zIndex: 60,
-        width: 'min(390px, calc(100vw - 32px))',
-        height: 'min(580px, calc(100vh - 40px))',
+        width: 'min(386px, calc(100vw - 32px))',
+        height: 'min(600px, calc(100vh - 40px))',
         display: 'flex', flexDirection: 'column',
         background: 'var(--surface)',
-        border: '1px solid var(--border)',
-        borderRadius: 'var(--radius-xl)',
-        boxShadow: 'var(--shadow-xl)',
+        border: '1px solid var(--border-strong)',
+        borderRadius: 16,
+        boxShadow: '0 26px 60px rgba(20,34,94,0.3)',
         overflow: 'hidden',
         animation: 'racco-chat-panel-in var(--dur-base) var(--ease-out) both',
       }}
@@ -358,25 +359,26 @@ export default function AssistantPanel() {
       {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10,
-        padding: '12px 14px',
-        borderBottom: '1px solid var(--border)',
-        background: 'var(--surface-sunken)',
+        padding: '11px 13px',
+        borderBottom: '1px solid var(--divider)',
+        background: 'var(--surface)',
       }}>
         <div style={{
-          width: 30, height: 30, borderRadius: '50%',
-          background: 'var(--brand)', color: 'var(--text-on-brand)',
+          width: 32, height: 32, borderRadius: 10,
+          background: 'var(--blue-50)', color: 'var(--blue-600)',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           flex: 'none',
         }}>
-          <Icon name="sparkles" size={15} />
+          <Icon name="sparkles" size={18} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
-            fontFamily: 'var(--font-display)', fontWeight: 700,
-            fontSize: 13.5, color: 'var(--text-strong)', lineHeight: 1.2,
+            fontFamily: 'var(--font-sans)', fontWeight: 800,
+            fontSize: 14, color: 'var(--text-strong)', lineHeight: 1.2,
           }}>Assistant</div>
-          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-            {busy ? 'Answering…' : 'Answers from your own records'}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 600, fontSize: 11, color: 'var(--success-700)' }}>
+            <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--success-500)' }} />
+            {busy ? 'Answering…' : 'Answers read from your own records'}
           </div>
         </div>
         {turns.length > 0 && (
@@ -413,9 +415,9 @@ export default function AssistantPanel() {
         ref={scroller}
         className="racco-scroll"
         style={{
-          flex: 1, overflowY: 'auto', padding: '16px 14px',
-          display: 'flex', flexDirection: 'column', gap: 16,
-          background: 'var(--bg-app)',
+          flex: 1, minHeight: 0, overflowY: 'auto', padding: '14px 13px',
+          display: 'flex', flexDirection: 'column', gap: 15,
+          background: 'var(--ink-25)',
         }}
       >
         {empty && (
@@ -450,6 +452,13 @@ export default function AssistantPanel() {
                   onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--surface)'; }}
                 >{s}</button>
               ))}
+            </div>
+            <div style={{ display: 'flex', gap: 9, marginTop: 12, padding: '10px 12px', background: 'var(--surface)', borderLeft: '3px solid var(--border-strong)', borderRadius: '0 8px 8px 0' }}>
+              <Icon name="lock" size={16} style={{ color: 'var(--text-muted)', flex: 'none', marginTop: 1 }} />
+              <p style={{ fontStyle: 'italic', fontSize: 11.5, lineHeight: 1.6, color: 'var(--text-muted)' }}>
+                It looks things up &mdash; it cannot book, edit or approve anything. Every answer is read from your
+                own records, under your own access.
+              </p>
             </div>
           </div>
         )}

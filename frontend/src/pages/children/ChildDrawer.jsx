@@ -99,7 +99,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
           <div className="racco-case-grid">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {fields.map(([k, v]) => (
-                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, paddingBottom: 12, borderBottom: '1px solid var(--ink-100)' }}>
+                <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, paddingBottom: 12, borderBottom: '1px solid var(--divider-row)' }}>
                   <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>{k}</span>
                   <span style={{ fontSize: 13.5, color: 'var(--text-strong)', fontWeight: 700, textAlign: 'right' }}>{v}</span>
                 </div>
@@ -132,7 +132,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
                   {child.recommendation && <p style={{ fontSize: 13, color: 'var(--text-body)', margin: '0 0 10px', lineHeight: 1.55 }}>{child.recommendation}</p>}
                   {[['Referral Source', child.referral_source], ['Educational Placement', child.education_level], ['Current Whereabouts', child.current_placement]]
                     .filter(([, v]) => v).map(([k, v]) => (
-                      <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, paddingBottom: 10, borderBottom: '1px solid var(--ink-100)', marginBottom: 10 }}>
+                      <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, paddingBottom: 10, borderBottom: '1px solid var(--divider-row)', marginBottom: 10 }}>
                         <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>{k}</span>
                         <span style={{ fontSize: 13.5, color: 'var(--text-strong)', fontWeight: 700, textAlign: 'right' }}>{v}</span>
                       </div>

@@ -2,10 +2,14 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import api from '../api/client';
+import { ageFrom, caseRef } from '../utils/child';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { Card, Button, Badge, Alert, Select, FormField, Icon, iconBtn, PAGE, ConfirmDialog, Modal } from '../ui';
+import {
+  Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, Modal, PAGE, Select, Tabs,
+} from '../ui';
 import { PA_STATUS_TONES } from '../config/caseData';
+import AdoptionSummary from '../components/AdoptionSummary';
 import { polishRemark, sendFeedback, getLatestBrief, generateBrief, summarizeDocument, confirmSummary } from '../api/assistant';
 
 // "In her own words" reads better than a label, but gender is blank=True on
@@ -23,7 +27,6 @@ const CASE_STATUS_META = {
   terminated: { label: 'Terminated', tone: 'neutral' },
 };
 
-const caseRef = (id) => `C-${String(id).padStart(4, '0')}`;
 const td = { padding: '10px 14px', fontSize: 13, color: 'var(--text-body)', whiteSpace: 'nowrap' };
 const textarea = { width: '100%', resize: 'vertical', padding: '11px 13px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', fontFamily: 'var(--font-sans)', fontSize: 14, lineHeight: 1.55 };
 
@@ -34,6 +37,9 @@ export default function ChildProgressReport() {
   const toast = useToast();
   const isPsych = user?.role_name === 'Psychologist';
   const [data, setData] = useState(null);
+  // Which section of the chart is showing. Every panel stays mounted — see
+  // .racco-tabpanel in index.css for why the report still prints whole.
+  const [tab, setTab] = useState('overview');
   const [ackBusy, setAckBusy] = useState(null);
   const [remarkText, setRemarkText] = useState('');
   const [result, setResult] = useState(null); // add-result drawer
@@ -91,6 +97,35 @@ export default function ChildProgressReport() {
   const canAdvance = canWrite || user?.role_name === 'Administrator';
   const activePlan = (data.treatment_plans || []).find((p) => p.status === 'active') || (data.treatment_plans || [])[0];
   const csMeta = CASE_STATUS_META[child.case_status] || CASE_STATUS_META.pre_assessment;
+
+  const age = ageFrom(child.birth_date);
+  const unreviewedFlags = (data.self_report_flags || []).filter((f) => !f.is_reviewed).length;
+  const heroMeta = [age != null ? `${age} y` : null, child.gender, child.case_type].filter(Boolean).join(' · ');
+
+  /* The counts are the point of the tab strip: it says how much is behind
+   * each section before you spend a click finding out. */
+  const chartTabs = [
+    { id: 'overview', label: 'Overview' },
+    { id: 'interviews', label: 'Interviews', count: (data.interviews || []).length || undefined },
+    { id: 'instruments', label: 'Results & reports', count: ((data.result_entries || []).length + (data.reports || []).length) || undefined },
+    { id: 'remarks', label: 'Remarks', count: (data.remarks || []).length || undefined },
+    { id: 'voice', label: "Child's voice", count: (data.opinionnaires || []).length || undefined },
+    { id: 'casework', label: 'Casework', count: (data.case_referrals || []).length || undefined },
+  ];
+
+  const facts = [
+    { k: 'Case reference', v: caseRef(child.id) },
+    { k: 'Age / date of birth', v: [age != null ? `${age} years` : null, child.birth_date].filter(Boolean).join(' · ') },
+    { k: 'Gender', v: child.gender },
+    { k: 'Case type', v: child.case_type },
+    { k: 'Category', v: child.case_category },
+    { k: 'Legal status', v: child.legal_status },
+    { k: 'Current placement', v: child.current_placement },
+    { k: 'Address', v: [child.barangay, child.municipality, child.province].filter(Boolean).join(', ') },
+    { k: 'Assigned psychologist', v: child.psychologist_name },
+    { k: 'Date of admission', v: child.date_of_admission },
+    { k: 'Education level', v: child.education_level },
+  ];
 
   const advance = async (next) => {
     try {
@@ -229,48 +264,185 @@ export default function ChildProgressReport() {
 
   return (
     <div style={PAGE} className="racco-print-area">
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16, gap: 10, flexWrap: 'wrap' }} className="racco-no-print">
-        <Button variant="ghost" onClick={() => navigate('/reports')} iconLeft={<Icon name="arrow-left" size={17} />}>Back to Results</Button>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <Button variant="secondary" onClick={() => openBrief()} disabled={briefBusy}>
-            {briefBusy ? 'Preparing…' : 'Pre-session brief'}
-          </Button>
-          <Button variant="secondary" onClick={() => window.print()} iconLeft={<Icon name="printer" size={17} />}>Print / Save PDF</Button>
+      {/* Hero. Back out to Records, who this child is, and the three things
+          you came here to do — above the tab strip, so they stay put whichever
+          section you are reading. */}
+      <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
+        <div className="racco-no-print" style={{ height: 44, background: 'linear-gradient(100deg, var(--blue-900), var(--blue-600))', display: 'flex', alignItems: 'center', padding: '0 14px' }}>
+          <button
+            type="button" onClick={() => navigate('/children')}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 7, height: 30, padding: '0 12px', border: '1px solid rgba(255,255,255,0.28)', borderRadius: 'var(--radius-pill)', background: 'rgba(255,255,255,0.14)', color: '#fff', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}
+          >
+            <Icon name="arrow-left" size={16} />All records
+          </button>
+        </div>
+
+          {/* The avatar sits BELOW the bar, not lapped over it.
+              Overlapping looks better and was what the mockup drew, but the
+              back control lives at the bar's leading edge and the avatar is
+              the first thing in the row underneath — so they land on the same
+              44px of the left margin and the avatar, being later in the DOM,
+              paints over the button. Measured at 1440px: 62px of horizontal
+              overlap. Separating them vertically instead would need a ~94px
+              bar to clear a 30px button and a 62px avatar, which is a lot of
+              navy to fix a 10px collision. */}
+        <div style={{ padding: '14px 18px 13px', display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+          <Avatar name={child.fullname} size={62} style={{ alignSelf: 'flex-start' }} />
+          <div style={{ flex: 1, minWidth: 200 }}>
+            <h2 style={{ fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 21, lineHeight: 1.2, letterSpacing: '-0.015em', color: 'var(--text-strong)' }}>{child.fullname}</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 5, flexWrap: 'wrap' }}>
+              <span className="racco-mono" style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--text-muted)' }}>{caseRef(child.id)}</span>
+              {/* No 1px rule between the reference and the meta. It is a
+                  flex item, so on a narrow window it wraps to the end of a
+                  line on its own and reads as a stray mark; the mono/sans
+                  contrast already separates the two. */}
+              <span style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--text-body)' }}>{heroMeta}</span>
+              <Badge tone={child.status === 'active' ? 'success' : 'neutral'} size="sm" dot>
+                {child.status === 'active' ? 'Active' : 'Archived (Terminated)'}
+              </Badge>
+              <Badge tone={csMeta.tone} size="sm">{csMeta.label}</Badge>
+              <Badge tone={PA_STATUS_TONES[child.pre_assessment_status] || 'amber'} size="sm" dot>{child.pre_assessment_status}</Badge>
+              {unreviewedFlags > 0 && (
+                <Badge tone="danger" size="sm">
+                  {unreviewedFlags} self-report answer{unreviewedFlags === 1 ? '' : 's'} to read
+                </Badge>
+              )}
+              {!child.psychologist_name && child.status === 'active' && (
+                <Badge tone="warning" size="sm">No assigned psychologist</Badge>
+              )}
+            </div>
+          </div>
+          <div className="racco-no-print" style={{ display: 'flex', gap: 8, flex: 'none', flexWrap: 'wrap' }}>
+            <Button variant="secondary" onClick={() => openBrief()} disabled={briefBusy} iconLeft={<Icon name="sparkles" size={17} />}>
+              {briefBusy ? 'Preparing…' : 'Pre-session brief'}
+            </Button>
+            <Button variant="secondary" onClick={() => window.print()} iconLeft={<Icon name="printer" size={17} />}>Print</Button>
+            {canAdvance && child.status === 'active' && (child.case_status === 'pre_assessment'
+              ? <Button variant="primary" onClick={() => setConfirmMove({ next: 'counseling', childName: child.fullname })} iconLeft={<Icon name="chevron-right" size={16} />}>Move to Counseling</Button>
+              : <Button variant="secondary" onClick={() => advance('pre_assessment')} iconLeft={<Icon name="arrow-left" size={16} />}>Back to Pre-Assessment</Button>)}
+          </div>
+        </div>
+
+        <div className="racco-no-print">
+          <Tabs tabs={chartTabs} active={tab} onChange={setTab} style={{ borderBottom: 'none' }} />
         </div>
       </div>
 
-      {/* Profile header */}
-      <Card padding="22px" style={{ marginBottom: 18 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
-          <div>
-            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 22, color: 'var(--text-strong)' }}>{child.fullname}</div>
-            <div className="racco-mono" style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{caseRef(child.id)} · {child.case_type || '—'}</div>
-            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4 }}>
-              Psychologist: {child.psychologist_name || '—'} · {[child.barangay, child.municipality, child.province].filter(Boolean).join(', ') || '—'}
+      <div className="racco-stack racco-tabpanel" hidden={tab !== 'overview'}>
+        {/* Renders nothing unless this child is actually in the adoption
+            pipeline. For a psychologist it is the only place the case is
+            visible at all — the board is staff casework. */}
+        <AdoptionSummary childId={child.id} />
+
+        <Card title="Identifying information" padding="0">
+          <div style={{ padding: '4px 15px 12px' }}>
+            {facts.map((f) => (
+              <div key={f.k} style={{ display: 'flex', gap: 12, padding: '6px 0', borderBottom: '1px solid var(--ink-50)' }}>
+                <span style={{ width: 150, flex: 'none', fontWeight: 700, fontSize: 12, color: 'var(--text-muted)' }}>{f.k}</span>
+                <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 12.5, color: 'var(--text-strong)' }}>{f.v || '—'}</span>
+              </div>
+            ))}
+          </div>
+          {(child.instruments_used || []).length > 0 && (
+            <div style={{ padding: '11px 15px', background: 'var(--ink-50)', display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+              <span className="racco-eyebrow" style={{ fontSize: 'var(--text-3xs)', marginRight: 4 }}>Instruments used</span>
+              {child.instruments_used.map((t) => <Badge key={t} tone="brand" size="sm">{t}</Badge>)}
             </div>
+          )}
+        </Card>
+
+      {/* The child's own words, flagged as worth reading.
+
+          Shown EXPANDED and immediately above the remarks. The words were
+          never missing before this — they were rendered further down, folded
+          behind an "Answers (3)" toggle, one click from anyone who thought to
+          look. Nobody did. Folding them again would rebuild the failure. */}
+      {(data.self_report_flags || []).filter((f) => !f.is_reviewed).length > 0 && (
+        <Card
+          eyebrow="Self-report"
+          title={ownWordsTitle(data.child)}
+          padding="20px"
+          accent="var(--danger-500)"
+        >
+          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 14 }}>
+            Read these alongside the remarks below. Flagging says only that the
+            child said something worth reading — it is not a judgement about the
+            case or about anyone&apos;s notes.
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-            <Badge tone={csMeta.tone} dot>Case: {csMeta.label}</Badge>
-            <Badge tone={PA_STATUS_TONES[child.pre_assessment_status] || 'amber'} dot>Pre-Assessment: {child.pre_assessment_status}</Badge>
-            <Badge tone={child.status === 'active' ? 'success' : 'neutral'} dot>{child.status === 'active' ? 'Active' : 'Inactive (Terminated)'}</Badge>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {(data.self_report_flags || []).filter((f) => !f.is_reviewed).map((f) => (
+              <div key={f.id} style={{ borderLeft: '3px solid var(--danger-500)', paddingLeft: 14 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{f.question}</div>
+                <div style={{ fontSize: 15.5, lineHeight: 1.5, color: 'var(--text-strong)', margin: '4px 0 6px' }}>
+                  &ldquo;{f.answer}&rdquo;
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+                  <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
+                    {String(f.created_at || '').slice(0, 10)}
+                    {' · '}
+                    {f.source === 'model' ? 'local model' : 'phrase'}: {f.matched}
+                  </span>
+                  <Button size="sm" variant="secondary" onClick={() => acknowledgeFlag(f.id)}
+                          disabled={ackBusy === f.id} className="racco-no-print">
+                    {ackBusy === f.id ? 'Marking…' : 'Mark as read'}
+                  </Button>
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
-        {canAdvance && child.status === 'active' && (
-          <div style={{ display: 'flex', gap: 10, marginTop: 14, flexWrap: 'wrap' }} className="racco-no-print">
-            {child.case_status === 'pre_assessment'
-              ? <Button variant="primary" onClick={() => setConfirmMove({ next: 'counseling', childName: child.fullname })} iconLeft={<Icon name="chevron-right" size={15} />}>Move to Counseling</Button>
-              : <Button variant="secondary" onClick={() => advance('pre_assessment')} iconLeft={<Icon name="arrow-left" size={15} />}>Back to Pre-Assessment</Button>}
-          </div>
-        )}
-        {(child.instruments_used || []).length > 0 && (
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 12 }}>
-            {child.instruments_used.map((t) => <Badge key={t} tone="brand" size="sm">{t}</Badge>)}
-          </div>
-        )}
-      </Card>
+        </Card>
+      )}
+
+      {/* Treatment plan + problems, side by side */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 18 }}>
+        <Card eyebrow="Care" title="Treatment plan" padding="20px">
+          {activePlan ? (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+                <Badge tone={activePlan.status === 'active' ? 'success' : 'neutral'} size="sm" dot>{activePlan.status}</Badge>
+                {activePlan.review_date && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Review {activePlan.review_date}</span>}
+              </div>
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Objectives</div>
+              <p style={{ fontSize: 13.5, color: 'var(--text-strong)', margin: '4px 0 10px', lineHeight: 1.55 }}>{activePlan.objectives}</p>
+              {activePlan.interventions && (<>
+                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Interventions</div>
+                <p style={{ fontSize: 13.5, color: 'var(--text-body)', margin: '4px 0 0', lineHeight: 1.55 }}>{activePlan.interventions}</p>
+              </>)}
+              {canWrite && <div style={{ marginTop: 12 }} className="racco-no-print"><Button variant="secondary" onClick={() => setPlan({ ...activePlan })} iconLeft={<Icon name="pencil" size={15} />}>Edit plan</Button></div>}
+            </div>
+          ) : (
+            <div>
+              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>No treatment plan yet.</div>
+              {canWrite && <Button variant="primary" onClick={() => setPlan({ objectives: '', interventions: '', status: 'active', review_date: '' })} iconLeft={<Icon name="plus" size={15} />} className="racco-no-print">Create plan</Button>}
+            </div>
+          )}
+        </Card>
+
+        <Card eyebrow="Watchlist" title="Problems encountered" padding="20px">
+          {data.problems.length === 0 ? (
+            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No problems logged.</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {data.problems.map((p) => (
+                <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 'var(--radius-md)', background: p.resolved ? 'var(--success-50)' : 'var(--ink-50)', border: '1px solid var(--border)' }}>
+                  <Icon name={p.resolved ? 'check-circle-2' : 'alert-triangle'} size={15} style={{ color: p.resolved ? 'var(--success-600)' : 'var(--amber-500)' }} />
+                  <span style={{ flex: 1, fontSize: 13, color: 'var(--text-strong)', textDecoration: p.resolved ? 'line-through' : 'none', opacity: p.resolved ? 0.7 : 1 }}>{p.description}</span>
+                  {p.category && <Badge tone="neutral" size="sm">{p.category}</Badge>}
+                  {canWrite && !p.resolved && (
+                    <button title="Mark resolved" className="racco-no-print" style={iconBtn('var(--success-600)')}
+                      onClick={async () => { try { await api.patch(`/problems/${p.id}/`, { resolved: true }); load(); } catch { toast.error('Could not update.'); } }}>
+                      <Icon name="check" size={14} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+      </div>
 
       {/* Pre-assessment log */}
-      <Card eyebrow="Clinical workflow" title="Pre-assessment log" padding="0" style={{ marginBottom: 18 }}>
+      <Card eyebrow="Clinical workflow" title="Pre-assessment log" padding="0">
         {data.pre_assessments.length === 0 ? (
           <div style={{ padding: 18, fontSize: 13, color: 'var(--text-muted)' }}>No pre-assessments yet.</div>
         ) : (
@@ -283,7 +455,7 @@ export default function ChildProgressReport() {
               </tr></thead>
               <tbody>
                 {data.pre_assessments.map((p) => (
-                  <tr key={p.id} style={{ borderBottom: '1px solid var(--ink-100)' }}>
+                  <tr key={p.id} style={{ borderBottom: '1px solid var(--divider-row)' }}>
                     <td style={td}>{p.date}</td>
                     <td style={td}><Badge tone={p.status === 'completed' ? 'success' : 'amber'} size="sm" dot>{p.status.replace('_', ' ')}</Badge></td>
                     <td style={td}>{p.consent ? (p.consent_status || 'linked') : '—'}</td>
@@ -298,8 +470,12 @@ export default function ChildProgressReport() {
         )}
       </Card>
 
+      </div>
+
+      <div className="racco-stack racco-tabpanel" hidden={tab !== 'interviews'}>
+
       {/* Clinical interviews — every respondent, incl. secondary "Save & interview another" records */}
-      <Card eyebrow="Clinical workflow" title="Clinical interviews" padding="0" style={{ marginBottom: 18 }}>
+      <Card eyebrow="Clinical workflow" title="Clinical interviews" padding="0">
         {(data.interviews || []).length === 0 ? (
           <div style={{ padding: 18, fontSize: 13, color: 'var(--text-muted)' }}>
             No clinical interviews recorded yet — they are conducted in the pre-assessment wizard.
@@ -347,8 +523,126 @@ export default function ChildProgressReport() {
         )}
       </Card>
 
+      </div>
+
+      <div className="racco-stack racco-tabpanel" hidden={tab !== 'instruments'}>
+
+      {/* Result entries */}
+      <Card eyebrow="Findings" title="Result entries (manual)" padding="0">
+        <div style={{ padding: '12px 16px', display: 'flex', justifyContent: 'flex-end' }} className="racco-no-print">
+          {canWrite && <Button variant="primary" onClick={() => setResult({ instrument: '', summary: '', classification: '', baseline_category: '' })} iconLeft={<Icon name="plus" size={15} />}>Add Result Entry</Button>}
+        </div>
+        {data.result_entries.length === 0 ? (
+          <div style={{ padding: '0 18px 18px', fontSize: 13, color: 'var(--text-muted)' }}>No result entries yet — the psychologist records findings here after paper administration.</div>
+        ) : (
+          <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {data.result_entries.map((r) => (
+              <div key={r.id} style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 14, background: 'var(--ink-50)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{r.instrument_title || 'General findings'}</div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {r.baseline_category && <Badge tone={r.baseline_category === 'Needs Counseling' ? 'amber' : 'success'} size="sm" dot>{r.baseline_category}</Badge>}
+                    {r.classification && <Badge tone="brand" size="sm">{r.classification}</Badge>}
+                    <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>{r.date}</span>
+                  </div>
+                </div>
+                <p style={{ fontSize: 13.5, color: 'var(--text-body)', margin: 0, lineHeight: 1.6 }}>{r.summary}</p>
+                <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 6 }}>Entered by {r.entered_by_name || '—'}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      {/* Uploaded reports */}
+      <Card eyebrow="Documents" title="Psychological reports" padding="0">
+        {data.reports.length === 0 ? (
+          <div style={{ padding: 18, fontSize: 13, color: 'var(--text-muted)' }}>No uploaded reports. Upload from Results &amp; Reports.</div>
+        ) : (
+          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {data.reports.map((f) => (
+              <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', background: 'var(--ink-50)' }}>
+                <Icon name="file-text" size={18} style={{ color: 'var(--blue-600)' }} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.original_filename}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{f.report_type}{f.coverage ? ` · ${f.coverage}` : ''} · {f.author_name || '—'} · {(f.created_at || '').slice(0, 10)}</div>
+                  {f.ai_summary && f.ai_summary_confirmed && (
+                    <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 'var(--radius-md)', background: 'var(--blue-50)', border: '1px solid var(--blue-100)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                        <Icon name="file-text" size={12} style={{ color: 'var(--blue-600)' }} />
+                        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--blue-700)' }}>
+                          Summary
+                        </span>
+                      </div>
+                      <p style={{ fontSize: 12.5, color: 'var(--text-body)', margin: 0, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{f.ai_summary}</p>
+                    </div>
+                  )}
+                </div>
+                <Button variant="ghost" size="sm" disabled={summaryBusy} className="racco-no-print"
+                        onClick={() => f.ai_summary_confirmed
+                          ? setConfirmResummarize({ kind: 'report', id: f.id, filename: f.original_filename })
+                          : draftSummary('report', f.id)}>
+                  {f.ai_summary ? 'Re-summarise' : 'AI summary'}
+                </Button>
+                {f.ai_summary && (
+                  <Badge tone={f.ai_summary_confirmed ? 'success' : 'amber'} size="sm">
+                    {f.ai_summary_confirmed ? 'Confirmed' : 'Draft (unconfirmed)'}
+                  </Badge>
+                )}
+                <Button variant="ghost" onClick={() => download(f)} iconLeft={<Icon name="download" size={15} />} className="racco-no-print">Download</Button>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      </div>
+
+      <div className="racco-stack racco-tabpanel" hidden={tab !== 'remarks'}>
+
+      {/* Remarks log */}
+      <Card eyebrow="Progress log" title="Psychological remark notes" padding="20px">
+        {canWrite && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: data.remarks.length ? 18 : 0 }} className="racco-no-print">
+            <textarea value={remarkText} onChange={(e) => setRemarkText(e.target.value)} rows={3} placeholder="Add a dated remark for this child…" style={textarea} />
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <Button variant="ghost" onClick={polish}
+                      disabled={!remarkText.trim() || polishing}
+                      iconLeft={<Icon name="sparkles" size={16} />}>
+                {polishing ? 'Polishing…' : 'Polish writing'}
+              </Button>
+              <Button variant="primary" onClick={addRemark} iconLeft={<Icon name="plus" size={16} />} disabled={!remarkText.trim()}>Add remark</Button>
+            </div>
+            {polishJob && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
+                <Alert tone="info" disclaimer style={{ flex: 1, marginTop: 0 }}>
+                  AI-drafted decision support, not a diagnosis. Review and edit before saving.
+                </Alert>
+                <Button variant="ghost" size="sm" onClick={revertPolish}>Revert to my text</Button>
+              </div>
+            )}
+          </div>
+        )}
+        {data.remarks.length === 0 ? (
+          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No remarks yet.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {data.remarks.map((n) => (
+              <div key={n.id} style={{ borderLeft: '3px solid var(--blue-200)', paddingLeft: 12 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>{n.date} · {n.author_name || '—'}</div>
+                <p style={{ fontSize: 13.5, lineHeight: 1.6, color: 'var(--text-strong)', margin: '4px 0 0' }}>{n.text}</p>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
+
+      </div>
+
+      <div className="racco-stack racco-tabpanel" hidden={tab !== 'voice'}>
+
       {/* Child opinionnaire (QR survey) */}
-      <Card eyebrow="Child's voice" title="Opinionnaire (QR survey)" padding="20px" style={{ marginBottom: 18 }}>
+      <Card eyebrow="Child's voice" title="Opinionnaire (QR survey)" padding="20px">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: (data.opinionnaires || []).length ? 14 : 0 }}>
           <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, maxWidth: 520 }}>
             The child answers the agency&apos;s self-report opinionnaire on a secondary device via QR code.
@@ -392,8 +686,12 @@ export default function ChildProgressReport() {
         )}
       </Card>
 
+      </div>
+
+      <div className="racco-stack racco-tabpanel" hidden={tab !== 'casework'}>
+
       {/* Case referrals (social worker's side of the split view) */}
-      <Card eyebrow="Casework" title="Case referral (social worker)" padding="0" style={{ marginBottom: 18 }}>
+      <Card eyebrow="Casework" title="Case referral (social worker)" padding="0">
         {(data.case_referrals || []).length === 0 ? (
           <div style={{ padding: 18, fontSize: 13, color: 'var(--text-muted)' }}>
             No case referral uploaded yet. Social workers upload it from Results &amp; Reports.
@@ -443,203 +741,9 @@ export default function ChildProgressReport() {
         )}
       </Card>
 
-      {/* Result entries */}
-      <Card eyebrow="Findings" title="Result entries (manual)" padding="0" style={{ marginBottom: 18 }}>
-        <div style={{ padding: '12px 16px', display: 'flex', justifyContent: 'flex-end' }} className="racco-no-print">
-          {canWrite && <Button variant="primary" onClick={() => setResult({ instrument: '', summary: '', classification: '', baseline_category: '' })} iconLeft={<Icon name="plus" size={15} />}>Add Result Entry</Button>}
-        </div>
-        {data.result_entries.length === 0 ? (
-          <div style={{ padding: '0 18px 18px', fontSize: 13, color: 'var(--text-muted)' }}>No result entries yet — the psychologist records findings here after paper administration.</div>
-        ) : (
-          <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {data.result_entries.map((r) => (
-              <div key={r.id} style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 14, background: 'var(--ink-50)' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 6 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{r.instrument_title || 'General findings'}</div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {r.baseline_category && <Badge tone={r.baseline_category === 'Needs Counseling' ? 'amber' : 'success'} size="sm" dot>{r.baseline_category}</Badge>}
-                    {r.classification && <Badge tone="brand" size="sm">{r.classification}</Badge>}
-                    <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>{r.date}</span>
-                  </div>
-                </div>
-                <p style={{ fontSize: 13.5, color: 'var(--text-body)', margin: 0, lineHeight: 1.6 }}>{r.summary}</p>
-                <div style={{ fontSize: 11.5, color: 'var(--text-faint)', marginTop: 6 }}>Entered by {r.entered_by_name || '—'}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* Uploaded reports */}
-      <Card eyebrow="Documents" title="Psychological reports" padding="0" style={{ marginBottom: 18 }}>
-        {data.reports.length === 0 ? (
-          <div style={{ padding: 18, fontSize: 13, color: 'var(--text-muted)' }}>No uploaded reports. Upload from Results &amp; Reports.</div>
-        ) : (
-          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {data.reports.map((f) => (
-              <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', background: 'var(--ink-50)' }}>
-                <Icon name="file-text" size={18} style={{ color: 'var(--blue-600)' }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.original_filename}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{f.report_type}{f.coverage ? ` · ${f.coverage}` : ''} · {f.author_name || '—'} · {(f.created_at || '').slice(0, 10)}</div>
-                  {f.ai_summary && f.ai_summary_confirmed && (
-                    <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 'var(--radius-md)', background: 'var(--blue-50)', border: '1px solid var(--blue-100)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                        <Icon name="file-text" size={12} style={{ color: 'var(--blue-600)' }} />
-                        <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--blue-700)' }}>
-                          Summary
-                        </span>
-                      </div>
-                      <p style={{ fontSize: 12.5, color: 'var(--text-body)', margin: 0, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{f.ai_summary}</p>
-                    </div>
-                  )}
-                </div>
-                <Button variant="ghost" size="sm" disabled={summaryBusy} className="racco-no-print"
-                        onClick={() => f.ai_summary_confirmed
-                          ? setConfirmResummarize({ kind: 'report', id: f.id, filename: f.original_filename })
-                          : draftSummary('report', f.id)}>
-                  {f.ai_summary ? 'Re-summarise' : 'AI summary'}
-                </Button>
-                {f.ai_summary && (
-                  <Badge tone={f.ai_summary_confirmed ? 'success' : 'amber'} size="sm">
-                    {f.ai_summary_confirmed ? 'Confirmed' : 'Draft (unconfirmed)'}
-                  </Badge>
-                )}
-                <Button variant="ghost" onClick={() => download(f)} iconLeft={<Icon name="download" size={15} />} className="racco-no-print">Download</Button>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      {/* Treatment plan + problems, side by side */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 18, marginBottom: 18 }}>
-        <Card eyebrow="Care" title="Treatment plan" padding="20px">
-          {activePlan ? (
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-                <Badge tone={activePlan.status === 'active' ? 'success' : 'neutral'} size="sm" dot>{activePlan.status}</Badge>
-                {activePlan.review_date && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Review {activePlan.review_date}</span>}
-              </div>
-              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Objectives</div>
-              <p style={{ fontSize: 13.5, color: 'var(--text-strong)', margin: '4px 0 10px', lineHeight: 1.55 }}>{activePlan.objectives}</p>
-              {activePlan.interventions && (<>
-                <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: '0.05em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Interventions</div>
-                <p style={{ fontSize: 13.5, color: 'var(--text-body)', margin: '4px 0 0', lineHeight: 1.55 }}>{activePlan.interventions}</p>
-              </>)}
-              {canWrite && <div style={{ marginTop: 12 }} className="racco-no-print"><Button variant="secondary" onClick={() => setPlan({ ...activePlan })} iconLeft={<Icon name="pencil" size={15} />}>Edit plan</Button></div>}
-            </div>
-          ) : (
-            <div>
-              <div style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 12 }}>No treatment plan yet.</div>
-              {canWrite && <Button variant="primary" onClick={() => setPlan({ objectives: '', interventions: '', status: 'active', review_date: '' })} iconLeft={<Icon name="plus" size={15} />} className="racco-no-print">Create plan</Button>}
-            </div>
-          )}
-        </Card>
-
-        <Card eyebrow="Watchlist" title="Problems encountered" padding="20px">
-          {data.problems.length === 0 ? (
-            <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No problems logged.</div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {data.problems.map((p) => (
-                <div key={p.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', borderRadius: 'var(--radius-md)', background: p.resolved ? 'var(--success-50)' : 'var(--ink-50)', border: '1px solid var(--border)' }}>
-                  <Icon name={p.resolved ? 'check-circle-2' : 'alert-triangle'} size={15} style={{ color: p.resolved ? 'var(--success-600)' : 'var(--amber-500)' }} />
-                  <span style={{ flex: 1, fontSize: 13, color: 'var(--text-strong)', textDecoration: p.resolved ? 'line-through' : 'none', opacity: p.resolved ? 0.7 : 1 }}>{p.description}</span>
-                  {p.category && <Badge tone="neutral" size="sm">{p.category}</Badge>}
-                  {canWrite && !p.resolved && (
-                    <button title="Mark resolved" className="racco-no-print" style={iconBtn('var(--success-600)')}
-                      onClick={async () => { try { await api.patch(`/problems/${p.id}/`, { resolved: true }); load(); } catch { toast.error('Could not update.'); } }}>
-                      <Icon name="check" size={14} />
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
       </div>
 
-      {/* The child's own words, flagged as worth reading.
-
-          Shown EXPANDED and immediately above the remarks. The words were
-          never missing before this — they were rendered further down, folded
-          behind an "Answers (3)" toggle, one click from anyone who thought to
-          look. Nobody did. Folding them again would rebuild the failure. */}
-      {(data.self_report_flags || []).filter((f) => !f.is_reviewed).length > 0 && (
-        <Card
-          eyebrow="Self-report"
-          title={ownWordsTitle(data.child)}
-          padding="20px"
-          accent="var(--danger-500)"
-        >
-          <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginBottom: 14 }}>
-            Read these alongside the remarks below. Flagging says only that the
-            child said something worth reading — it is not a judgement about the
-            case or about anyone&apos;s notes.
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-            {(data.self_report_flags || []).filter((f) => !f.is_reviewed).map((f) => (
-              <div key={f.id} style={{ borderLeft: '3px solid var(--danger-500)', paddingLeft: 14 }}>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{f.question}</div>
-                <div style={{ fontSize: 15.5, lineHeight: 1.5, color: 'var(--text-strong)', margin: '4px 0 6px' }}>
-                  &ldquo;{f.answer}&rdquo;
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-                  <span style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
-                    {String(f.created_at || '').slice(0, 10)}
-                    {' · '}
-                    {f.source === 'model' ? 'local model' : 'phrase'}: {f.matched}
-                  </span>
-                  <Button size="sm" variant="secondary" onClick={() => acknowledgeFlag(f.id)}
-                          disabled={ackBusy === f.id} className="racco-no-print">
-                    {ackBusy === f.id ? 'Marking…' : 'Mark as read'}
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {/* Remarks log */}
-      <Card eyebrow="Progress log" title="Psychological remark notes" padding="20px">
-        {canWrite && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: data.remarks.length ? 18 : 0 }} className="racco-no-print">
-            <textarea value={remarkText} onChange={(e) => setRemarkText(e.target.value)} rows={3} placeholder="Add a dated remark for this child…" style={textarea} />
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <Button variant="ghost" onClick={polish}
-                      disabled={!remarkText.trim() || polishing}
-                      iconLeft={<Icon name="sparkles" size={16} />}>
-                {polishing ? 'Polishing…' : 'Polish writing'}
-              </Button>
-              <Button variant="primary" onClick={addRemark} iconLeft={<Icon name="plus" size={16} />} disabled={!remarkText.trim()}>Add remark</Button>
-            </div>
-            {polishJob && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
-                <Alert tone="info" disclaimer style={{ flex: 1, marginTop: 0 }}>
-                  AI-drafted decision support, not a diagnosis. Review and edit before saving.
-                </Alert>
-                <Button variant="ghost" size="sm" onClick={revertPolish}>Revert to my text</Button>
-              </div>
-            )}
-          </div>
-        )}
-        {data.remarks.length === 0 ? (
-          <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No remarks yet.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {data.remarks.map((n) => (
-              <div key={n.id} style={{ borderLeft: '3px solid var(--blue-200)', paddingLeft: 12 }}>
-                <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>{n.date} · {n.author_name || '—'}</div>
-                <p style={{ fontSize: 13.5, lineHeight: 1.6, color: 'var(--text-strong)', margin: '4px 0 0' }}>{n.text}</p>
-              </div>
-            ))}
-          </div>
-        )}
-      </Card>
-
-      <Alert disclaimer title="Note." style={{ marginTop: 18 }}>All clinical findings are the licensed psychologist&apos;s own professional judgment.</Alert>
+      <Alert disclaimer title="Note.">All clinical findings are the licensed psychologist&apos;s own professional judgment.</Alert>
 
       {/* Add-result drawer */}
       {result && (

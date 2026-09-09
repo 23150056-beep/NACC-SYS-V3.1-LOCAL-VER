@@ -41,38 +41,35 @@ export default function AuthLayout({ heading, subheading, children, footer = nul
   return (
     <div className="racco-sky-wash racco-auth-wash">
       <div className="racco-login-card"
-           style={{ background: 'var(--surface)', borderRadius: 'var(--radius-2xl)',
+           style={{ background: 'var(--surface)', borderRadius: 'var(--radius-xl)',
                     boxShadow: 'var(--shadow-xl)', overflow: 'hidden' }}>
 
-        {/* Brand panel */}
-        <div className="racco-login-brand"
-             style={{ background: 'linear-gradient(155deg, var(--blue-700), var(--blue-600) 60%, var(--blue-800))',
-                      color: '#fff', position: 'relative' }}>
-          <div style={{ position: 'absolute', inset: 0, background: 'radial-gradient(120% 90% at 100% 0%, rgba(255,172,42,0.22), transparent 55%)' }} />
-          <div style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 14 }}>
+        {/* Brand panel. Flat chrome navy, not a gradient: this is the same
+            surface the signed-in header uses, so signing in reads as walking
+            into the building rather than arriving somewhere else. */}
+        <div className="racco-login-brand" style={{ background: 'var(--chrome)', color: '#fff' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
             <img src="/racco-seal.jpg" alt="NACC seal" className="racco-auth-seal"
                  style={{ borderRadius: '50%', objectFit: 'cover',
-                          boxShadow: 'var(--shadow-md)', flex: 'none' }} />
+                          boxShadow: '0 6px 18px rgba(0,0,0,0.28)', flex: 'none' }} />
             <div style={{ minWidth: 0 }}>
               <div className="racco-auth-org"
-                   style={{ fontFamily: 'var(--font-display)', fontWeight: 800, lineHeight: 1.1 }}>
-                National Authority for Child Care
+                   style={{ fontFamily: 'var(--font-display)', fontWeight: 800, lineHeight: 1.2 }}>
+                NACC &ndash; RACCO 1
               </div>
-              <div style={{ fontSize: 12, opacity: 0.85, fontWeight: 600, letterSpacing: '0.02em' }}>
-                NACC – Regional Alternative Childcare Office 1
+              <div style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 11, letterSpacing: '0.1em', textTransform: 'uppercase', color: 'var(--blue-300)', marginTop: 6 }}>
+                Regional Alternative Child Care Office I
               </div>
             </div>
+            <p className="racco-login-tagline" style={{ fontSize: 14, lineHeight: 1.6, color: 'var(--blue-200)', maxWidth: 300 }}>
+              Child case management and counseling support for the children in RACCO I&rsquo;s care.
+            </p>
           </div>
           {/* The first thing to go on a short window — it is the one part of
               the page carrying no information the user needs to act on. */}
-          <div className="racco-login-tagline" style={{ position: 'relative' }}>
-            <div className="racco-auth-motto"
-                 style={{ fontFamily: 'var(--font-display)', fontWeight: 800, lineHeight: 1.1 }}>
-              In The Best Interests<br />of the Child
-            </div>
-            <p style={{ marginTop: 10, fontSize: 13.5, opacity: 0.85, lineHeight: 1.55, maxWidth: 320 }}>
-              Behavioral Assessment &amp; Counseling Support System
-            </p>
+          <div className="racco-login-tagline"
+               style={{ fontWeight: 600, fontSize: 13, lineHeight: 1.5, color: '#fff', borderLeft: '3px solid var(--amber-400)', paddingLeft: 14 }}>
+            Every child in our care is known by name, not by number.
           </div>
         </div>
 

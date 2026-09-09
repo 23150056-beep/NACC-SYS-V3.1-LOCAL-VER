@@ -13,9 +13,9 @@ export function StatusChip({ child, size = 'sm' }) {
   return <Badge tone="success" size={size} dot>Active{child.case_type ? ` · ${child.case_type}` : ''}</Badge>;
 }
 
-// Purpose labels mirror Schedule.jsx.
-
-export const PURPOSE_LABEL = { pre_assessment: 'Pre-Assessment', session: 'Session', follow_up: 'Follow-up' };
+// Re-exported, not redefined: the left rail and the header both label
+// appointments too, and neither should be importing out of a page.
+export { PURPOSE_LABEL } from '../../utils/child';
 // Local YYYY-MM-DD (never toISOString — it shifts the date in UTC+8 evenings).
 export const localDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 export const fmtTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
