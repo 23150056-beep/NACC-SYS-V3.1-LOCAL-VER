@@ -401,10 +401,18 @@ BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "NACC RACCO1")
 # details, no passwords. A text sits unencrypted on a lock screen.
 SMS_PROVIDER = os.getenv("SMS_PROVIDER", "console")
 SMS_API_KEY = os.getenv("SMS_API_KEY", "")
-SMS_ENDPOINT = os.getenv("SMS_ENDPOINT", "https://api.semaphore.co/api/v4/messages")
+# Unset means "whatever the chosen provider's own URL is" - see
+# accounts/sms.py DEFAULT_ENDPOINTS. It used to default to Semaphore's URL
+# for every provider, so switching gateway without also changing this
+# posted the new provider's payload at the old provider.
+SMS_ENDPOINT = os.getenv("SMS_ENDPOINT", "")
 # The name a message appears to come from. Has to be registered with the
 # gateway first; unset means their default shared sender.
 SMS_SENDER_NAME = os.getenv("SMS_SENDER_NAME", "")
+# Only meaningful for the "textbee" provider, and only when more than one
+# handset is paired. Unset sends from whichever phone was most recently
+# active, which is the right answer when there is exactly one.
+SMS_DEVICE_ID = os.getenv("SMS_DEVICE_ID", "")
 
 # The shared token that lets a scheduler trigger the daily session reminder.
 # Render's free plan has no cron, so the job is exposed as an endpoint and

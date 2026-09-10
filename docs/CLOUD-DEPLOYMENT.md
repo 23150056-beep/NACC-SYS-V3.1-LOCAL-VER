@@ -197,8 +197,8 @@ reproduce a deployment problem.
 |---|---|---|
 | `BREVO_API_KEY` | — | Unset = no assignment emails are sent; nothing else changes. |
 | `BREVO_SENDER_EMAIL` | `racco1nacc@gmail.com` | Must be a verified sender in the Brevo account. |
-| `SMS_PROVIDER` | unset | Unset = messages go to the log, nothing is sent. Set to `semaphore` to switch texts on. See §9b. |
-| `SMS_API_KEY` | — | Semaphore API key. Required when SMS_PROVIDER is set. |
+| `SMS_PROVIDER` | unset | Unset = messages go to the log, nothing is sent. Set to `semaphore` or `philsms` to switch texts on. See §9b. |
+| `SMS_API_KEY` | — | The chosen gateway's API key. Required when SMS_PROVIDER is set. |
 | `SMS_SENDER_NAME` | unset | An approved Semaphore sender name, e.g. NACC. Unset uses their shared sender. |
 | `SESSION_REMINDER_TOKEN` | unset | Lets a scheduler trigger the daily reminder. Unset = that endpoint 404s. See §9c. |
 | `BREVO_SENDER_NAME` | `NACC RACCO1` | |
@@ -790,10 +790,42 @@ Coverage is identical: Semaphore reaches Globe, Smart, DITO and the sub-brands
 
 ### Step 1 — Get an API key
 
-1. <https://semaphore.co> → sign up → **API** in the dashboard.
-2. Copy the API key.
-3. Load credit. There is a minimum top-up; a small one lasts months at this
-   volume.
+Three gateways are supported. The first two are local aggregators on
+domestic interconnects; the third is not an aggregator at all. Pick on what
+you can actually open an account for and afford — the APIs are all one setting
+apart.
+
+| | `semaphore` | `philsms` | `textbee` |
+|---|---|---|---|
+| Per message | ~₱0.50 | from ~₱0.35 | free (your own SIM) |
+| Minimum outlay | a top-up | a top-up — check the dashboard, not the marketing page | none |
+| Account needed | business | business | **personal** |
+| Sender shown | `NACC` once approved | `NACC` once approved | **the handset's own number** |
+| Volume ceiling | your credit | your credit | 50/day, 300/month on the free plan |
+| Needs | nothing | nothing | an Android phone, kept on and online |
+
+**`textbee` is the one to use when the aggregators are out of reach**, which
+they were: both wanted a business account and a top-up worth about three years
+of this office's traffic. The app runs on an Android handset, the SIM in it
+sends the message, and the API is a relay telling the phone what to send. No
+business registration, no sender-name approval, no credit.
+
+The trade is real and worth stating plainly. Messages arrive from a personal
+mobile number rather than `NACC`, and if that phone is off, out of signal or
+unpaired, nothing sends — so the check button counts linked phones rather than
+credits for this provider, because an empty device list is exactly what a
+working setup looks like otherwise. At around a hundred messages a month the
+free plan's 300 is comfortable; the 50/day cap is far above the ceiling here,
+since the daily reminder is one message per psychologist rather than one per
+appointment.
+
+1. `semaphore` / `philsms`: sign up at <https://semaphore.co> or
+   <https://philsms.com>, copy the API key, load credit.
+2. `textbee`: sign up at <https://textbee.dev>, install the Android app on the
+   handset that holds the SIM, pair it, copy the API key.
+
+Nothing in the code prefers any of them, and moving between them is the
+`SMS_PROVIDER` line and nothing else. That is why the interface exists.
 
 ### Step 2 — Register a sender name (optional, recommended)
 
@@ -806,10 +838,11 @@ send time with a message the test button will show you verbatim.
 
 | Variable | Value |
 |---|---|
-| `SMS_PROVIDER` | `semaphore` |
+| `SMS_PROVIDER` | `semaphore`, `philsms` or `textbee` |
 | `SMS_API_KEY` | the key from step 1 |
-| `SMS_SENDER_NAME` | your approved sender name, or leave unset |
-| `SMS_ENDPOINT` | leave unset — it defaults to Semaphore's v4 endpoint |
+| `SMS_SENDER_NAME` | your approved sender name; ignored by `textbee` |
+| `SMS_DEVICE_ID` | `textbee` only, and only with more than one phone paired |
+| `SMS_ENDPOINT` | leave unset — each provider has its own default URL |
 
 Leaving `SMS_PROVIDER` unset keeps the console behaviour, which is what you
 want on the demo.
@@ -820,9 +853,13 @@ Every notification send happens on a background thread, so a gateway refusing
 a message looks exactly like one delivering it. There is a button for this,
 for the same reason the mail has one.
 
-1. Sign in as an administrator → **My Profile** → add and verify your own
+1. **Settings** → **Text messages** → **Check the key**. This asks the gateway
+   who you are and sends nothing, so a mistyped key costs no credit and needs
+   no verified handset. On `textbee` it reports how many phones are paired,
+   which is that gateway's real failure mode.
+2. Sign in as an administrator → **My Profile** → add and verify your own
    mobile number. You will receive a six-digit code.
-2. **Settings** → **Text messages** → **Send a test text**.
+3. **Settings** → **Text messages** → **Send a test text**.
 3. The screen prints what the gateway actually replied — a bad key, an
    unapproved sender name and an empty balance all say so in their own words.
 
@@ -832,11 +869,20 @@ If no code arrives at step 1, the gateway is refusing and step 2 will say why.
 
 - **`SMS_PROVIDER` still unset.** Messages go to the log, not to a handset.
   The test button says so plainly rather than reporting success.
+- **`textbee`: the phone.** Switched off, out of signal, out of battery or
+  unpaired all stop delivery while the API key stays perfectly valid. Check
+  the key — it counts paired phones.
 - **Sender name not approved.** Rejected at send time, named in the error.
 - **No credit.** Rejected with a balance message.
 - **The recipient never verified their number.** An unverified number is
   skipped silently by design — a number somebody typed may be a typo, and a
   typo is a stranger's handset. Check **Users** for who has a verified number.
+- **A link in the message.** Since 2023 the NTC has required carriers to block
+  every SMS containing a clickable URL, in real time — so a message with one
+  is dropped by the network after the gateway has accepted and billed it,
+  which reads as a delivery failure with nobody at fault. No message this
+  system sends contains a URL; they say "Sign in to review it" instead, and a
+  well-meant edit adding a link is the way that quietly stops being true.
 
 ### Sending the daily reminder
 

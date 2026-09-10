@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
-  Alert, Badge, Button, Card, FormField, Icon, Input, PAGE, PageHeader, Switch, TD, TH, THEAD_ROW, TR,
+  Alert, Badge, Button, Card, FormField, Icon, Input, Note, PAGE, PageHeader, Switch, TD, TH, THEAD_ROW, TR,
 } from '../ui';
 import { useToast } from '../context/ToastContext';
 import { getAssistantSettings, saveAssistantSettings, getAssistantMetrics, checkAssistant } from '../api/assistant';
 import { testEmailDelivery } from '../api/email';
-import { testSmsDelivery } from '../api/sms';
+import { checkSmsGateway, testSmsDelivery } from '../api/sms';
 
 const FEATURE_LABELS = {
   brief: 'Pre-session briefs',
@@ -30,6 +30,7 @@ export default function Settings() {
   const [draft, setDraft] = useState({ ollama_url: '', model_name: '' });
   const [mailTesting, setMailTesting] = useState(false);
   const [smsTesting, setSmsTesting] = useState(false);
+  const [smsChecking, setSmsChecking] = useState(false);
   const [smsResult, setSmsResult] = useState(null);   // { ok, detail, provider, sender, recipient }
   const [mailResult, setMailResult] = useState(null);   // { ok, detail, sender, recipient }
 
@@ -135,8 +136,33 @@ export default function Settings() {
               This sends one message to <strong>your own</strong> verified number
               and reports what the gateway replied.
             </div>
-            <div>
-              <Button variant="secondary" disabled={smsTesting}
+            <Note icon="info">
+              Check the key first. Gateways hand out only a handful of free
+              credits to try with and there is no sandbox, so proving the key
+              works should not cost one of them &mdash; and a wrong key and an
+              unverified number fail in ways that look alike.
+            </Note>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Button variant="secondary" disabled={smsTesting || smsChecking}
+                      iconLeft={<Icon name="shield-check" size={16} />}
+                      onClick={async () => {
+                        setSmsChecking(true);
+                        setSmsResult(null);
+                        try {
+                          setSmsResult(await checkSmsGateway());
+                        } catch (err) {
+                          setSmsResult({
+                            ok: false,
+                            detail: err.response?.data?.detail
+                              || 'The gateway could not be checked.',
+                          });
+                        } finally {
+                          setSmsChecking(false);
+                        }
+                      }}>
+                {smsChecking ? 'Checking…' : 'Check the key'}
+              </Button>
+              <Button variant="secondary" disabled={smsTesting || smsChecking}
                       iconLeft={<Icon name="message-square" size={16} />}
                       onClick={async () => {
                         setSmsTesting(true);

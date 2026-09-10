@@ -32,7 +32,7 @@ from children.notifications import send_temporary_password_notification
 from accounts.sms_notifications import (
     notify_temporary_password, start_phone_verification,
     confirm_phone_verification)
-from accounts.sms import send_sms
+from accounts.sms import check_gateway, send_sms
 from accounts.phone import (normalise_ph_mobile, InvalidPhilippineMobile,
                             as_typed as phone_as_typed)
 
@@ -375,6 +375,23 @@ class SmsConfigTestView(generics.GenericAPIView):
     permission_classes = [IsAdministrator]
     serializer_class = None
 
+    def get(self, request):
+        """Confirm the key and the balance without spending a message.
+
+        GET asks, POST sends - which is the ordinary meaning of both verbs and
+        also the order somebody should do them in. PhilSMS ships five free
+        credits and has no sandbox, so the key has to be diagnosable without
+        burning one, and this needs no verified handset either: requiring one
+        first is what made a bad key hard to tell from a bad number.
+        """
+        result = check_gateway()
+        return Response({
+            "ok": result.ok,
+            "detail": result.detail,
+            "provider": settings.SMS_PROVIDER or "console",
+            "sender": settings.SMS_SENDER_NAME or "(the gateway default)",
+        }, status=status.HTTP_200_OK)
+
     def post(self, request):
         user = request.user
         if not user.phone:
@@ -383,10 +400,15 @@ class SmsConfigTestView(generics.GenericAPIView):
                  "detail": "Add your own mobile number first — this sends the "
                            "test to you, not to anyone else."},
                 status=status.HTTP_400_BAD_REQUEST)
+        # A different reference each time. The gateway's own guidance is that
+        # repeatedly sending nearly identical text to one number is classified
+        # as spam by the telcos, and this is the single message an
+        # administrator sends over and over while getting the key right.
+        reference = f"{secrets.randbelow(1_000_000):06d}"
         result = send_sms(
             user.phone,
-            "NACC SYS: this is a test message. If you can read this, text "
-            "notifications are working.",
+            f"NACC SYS: test message {reference}. If you can read this, text "
+            f"notifications are working.",
             "configuration test")
         return Response({
             "ok": result.ok,

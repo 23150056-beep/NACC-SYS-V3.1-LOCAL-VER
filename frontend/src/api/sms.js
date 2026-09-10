@@ -25,3 +25,8 @@ export const removeMyPhone = () => api.delete('/auth/me/phone/').then((r) => r.d
 // background thread, so this is the only place a refusal is visible without
 // reading server logs. The email card next to it exists for the same reason.
 export const testSmsDelivery = () => api.post('/sms-test/').then((r) => r.data);
+
+/* Confirms the key and reports the balance without spending a message. The
+   gateways sell credits in small bundles and hand out about five to try with,
+   so "is the key right" must not cost one of them. */
+export const checkSmsGateway = () => api.get('/sms-test/').then((r) => r.data);
