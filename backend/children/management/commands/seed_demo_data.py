@@ -43,6 +43,7 @@ from clinical.models import (
     AgencyFormTemplate, ConsentRecord, InstrumentCatalog, OpinionnaireInvite,
     PreAssessment, ProblemEntry, RemarkNote, ResultEntry, TreatmentPlan)
 from locations.models import Barangay, Municipality, Province
+from clinical import demo_referrals
 from scheduling import demo_schedule
 from scheduling.models import Appointment
 
@@ -211,12 +212,20 @@ class Command(BaseCommand):
         # its psychologist is actually free for - so the seeded calendar is one
         # the booking endpoint would have accepted. Demo data the real rules
         # would reject is a second system sharing a database.
+        # Booking requires a case referral on file, so a caseload without one
+        # is a caseload the calendar refuses in full - correctly, and for a
+        # reason that is about the fixture rather than the feature.
+        referrals = demo_referrals.install_referrals(
+            list(Child.objects.filter(status=Child.ACTIVE)),
+            uploaded_by=User.objects.filter(role__role_name=Role.STAFF).first())
+
         moved, _ = demo_schedule.realign_appointments()
 
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS(
             f"Built {made['children']} children across {len(psychologists)} psychologists."))
         self.stdout.write(f"  {moved} appointments placed in clinic hours")
+        self.stdout.write(f"  {referrals} case referrals written")
         for label in ("steady", "declining", "divergent"):
             self.stdout.write(f"  {label:<12} {made[label]:>3}")
         self.stdout.write(
