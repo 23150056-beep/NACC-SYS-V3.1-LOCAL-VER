@@ -49,6 +49,11 @@ class User(AbstractUser):
     # typed — texting a temporary password to a typo is worse than not
     # texting at all, so the senders check this.
     phone_verified = models.BooleanField(default=False)
+    # Whether the address has been proved to exist. False for a typed
+    # sign-up until a code is confirmed; true from the start for a Google
+    # one, which Google already verified. Approval emails a temporary
+    # password, so this is the gate on issuing a credential to a typo.
+    email_verified = models.BooleanField(default=False)
     role = models.ForeignKey(
         Role, on_delete=models.PROTECT, null=True, blank=True, related_name="users"
     )

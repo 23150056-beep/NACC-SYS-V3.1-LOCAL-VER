@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import api from '../api/client';
+import { clearTokens, getAccess, setTokens } from '../api/session';
 
 const AuthContext = createContext(null);
 
@@ -8,19 +9,18 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('access');
+    const token = getAccess();
     if (!token) { setLoading(false); return; }
     api.get('/auth/me/')
       .then((res) => setUser(res.data))
-      .catch(() => { localStorage.removeItem('access'); localStorage.removeItem('refresh'); })
+      .catch(() => clearTokens())
       .finally(() => setLoading(false));
   }, []);
 
   // Both sign-in paths return the same {access, refresh, user} envelope, so
   // the session is stored identically however the user got here.
   const storeSession = (data) => {
-    localStorage.setItem('access', data.access);
-    localStorage.setItem('refresh', data.refresh);
+    setTokens(data.access, data.refresh);
     setUser(data.user);
     return data.user;
   };
@@ -43,8 +43,7 @@ export function AuthProvider({ children }) {
   };
 
   const logout = () => {
-    localStorage.removeItem('access');
-    localStorage.removeItem('refresh');
+    clearTokens();
     // Clear any unsaved intake drafts (keyed per-user) so they never leak to
     // whichever account logs in next on this workstation.
     try {

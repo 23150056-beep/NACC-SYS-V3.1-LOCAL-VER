@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import api from '../api/client';
+import { getAccess } from '../api/session';
 import { useAuth } from './AuthContext';
 
 const ActivityContext = createContext(null);
@@ -51,7 +52,7 @@ export function ActivityProvider({ children }) {
   }, [user?.id]);
 
   const refresh = useCallback(() => {
-    if (!localStorage.getItem('access')) return;
+    if (!getAccess()) return;
     setLoading(true);
     api.get('/activity/')
       .then((r) => setEvents(r.data))

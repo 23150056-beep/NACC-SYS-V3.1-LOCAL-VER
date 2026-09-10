@@ -63,6 +63,15 @@ export default function Signup() {
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
   const [done, setDone] = useState(false);
+  // The address has to be proved before an administrator can approve the
+  // request — approval emails a temporary password, and an unverified address
+  // is one that credential could be handed to by mistake. Until the code is
+  // entered the request sits in the queue and cannot be approved, so this step
+  // is not optional decoration.
+  const [code, setCode] = useState('');
+  const [codeError, setCodeError] = useState('');
+  const [verified, setVerified] = useState(false);
+  const [verifying, setVerifying] = useState(false);
 
   const set = (k) => (e) => {
     const value = k === 'password' ? e.target.value.replace(/\s/g, '') : e.target.value;
@@ -126,6 +135,54 @@ export default function Signup() {
       setBusy(false);
     }
   };
+
+  const verify = async (e) => {
+    e.preventDefault();
+    setCodeError('');
+    setVerifying(true);
+    try {
+      await api.post('/auth/signup/verify-email/', { email: form.email, code });
+      setVerified(true);
+    } catch (err) {
+      setCodeError(err.response?.data?.detail
+        || 'That code is not right, or it has expired.');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  if (done && !verified) {
+    return (
+      <AuthLayout
+        title="Confirm your email"
+        heading="Confirm your email"
+        subheading={`We sent a six-digit code to ${form.email}.`}
+        footer={<AuthLink to="/login">Back to sign in</AuthLink>}
+      >
+        <form onSubmit={verify} className="racco-auth-stack"
+              style={{ marginTop: 'clamp(12px, 2vh, 22px)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {codeError && (
+            <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{codeError}</Alert>
+          )}
+          <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.6, color: 'var(--text-body)' }}>
+            Your request is in the queue, but an administrator cannot approve it
+            until the address is confirmed &mdash; approval sends a temporary
+            password to it.
+          </p>
+          <FormField label="Six-digit code" required>
+            <Input
+              value={code} onChange={(e) => setCode(e.target.value)}
+              inputMode="numeric" autoComplete="one-time-code" maxLength={6}
+              placeholder="000000"
+            />
+          </FormField>
+          <Button type="submit" variant="primary" fullWidth disabled={verifying || code.length < 6}>
+            {verifying ? 'Checking…' : 'Confirm my email'}
+          </Button>
+        </form>
+      </AuthLayout>
+    );
+  }
 
   if (done) {
     return (

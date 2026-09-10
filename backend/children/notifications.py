@@ -371,3 +371,37 @@ def send_temporary_password_notification(user, temporary_password):
             target=_post, args=(payload, "temporary password email"),
             daemon=True).start())
     return True
+
+
+def send_verification_code(email, code):
+    """Mail a sign-up verification code, and say whether it was accepted.
+
+    Sent synchronously, unlike the notifications above: the applicant is
+    sitting in front of the form waiting for it, and a failure they are not
+    told about is a form that appears to have worked and has not.
+
+    With no BREVO_API_KEY the code goes to the log instead, the same way the
+    SMS console provider works — a missing key should not crash a sign-up, and
+    it should not silently do nothing either.
+    """
+    if not email:
+        return False
+    if not settings.BREVO_API_KEY:
+        logger.warning("EMAIL (console) verification code for %s: %s", email, code)
+        return True
+    payload = {
+        "sender": {
+            "name": settings.BREVO_SENDER_NAME,
+            "email": settings.BREVO_SENDER_EMAIL,
+        },
+        "to": [{"email": email}],
+        "subject": "Your NACC SYS verification code",
+        "htmlContent": (
+            "<h2>Confirm your email address</h2>"
+            f"<p>Your verification code is <strong>{html.escape(code)}</strong>.</p>"
+            "<p>It expires in 15 minutes.</p>"
+            "<p>If you did not request access to NACC SYS, you can ignore "
+            "this message.</p>"
+        ),
+    }
+    return _post(payload, "sign-up verification code")

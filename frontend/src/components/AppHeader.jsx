@@ -183,11 +183,18 @@ export default function AppHeader() {
     if (pw.new_password !== pw.confirm) { setPwError('Passwords do not match.'); return; }
     setPwBusy(true);
     try {
-      await api.post('/auth/change-password/', {
+      const { data } = await api.post('/auth/change-password/', {
         current_password: pw.current_password, new_password: pw.new_password,
       });
-      toast.success('Password changed.');
       setPwOpen(false);
+      // Same rule as the forced-change gate, and for the same reason: the
+      // session this was changed from no longer authenticates.
+      if (data?.reauthenticate) {
+        toast.success('Password changed. Please sign in with your new password.');
+        logout();
+        return;
+      }
+      toast.success('Password changed.');
     } catch (err) {
       const data = err.response?.data || {};
       const msg = data.current_password || data.new_password || data.non_field_errors || data.detail

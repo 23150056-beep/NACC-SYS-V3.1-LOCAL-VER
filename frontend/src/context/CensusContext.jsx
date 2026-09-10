@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import api from '../api/client';
+import { getAccess } from '../api/session';
 import { useAuth } from './AuthContext';
 
 /* /reports/dashboard/ answers two screens at once: the Dashboard's own body
@@ -29,7 +30,7 @@ export function CensusProvider({ children }) {
   const isAdmin = user?.role_name === 'Administrator';
 
   const refresh = useCallback(() => {
-    if (!localStorage.getItem('access')) return;
+    if (!getAccess()) return;
     setLoading(true);
     api.get(`/reports/dashboard/?range=${range}`)
       .then((r) => setStats({ ...EMPTY, ...r.data }))

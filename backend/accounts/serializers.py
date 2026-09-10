@@ -5,6 +5,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from accounts.models import Role, UserProfile
 from activity.models import ActivityLog
+from accounts.token_claims import stamp
 from activity.services import log_activity
 
 User = get_user_model()
@@ -34,6 +35,7 @@ class UserSerializer(serializers.ModelSerializer):
         fields = [
             "id", "email", "username", "first_name", "last_name",
             "middle_initial", "contact_details", "phone", "phone_verified",
+            "email_verified",
             "role", "role_name",
             "requested_role", "requested_role_name",
             "fullname", "status", "must_change_password", "admin_takeover_pending",
@@ -43,7 +45,7 @@ class UserSerializer(serializers.ModelSerializer):
             # Only the person holding the handset can change these, through
             # /api/auth/me/phone/. An administrator typing a number into
             # somebody's record must not be able to mark it verified.
-            "phone", "phone_verified",
+            "phone", "phone_verified", "email_verified",
             "must_change_password", "admin_takeover_pending",
             "requested_role", "requested_role_name",
             "google_linked", "last_login", "created_at",
@@ -230,7 +232,9 @@ class LoginSerializer(TokenObtainPairSerializer):
     def get_token(cls, user):
         token = super().get_token(user)
         token["role"] = user.role.role_name if user.role else None
-        return token
+        # Both doors mint tokens through here, so binding the token to the
+        # password it was issued under only has to be done once.
+        return stamp(token, user)
 
     def validate(self, attrs):
         data = super().validate(attrs)

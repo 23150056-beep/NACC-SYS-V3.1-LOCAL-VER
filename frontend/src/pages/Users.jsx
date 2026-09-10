@@ -354,8 +354,13 @@ export default function Users() {
         await api.post(`/users/${u.id}/archive/`);
         toast.success(`${nameOf(u)} deactivated`);
       } else if (kind === 'reactivate') {
-        await api.post(`/users/${u.id}/reactivate/`);
-        toast.success(`${nameOf(u)} reactivated — they must set a new password at next sign-in`);
+        const { data } = await api.post(`/users/${u.id}/reactivate/`);
+        // Only true where there is a password to change. A colleague who signs
+        // in with Google has none, and telling them to set one sends them
+        // looking for a screen that cannot help them.
+        toast.success(data?.must_change_password
+          ? `${nameOf(u)} reactivated — they must set a new password at next sign-in`
+          : `${nameOf(u)} reactivated — they sign in with Google as before`);
       } else if (kind === 'reset') {
         const { data } = await api.post(`/users/${u.id}/reset-password/`);
         setResetResult({ user: u, temp_password: data.temp_password, email_queued: data.email_queued });

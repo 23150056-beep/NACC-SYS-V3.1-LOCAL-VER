@@ -15,6 +15,7 @@ from accounts.google_auth import (
     AccessRequestPending, SignupThrottled, link_google_account,
     resolve_google_user, verify_google_credential,
 )
+from accounts import email_verification
 from accounts.lockout import client_ip, clear_failures, is_locked, register_failure
 from accounts.models import Role, UserProfile
 from accounts import signup_limit
@@ -147,6 +148,38 @@ class GoogleLoginView(generics.GenericAPIView):
         }, status=status.HTTP_200_OK)
 
 
+class VerifySignupEmailView(generics.GenericAPIView):
+    """Confirm a typed address by the code mailed to it.
+
+    Open, and it has to be: the applicant cannot sign in — a PENDING account is
+    refused by design — so there is no session to authenticate this against.
+    What protects it is that the code is six digits, short-lived, guess-limited
+    and burned on use.
+
+    Every failure reads the same from outside, for the reason the sign-up form
+    gives one refusal for every address already spoken for: a different answer
+    would turn this into a way to ask whether somebody works at the agency.
+    """
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+    serializer_class = None
+
+    def post(self, request):
+        email = (request.data.get("email") or "").strip().lower()
+        ok, message = email_verification.confirm(email, request.data.get("code"))
+        if not ok:
+            return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
+        user = User.objects.filter(email__iexact=email).first()
+        if user is None:
+            # A confirmed code with no row behind it: nothing to mark, and
+            # saying so would leak which addresses exist.
+            return Response({"detail": message}, status=status.HTTP_200_OK)
+        user.email_verified = True
+        user.save(update_fields=["email_verified", "updated_at"])
+        return Response({"detail": message}, status=status.HTTP_200_OK)
+
+
 class SignupView(generics.GenericAPIView):
     """Open sign-up: creates a request, never an account with access.
 
@@ -184,6 +217,10 @@ class SignupView(generics.GenericAPIView):
 
         user = serializer.save()
         signup_limit.register_attempt(ip)
+        # A typed address is only what somebody typed. Approval emails a
+        # temporary password, so the address has to be proved before an
+        # administrator can hand a credential to a typo.
+        email_verification.start(user.email)
         log_activity(
             None, ActivityLog.CREATED, ActivityLog.SECURITY,
             entity_type="User",
@@ -268,7 +305,12 @@ class ChangePasswordView(generics.GenericAPIView):
         log_activity(
             request.user, ActivityLog.UPDATED, ActivityLog.SECURITY,
             entity_type="User", entity_label="Changed own password", entity_id=request.user.id)
-        return Response({"detail": "Password changed."}, status=status.HTTP_200_OK)
+        # Every token minted under the old password stopped working the moment
+        # it changed - see accounts/token_auth.py. Saying so here means the two
+        # screens that change a password do not each decide for themselves
+        # whether to sign the person out.
+        return Response({"detail": "Password changed.", "reauthenticate": True},
+                        status=status.HTTP_200_OK)
 
 
 class MyProfileView(generics.RetrieveUpdateAPIView):
@@ -520,7 +562,16 @@ class UserViewSet(viewsets.ModelViewSet):
         The old password is left working — an account is usually deactivated
         when someone leaves, so it is flagged for a forced change instead:
         whoever comes back signs in once with the old credentials and has to
-        set a new password before they reach any case data."""
+        set a new password before they reach any case data.
+
+        That flag is set only where there is a password to change. An account
+        created through the Google door has `set_unusable_password()`, and the
+        gate the flag raises asks for the CURRENT password and checks it with
+        `check_password()` — which no value can satisfy on an unusable one. So
+        flagging a Google colleague on the way back in forced nothing and shut
+        them out for good; the only route back was a new account. They
+        re-authenticate with Google, which is the credential they actually
+        have."""
         user = self.get_object()
         if user.status != User.ARCHIVED:
             return Response({"detail": "This account is already active."},
@@ -541,10 +592,13 @@ class UserViewSet(viewsets.ModelViewSet):
                            "Access Requests instead."},
                 status=status.HTTP_400_BAD_REQUEST)
         user.status = User.ACTIVE
-        user.must_change_password = True
+        user.must_change_password = user.has_usable_password()
         user.save(update_fields=["status", "must_change_password", "updated_at"])
         self._log(user, ActivityLog.UPDATED)
-        return Response({"status": user.status}, status=status.HTTP_200_OK)
+        return Response(
+            {"status": user.status,
+             "must_change_password": user.must_change_password},
+            status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"])
     def activity(self, request, pk=None):
@@ -587,6 +641,17 @@ class UserViewSet(viewsets.ModelViewSet):
         if user.status != User.PENDING:
             return Response({"detail": "This account is not awaiting approval."},
                             status=status.HTTP_400_BAD_REQUEST)
+        # Approving emails a temporary password. An address nobody has proved
+        # exists is an address that credential may be handed to by mistake, so
+        # the check bites here rather than merely showing beside the row.
+        # Google requests arrive verified — Google checked the address.
+        if not user.email_verified:
+            return Response(
+                {"detail": "This applicant has not confirmed their email "
+                           "address yet, and approving would send a temporary "
+                           "password to an address nobody has verified. Ask "
+                           "them to enter the code sent when they registered."},
+                status=status.HTTP_400_BAD_REQUEST)
 
         role_id = request.data.get("role")
         if not role_id:

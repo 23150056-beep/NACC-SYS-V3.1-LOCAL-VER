@@ -351,7 +351,12 @@ class AccessRequestApprovalTest(APITestCase):
         self.request_user = User.objects.create_user(
             email="hopeful@gmail.com", username="hopeful@gmail.com",
             status=User.PENDING, requested_role=self.psych_role,
-            google_sub="sub-hopeful")
+            google_sub="sub-hopeful",
+            # A Google request, and Google verified the address before this
+            # system ever saw it - see accounts/email_verification.py. Approval
+            # now refuses an address nobody has proved, so the fixture has to
+            # say which door this came through rather than leaving it blank.
+            email_verified=True)
 
     def _auth(self, email="admin@racco1.gov.ph", password="admin1234"):
         token = self.client.post("/api/auth/login/", {

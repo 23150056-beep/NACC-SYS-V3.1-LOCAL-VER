@@ -12,7 +12,7 @@ import { Button, FormField, PasswordInput, Alert, Icon } from '../ui';
 // The server enforces the lockout independently (accounts/authentication.py);
 // this is just the compliant path out of it.
 export default function PasswordChangeGate({ prefillCurrent = '', title = 'Set a new password', subtitle, onDone }) {
-  const { updateUser } = useAuth();
+  const { updateUser, logout } = useAuth();
   const toast = useToast();
   const [current, setCurrent] = useState(prefillCurrent);
   const [next, setNext] = useState('');
@@ -27,7 +27,15 @@ export default function PasswordChangeGate({ prefillCurrent = '', title = 'Set a
     if (next !== confirm) { setError('Passwords do not match.'); return; }
     setBusy(true);
     try {
-      await api.post('/auth/change-password/', { current_password: current, new_password: next });
+      const { data } = await api.post('/auth/change-password/', { current_password: current, new_password: next });
+      // Every token minted under the old password stopped working the moment
+      // it changed, so carrying on with this session is not an option the
+      // server leaves open — signing back in is the only way forward.
+      if (data?.reauthenticate) {
+        toast.success('Password updated. Please sign in with your new password.');
+        logout();
+        return;
+      }
       updateUser({ must_change_password: false });
       toast.success('Password updated.');
       if (onDone) onDone();

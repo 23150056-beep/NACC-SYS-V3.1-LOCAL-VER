@@ -182,9 +182,25 @@ class SignupReachesTheApprovalQueueTest(APITestCase):
         # The screen files it under "Awaiting approval" off this field alone.
         self.assertEqual(mine[0]["status"], User.PENDING)
 
+    def _confirm_email(self, email):
+        from django.core.cache import cache
+        from accounts import email_verification
+
+        entry = cache.get(email_verification.code_key(email))
+        self.assertIsNotNone(entry, "signing up should have issued a code")
+        return self.client.post("/api/auth/signup/verify-email/",
+                                {"email": email, "code": entry["code"]},
+                                format="json")
+
     def test_approval_turns_it_into_an_account_that_can_sign_in(self):
         self.client.post(URL, _payload(), format="json")
         user = User.objects.get(email="maria@gmail.com")
+
+        # A typed address proves itself with the code mailed to it. Approval
+        # emails a temporary password, so an unverified one is refused - see
+        # test_email_verification. This walks the real flow rather than
+        # reaching around it.
+        self._confirm_email("maria@gmail.com")
 
         self._as_admin()
         resp = self.client.post(f"/api/users/{user.id}/approve/",

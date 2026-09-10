@@ -243,6 +243,9 @@ def _register_access_request(claims, requested_role_name=None):
         status=User.PENDING,
         google_sub=claims["sub"],
         requested_role=role,
+        # Google checked the address before it ever reached us, so this door
+        # never asks the applicant to prove it a second time.
+        email_verified=True,
     )
     user.set_unusable_password()
     try:
