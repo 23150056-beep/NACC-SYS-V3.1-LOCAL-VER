@@ -1,5 +1,6 @@
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
+from django.contrib.auth import get_user_model
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -12,6 +13,7 @@ from accounts.scoping import role_of as _role
 from activity.models import ActivityLog
 from activity.services import log_activity
 from children.models import Child
+from scheduling import booking
 from scheduling.availability import free_windows
 from scheduling.models import AvailabilityBlock, Appointment
 from scheduling.serializers import AvailabilityBlockSerializer, AppointmentSerializer
@@ -61,6 +63,64 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         self._assert_can_write(instance.psychologist_id)
         instance.delete()
+
+    @action(detail=False, methods=["get"], url_path="slots")
+    def slots(self, request):
+        """The start times somebody can actually pick, for one psychologist
+        on one day.
+
+        The booking form used to be two blank boxes and a row of chips showing
+        the START of each window, so everybody clicked 09:00 and the second
+        person to try was told it was taken. This answers the question the
+        form is really asking.
+
+        `reason` matters as much as `slots`: "they do not work Wednesdays",
+        "the day is full" and "a 3-hour session does not fit" are three
+        different next actions, and an empty list renders all three as a blank
+        panel that looks broken.
+        """
+        psy_id = request.query_params.get("psychologist")
+        if not (psy_id or "").isdigit():
+            return Response({"detail": "Which psychologist?"}, status=400)
+        psy_id = int(psy_id)
+        # A psychologist sees their own day and nobody else's, and an attempt
+        # on a colleague 404s rather than 403s - the same "hidden, not
+        # disclosed" convention next_slots and the clinical viewsets use.
+        if _role(request) == Role.PSYCHOLOGIST and psy_id != request.user.id:
+            return Response({"detail": "Not found."}, status=404)
+        psych = get_user_model().objects.filter(pk=psy_id).first()
+        if psych is None:
+            return Response({"detail": "Not found."}, status=404)
+
+        try:
+            day = date.fromisoformat(request.query_params.get("date", ""))
+        except ValueError:
+            return Response({"detail": "A date in YYYY-MM-DD, please."}, status=400)
+
+        child = None
+        child_id = request.query_params.get("child")
+        if child_id and str(child_id).isdigit():
+            child = Child.objects.filter(pk=child_id).first()
+        try:
+            duration = int(request.query_params.get("duration") or 60)
+        except ValueError:
+            duration = 60
+        duration = max(15, min(duration, 8 * 60))
+
+        # `exclude` is the appointment being moved, so its own time still shows
+        # on the grid offering to move it.
+        exclude = request.query_params.get("exclude")
+        exclude = int(exclude) if (exclude or "").isdigit() else None
+        found = booking.bookable_slots(psych, child, day,
+                                       duration_minutes=duration,
+                                       exclude_id=exclude)
+        return Response({
+            "psychologist": getattr(psych, "fullname", "") or psych.get_username(),
+            "date": day.isoformat(),
+            "duration": duration,
+            "slots": found,
+            "reason": "" if found else booking.why_empty(psych, day, duration),
+        })
 
     @action(detail=False, methods=["get"], url_path="next-slots")
     def next_slots(self, request):
@@ -120,28 +180,22 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             qs = qs.filter(child_id=child)
         return qs
 
-    def _validate_booking(self, psychologist, start, duration_minutes):
-        """Staff/admin bookings must land inside an active availability block
-        with free capacity. Psychologists may override on their own calendar."""
-        role = _role(self.request)
-        if role == Role.PSYCHOLOGIST and psychologist.id == self.request.user.id:
-            return
-        local = timezone.localtime(start) if timezone.is_aware(start) else start
-        blocks = [b for b in psychologist.availability_blocks.filter(active=True)
-                  if b.covers(local)]
-        if not blocks:
-            raise ValidationError(
-                {"start": "That time is outside the psychologist's availability."})
-        block = blocks[0]
-        day_start = local.replace(hour=0, minute=0, second=0, microsecond=0)
-        taken = (Appointment.objects
-                 .filter(psychologist=psychologist,
-                         start__gte=day_start, start__lt=day_start + timedelta(days=1))
-                 .exclude(status=Appointment.CANCELLED)
-                 .filter(start__time__gte=block.start_time, start__time__lt=block.end_time)
-                 .count())
-        if taken >= block.capacity:
-            raise ValidationError({"start": "That availability block is fully booked."})
+    def _validate_booking(self, psychologist, child, start, duration_minutes,
+                          exclude_id=None):
+        """Every rule about whether this booking can exist - see booking.py.
+
+        A psychologist working outside their own posted window is their call,
+        which is what own_calendar waives. It never waives the overlap rules:
+        the availability window is a preference and being in one place at a
+        time is not.
+        """
+        own = (_role(self.request) == Role.PSYCHOLOGIST
+               and psychologist.id == self.request.user.id)
+        errors = booking.errors_for(
+            psychologist, child, start, duration_minutes,
+            own_calendar=own, exclude_id=exclude_id)
+        if errors:
+            raise ValidationError(errors)
 
     def perform_create(self, serializer):
         role = _role(self.request)
@@ -152,10 +206,34 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             if psychologist is None:
                 raise ValidationError({"psychologist": "Select the psychologist."})
         self._validate_booking(psychologist,
+                               serializer.validated_data.get("child"),
                                serializer.validated_data["start"],
                                serializer.validated_data.get("duration_minutes", 60))
         obj = serializer.save(psychologist=psychologist, booked_by=self.request.user)
         log_activity(self.request.user, ActivityLog.CREATED, ActivityLog.RECORD,
+                     entity_type="Appointment", entity_label=obj.child.fullname,
+                     entity_id=obj.id, recipient=obj.psychologist)
+
+    def perform_update(self, serializer):
+        """Moving an appointment is booking it again, and checked as such.
+
+        This method did not exist, so every rule above was reachable simply by
+        creating a valid appointment and then PATCHing it somewhere else.
+        """
+        instance = serializer.instance
+        data = serializer.validated_data
+        psychologist = data.get("psychologist") or instance.psychologist
+        if _role(self.request) == Role.PSYCHOLOGIST:
+            psychologist = instance.psychologist
+        self._validate_booking(
+            psychologist,
+            data.get("child", instance.child),
+            data.get("start", instance.start),
+            data.get("duration_minutes", instance.duration_minutes),
+            exclude_id=instance.pk,
+        )
+        obj = serializer.save(psychologist=psychologist)
+        log_activity(self.request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type="Appointment", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.psychologist)
 
@@ -167,6 +245,19 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         if not allowed:
             return Response({"detail": "You cannot update this appointment."},
                             status=status.HTTP_403_FORBIDDEN)
+        # Cancelling stays available at any time - a session called off on the
+        # day, or a no-show written up late, are both normal. Recording an
+        # OUTCOME is different: it is a claim about something that happened.
+        if new_status in (Appointment.COMPLETED, Appointment.NO_SHOW):
+            if obj.status == Appointment.CANCELLED:
+                return Response(
+                    {"detail": "This appointment was cancelled. Book a new one rather "
+                               "than recording an outcome against it."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            if obj.start > timezone.now():
+                return Response(
+                    {"detail": "This appointment has not happened yet."},
+                    status=status.HTTP_400_BAD_REQUEST)
         obj.status = new_status
         obj.save(update_fields=["status", "updated_at"])
         log_activity(request.user, ActivityLog.UPDATED, ActivityLog.RECORD,

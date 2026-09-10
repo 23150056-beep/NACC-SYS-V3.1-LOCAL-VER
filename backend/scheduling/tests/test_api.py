@@ -165,6 +165,10 @@ class BookingTest(SchedulingBase):
         aid = self._book(next_weekday(2, 10)).data["id"]
         # staff may cancel but not complete
         self.assertEqual(self.client.post(f"/api/appointments/{aid}/complete/").status_code, 403)
+        # An outcome is a claim about something that happened, so it cannot be
+        # recorded ahead of time - see test_booking_integrity. This test is
+        # about WHO may record one, so put the session in the past first.
+        Appointment.objects.filter(pk=aid).update(start=timezone.now() - timedelta(hours=2))
         # psychologist completes
         self._auth("p@racco1.gov.ph")
         resp = self.client.post(f"/api/appointments/{aid}/complete/")

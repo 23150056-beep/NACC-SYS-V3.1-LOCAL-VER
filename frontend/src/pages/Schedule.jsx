@@ -20,6 +20,36 @@ const PURPOSES = [
   { v: 'follow_up', label: 'Follow-up' },
 ];
 const STATUS_TONE = { scheduled: 'brand', completed: 'success', no_show: 'amber', cancelled: 'neutral' };
+const DURATIONS = [
+  { v: 30, label: '30 min' }, { v: 45, label: '45 min' }, { v: 60, label: '1 hour' },
+  { v: 90, label: '1 hr 30' }, { v: 120, label: '2 hours' },
+];
+const SLOT_EMPTY = {
+  fontSize: 12.5, color: 'var(--text-muted)', padding: '9px 12px',
+  border: '1px dashed var(--border)', borderRadius: 'var(--radius-control)',
+};
+
+const todayIso = () => {
+  // Local date. toISOString() converts to UTC and hands back yesterday for
+  // anybody east of Greenwich, which is all of the Philippines.
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+/* DRF answers {field: ["message"]}, and rendering that raw put a JSON array on
+   screen. Take the first readable sentence, whatever shape it arrives in. */
+function firstError(data, fallback = 'Booking failed.') {
+  if (!data) return fallback;
+  if (typeof data === 'string') return data;
+  for (const key of ['start', 'child', 'psychologist', 'detail', 'non_field_errors']) {
+    const v = data[key];
+    if (Array.isArray(v) && v.length) return String(v[0]);
+    if (typeof v === 'string' && v) return v;
+  }
+  const first = Object.values(data)[0];
+  if (Array.isArray(first) && first.length) return String(first[0]);
+  return typeof first === 'string' ? first : fallback;
+}
 const STATUS_COLOR = { scheduled: 'var(--blue-600)', completed: 'var(--success-600)', no_show: 'var(--amber-500)', cancelled: 'var(--text-faint)' };
 
 export default function Schedule() {
@@ -36,20 +66,59 @@ export default function Schedule() {
   const [blockForm, setBlockForm] = useState(null);
   const [sel, setSel] = useState(null);
   const [error, setError] = useState('');
-  const [slotHints, setSlotHints] = useState(null);
+  const [daySlots, setDaySlots] = useState(null);   // { slots, reason, psychologist } for the chosen day
+  const [slotsBusy, setSlotsBusy] = useState(false);
   const [openPsy, setOpenPsy] = useState(null); // { id, name } — full-page availability view (admin/staff)
+  // The calendar is controlled so the page knows which month is on screen and
+  // can fetch that range rather than the entire history.
+  const [calDate, setCalDate] = useState(() => new Date());
+  const [calView, setCalView] = useState('month');
+
+  // Which appointments to hold in memory. The page used to ask for EVERY
+  // appointment ever booked on every load - the endpoint is unpaginated, and
+  // this database is already at 200 and only grows. A three-month window
+  // around the month on screen covers the calendar plus a month either side,
+  // so ordinary month-stepping never shows a gap.
+  const range = useMemo(() => {
+    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const from = new Date(calDate.getFullYear(), calDate.getMonth() - 1, 1);
+    const to = new Date(calDate.getFullYear(), calDate.getMonth() + 2, 0);
+    return { from: iso(from), to: iso(to) };
+  }, [calDate]);
 
   const load = useCallback(() => {
-    api.get('/appointments/').then((r) => setAppointments(r.data)).catch(() => {});
+    api.get(`/appointments/?from=${range.from}&to=${range.to}`).then((r) => setAppointments(r.data)).catch(() => {});
     api.get('/availability/').then((r) => setBlocks(r.data)).catch(() => {});
     api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))).catch(() => {});
     if (!isPsych) api.get('/psychologists/').then((r) => setPsychologists(r.data)).catch(() => {});
-  }, [isPsych]);
+  }, [isPsych, range.from, range.to]);
   useEffect(() => { load(); }, [load]);
+  // The openings for the psychologist actually chosen, on the day actually
+  // chosen, at the duration actually chosen. The old version asked about the
+  // child's ASSIGNED psychologist regardless of who was picked in the form,
+  // so booking anyone else showed somebody else's free time.
+  const bookingPsy = booking?.psychologist || (isPsych ? user?.id : '');
+  const bookingDate = booking?.date;
+  const bookingDuration = booking?.duration;
+  const bookingChild = booking?.child;
+  const movingId = booking?.id;
   useEffect(() => {
-    if (!booking?.child) { setSlotHints(null); return; }
-    api.get(`/availability/next-slots/?child=${booking.child}`).then((r) => setSlotHints(r.data)).catch(() => setSlotHints(null));
-  }, [booking?.child]);
+    if (!bookingPsy || !bookingDate) { setDaySlots(null); return; }
+    let live = true;
+    setSlotsBusy(true);
+    const q = new URLSearchParams({
+      psychologist: bookingPsy, date: bookingDate, duration: bookingDuration || 60,
+    });
+    if (bookingChild) q.set('child', bookingChild);
+    // When moving one, it must not be counted as a clash with itself, or the
+    // time it currently holds vanishes from the grid offering to move it.
+    if (movingId) q.set('exclude', movingId);
+    api.get(`/availability/slots/?${q}`)
+      .then((r) => { if (live) setDaySlots(r.data); })
+      .catch(() => { if (live) setDaySlots(null); })
+      .finally(() => { if (live) setSlotsBusy(false); });
+    return () => { live = false; };
+  }, [bookingPsy, bookingDate, bookingDuration, bookingChild, movingId]);
   // Quietly warms today's brief cache in the background. prefetchBriefs()
   // already swallows its own errors (including a 503 when the assistant is
   // off) — this screen must never know or care whether it succeeded.
@@ -60,7 +129,9 @@ export default function Schedule() {
 
   const openBooking = () => {
     setError('');
-    setBooking({ child: '', psychologist: '', date: '', time: '09:00', purpose: 'session', duration: 60, notes: '' });
+    // No default time. A prefilled 09:00 was the reason everybody booked
+    // 09:00 and the second one was refused.
+    setBooking({ child: '', psychologist: '', date: todayIso(), time: '', purpose: 'session', duration: 60, notes: '' });
   };
   useOpenFromLink('book', '1', openBooking, !!booking);
 
@@ -114,19 +185,46 @@ export default function Schedule() {
   const book = async (e) => {
     e.preventDefault();
     setError('');
-    const startIso = `${booking.date}T${booking.time}:00`;
+    const payload = {
+      child: booking.child, psychologist: booking.psychologist || undefined,
+      start: `${booking.date}T${booking.time}:00`,
+      duration_minutes: booking.duration || 60,
+      purpose: booking.purpose, notes: booking.notes || '',
+    };
     try {
-      await api.post('/appointments/', {
-        child: booking.child, psychologist: booking.psychologist || undefined,
-        start: startIso, duration_minutes: booking.duration || 60,
-        purpose: booking.purpose, notes: booking.notes || '',
-      });
-      toast.success('Appointment booked');
-      setBooking(null); load();
+      // Moving one is the same form and the same rules, so it is the same
+      // handler — only the verb differs. Cancel-and-rebook was the previous
+      // answer, and it threw away who booked it and when.
+      if (booking.id) {
+        await api.patch(`/appointments/${booking.id}/`, payload);
+        toast.success('Appointment moved');
+      } else {
+        await api.post('/appointments/', payload);
+        toast.success('Appointment booked');
+      }
+      setBooking(null); setSel(null); load();
     } catch (err) {
-      const d = err.response?.data;
-      setError(d?.start || d?.psychologist || d?.child || JSON.stringify(d || 'Booking failed'));
+      setError(firstError(err.response?.data));
     }
+  };
+
+  /* Reopen the booking drawer over an existing appointment. The day is kept
+     so the grid opens on it; the time is cleared because picking a new one is
+     the entire point. */
+  const openReschedule = (appt) => {
+    setError('');
+    const at = new Date(appt.start);
+    const pad = (n) => String(n).padStart(2, '0');
+    setBooking({
+      id: appt.id,
+      child: String(appt.child),
+      psychologist: String(appt.psychologist),
+      date: `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`,
+      time: '',
+      purpose: appt.purpose,
+      duration: appt.duration_minutes || 60,
+      notes: appt.notes || '',
+    });
   };
 
   const openCreateBlock = () => {
@@ -312,18 +410,24 @@ export default function Schedule() {
             startAccessor="start"
             endAccessor="end"
             views={['month', 'week', 'day']}
-            defaultView="month"
             popup
             eventPropGetter={eventStyleGetter}
             onSelectEvent={(ev) => setSel(ev.resource)}
             selectable
+            date={calDate}
+            onNavigate={setCalDate}
+            view={calView}
+            onView={setCalView}
             onSelectSlot={(slot) => {
               if (!canBook) return;
               setError('');
-              const t = format(slot.start, 'HH:mm');
+              // Take the DAY from the click and let the grid supply the time.
+              // Carrying the clicked time through was how somebody landed on
+              // 14:20 in a window that closes at noon and only found out on
+              // pressing Book.
               setBooking({
-                child: '', psychologist: isPsych ? '' : '',
-                date: format(slot.start, 'yyyy-MM-dd'), time: t === '00:00' ? '09:00' : t,
+                child: '', psychologist: '',
+                date: format(slot.start, 'yyyy-MM-dd'), time: '',
                 purpose: 'session', duration: 60, notes: '',
               });
             }}
@@ -386,7 +490,9 @@ export default function Schedule() {
       {booking && (
         <div onClick={() => setBooking(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.32)', display: 'flex', justifyContent: 'flex-end', zIndex: 70 }}>
           <form onSubmit={book} onClick={(e) => e.stopPropagation()} style={{ width: 420, maxWidth: '92%', height: '100%', background: 'var(--surface)', boxShadow: 'var(--shadow-xl)', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--border)', background: 'var(--ink-50)', fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>Book Appointment</div>
+            <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--border)', background: 'var(--ink-50)', fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>
+              {booking.id ? 'Move appointment' : 'Book appointment'}
+            </div>
             <div className="racco-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
               {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{String(error)}</Alert>}
               <FormField label="Child" required>
@@ -407,43 +513,91 @@ export default function Schedule() {
                   </Select>
                 </FormField>
               )}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <FormField label="Date" required>
-                  <Input type="date" value={booking.date} onChange={(e) => setBooking({ ...booking, date: e.target.value })} />
-                </FormField>
-                <FormField label="Time" required>
-                  <Input type="time" value={booking.time} onChange={(e) => setBooking({ ...booking, time: e.target.value })} />
-                </FormField>
-              </div>
-              {slotHints?.slots?.length > 0 && (
-                <div>
-                  <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 6 }}>Next openings — {slotHints.psychologist}</div>
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {slotHints.slots.map((s, i) => (
-                      <button key={i} type="button" onClick={() => setBooking({ ...booking, date: s.date, time: s.start })}
-                        style={{ padding: '5px 10px', borderRadius: 'var(--radius-pill)', border: '1px solid var(--blue-300)', background: 'var(--blue-50)', color: 'var(--blue-700)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 11.5, cursor: 'pointer' }}>
-                        {s.weekday.slice(0, 3)} {s.date.slice(5)} · {s.start} ({s.remaining} open)
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
+              {/* Purpose and length come BEFORE the day, because both change
+                  which times are free. Asking for a time first and letting the
+                  length invalidate it afterwards is how the old form produced
+                  a refusal only once you pressed Book. */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <FormField label="Purpose">
                   <Select value={booking.purpose} onChange={(e) => setBooking({ ...booking, purpose: e.target.value })}>
                     {PURPOSES.map((p) => <option key={p.v} value={p.v}>{p.label}</option>)}
                   </Select>
                 </FormField>
-                <FormField label="Duration (min)">
-                  <Input type="number" min="15" step="15" value={booking.duration} onChange={(e) => setBooking({ ...booking, duration: e.target.value })} />
+                <FormField label="Length">
+                  <Select
+                    value={booking.duration}
+                    onChange={(e) => setBooking({ ...booking, duration: Number(e.target.value), time: '' })}
+                  >
+                    {DURATIONS.map((d) => <option key={d.v} value={d.v}>{d.label}</option>)}
+                  </Select>
                 </FormField>
               </div>
+              <FormField label="Day" required>
+                <Input
+                  type="date" value={booking.date} min={todayIso()}
+                  onChange={(e) => setBooking({ ...booking, date: e.target.value, time: '' })}
+                />
+              </FormField>
+
+              {/* The time is chosen, not typed. Every option here has been put
+                  through the same check the booking endpoint runs, so a slot
+                  on this grid cannot come back refused. */}
+              <FormField label="Time" required>
+                {(!bookingPsy || !booking.date) ? (
+                  <div style={SLOT_EMPTY}>
+                    Choose {isPsych ? 'a day' : 'a psychologist and a day'} to see open times.
+                  </div>
+                ) : slotsBusy ? (
+                  <div style={SLOT_EMPTY}>Checking that day&hellip;</div>
+                ) : daySlots?.slots?.length ? (
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {daySlots.slots.map((s) => {
+                      const on = booking.time === s.start;
+                      return (
+                        <button
+                          key={s.start} type="button" aria-pressed={on}
+                          title={`${s.start} to ${s.end}`}
+                          onClick={() => setBooking({ ...booking, time: s.start })}
+                          style={{
+                            padding: '7px 12px', borderRadius: 'var(--radius-control)',
+                            border: `1px solid ${on ? 'var(--blue-600)' : 'var(--border)'}`,
+                            background: on ? 'var(--blue-600)' : 'var(--surface)',
+                            color: on ? '#fff' : 'var(--text-strong)',
+                            fontFamily: 'var(--font-sans)', fontWeight: 700,
+                            fontSize: 12.5, cursor: 'pointer', minWidth: 66,
+                          }}
+                        >
+                          {s.start}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  /* Never a blank panel. "They do not work Wednesdays", "the
+                     day is full" and "that length does not fit" send somebody
+                     to three different next actions. */
+                  <Alert tone="amber" icon={<Icon name="calendar" size={17} />}>
+                    {daySlots?.reason || 'No open times that day.'}
+                  </Alert>
+                )}
+              </FormField>
               <FormField label="Notes">
                 <Input value={booking.notes} onChange={(e) => setBooking({ ...booking, notes: e.target.value })} />
               </FormField>
             </div>
             <div style={{ padding: 16, borderTop: '1px solid var(--border)' }}>
-              <Button type="submit" variant="primary" fullWidth disabled={!booking.child || !booking.date || (!isPsych && !booking.psychologist)} iconLeft={<Icon name="calendar" size={16} />}>Book</Button>
+              {/* Says what is still missing rather than sitting there grey. */}
+              <Button
+                type="submit" variant="primary" fullWidth
+                disabled={!booking.child || !booking.date || !booking.time || (!isPsych && !booking.psychologist)}
+                title={!booking.child ? 'Choose a child'
+                  : (!isPsych && !booking.psychologist) ? 'Choose a psychologist'
+                    : !booking.date ? 'Choose a day'
+                      : !booking.time ? 'Choose a time' : 'Book it'}
+                iconLeft={<Icon name="calendar" size={16} />}
+              >
+                {booking.time ? `Book ${booking.time}` : 'Book'}
+              </Button>
             </div>
           </form>
         </div>
@@ -538,13 +692,36 @@ export default function Schedule() {
               {PURPOSES.find((p) => p.v === sel.purpose)?.label || sel.purpose} with {sel.psychologist_name || '—'}
               {sel.notes ? ` · ${sel.notes}` : ''}
             </div>
-            {sel.status === 'scheduled' && (
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {(isPsych || role === 'Administrator') && <Button variant="primary" onClick={() => setStatus(sel, 'complete')} iconLeft={<Icon name="check" size={15} />}>Completed</Button>}
-                {(isPsych || role === 'Administrator') && <Button variant="secondary" onClick={() => setStatus(sel, 'no_show')} iconLeft={<Icon name="alert-triangle" size={15} />}>No-show</Button>}
-                <Button variant="danger" onClick={() => setStatus(sel, 'cancel')} iconLeft={<Icon name="x" size={15} />}>Cancel</Button>
-              </div>
-            )}
+            {sel.status === 'scheduled' && (() => {
+              // An outcome is a claim about something that happened, so the
+              // server refuses one ahead of time. Offer it disabled with the
+              // reason rather than letting the click earn an error.
+              const started = new Date(sel.start) <= new Date();
+              const outcomeTitle = started ? undefined : 'This session has not happened yet.';
+              return (
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {(isPsych || role === 'Administrator') && (
+                    <Button variant="primary" disabled={!started} title={outcomeTitle}
+                      onClick={() => setStatus(sel, 'complete')} iconLeft={<Icon name="check" size={15} />}>
+                      Completed
+                    </Button>
+                  )}
+                  {(isPsych || role === 'Administrator') && (
+                    <Button variant="secondary" disabled={!started} title={outcomeTitle}
+                      onClick={() => setStatus(sel, 'no_show')} iconLeft={<Icon name="alert-triangle" size={15} />}>
+                      No-show
+                    </Button>
+                  )}
+                  {canBook && (
+                    <Button variant="secondary" onClick={() => openReschedule(sel)}
+                      iconLeft={<Icon name="calendar" size={15} />}>
+                      Reschedule
+                    </Button>
+                  )}
+                  <Button variant="danger" onClick={() => setStatus(sel, 'cancel')} iconLeft={<Icon name="x" size={15} />}>Cancel</Button>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

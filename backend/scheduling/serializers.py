@@ -63,6 +63,11 @@ class AppointmentSerializer(serializers.ModelSerializer):
         extra_kwargs = {"psychologist": {"required": False}}
 
     def validate_start(self, value):
-        if value < timezone.now() and self.instance is None:
+        # Checked when MOVING one too, not only when creating it - otherwise a
+        # reschedule can drop an appointment into last week. An unchanged start
+        # is exempt so that editing the notes on a past session still works.
+        if self.instance is not None and value == self.instance.start:
+            return value
+        if value < timezone.now():
             raise serializers.ValidationError("Cannot book an appointment in the past.")
         return value
