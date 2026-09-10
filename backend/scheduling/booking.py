@@ -165,8 +165,14 @@ def bookable_slots(psychologist, child, day, duration_minutes=60,
                     "end": ends_at(cursor, duration_minutes).strftime("%H:%M"),
                 })
             cursor += step
-    slots.sort(key=lambda s: s["start"])
-    return slots
+    # De-duplicated by start time. Two overlapping windows on one day would
+    # otherwise offer the shared hours twice, and the grid would show 09:00
+    # next to 09:00. The availability form refuses to create such a pair, but
+    # a database can still hold one, and the fix belongs where the reader is.
+    unique = {}
+    for slot in slots:
+        unique.setdefault(slot["start"], slot)
+    return sorted(unique.values(), key=lambda s: s["start"])
 
 
 def _spoken(day):

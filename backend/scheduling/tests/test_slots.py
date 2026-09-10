@@ -103,6 +103,16 @@ class BookableSlotTests(SchedulingBase):
             exclude_id=appt.pk)
         self.assertIn("10:00", [s["start"] for s in moving])
 
+    def test_overlapping_windows_do_not_offer_a_time_twice(self):
+        # The availability form refuses to create such a pair, but a seeder or
+        # a direct write can, and a grid showing 09:00 beside 09:00 reads as a
+        # broken screen rather than as bad data.
+        AvailabilityBlock.objects.create(
+            psychologist=self.psy, weekday=2, start_time="08:00",
+            end_time="12:00", capacity=6)
+        starts = [s["start"] for s in self._slots()]
+        self.assertEqual(len(starts), len(set(starts)), starts)
+
     def test_a_day_with_no_window_offers_nothing(self):
         self.assertEqual([], booking.bookable_slots(
             self.psy, self.child, next_weekday(0, 9).date()))

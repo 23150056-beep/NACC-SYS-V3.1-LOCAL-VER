@@ -37,11 +37,13 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.models import Role, User
+from config.demo_guard import refuse_if_not_local
 from children.models import Child
 from clinical.models import (
     AgencyFormTemplate, ConsentRecord, InstrumentCatalog, OpinionnaireInvite,
     PreAssessment, ProblemEntry, RemarkNote, ResultEntry, TreatmentPlan)
 from locations.models import Barangay, Municipality, Province
+from scheduling import demo_schedule
 from scheduling.models import Appointment
 
 # Invented, but drawn from naming patterns common in the Ilocos region so the
@@ -160,18 +162,12 @@ class Command(BaseCommand):
         pointed at. Running it against the agency's real one would mix fictional
         records into real case files — not a data loss, something worse: a file
         that cannot be trusted.
+
+        The checks live in config.demo_guard because more than one command
+        invents data now, and a guard kept in two copies protects whichever
+        copy somebody remembered to update.
         """
-        db = settings.DATABASES["default"]
-        host = str(db.get("HOST", "")).lower()
-        remote = ("neon.tech", "render.com", "amazonaws.com", "supabase.co")
-        if any(marker in host for marker in remote):
-            raise CommandError(
-                f"Refusing to run: the database host ({host}) looks like a hosted "
-                "one. This command is for local databases only.")
-        if not settings.DEBUG:
-            raise CommandError(
-                "Refusing to run with DJANGO_DEBUG=False. Demo data belongs in "
-                "development, and a production system should never contain it.")
+        refuse_if_not_local()
 
     def handle(self, *args, **options):
         # Checked before anything opens a connection. This used to sit inside a
@@ -199,6 +195,10 @@ class Command(BaseCommand):
             raise CommandError("No PSGC addresses loaded. Run: manage.py seed_psgc")
 
         psychologists = self._ensure_staff(rng)
+        # A caseload nobody can be booked with is not a caseload. Without this
+        # every psychologist here carries children and has no bookable window,
+        # so the one thing the calendar exists for fails for all forty.
+        demo_schedule.install_availability(psychologists)
         template = self._ensure_self_report_template()
         instruments = self._ensure_instruments(psychologists)
         places = self._addresses(rng)
@@ -206,9 +206,17 @@ class Command(BaseCommand):
         made = self._build_children(rng, options, today, psychologists, template,
                                     instruments, places)
 
+        # The appointments above are placed at rough offsets from today. This
+        # puts every one of them on a weekday, inside clinic hours, on a slot
+        # its psychologist is actually free for - so the seeded calendar is one
+        # the booking endpoint would have accepted. Demo data the real rules
+        # would reject is a second system sharing a database.
+        moved, _ = demo_schedule.realign_appointments()
+
         self.stdout.write("")
         self.stdout.write(self.style.SUCCESS(
             f"Built {made['children']} children across {len(psychologists)} psychologists."))
+        self.stdout.write(f"  {moved} appointments placed in clinic hours")
         for label in ("steady", "declining", "divergent"):
             self.stdout.write(f"  {label:<12} {made[label]:>3}")
         self.stdout.write(
