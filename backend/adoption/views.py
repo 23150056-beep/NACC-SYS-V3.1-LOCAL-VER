@@ -40,11 +40,6 @@ class CaseworkAccess(BasePermission):
                     and role_of(request) in (Role.ADMINISTRATOR, Role.STAFF))
 
 
-class IsAdministrator(BasePermission):
-    def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated
-                    and role_of(request) == Role.ADMINISTRATOR)
-
 
 def _cases_for(request):
     """Every case this account may see.
@@ -151,8 +146,14 @@ class AdoptionCaseViewSet(ReadOnlyModelViewSet):
             return Response({"detail": str(exc)}, status=http.HTTP_400_BAD_REQUEST)
         return Response(CaseDetailSerializer(self.get_object()).data)
 
-    @action(detail=True, methods=["post"], permission_classes=[IsAdministrator])
+    @action(detail=True, methods=["post"])
     def close(self, request, pk=None):
+        # Casework, not an administrator's signature. A case ends for five
+        # reasons and four of them are just what happened to the child; the
+        # person who worked it is the person who knows which.
+        denied = self._casework_or_403()
+        if denied:
+            return denied
         case = self.get_object()
         try:
             pipeline.close(case, actor=request.user,
@@ -194,10 +195,12 @@ class RequirementViewSet(ViewSet):
         try:
             requirement = fn(*args, **kwargs)
         except docket.NotPermitted as exc:
-            # A role refusal is a 403; a state refusal (nothing submitted yet,
-            # no reason given) is a 400. The client shows them differently.
+            # A role refusal is a 403; a state refusal - nothing submitted yet,
+            # no reason given, your own upload - is a 400. The client shows them
+            # differently, and the difference is the exception's type rather
+            # than a word in its message.
             code = (http.HTTP_403_FORBIDDEN
-                    if "role" in str(exc).lower() or "only an administrator" in str(exc).lower()
+                    if isinstance(exc, docket.RoleNotPermitted)
                     else http.HTTP_400_BAD_REQUEST)
             return Response({"detail": str(exc)}, status=code)
         return Response(RequirementSerializer(requirement).data)

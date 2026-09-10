@@ -52,9 +52,13 @@ function ClockBar({ clock }) {
   );
 }
 
-function RequirementRow({ r, canAct, isAdmin, onSubmit, onVerify, onWaive, busy }) {
+function RequirementRow({ r, canAct, currentUserId, onSubmit, onVerify, onWaive, busy }) {
   const meta = REQUIREMENT_STATE_META[r.state] || REQUIREMENT_STATE_META.pending;
   const fileRef = useRef(null);
+  // The one rule that is not about rank: you cannot sign off your own upload.
+  // Shown and disabled rather than hidden, so the reason is legible instead of
+  // the button just being missing.
+  const isMyOwnUpload = r.submitted_by != null && r.submitted_by === currentUserId;
 
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 11, padding: '10px 15px', borderBottom: '1px solid var(--divider-row)' }}>
@@ -68,9 +72,9 @@ function RequirementRow({ r, canAct, isAdmin, onSubmit, onVerify, onWaive, busy 
         </div>
         {/* Provenance, not just state: who put it there and who signed it. */}
         <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 2 }}>
-          {r.state === 'waived' ? `Waived by ${r.verified_by_name || 'an administrator'} — ${r.waiver_reason}`
-            : r.state === 'verified' ? `Verified by ${r.verified_by_name || 'an administrator'}${r.verified_at ? ` on ${shortDate(r.verified_at)}` : ''}`
-              : r.state === 'submitted' ? `Submitted by ${r.submitted_by_name || 'staff'}${r.submitted_at ? ` on ${shortDate(r.submitted_at)}` : ''}, awaiting verification`
+          {r.state === 'waived' ? `Waived by ${r.verified_by_name || 'a colleague'} — ${r.waiver_reason}`
+            : r.state === 'verified' ? `Verified by ${r.verified_by_name || 'a colleague'}${r.verified_at ? ` on ${shortDate(r.verified_at)}` : ''}`
+              : r.state === 'submitted' ? `Submitted by ${r.submitted_by_name || 'a colleague'}${r.submitted_at ? ` on ${shortDate(r.submitted_at)}` : ''}, awaiting verification`
                 : 'Not yet submitted'}
           {r.document_name ? ` · ${r.document_name}` : ''}
         </div>
@@ -89,12 +93,18 @@ function RequirementRow({ r, canAct, isAdmin, onSubmit, onVerify, onWaive, busy 
               Mark done
             </Button>
           )}
-          {isAdmin && r.state === 'submitted' && (
-            <Button variant="primary" size="sm" disabled={busy} onClick={() => onVerify(r)}>Verify</Button>
+          {r.state === 'submitted' && (
+            <Button
+              variant="primary" size="sm" disabled={busy || isMyOwnUpload}
+              title={isMyOwnUpload
+                ? 'This is your own upload. Verification has to come from somebody else.'
+                : 'Sign this off'}
+              onClick={() => onVerify(r)}
+            >
+              Verify
+            </Button>
           )}
-          {isAdmin && (
-            <Button variant="secondary" size="sm" disabled={busy} onClick={() => onWaive(r)}>Waive</Button>
-          )}
+          <Button variant="secondary" size="sm" disabled={busy} onClick={() => onWaive(r)}>Waive</Button>
         </div>
       )}
     </div>
@@ -107,7 +117,8 @@ export default function AdoptionCase() {
   const toast = useToast();
   const { user } = useAuth();
   const role = user?.role_name || 'Staff';
-  const isAdmin = role === 'Administrator';
+  // One casework capability, not two tiers. The module is a checklist the
+  // office keeps for itself; the only per-row rule left is self-verification.
   const canAct = ['Administrator', 'Staff'].includes(role);
 
   const [data, setData] = useState(null);
@@ -217,9 +228,7 @@ export default function AdoptionCase() {
                   Step back
                 </Button>
               )}
-              {isAdmin && (
-                <Button variant="secondary" disabled={busy} onClick={() => setClosing(true)}>Close case</Button>
-              )}
+              <Button variant="secondary" disabled={busy} onClick={() => setClosing(true)}>Close case</Button>
               {/* Disabled with the reason in the tooltip, per the spec: the
                   button must say what is stopping it, not merely refuse. */}
               <Button
@@ -394,7 +403,8 @@ export default function AdoptionCase() {
               </div>
               {rows.map((r) => (
                 <RequirementRow
-                  key={r.id} r={r} canAct={canAct && !data.closed_at && !data.on_hold} isAdmin={isAdmin} busy={busy}
+                  key={r.id} r={r} canAct={canAct && !data.closed_at && !data.on_hold}
+                  currentUserId={user?.id} busy={busy}
                   onSubmit={(req, file) => run(() => submitRequirement(req.id, file), 'Added to the docket.')}
                   onVerify={(req) => run(() => verifyRequirement(req.id), 'Verified.')}
                   onWaive={(req) => { setWaiving(req); setWaiverReason(''); }}
@@ -405,8 +415,8 @@ export default function AdoptionCase() {
         })}
         <Note icon="gavel">
           A requirement counts as met only once somebody other than the person who submitted it has
-          verified it. Waiving one is an administrator&rsquo;s decision to proceed without a statutory
-          document, and the reason is the only record of why.
+          verified it &mdash; that one rule holds whoever you are. Waiving is the decision to proceed
+          without a statutory document, and the reason you type is the only record of why.
         </Note>
       </Card>
 

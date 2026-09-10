@@ -31,7 +31,10 @@ class RequirementSerializer(serializers.ModelSerializer):
         fields = [
             "id", "stage_number", "code", "label", "state", "owned_externally",
             "due_date", "original_filename", "document_name",
-            "submitted_by_name", "submitted_at",
+            # The id as well as the name: the screen hides Verify on your own
+            # upload, and matching on a display name works until two people
+            # share one.
+            "submitted_by", "submitted_by_name", "submitted_at",
             "verified_by_name", "verified_at", "waiver_reason",
         ]
 

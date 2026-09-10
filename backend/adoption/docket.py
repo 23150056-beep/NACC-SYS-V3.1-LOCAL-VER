@@ -1,13 +1,20 @@
 """The requirement checklist: submit, verify, waive.
 
-Two separations of duty live here rather than in a DRF permission class,
-because neither is a pure function of the caller's role:
+The module is a checklist the office keeps for itself, so every casework role
+works it end to end - staff tick, sign off and waive exactly as administrators
+do. Gating verification on the administrator role only ever produced a stage a
+staff member could fill in and then not finish.
 
-* **Nobody verifies their own upload.** That depends on the row, not the role.
-  Without it, "verified" only means somebody clicked twice.
-* **Only an administrator waives, and only with a reason.** A waiver is a
-  decision to proceed without a statutory document; the reason is the whole
-  audit trail for that decision.
+One rule survives that, and it lives here rather than in a DRF permission
+class because it is not a function of the caller's role at all:
+
+* **Nobody verifies their own upload.** That depends on the ROW. Two people
+  are still two people whether they are administrators or staff, and without
+  this rule "verified" only means somebody clicked twice.
+
+A waiver still has to say why. That is not a permission either - it is the
+audit trail for proceeding without a statutory document, and it is worth the
+same whoever grants it.
 
 Views call these. They do not re-check the rules, and they must not, or the
 rules will drift apart the first time a second screen wants to verify
@@ -24,15 +31,28 @@ class NotPermitted(Exception):
     """The action is refused, and the message says why to the person's face."""
 
 
-# Who may put something ON the docket. Psychologists are absent on purpose:
-# section 6 gives them the timeline of children they assessed and nothing more.
+class RoleNotPermitted(NotPermitted):
+    """Refused because of who is asking, rather than what state the row is in.
+
+    The distinction is the HTTP status - 403 for this, 400 for everything else -
+    and it used to be recovered by searching the message for the word
+    "administrator". That worked until the word changed. A subclass cannot be
+    broken by rewording a sentence.
+    """
+
+
+# The casework roles, and the same three tuples for all of it. Psychologists
+# are absent from every one of them on purpose: section 6 gives them the
+# timeline of children they assessed and nothing more.
+#
+# These stay as three separate names rather than one CASEWORK_ROLES constant
+# because they are three different decisions. If a Supervisor role is ever
+# added - the spec's "verify requirements, reassign owners, approve
+# extensions" - it is these tuples that get narrowed again, and they will not
+# all narrow the same way.
 SUBMIT_ROLES = (Role.ADMINISTRATOR, Role.STAFF)
-# Who may sign it off. The spec's Supervisor - "verify requirements, reassign
-# owners, approve extensions" - has no account type in this system yet, so it
-# collapses into Administrator. When a Supervisor role is added this tuple is
-# the only line that has to change.
-VERIFY_ROLES = (Role.ADMINISTRATOR,)
-WAIVE_ROLES = (Role.ADMINISTRATOR,)
+VERIFY_ROLES = (Role.ADMINISTRATOR, Role.STAFF)
+WAIVE_ROLES = (Role.ADMINISTRATOR, Role.STAFF)
 
 
 def _assert_open(requirement):
@@ -47,7 +67,7 @@ def submit(requirement, actor, document=None, original_filename="", due_date=Non
     """Put a document (or an assertion) on the docket, pending verification."""
     _assert_open(requirement)
     if role_of_user(actor) not in SUBMIT_ROLES:
-        raise NotPermitted("Your role cannot add documents to an adoption docket.")
+        raise RoleNotPermitted("Your role cannot add documents to an adoption docket.")
 
     requirement.state = Requirement.SUBMITTED
     requirement.submitted_by = actor
@@ -65,7 +85,7 @@ def verify(requirement, actor):
     """Sign a submitted requirement off. Never your own."""
     _assert_open(requirement)
     if role_of_user(actor) not in VERIFY_ROLES:
-        raise NotPermitted("Only an administrator can verify a docket requirement.")
+        raise RoleNotPermitted("Your role cannot verify a docket requirement.")
     if requirement.state != Requirement.SUBMITTED:
         raise NotPermitted("There is nothing submitted here to verify yet.")
     if requirement.submitted_by_id == getattr(actor, "id", None):
@@ -87,7 +107,7 @@ def waive(requirement, actor, reason):
     """
     _assert_open(requirement)
     if role_of_user(actor) not in WAIVE_ROLES:
-        raise NotPermitted("Only an administrator can waive a requirement.")
+        raise RoleNotPermitted("Your role cannot waive a requirement.")
     if not (reason or "").strip():
         raise NotPermitted("A waiver has to say why.")
 

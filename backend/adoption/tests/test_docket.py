@@ -1,12 +1,19 @@
 """The docket - submit, verify, waive. Spec sections 5.6 and 6.
 
-Two separations of duty are the reason this is not just a status dropdown:
+This is a checklist staff run themselves, so every casework role can tick,
+sign off and waive. One rule survives that opening-up, and it is the one that
+cannot be expressed as a role at all:
 
-* the person who uploads a document may not be the person who verifies it, and
-* only an administrator may waive a statutory requirement, with a reason.
+* **the person who uploads a document may not be the person who verifies it.**
 
-Both live in the service rather than in a permission class, because "not your
-own upload" depends on the row, not on the role.
+It lives in the service rather than in a permission class because "not your
+own upload" depends on the ROW, not on who is asking. Two people are still two
+people whether they are administrators or staff, and without this rule a
+verified tick only means somebody clicked twice.
+
+A waiver still has to say why. That is not a permission - it is the audit
+trail for proceeding without a statutory document, and it is worth the same
+whoever grants it.
 """
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -71,10 +78,22 @@ class DocketTests(TestCase):
             docket.verify(self.req, actor=self.admin)
         self.assertIn("own", str(ctx.exception).lower())
 
-    def test_staff_cannot_verify_at_all(self):
+    def test_staff_verify_somebody_elses_upload(self):
+        # The module is a checklist the office keeps for itself. Requiring an
+        # administrator for every tick left staff unable to finish a stage.
         docket.submit(self.req, actor=self.other_staff)
-        with self.assertRaises(docket.NotPermitted):
+        docket.verify(self.req, actor=self.staff)
+        self.req.refresh_from_db()
+        self.assertEqual(Requirement.VERIFIED, self.req.state)
+        self.assertEqual(self.staff, self.req.verified_by)
+
+    def test_a_staff_member_may_not_verify_their_own_upload_either(self):
+        # The separation of duty is about the row, not the role, so opening
+        # verification to staff must not open it to self-verification.
+        docket.submit(self.req, actor=self.staff)
+        with self.assertRaises(docket.NotPermitted) as ctx:
             docket.verify(self.req, actor=self.staff)
+        self.assertIn("own", str(ctx.exception).lower())
 
     def test_nothing_can_be_verified_before_it_is_submitted(self):
         with self.assertRaises(docket.NotPermitted):
@@ -84,9 +103,11 @@ class DocketTests(TestCase):
         with self.assertRaises(docket.NotPermitted):
             docket.waive(self.req, actor=self.admin, reason="  ")
 
-    def test_waiving_is_administrator_only(self):
-        with self.assertRaises(docket.NotPermitted):
-            docket.waive(self.req, actor=self.staff, reason="original lost in the 2019 fire")
+    def test_staff_can_waive_with_a_reason(self):
+        docket.waive(self.req, actor=self.staff, reason="original lost in the 2019 fire")
+        self.req.refresh_from_db()
+        self.assertEqual(Requirement.WAIVED, self.req.state)
+        self.assertEqual(self.staff, self.req.verified_by)
 
     def test_waiving_records_the_reason(self):
         docket.waive(self.req, actor=self.admin, reason="original lost in the 2019 fire")

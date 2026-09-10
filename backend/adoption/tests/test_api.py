@@ -30,9 +30,11 @@ class ApiTestBase(APITestCase):
             email="p@racco1.gov.ph", username="p", password="pass1234", role=psy_role)
         self.other_psy = User.objects.create_user(
             email="p2@racco1.gov.ph", username="p2", password="pass1234", role=psy_role)
+        staff_role = Role.objects.create(role_name=Role.STAFF)
         self.staff = User.objects.create_user(
-            email="s@racco1.gov.ph", username="s", password="pass1234",
-            role=Role.objects.create(role_name=Role.STAFF))
+            email="s@racco1.gov.ph", username="s", password="pass1234", role=staff_role)
+        self.other_staff = User.objects.create_user(
+            email="s2@racco1.gov.ph", username="s2", password="pass1234", role=staff_role)
         self.admin = User.objects.create_user(
             email="a@racco1.gov.ph", username="a", password="pass1234",
             role=Role.objects.create(role_name=Role.ADMINISTRATOR))
@@ -141,17 +143,21 @@ class AdvanceApiTests(ApiTestBase):
         r = self.client.post(f"/api/adoption/cases/{case.id}/revert/", {"note": ""})
         self.assertEqual(400, r.status_code)
 
-    def test_only_an_administrator_can_close_a_case(self):
+    def test_staff_can_close_a_case(self):
         case = self.make_case()
         self.client.force_authenticate(self.staff)
         r = self.client.post(f"/api/adoption/cases/{case.id}/close/",
                              {"reason": AdoptionCase.AGED_OUT})
-        self.assertEqual(403, r.status_code)
+        self.assertEqual(200, r.status_code)
 
-        self.client.force_authenticate(self.admin)
+    def test_a_psychologist_still_cannot_close_a_case(self):
+        # Opening the module to staff does not open it to every role. The
+        # caseload of the office is still not a psychologist's to run.
+        case = self.make_case()
+        self.client.force_authenticate(self.psy)
         r = self.client.post(f"/api/adoption/cases/{case.id}/close/",
                              {"reason": AdoptionCase.AGED_OUT})
-        self.assertEqual(200, r.status_code)
+        self.assertEqual(403, r.status_code)
 
 
 class RequirementApiTests(ApiTestBase):
@@ -167,11 +173,28 @@ class RequirementApiTests(ApiTestBase):
         self.req.refresh_from_db()
         self.assertEqual(Requirement.SUBMITTED, self.req.state)
 
-    def test_staff_cannot_verify(self):
+    def test_staff_verify_somebody_elses_submission(self):
+        self.client.force_authenticate(self.other_staff)
+        self.client.post(f"/api/adoption/requirements/{self.req.id}/submit/")
+        self.client.force_authenticate(self.staff)
+        r = self.client.post(f"/api/adoption/requirements/{self.req.id}/verify/")
+        self.assertEqual(200, r.status_code)
+
+    def test_the_payload_says_WHO_submitted_it_not_just_their_name(self):
+        # The screen has to hide Verify on your own upload rather than offer a
+        # button the server will refuse. Matching on a display name would work
+        # until two people share one.
+        self.client.force_authenticate(self.staff)
+        self.client.post(f"/api/adoption/requirements/{self.req.id}/submit/")
+        r = self.client.get(f"/api/adoption/cases/{self.case.id}/")
+        row = next(x for x in r.data["requirements"] if x["id"] == self.req.id)
+        self.assertEqual(self.staff.id, row["submitted_by"])
+
+    def test_staff_cannot_verify_their_own_submission(self):
         self.client.force_authenticate(self.staff)
         self.client.post(f"/api/adoption/requirements/{self.req.id}/submit/")
         r = self.client.post(f"/api/adoption/requirements/{self.req.id}/verify/")
-        self.assertEqual(403, r.status_code)
+        self.assertEqual(400, r.status_code)
 
     def test_an_administrator_cannot_verify_their_own_submission(self):
         self.client.force_authenticate(self.admin)
@@ -186,9 +209,12 @@ class RequirementApiTests(ApiTestBase):
         r = self.client.post(f"/api/adoption/requirements/{self.req.id}/verify/")
         self.assertEqual(200, r.status_code)
 
-    def test_waiving_is_administrator_only_and_needs_a_reason(self):
+    def test_waiving_needs_a_reason_whoever_grants_it(self):
         self.client.force_authenticate(self.staff)
-        self.assertEqual(403, self.client.post(
+        self.assertEqual(400, self.client.post(
+            f"/api/adoption/requirements/{self.req.id}/waive/",
+            {"reason": ""}).status_code)
+        self.assertEqual(200, self.client.post(
             f"/api/adoption/requirements/{self.req.id}/waive/",
             {"reason": "lost"}).status_code)
 
