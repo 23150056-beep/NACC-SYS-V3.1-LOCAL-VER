@@ -65,6 +65,31 @@ curl -s https://nacc-v3-demo-api.onrender.com/api/assistant/capabilities/ -o /de
 For the frontend, fetch the page, read the hashed `/assets/index-*.js` name out
 of it, and grep the bundle for a string only the new build contains.
 
+**On 10 Sep 2026 it did deploy** — five pushes, each verified this way, each
+live within minutes. So the answer changes; the discipline does not. Verify it
+every time, because the whole point is that you cannot tell from here.
+
+Three ways that verification goes wrong, all learned the hard way on 10 Sep:
+
+- **The two services deploy independently.** `nacc-v3-demo-api` and
+  `nacc-v3-demo-web` are separate Render services off one push. The API went
+  live while the web build was still running, and polling only the bundle hash
+  said "not deployed" for a backend that was already serving the new code. A
+  backend-only commit never changes the bundle at all. Check the one you
+  actually changed, and say which you checked.
+- **A 401 means nothing without a control.** Probe a route that cannot exist
+  in the same run: it must answer 404 while the real one answers 401. And a
+  path under a DRF router — anything registered with `router.register` — cannot
+  be told apart anonymously at all, because the detail route swallows the
+  unknown segment as a pk and answers 401 either way. Pick an explicitly
+  routed path, or check the frontend bundle instead.
+- **Do not pipe a long verification through `tail`.** A background
+  `manage.py test | tail -8` reported `FAILED (failures=4, errors=1)` and threw
+  away every failure name with it; the whole suite had to run again to find
+  out what broke. The same goes for `grep` over a downloaded bundle — it can
+  abort on a large minified file and print nothing, which reads exactly like
+  "the string is absent".
+
 **Do not `git push origin`** — the owner has said he does not want Render
 touched, and that push is what deploys it. Pushing there needs asking first, in
 so many words.
