@@ -103,6 +103,9 @@ export default function Schedule() {
   const [openPsy, setOpenPsy] = useState(null); // { id, name } — full-page availability view (admin/staff)
   const [removing, setRemoving] = useState(null);  // the weekly pattern awaiting confirmation
   const [calPsy, setCalPsy] = useState('');        // '' = everyone
+  const [leave, setLeave] = useState([]);          // declared absences
+  const [leaveForm, setLeaveForm] = useState(null);
+  const [removingLeave, setRemovingLeave] = useState(null);
   // The calendar is controlled so the page knows which month is on screen and
   // can fetch that range rather than the entire history.
   const [calDate, setCalDate] = useState(() => new Date());
@@ -123,6 +126,7 @@ export default function Schedule() {
   const load = useCallback(() => {
     api.get(`/appointments/?from=${range.from}&to=${range.to}`).then((r) => setAppointments(r.data)).catch(() => {});
     api.get('/availability/').then((r) => setBlocks(r.data)).catch(() => {});
+    api.get('/unavailability/?upcoming=true').then((r) => setLeave(r.data)).catch(() => {});
     api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))).catch(() => {});
     if (!isPsych) api.get('/psychologists/').then((r) => setPsychologists(r.data)).catch(() => {});
   }, [isPsych, range.from, range.to]);
@@ -233,6 +237,12 @@ export default function Schedule() {
     [openPsy, blocks],
   );
   const openPsyPatterns = useMemo(() => patternsOf(openPsyBlocks), [openPsyBlocks]);
+  const canRecordLeave = openPsy && (role === 'Administrator'
+    || (isPsych && String(openPsy.id) === String(user?.id)));
+  const openPsyLeave = useMemo(
+    () => (openPsy ? leave.filter((l) => String(l.psychologist) === String(openPsy.id)) : []),
+    [openPsy, leave],
+  );
   const openPsyWeeklySlots = openPsyBlocks.filter((b) => b.date == null).reduce((s, b) => s + (b.capacity || 0), 0);
   const openPsyDated = openPsyBlocks.filter((b) => b.date != null)
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
@@ -378,6 +388,35 @@ export default function Schedule() {
     booked: b.booked_ahead || 0,
   });
 
+  const saveLeave = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!leaveForm.starts_on || !leaveForm.ends_on) { setError('Pick both dates.'); return; }
+    try {
+      await api.post('/unavailability/', {
+        psychologist: leaveForm.psychologist || undefined,
+        starts_on: leaveForm.starts_on, ends_on: leaveForm.ends_on,
+        reason: leaveForm.reason || '',
+      });
+      toast.success('Leave recorded');
+      setLeaveForm(null); load();
+    } catch (err) {
+      setError(firstError(err.response?.data, 'Could not record the leave.'));
+    }
+  };
+
+  const removeLeave = async () => {
+    if (!removingLeave) return;
+    try {
+      await api.delete(`/unavailability/${removingLeave.id}/`);
+      toast.success('Leave removed');
+      setRemovingLeave(null); load();
+    } catch {
+      toast.error('Could not remove the leave.');
+      setRemovingLeave(null);
+    }
+  };
+
   const removePattern = async () => {
     if (!removing) return;
     try {
@@ -496,6 +535,57 @@ export default function Schedule() {
                     </div>
                   </div>
                 )}
+                {/* Days this person is NOT here. The weekly pattern above can
+                    only say when somebody is available, so before this the
+                    only way to record leave was to delete the weekday window
+                    and put it back afterwards — which loses whatever capacity
+                    was tuned and strands anything already booked into it. */}
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 }}>
+                    <div className="racco-eyebrow" style={{ fontSize: 10 }}>Away &amp; leave</div>
+                    {canRecordLeave && (
+                      <Button
+                        variant="ghost" size="sm"
+                        onClick={() => { setError(''); setLeaveForm({ psychologist: openPsy.id, starts_on: todayIso(), ends_on: todayIso(), reason: '' }); }}
+                        iconLeft={<Icon name="plane" size={15} />}
+                      >
+                        Record leave
+                      </Button>
+                    )}
+                  </div>
+                  {openPsyLeave.length === 0 ? (
+                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                      No leave recorded. Nothing is blocked out.
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {openPsyLeave.map((l) => (
+                        <div key={l.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', borderRadius: 'var(--radius-lg)', background: 'var(--amber-50, var(--ink-50))', border: '1px solid var(--border)', flexWrap: 'wrap' }}>
+                          <Icon name="plane" size={16} style={{ color: 'var(--amber-600, var(--text-muted))', flex: 'none' }} />
+                          <span style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>
+                            {l.starts_on === l.ends_on ? l.starts_on : `${l.starts_on} → ${l.ends_on}`}
+                          </span>
+                          <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: 'var(--text-muted)' }}>
+                            {l.reason || 'Away'}
+                          </span>
+                          {/* Recording leave never cancels what is booked. The
+                              count is how the screen says so rather than
+                              leaving somebody to find out. */}
+                          {l.booked_during > 0 && (
+                            <Badge tone="amber" size="sm">
+                              {l.booked_during} session{l.booked_during === 1 ? '' : 's'} still booked
+                            </Badge>
+                          )}
+                          {canRecordLeave && (
+                            <button title="Remove this leave" onClick={() => setRemovingLeave(l)} style={iconBtn('var(--red-700)')}>
+                              <Icon name="trash-2" size={14} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 {openPsyDated.length > 0 && (
                   <div>
                     <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 8 }}>Specific dates</div>
@@ -636,6 +726,57 @@ export default function Schedule() {
       )}
 
       {/* Booking drawer */}
+      {leaveForm && (
+        <div onClick={() => setLeaveForm(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.32)', display: 'flex', justifyContent: 'flex-end', zIndex: 70 }}>
+          <form onSubmit={saveLeave} onClick={(e) => e.stopPropagation()} style={{ width: 400, maxWidth: '92%', height: '100%', background: 'var(--surface)', boxShadow: 'var(--shadow-xl)', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--border)', background: 'var(--ink-50)', fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>
+              Record leave
+            </div>
+            <div className="racco-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{String(error)}</Alert>}
+              <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-muted)' }}>
+                Nothing can be booked into these dates. Sessions already booked
+                are <strong>not</strong> cancelled &mdash; they stay on the
+                calendar and are counted for you.
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <FormField label="First day" required>
+                  <Input type="date" value={leaveForm.starts_on}
+                         onChange={(e) => setLeaveForm({ ...leaveForm, starts_on: e.target.value, ends_on: leaveForm.ends_on < e.target.value ? e.target.value : leaveForm.ends_on })} />
+                </FormField>
+                <FormField label="Last day" required hint="Inclusive.">
+                  <Input type="date" value={leaveForm.ends_on} min={leaveForm.starts_on}
+                         onChange={(e) => setLeaveForm({ ...leaveForm, ends_on: e.target.value })} />
+                </FormField>
+              </div>
+              <FormField label="Reason" hint="Leave, training, court &mdash; whatever it is.">
+                <Input value={leaveForm.reason} placeholder="Annual leave"
+                       onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })} />
+              </FormField>
+            </div>
+            <div style={{ padding: 16, borderTop: '1px solid var(--border)' }}>
+              <Button type="submit" variant="primary" fullWidth iconLeft={<Icon name="plane" size={16} />}>
+                Record it
+              </Button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {removingLeave && (
+        <ConfirmDialog
+          onClose={() => setRemovingLeave(null)}
+          onConfirm={removeLeave}
+          tone="danger"
+          icon={<Icon name="trash-2" size={19} />}
+          title="Remove this leave?"
+          description={removingLeave.starts_on === removingLeave.ends_on
+            ? `${removingLeave.starts_on} becomes bookable again.`
+            : `${removingLeave.starts_on} to ${removingLeave.ends_on} becomes bookable again.`}
+          confirmLabel="Remove it" cancelLabel="Keep it"
+        />
+      )}
+
       {removing && (
         <ConfirmDialog
           onClose={() => setRemoving(null)}

@@ -15,8 +15,10 @@ from activity.services import log_activity
 from children.models import Child
 from scheduling import booking
 from scheduling.availability import free_windows
-from scheduling.models import AvailabilityBlock, Appointment
-from scheduling.serializers import AvailabilityBlockSerializer, AppointmentSerializer
+from scheduling.models import AvailabilityBlock, Appointment, Unavailability
+from scheduling.serializers import (
+    AvailabilityBlockSerializer, AppointmentSerializer, UnavailabilitySerializer,
+)
 
 
 
@@ -155,6 +157,73 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
             "psychologist": getattr(psych, "fullname", "") or psych.get_username(),
             "slots": slots[:6],
         })
+
+
+class UnavailabilityViewSet(viewsets.ModelViewSet):
+    """Leave, training, court — days somebody is not seeing children.
+
+    Whose calendar it is decides who may write it: a psychologist declares
+    their own, an administrator declares anybody's, and staff read it so the
+    booking screen can explain itself. The same rule availability already
+    follows, for the same reason - a diary is a person's own.
+
+    Declaring leave over existing sessions is allowed on purpose. The person IS
+    away; a calendar that refuses to record that is a calendar lying about who
+    is in. The sessions are left exactly where they are and the row reports how
+    many are caught, so the screen can warn rather than silently cancel.
+    """
+
+    permission_classes = [IsAuthenticated]
+    pagination_class = None
+    serializer_class = UnavailabilitySerializer
+
+    def get_queryset(self):
+        qs = Unavailability.objects.select_related("psychologist")
+        psy = self.request.query_params.get("psychologist")
+        if psy and str(psy).isdigit():
+            qs = qs.filter(psychologist_id=psy)
+        upcoming = self.request.query_params.get("upcoming")
+        if upcoming == "true":
+            qs = qs.filter(ends_on__gte=timezone.localdate())
+        return qs
+
+    def _assert_can_write(self, psychologist_id):
+        role = _role(self.request)
+        if role == Role.ADMINISTRATOR:
+            return
+        if role == Role.PSYCHOLOGIST and psychologist_id == self.request.user.id:
+            return
+        raise PermissionDenied("You can only record your own leave.")
+
+    def perform_create(self, serializer):
+        role = _role(self.request)
+        named = serializer.validated_data.get("psychologist")
+        if role == Role.PSYCHOLOGIST:
+            # Named somebody else? Refused, not quietly rewritten to
+            # themselves. Substituting would create a row nobody asked for and
+            # report success, which is a worse answer than "you cannot do
+            # that" — the caller would never learn the colleague is still
+            # marked as available.
+            psychologist = named or self.request.user
+        else:
+            psychologist = named
+            if psychologist is None:
+                raise ValidationError({"psychologist": "Whose leave is this?"})
+        self._assert_can_write(psychologist.id)
+        obj = serializer.save(psychologist=psychologist,
+                              created_by=self.request.user)
+        log_activity(self.request.user, ActivityLog.CREATED, ActivityLog.RECORD,
+                     entity_type="Unavailability",
+                     entity_label=getattr(psychologist, "fullname", "") or "",
+                     entity_id=obj.id, recipient=psychologist)
+
+    def perform_update(self, serializer):
+        self._assert_can_write(serializer.instance.psychologist_id)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._assert_can_write(instance.psychologist_id)
+        instance.delete()
 
 
 class AppointmentViewSet(viewsets.ModelViewSet):

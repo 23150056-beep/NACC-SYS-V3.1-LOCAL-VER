@@ -180,15 +180,43 @@ class SlotEndpointTests(SchedulingBase):
 
 
 class SlotsRespectTodayTests(SchedulingBase):
-    def test_a_window_that_has_already_started_today_is_not_offered(self):
+    """Today's openings start from now, not from midnight.
+
+    Written first as "an all-day window should still offer something", which
+    is true until 22:00 and false after it: the last 60-minute start inside a
+    00:00-23:59 window is 22:00, so a run late in the evening failed on a
+    fixture that had simply run out of day. A test that depends on the hour it
+    is run at is a test that will accuse the code of something one evening.
+
+    The property that actually matters holds at every hour: nothing offered is
+    in the past. The "something is offered" half is asserted against a window
+    with a known amount of day left in it.
+    """
+
+    def test_nothing_offered_today_is_in_the_past(self):
         now = timezone.localtime()
         AvailabilityBlock.objects.create(
             psychologist=self.psy, date=now.date(),
             start_time="00:00", end_time="23:59", capacity=20)
         starts = [s["start"] for s in booking.bookable_slots(
             self.psy, self.child, now.date(), duration_minutes=60)]
-        self.assertTrue(starts, "an all-day window today should still offer something")
-        # Nothing offered may be in the past, and the earliest offer must be
-        # after right now rather than at midnight.
-        earliest = starts[0]
-        self.assertGreater(earliest, (now - timedelta(minutes=1)).strftime("%H:%M"))
+        cutoff = (now - timedelta(minutes=1)).strftime("%H:%M")
+        for start in starts:
+            self.assertGreater(start, cutoff,
+                               "an opening today may not be earlier than now")
+
+    def test_a_window_later_today_still_offers_its_times(self):
+        # Anchored to now rather than to a clock time, so it has the same
+        # amount of day left whenever it runs.
+        now = timezone.localtime()
+        opens = (now + timedelta(minutes=30)).replace(second=0, microsecond=0)
+        closes = opens + timedelta(hours=3)
+        if closes.date() != opens.date():
+            self.skipTest("too close to midnight for a three-hour window")
+        AvailabilityBlock.objects.create(
+            psychologist=self.psy, date=now.date(),
+            start_time=opens.strftime("%H:%M"), end_time=closes.strftime("%H:%M"),
+            capacity=20)
+        starts = [s["start"] for s in booking.bookable_slots(
+            self.psy, self.child, now.date(), duration_minutes=60)]
+        self.assertTrue(starts, "a window opening in half an hour has openings")

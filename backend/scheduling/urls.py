@@ -2,11 +2,14 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from scheduling.tasks_views import SessionReminderTaskView
-from scheduling.views import AvailabilityBlockViewSet, AppointmentViewSet
+from scheduling.views import (
+    AvailabilityBlockViewSet, AppointmentViewSet, UnavailabilityViewSet,
+)
 
 router = DefaultRouter()
 router.register("availability", AvailabilityBlockViewSet, basename="availability")
 router.register("appointments", AppointmentViewSet, basename="appointment")
+router.register("unavailability", UnavailabilityViewSet, basename="unavailability")
 
 urlpatterns = router.urls + [
     # Called by whatever runs on a schedule, not by the app. Guarded by a

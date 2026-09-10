@@ -77,3 +77,43 @@ class Appointment(models.Model):
     class Meta:
         db_table = "tbl_appointment"
         ordering = ["start"]
+
+
+class Unavailability(models.Model):
+    """A range of dates when a psychologist is not seeing children.
+
+    AvailabilityBlock can only express presence, so the only way to say
+    somebody was away was to delete the weekday window and add it back
+    afterwards - which loses whatever capacity had been tuned and silently
+    strands every session already booked into it.
+
+    A date RANGE rather than a weekday, because that is the shape leave
+    actually takes: "the 12th to the 16th", not "Tuesdays". Inclusive at both
+    ends, which is how anybody writing it down means it.
+
+    Leave, a training day and a court appearance are the same thing to this
+    model - somebody is not there - so `reason` is free text rather than a
+    choice list nobody would agree on.
+
+    Declaring one never cancels an appointment. Those were agreed with
+    somebody, and quietly dropping them as a side effect of recording leave
+    would be worse than the gap this closes; the screen warns instead.
+    """
+
+    psychologist = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="unavailability")
+    starts_on = models.DateField()
+    ends_on = models.DateField()
+    reason = models.CharField(max_length=140, blank=True)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="unavailability_declared")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "tbl_unavailability"
+        ordering = ["starts_on", "id"]
+
+    def covers(self, day):
+        return self.starts_on <= day <= self.ends_on

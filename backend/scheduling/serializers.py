@@ -1,7 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
 
-from scheduling.models import AvailabilityBlock, Appointment
+from scheduling.models import AvailabilityBlock, Appointment, Unavailability
 
 
 class AvailabilityBlockSerializer(serializers.ModelSerializer):
@@ -95,3 +95,38 @@ class AppointmentSerializer(serializers.ModelSerializer):
         if value < timezone.now():
             raise serializers.ValidationError("Cannot book an appointment in the past.")
         return value
+
+
+class UnavailabilitySerializer(serializers.ModelSerializer):
+    psychologist_name = serializers.CharField(
+        source="psychologist.fullname", read_only=True, default=None)
+    booked_during = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Unavailability
+        fields = ["id", "psychologist", "psychologist_name", "starts_on",
+                  "ends_on", "reason", "booked_during", "created_at"]
+
+    def get_booked_during(self, obj):
+        """Sessions still standing inside these dates.
+
+        Declaring leave never cancels them - they were agreed with somebody -
+        so the number is how the screen says what is caught in it, before and
+        after. Past and cancelled ones are excluded: neither is something
+        anybody has to do anything about.
+        """
+        return (Appointment.objects
+                .filter(psychologist_id=obj.psychologist_id,
+                        start__date__gte=obj.starts_on,
+                        start__date__lte=obj.ends_on,
+                        start__gte=timezone.now())
+                .exclude(status=Appointment.CANCELLED)
+                .count())
+
+    def validate(self, attrs):
+        starts = attrs.get("starts_on") or (self.instance.starts_on if self.instance else None)
+        ends = attrs.get("ends_on") or (self.instance.ends_on if self.instance else None)
+        if starts and ends and ends < starts:
+            raise serializers.ValidationError(
+                {"ends_on": "The last day cannot be before the first."})
+        return attrs

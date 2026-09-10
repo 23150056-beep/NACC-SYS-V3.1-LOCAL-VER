@@ -25,12 +25,38 @@ from datetime import datetime, timedelta
 from django.utils import timezone
 
 from clinical.models import CaseReferral
-from scheduling.models import Appointment
+from scheduling.models import Appointment, Unavailability
 
 # How far either side of the new appointment to look for clashes. Comfortably
 # wider than any appointment anybody books, and it keeps the comparison in
 # Python: end times are start + duration, which is not a column to filter on.
 CLASH_MARGIN = timedelta(hours=12)
+
+
+def leave_covering(psychologist, day):
+    """The leave, if any, that this psychologist is on that day.
+
+    An absence is not a preference. A psychologist may work outside their own
+    posted hours - that override is theirs - but not on a day they are not
+    there, so this is checked for every role including on their own calendar.
+    """
+    return (Unavailability.objects
+            .filter(psychologist=psychologist, starts_on__lte=day, ends_on__gte=day)
+            .first())
+
+
+def _spoken_date(day):
+    """"12 Sep" - %-d is a glibc extension and raises on Windows."""
+    return f"{day.day} {day:%b}"
+
+
+def leave_error(leave):
+    name = getattr(leave.psychologist, "fullname", "") or "This psychologist"
+    when = (_spoken_date(leave.starts_on) if leave.starts_on == leave.ends_on
+            else f"{_spoken_date(leave.starts_on)} to {_spoken_date(leave.ends_on)}")
+    detail = f" ({leave.reason})" if leave.reason else ""
+    return {"start": f"{name} is away on {when}{detail}. Nothing can be booked "
+                     f"into those dates."}
 
 
 def referral_on_file(child):
@@ -119,6 +145,14 @@ def errors_for(psychologist, child, start, duration_minutes,
     if child is not None and exclude_id is None and not referral_on_file(child):
         return missing_referral_error(child)
 
+    # Checked on moves as well as new bookings, unlike the referral: a referral
+    # arriving late is paperwork catching up, but putting a session on a day
+    # somebody is away is wrong whenever it is done.
+    _local = timezone.localtime(start) if timezone.is_aware(start) else start
+    leave = leave_covering(psychologist, _local.date())
+    if leave is not None:
+        return leave_error(leave)
+
     local_start = timezone.localtime(start) if timezone.is_aware(start) else start
     end = ends_at(start, duration_minutes)
     local_end = ends_at(local_start, duration_minutes)
@@ -181,6 +215,8 @@ def bookable_slots(psychologist, child, day, duration_minutes=60,
     # the answer is the same for the whole day and costs a query each time.
     if child is not None and exclude_id is None and not referral_on_file(child):
         return []
+    if leave_covering(psychologist, day) is not None:
+        return []
 
     now = timezone.localtime()
     slots = []
@@ -224,6 +260,12 @@ def why_empty(psychologist, day, duration_minutes=60, child=None, exclude_id=Non
     # somebody "fully booked on Wednesday" would send them to try Thursday.
     if child is not None and exclude_id is None and not referral_on_file(child):
         return missing_referral_error(child)["child"]
+    # Before "no availability" and before "fully booked": both of those send
+    # somebody to try another day, and if the person is away all week that is
+    # a wasted trip back through the form.
+    leave = leave_covering(psychologist, day)
+    if leave is not None:
+        return leave_error(leave)["start"]
     blocks = blocks_on(psychologist, day)
     if not blocks:
         return f"{name} has no availability on {_spoken(day)}."
