@@ -129,9 +129,12 @@ class AdoptionCaseViewSet(ReadOnlyModelViewSet):
                 {"detail": str(exc),
                  "blockers": RequirementSerializer(exc.blockers, many=True).data},
                 status=http.HTTP_400_BAD_REQUEST)
+        # Addressed to the case owner, who is a staff member. This is the one
+        # place the model knows which staff member a piece of work belongs to,
+        # so it is the one place a staff notification can honestly be personal.
         log_activity(request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type="AdoptionCase", entity_label=case.child.fullname,
-                     entity_id=case.child_id)
+                     entity_id=case.child_id, recipient=case.owner)
         return Response(CaseDetailSerializer(self.get_object()).data)
 
     @action(detail=True, methods=["post"])

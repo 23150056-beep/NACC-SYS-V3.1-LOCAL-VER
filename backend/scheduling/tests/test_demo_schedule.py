@@ -28,7 +28,7 @@ from accounts.models import Role
 from children.models import Child
 from scheduling import booking, demo_schedule
 from scheduling.models import Appointment, AvailabilityBlock
-from scheduling.tests.test_api import SchedulingBase
+from scheduling.tests.test_api import SchedulingBase, child_with_referral
 
 User = get_user_model()
 
@@ -136,8 +136,7 @@ class AppointmentsLandInClinicHoursTest(SchedulingBase):
         super().setUp()
         AvailabilityBlock.objects.all().delete()
         demo_schedule.install_availability([self.psy])
-        self.child_b = Child.objects.create(fullname="Ben",
-                                            assigned_psychologist=self.psy)
+        self.child_b = child_with_referral("Ben", self.psy)
 
     def _at(self, days_from_now, hour, minute=22):
         """A local datetime `days_from_now` away, at a deliberately odd time."""

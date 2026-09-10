@@ -98,6 +98,10 @@ export default function ChildProgressReport() {
   const activePlan = (data.treatment_plans || []).find((p) => p.status === 'active') || (data.treatment_plans || [])[0];
   const csMeta = CASE_STATUS_META[child.case_status] || CASE_STATUS_META.pre_assessment;
 
+  // Sessions cannot be booked without the social worker's referral on file —
+  // enforced in the booking endpoint, so the button must not pretend otherwise.
+  const hasReferral = (data.case_referrals || []).length > 0;
+
   const age = ageFrom(child.birth_date);
   const unreviewedFlags = (data.self_report_flags || []).filter((f) => !f.is_reviewed).length;
   const heroMeta = [age != null ? `${age} y` : null, child.gender, child.case_type].filter(Boolean).join(' · ');
@@ -317,6 +321,23 @@ export default function ChildProgressReport() {
               {briefBusy ? 'Preparing…' : 'Pre-session brief'}
             </Button>
             <Button variant="secondary" onClick={() => window.print()} iconLeft={<Icon name="printer" size={17} />}>Print</Button>
+            {/* Booking a session is the thing you most often want next while
+                reading a child's record, and it used to mean leaving for the
+                Calendar and picking the same child out of a list again. The
+                link carries the child, so the drawer opens knowing who. */}
+            {child.status === 'active' && (
+              <Button
+                variant="secondary"
+                disabled={!hasReferral}
+                title={hasReferral
+                  ? 'Book a session for this child'
+                  : 'A case referral has to be on file before sessions can be booked.'}
+                onClick={() => navigate(`/schedule?book=1&child=${child.id}`)}
+                iconLeft={<Icon name="calendar-plus" size={17} />}
+              >
+                Book appointment
+              </Button>
+            )}
             {canAdvance && child.status === 'active' && (child.case_status === 'pre_assessment'
               ? <Button variant="primary" onClick={() => setConfirmMove({ next: 'counseling', childName: child.fullname })} iconLeft={<Icon name="chevron-right" size={16} />}>Move to Counseling</Button>
               : <Button variant="secondary" onClick={() => advance('pre_assessment')} iconLeft={<Icon name="arrow-left" size={16} />}>Back to Pre-Assessment</Button>)}
@@ -694,7 +715,21 @@ export default function ChildProgressReport() {
       <Card eyebrow="Casework" title="Case referral (social worker)" padding="0">
         {(data.case_referrals || []).length === 0 ? (
           <div style={{ padding: 18, fontSize: 13, color: 'var(--text-muted)' }}>
-            No case referral uploaded yet. Social workers upload it from Results &amp; Reports.
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'flex-start' }}>
+              <div>
+                No case referral uploaded yet &mdash; sessions cannot be booked for
+                {' '}{child.fullname} until one is on file.
+              </div>
+              {isStaffOrAdmin && (
+                <Button
+                  variant="primary" size="sm"
+                  onClick={() => navigate(`/report?upload=1&child=${child.id}`)}
+                  iconLeft={<Icon name="upload" size={15} />}
+                >
+                  Upload case referral
+                </Button>
+              )}
+            </div>
           </div>
         ) : (
           <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>

@@ -131,6 +131,12 @@ export default function Schedule() {
   // chosen, at the duration actually chosen. The old version asked about the
   // child's ASSIGNED psychologist regardless of who was picked in the form,
   // so booking anyone else showed somebody else's free time.
+  useEffect(() => {
+    if (!booking?.child || booking.psychologist || isPsych) return;
+    const c = children.find((x) => String(x.id) === String(booking.child));
+    if (c?.psychologist) setBooking((b) => ({ ...b, psychologist: String(c.psychologist) }));
+  }, [booking?.child, booking?.psychologist, children, isPsych]);
+
   const bookingPsy = booking?.psychologist || (isPsych ? user?.id : '');
   const bookingDate = booking?.date;
   const bookingDuration = booking?.duration;
@@ -161,13 +167,19 @@ export default function Schedule() {
     /* eslint-disable-next-line */
   }, []);
 
-  const openBooking = () => {
+  const openBooking = (childId = '') => {
     setError('');
     // No default time. A prefilled 09:00 was the reason everybody booked
     // 09:00 and the second one was refused.
-    setBooking({ child: '', psychologist: '', date: todayIso(), time: '', purpose: 'session', duration: 60, notes: '' });
+    setBooking({
+      child: childId ? String(childId) : '', psychologist: '',
+      date: todayIso(), time: '', purpose: 'session', duration: 60, notes: '',
+    });
   };
-  useOpenFromLink('book', '1', openBooking, !!booking);
+  // `?book=1&child=12` — opening the drawer from a child's record should not
+  // then ask which child. Both parameters are cleared afterwards so a refresh
+  // does not reopen it.
+  useOpenFromLink('book', '1', (params) => openBooking(params?.get('child')), !!booking, ['child']);
 
   const events = useMemo(() => appointments
     .filter((a) => !calPsy || String(a.psychologist) === String(calPsy))
@@ -536,7 +548,7 @@ export default function Schedule() {
         {/* One way in, so the drawer cannot be opened half-configured. This
             used to be a second copy that prefilled 09:00 — the exact default
             that had everybody booking the same slot. */}
-        {canBook && <Button variant="primary" onClick={openBooking} iconLeft={<Icon name="calendar-plus" size={18} />}>Book appointment</Button>}
+        {canBook && <Button variant="primary" onClick={() => openBooking()} iconLeft={<Icon name="calendar-plus" size={18} />}>Book appointment</Button>}
       </PageHeader>
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>

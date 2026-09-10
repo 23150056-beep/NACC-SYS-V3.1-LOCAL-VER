@@ -35,9 +35,15 @@ export default function Report() {
   const [error, setError] = useState('');
   const [openChild, setOpenChild] = useState(null);
 
-  const openReportUpload = () => { setError(''); setUpload({ kind: 'report', child: '', report_type: 'progress', coverage: '', fileObj: null }); };
-  const openReferralUpload = () => { setError(''); setUpload({ kind: 'case_referral', child: '', coverage: '', fileObj: null }); };
-  useOpenFromLink('upload', '1', isPsych ? openReportUpload : openReferralUpload, !!upload);
+  const openReportUpload = (childId = '') => { setError(''); setUpload({ kind: 'report', child: childId ? String(childId) : '', report_type: 'progress', coverage: '', fileObj: null }); };
+  const openReferralUpload = (childId = '') => { setError(''); setUpload({ kind: 'case_referral', child: childId ? String(childId) : '', coverage: '', fileObj: null }); };
+  // `?upload=1&child=12` — arriving from a child's record should not then ask
+  // which child, the same way the booking link carries one.
+  useOpenFromLink(
+    'upload', '1',
+    (params) => (isPsych ? openReportUpload : openReferralUpload)(params?.get('child')),
+    !!upload, ['child'],
+  );
 
   const load = () => {
     api.get('/result-entries/').then((r) => setEntries(r.data)).catch(() => {});
@@ -123,8 +129,8 @@ export default function Report() {
       >
         {tab === 'results' && <Button variant="secondary" onClick={exportCsv} iconLeft={<Icon name="download" size={17} />}>Export CSV</Button>}
         <Button variant="secondary" onClick={() => window.print()} iconLeft={<Icon name="printer" size={17} />}>Print</Button>
-        {isPsych && <Button variant="primary" onClick={openReportUpload} iconLeft={<Icon name="upload" size={18} />}>Upload report</Button>}
-        {isStaffOrAdmin && <Button variant="primary" onClick={openReferralUpload} iconLeft={<Icon name="folder-heart" size={18} />}>Upload case referral</Button>}
+        {isPsych && <Button variant="primary" onClick={() => openReportUpload()} iconLeft={<Icon name="upload" size={18} />}>Upload report</Button>}
+        {isStaffOrAdmin && <Button variant="primary" onClick={() => openReferralUpload()} iconLeft={<Icon name="folder-heart" size={18} />}>Upload case referral</Button>}
       </PageHeader>
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>

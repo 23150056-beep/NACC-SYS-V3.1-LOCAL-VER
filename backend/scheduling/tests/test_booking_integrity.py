@@ -19,7 +19,9 @@ from django.utils import timezone
 
 from children.models import Child
 from scheduling.models import AvailabilityBlock, Appointment
-from scheduling.tests.test_api import SchedulingBase, next_weekday
+from scheduling.tests.test_api import (
+    SchedulingBase, child_with_referral, next_weekday,
+)
 
 
 class NoDoubleBookingTests(SchedulingBase):
@@ -38,7 +40,7 @@ class NoDoubleBookingTests(SchedulingBase):
         }, format="json")
 
     def _other_child(self, name="Ben"):
-        return Child.objects.create(fullname=name, assigned_psychologist=self.psy)
+        return child_with_referral(name, self.psy)
 
     def test_the_first_booking_is_accepted(self):
         # The control. Everything below has to fail for the RIGHT reason.
@@ -157,7 +159,7 @@ class ReschedulingIsStillBookingTests(SchedulingBase):
 
     def test_moving_onto_another_appointment_is_refused(self):
         Appointment.objects.create(
-            child=Child.objects.create(fullname="Ben", assigned_psychologist=self.psy),
+            child=child_with_referral("Ben", self.psy),
             psychologist=self.psy, start=next_weekday(2, 10),
             duration_minutes=60, booked_by=self.staff)
         self.assertEqual(400, self._move(next_weekday(2, 10)).status_code)

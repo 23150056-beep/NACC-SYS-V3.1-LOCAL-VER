@@ -1,10 +1,13 @@
 from datetime import timedelta
 
+from django.core.files.uploadedfile import SimpleUploadedFile
+
 from django.utils import timezone
 from rest_framework.test import APITestCase
 from django.contrib.auth import get_user_model
 from accounts.models import Role
 from children.models import Child
+from clinical.models import CaseReferral
 from scheduling.models import AvailabilityBlock, Appointment
 
 User = get_user_model()
@@ -19,6 +22,25 @@ def next_weekday(weekday, hour):
     if candidate <= now:
         candidate += timedelta(days=7)
     return candidate
+
+
+def give_referral(child, uploaded_by=None):
+    """The social worker's referral, on file.
+
+    Booking now requires one - see test_referral_gate. A child who has been
+    through intake has it, so the shared fixture has it too; the tests that
+    are ABOUT the missing referral remove it and say so.
+    """
+    return CaseReferral.objects.create(
+        child=child, uploaded_by=uploaded_by,
+        file=SimpleUploadedFile("referral.pdf", b"%PDF-1.4 referral"),
+        original_filename="referral.pdf")
+
+
+def child_with_referral(name, psychologist=None):
+    child = Child.objects.create(fullname=name, assigned_psychologist=psychologist)
+    give_referral(child)
+    return child
 
 
 class SchedulingBase(APITestCase):
@@ -36,6 +58,7 @@ class SchedulingBase(APITestCase):
             email="s@racco1.gov.ph", username="s", password="pass1234", role=self.staff_role)
         self.child = Child.objects.create(
             fullname="Ana", case_type="Foster Care", assigned_psychologist=self.psy)
+        give_referral(self.child, self.staff)
         # Wednesday 9:00-12:00, capacity 2
         self.block = AvailabilityBlock.objects.create(
             psychologist=self.psy, weekday=2, start_time="09:00", end_time="12:00", capacity=2)

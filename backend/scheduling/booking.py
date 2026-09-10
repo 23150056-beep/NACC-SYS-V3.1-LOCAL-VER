@@ -24,12 +24,29 @@ from datetime import datetime, timedelta
 
 from django.utils import timezone
 
+from clinical.models import CaseReferral
 from scheduling.models import Appointment
 
 # How far either side of the new appointment to look for clashes. Comfortably
 # wider than any appointment anybody books, and it keeps the comparison in
 # Python: end times are start + duration, which is not a column to filter on.
 CLASH_MARGIN = timedelta(hours=12)
+
+
+def referral_on_file(child):
+    """Has the social worker's case referral been uploaded for this child?
+
+    The referral says why the child is here. Booking counselling before it
+    exists puts the appointment ahead of the paperwork that authorises it, and
+    the appointment is the part with a child sitting in a room.
+    """
+    return CaseReferral.objects.filter(child=child).exists()
+
+
+def missing_referral_error(child):
+    return {"child": f"{child.fullname} has no case referral on file. Upload "
+                     f"the case referral form on their record before booking "
+                     f"a session."}
 
 
 def ends_at(start, duration_minutes):
@@ -92,6 +109,16 @@ def errors_for(psychologist, child, start, duration_minutes,
     overlap rules. `exclude_id` is the appointment being edited, so moving one
     is not read as a clash with itself.
     """
+    # Checked before anything about time, and outside the own_calendar waiver:
+    # a psychologist may work outside their posted hours, but whether a child's
+    # paperwork exists has nothing to do with whose calendar it is.
+    #
+    # Only for NEW bookings. `exclude_id` means an appointment is being moved,
+    # and children booked before this rule existed must not become unmovable
+    # until somebody hunts down a document for them.
+    if child is not None and exclude_id is None and not referral_on_file(child):
+        return missing_referral_error(child)
+
     local_start = timezone.localtime(start) if timezone.is_aware(start) else start
     end = ends_at(start, duration_minutes)
     local_end = ends_at(local_start, duration_minutes)
@@ -150,6 +177,11 @@ def bookable_slots(psychologist, child, day, duration_minutes=60,
     it, the time that appointment currently holds is read as a clash with
     itself and disappears from the grid offering to move it.
     """
+    # Short-circuit rather than letting every candidate fail the same check:
+    # the answer is the same for the whole day and costs a query each time.
+    if child is not None and exclude_id is None and not referral_on_file(child):
+        return []
+
     now = timezone.localtime()
     slots = []
     for block in blocks_on(psychologist, day):
@@ -180,7 +212,7 @@ def _spoken(day):
     return f"{day:%A} {day.day} {day:%b}"
 
 
-def why_empty(psychologist, day, duration_minutes=60):
+def why_empty(psychologist, day, duration_minutes=60, child=None, exclude_id=None):
     """Why there is nothing to offer - an empty list is not an explanation.
 
     "They do not work Wednesdays", "the day is full" and "a 3-hour session
@@ -188,6 +220,10 @@ def why_empty(psychologist, day, duration_minutes=60):
     that renders all three as an empty panel just looks broken.
     """
     name = getattr(psychologist, "fullname", "") or "This psychologist"
+    # The paperwork answer comes first: it is true of every day, so telling
+    # somebody "fully booked on Wednesday" would send them to try Thursday.
+    if child is not None and exclude_id is None and not referral_on_file(child):
+        return missing_referral_error(child)["child"]
     blocks = blocks_on(psychologist, day)
     if not blocks:
         return f"{name} has no availability on {_spoken(day)}."

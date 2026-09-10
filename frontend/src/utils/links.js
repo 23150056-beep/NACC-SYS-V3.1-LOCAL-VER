@@ -15,15 +15,18 @@ import { useSearchParams } from 'react-router-dom';
  * the dashboard first linked to it; this is that pattern, extracted rather
  * than copied a fourth time.
  */
-export function useOpenFromLink(param, value, run, isOpen = false) {
+export function useOpenFromLink(param, value, run, isOpen = false, alsoClear = []) {
   const [searchParams, setSearchParams] = useSearchParams();
   const armed = searchParams.get(param) === value;
 
   useEffect(() => {
     if (!armed || isOpen) return;
-    run();
+    // The whole query is handed over, so a link can say WHICH child to book
+    // rather than only that a booking is wanted.
+    run(searchParams);
     const next = new URLSearchParams(searchParams);
     next.delete(param);
+    for (const extra of alsoClear) next.delete(extra);
     setSearchParams(next, { replace: true });
     // `run` is redefined every render by every caller; depending on it would
     // fire this again the moment the person closed what it opened.

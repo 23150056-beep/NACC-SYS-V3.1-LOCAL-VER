@@ -15,7 +15,9 @@ from django.utils import timezone
 
 from children.models import Child
 from scheduling.models import Appointment, AvailabilityBlock
-from scheduling.tests.test_api import SchedulingBase, next_weekday
+from scheduling.tests.test_api import (
+    SchedulingBase, child_with_referral, next_weekday,
+)
 
 
 class BookedAheadTest(SchedulingBase):
@@ -78,8 +80,7 @@ class BookedAheadTest(SchedulingBase):
             end_time="12:00", capacity=2)
         Appointment.objects.create(child=self.child, psychologist=self.psy,
                                    start=next_weekday(2, 10), duration_minutes=60)
-        other_child = Child.objects.create(fullname="Ben",
-                                           assigned_psychologist=self.psy)
+        other_child = child_with_referral("Ben", self.psy)
         Appointment.objects.create(child=other_child, psychologist=self.psy,
                                    start=next_weekday(2, 10) + timedelta(days=7),
                                    duration_minutes=60)

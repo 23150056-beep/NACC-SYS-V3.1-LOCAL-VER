@@ -17,7 +17,9 @@ from django.utils import timezone
 from children.models import Child
 from scheduling import booking
 from scheduling.models import Appointment, AvailabilityBlock
-from scheduling.tests.test_api import SchedulingBase, next_weekday
+from scheduling.tests.test_api import (
+    SchedulingBase, child_with_referral, next_weekday,
+)
 
 
 class BookableSlotTests(SchedulingBase):
@@ -47,7 +49,7 @@ class BookableSlotTests(SchedulingBase):
 
     def test_a_booked_time_disappears_from_the_offer(self):
         Appointment.objects.create(
-            child=Child.objects.create(fullname="Ben", assigned_psychologist=self.psy),
+            child=child_with_referral("Ben", self.psy),
             psychologist=self.psy, start=next_weekday(2, 10), duration_minutes=60)
         starts = [s["start"] for s in self._slots()]
         # 10:00 is taken, and 09:30 would run into it.
@@ -58,7 +60,7 @@ class BookableSlotTests(SchedulingBase):
 
     def test_a_cancelled_appointment_gives_its_time_back(self):
         appt = Appointment.objects.create(
-            child=Child.objects.create(fullname="Ben", assigned_psychologist=self.psy),
+            child=child_with_referral("Ben", self.psy),
             psychologist=self.psy, start=next_weekday(2, 10), duration_minutes=60,
             status=Appointment.CANCELLED)
         self.assertIn("10:00", [s["start"] for s in self._slots()])
@@ -82,8 +84,7 @@ class BookableSlotTests(SchedulingBase):
     def test_capacity_closes_the_whole_window(self):
         for hour, name in ((9, "Ben"), (11, "Cara")):
             Appointment.objects.create(
-                child=Child.objects.create(fullname=name,
-                                           assigned_psychologist=self.psy),
+                child=child_with_referral(name, self.psy),
                 psychologist=self.psy, start=next_weekday(2, hour),
                 duration_minutes=60)
         # Capacity 2 is now used up, so 10:00 is free of clashes and still not

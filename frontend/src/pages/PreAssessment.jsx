@@ -386,7 +386,7 @@ function ConsentStep({ child, consents, templates, onLinked, onRefresh, setError
 
   const recordNew = async () => {
     setError('');
-    if (!form.signer_name.trim()) { setError('Enter who signed the consent.'); return; }
+    if (!form.signer_name.trim()) { setError('Enter who accomplished the consent form.'); return; }
     setBusy(true);
     try {
       const fd = new FormData();
@@ -435,7 +435,7 @@ function ConsentStep({ child, consents, templates, onLinked, onRefresh, setError
           </div>
         )}
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-          <FormField label="Signed by" required><Input value={form.signer_name} onChange={(e) => setForm({ ...form, signer_name: e.target.value })} placeholder="Guardian’s full name" /></FormField>
+          <FormField label="Accomplished by" required><Input value={form.signer_name} onChange={(e) => setForm({ ...form, signer_name: e.target.value })} placeholder="Guardian’s full name" /></FormField>
           <FormField label="Relationship to child"><Input value={form.signer_relationship} onChange={(e) => setForm({ ...form, signer_relationship: e.target.value })} placeholder="e.g. Foster mother" /></FormField>
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -467,7 +467,7 @@ function ConsentStep({ child, consents, templates, onLinked, onRefresh, setError
           <div className="racco-scroll" style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', minWidth: 640, borderCollapse: 'collapse' }}>
               <thead><tr style={{ background: 'var(--ink-50)', borderBottom: '1px solid var(--border)' }}>
-                {['Signer', 'Relationship', 'Template', 'Date', 'Status', 'File', ''].map((h, i) => <th key={i} style={th}>{h}</th>)}
+                {['Accomplished by', 'Relationship', 'Template', 'Date', 'Status', 'File', ''].map((h, i) => <th key={i} style={th}>{h}</th>)}
               </tr></thead>
               <tbody>
                 {consents.map((c) => (

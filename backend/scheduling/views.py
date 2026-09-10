@@ -119,7 +119,8 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
             "date": day.isoformat(),
             "duration": duration,
             "slots": found,
-            "reason": "" if found else booking.why_empty(psych, day, duration),
+            "reason": "" if found else booking.why_empty(
+                psych, day, duration, child=child, exclude_id=exclude),
         })
 
     @action(detail=False, methods=["get"], url_path="next-slots")
