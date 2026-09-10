@@ -7,7 +7,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import {
-  Alert, Avatar, Badge, Button, Card, FormField, hoverLift, Icon, iconBtn, Input, PAGE, PageHeader, Select,
+  Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, hoverLift, Icon, iconBtn, Input, PAGE, PageHeader, Select,
 } from '../ui';
 import { prefetchBriefs } from '../api/assistant';
 import { useOpenFromLink } from '../utils/links';
@@ -28,6 +28,38 @@ const SLOT_EMPTY = {
   fontSize: 12.5, color: 'var(--text-muted)', padding: '9px 12px',
   border: '1px dashed var(--border)', borderRadius: 'var(--radius-control)',
 };
+
+/* A working week is one pattern, not ten rows.
+
+   Listing every block separately meant "Mondays 08:00-12:00 / Mondays
+   13:00-17:00 / Tuesdays 08:00-12:00 / ..." — ten near-identical lines for an
+   ordinary Monday-to-Friday schedule, five edits to move a lunch break, and no
+   way to see the shape of somebody's week at a glance. Blocks that share a
+   time and a capacity are one line with the days beside it. */
+function patternsOf(blocks) {
+  const byShape = new Map();
+  for (const b of blocks.filter((x) => x.date == null && x.weekday != null)) {
+    const key = `${b.start_time}|${b.end_time}|${b.capacity}`;
+    if (!byShape.has(key)) {
+      byShape.set(key, {
+        key,
+        start: String(b.start_time).slice(0, 5),
+        end: String(b.end_time).slice(0, 5),
+        capacity: b.capacity,
+        days: [],
+        blocks: [],
+        booked: 0,
+      });
+    }
+    const p = byShape.get(key);
+    p.days.push(b.weekday);
+    p.blocks.push(b);
+    p.booked += b.booked_ahead || 0;
+  }
+  return [...byShape.values()]
+    .map((p) => ({ ...p, days: [...p.days].sort((a, b) => a - b) }))
+    .sort((a, b) => a.start.localeCompare(b.start));
+}
 
 const todayIso = () => {
   // Local date. toISOString() converts to UTC and hands back yesterday for
@@ -69,6 +101,8 @@ export default function Schedule() {
   const [daySlots, setDaySlots] = useState(null);   // { slots, reason, psychologist } for the chosen day
   const [slotsBusy, setSlotsBusy] = useState(false);
   const [openPsy, setOpenPsy] = useState(null); // { id, name } — full-page availability view (admin/staff)
+  const [removing, setRemoving] = useState(null);  // the weekly pattern awaiting confirmation
+  const [calPsy, setCalPsy] = useState('');        // '' = everyone
   // The calendar is controlled so the page knows which month is on screen and
   // can fetch that range rather than the entire history.
   const [calDate, setCalDate] = useState(() => new Date());
@@ -135,7 +169,9 @@ export default function Schedule() {
   };
   useOpenFromLink('book', '1', openBooking, !!booking);
 
-  const events = useMemo(() => appointments.map((a) => {
+  const events = useMemo(() => appointments
+    .filter((a) => !calPsy || String(a.psychologist) === String(calPsy))
+    .map((a) => {
     const start = new Date(a.start);
     return {
       id: a.id,
@@ -144,7 +180,7 @@ export default function Schedule() {
       end: new Date(start.getTime() + (a.duration_minutes || 60) * 60000),
       resource: a,
     };
-  }), [appointments]);
+  }), [appointments, calPsy]);
 
   const eventStyleGetter = useCallback((event) => ({
     style: {
@@ -177,7 +213,14 @@ export default function Schedule() {
     return parts.join(' · ');
   };
 
-  const openPsyBlocks = openPsy ? blocks.filter((b) => String(b.psychologist) === String(openPsy.id)) : [];
+  // Memoised in its own right: a conditional expression builds a fresh
+  // array every render, and the pattern grouping below would then recompute
+  // on every keystroke elsewhere on the page.
+  const openPsyBlocks = useMemo(
+    () => (openPsy ? blocks.filter((b) => String(b.psychologist) === String(openPsy.id)) : []),
+    [openPsy, blocks],
+  );
+  const openPsyPatterns = useMemo(() => patternsOf(openPsyBlocks), [openPsyBlocks]);
   const openPsyWeeklySlots = openPsyBlocks.filter((b) => b.date == null).reduce((s, b) => s + (b.capacity || 0), 0);
   const openPsyDated = openPsyBlocks.filter((b) => b.date != null)
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
@@ -267,7 +310,27 @@ export default function Schedule() {
     // Owner is only set on create — editing never reassigns whose calendar a block belongs to.
     if (!isPsych && !blockForm.id) base.psychologist = blockForm.psychologist;
     try {
-      if (blockForm.id) {
+      if (blockForm.byDay) {
+        // Editing a whole weekly pattern: the ticked days are the truth. Days
+        // still ticked are updated in place, newly ticked ones created, and
+        // unticked ones removed — so "I no longer work Fridays" is one untick
+        // rather than hunting for the right row to delete.
+        const wanted = blockForm.weekdays.map(Number);
+        const existing = Object.entries(blockForm.byDay)
+          .map(([wd, id]) => [Number(wd), id]);
+        await Promise.all([
+          ...existing
+            .filter(([wd]) => wanted.includes(wd))
+            .map(([wd, id]) => api.patch(`/availability/${id}/`,
+              { ...base, weekday: wd, date: null })),
+          ...existing
+            .filter(([wd]) => !wanted.includes(wd))
+            .map(([, id]) => api.delete(`/availability/${id}/`)),
+          ...wanted
+            .filter((wd) => !(wd in blockForm.byDay))
+            .map((wd) => api.post('/availability/', { ...base, weekday: wd, date: null })),
+        ]);
+      } else if (blockForm.id) {
         const payload = {
           ...base,
           weekday: blockForm.mode === 'weekly' ? Number(blockForm.weekday) : null,
@@ -288,10 +351,51 @@ export default function Schedule() {
     }
   };
 
-  const removeBlock = async (b) => {
-    if (!window.confirm('Remove this availability block?')) return;
-    try { await api.delete(`/availability/${b.id}/`); load(); }
-    catch { toast.error('Could not remove the block.'); }
+  /* Removing a window never cancels what is booked inside it — those sessions
+     were agreed with somebody. But the old prompt was a bare browser confirm
+     saying "Remove this availability block?", which hid the one fact that
+     decides the answer. The dialog now names the days and the count. */
+  const askRemoveBlock = (b) => setRemoving({
+    key: `one-${b.id}`,
+    start: String(b.start_time).slice(0, 5),
+    end: String(b.end_time).slice(0, 5),
+    capacity: b.capacity,
+    days: b.weekday == null ? [] : [b.weekday],
+    date: b.date || null,
+    blocks: [b],
+    booked: b.booked_ahead || 0,
+  });
+
+  const removePattern = async () => {
+    if (!removing) return;
+    try {
+      await Promise.all(removing.blocks.map((b) => api.delete(`/availability/${b.id}/`)));
+      toast.success(removing.blocks.length === 1
+        ? 'Availability removed'
+        : `Removed ${removing.blocks.length} windows`);
+      setRemoving(null); load();
+    } catch {
+      toast.error('Could not remove the availability.');
+      setRemoving(null);
+    }
+  };
+
+  /* Edit the pattern, not one day of it. Ticking a day adds that window,
+     unticking removes it, and the times and capacity apply across the lot —
+     which is how somebody thinks about their own week. */
+  const openEditPattern = (pattern) => {
+    setError('');
+    setBlockForm({
+      ids: pattern.blocks.map((b) => b.id),
+      byDay: Object.fromEntries(pattern.blocks.map((b) => [b.weekday, b.id])),
+      mode: 'weekly',
+      weekdays: [...pattern.days],
+      date: '',
+      start_time: pattern.start,
+      end_time: pattern.end,
+      capacity: pattern.capacity,
+      psychologist: String(pattern.blocks[0]?.psychologist ?? ''),
+    });
   };
 
   const setStatus = async (a, actionName) => {
@@ -335,33 +439,51 @@ export default function Schedule() {
               <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No availability blocks for this psychologist yet.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-                {WEEKDAYS.map((d, i) => {
-                  const dayBlocks = openPsyBlocks.filter((b) => b.date == null && b.weekday === i)
-                    .sort((a, b) => String(a.start_time).localeCompare(String(b.start_time)));
-                  if (dayBlocks.length === 0) return null;
-                  return (
-                    <div key={d}>
-                      <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 8 }}>{d}s</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                        {dayBlocks.map((b) => (
-                          <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 'var(--radius-lg)', background: 'var(--ink-50)', border: '1px solid var(--border)' }}>
-                            <Icon name="clock" size={16} style={{ color: 'var(--blue-600)' }} />
-                            <span style={{ flex: 1, fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>
-                              {String(b.start_time).slice(0, 5)}–{String(b.end_time).slice(0, 5)}
-                            </span>
-                            <Badge tone="neutral" size="sm">{b.capacity} slot{b.capacity === 1 ? '' : 's'}</Badge>
-                            {role === 'Administrator' && (
-                              <>
-                                <button title="Edit" onClick={() => openEditBlock(b)} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={14} /></button>
-                                <button title="Remove" onClick={() => removeBlock(b)} style={iconBtn('var(--red-700)')}><Icon name="trash-2" size={14} /></button>
-                              </>
-                            )}
+                {openPsyPatterns.length > 0 && (
+                  <div>
+                    <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 8 }}>Weekly pattern</div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {openPsyPatterns.map((p) => (
+                        <div key={p.key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', borderRadius: 'var(--radius-lg)', background: 'var(--ink-50)', border: '1px solid var(--border)', flexWrap: 'wrap' }}>
+                          <Icon name="clock" size={16} style={{ color: 'var(--blue-600)', flex: 'none' }} />
+                          <span style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)', flex: 'none' }}>
+                            {p.start}&ndash;{p.end}
+                          </span>
+                          {/* The days it runs, as the week itself — the ones it
+                              does not run are shown faint rather than omitted,
+                              so a gap is visible instead of inferred. */}
+                          <div style={{ display: 'flex', gap: 3, flex: 1, minWidth: 0 }}>
+                            {WEEKDAYS.map((d, i) => (
+                              <span
+                                key={d}
+                                title={p.days.includes(i) ? `${d}s` : `Not ${d}s`}
+                                style={{
+                                  fontSize: 10.5, fontWeight: 800, letterSpacing: '.02em',
+                                  padding: '3px 6px', borderRadius: 5,
+                                  background: p.days.includes(i) ? 'var(--blue-600)' : 'transparent',
+                                  color: p.days.includes(i) ? '#fff' : 'var(--text-faint)',
+                                  border: `1px solid ${p.days.includes(i) ? 'var(--blue-600)' : 'var(--border)'}`,
+                                }}
+                              >
+                                {d.slice(0, 1)}
+                              </span>
+                            ))}
                           </div>
-                        ))}
-                      </div>
+                          <Badge tone="neutral" size="sm">{p.capacity} slot{p.capacity === 1 ? '' : 's'} a day</Badge>
+                          {p.booked > 0 && (
+                            <Badge tone="brand" size="sm">{p.booked} booked</Badge>
+                          )}
+                          {role === 'Administrator' && (
+                            <>
+                              <button title="Edit this pattern" onClick={() => openEditPattern(p)} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={14} /></button>
+                              <button title="Remove this pattern" onClick={() => setRemoving(p)} style={iconBtn('var(--red-700)')}><Icon name="trash-2" size={14} /></button>
+                            </>
+                          )}
+                        </div>
+                      ))}
                     </div>
-                  );
-                })}
+                  </div>
+                )}
                 {openPsyDated.length > 0 && (
                   <div>
                     <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 8 }}>Specific dates</div>
@@ -376,7 +498,7 @@ export default function Schedule() {
                           {role === 'Administrator' && (
                             <>
                               <button title="Edit" onClick={() => openEditBlock(b)} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={14} /></button>
-                              <button title="Remove" onClick={() => removeBlock(b)} style={iconBtn('var(--red-700)')}><Icon name="trash-2" size={14} /></button>
+                              <button title="Remove" onClick={() => askRemoveBlock(b)} style={iconBtn('var(--red-700)')}><Icon name="trash-2" size={14} /></button>
                             </>
                           )}
                         </div>
@@ -398,8 +520,23 @@ export default function Schedule() {
             </span>
           ))}
         </div>
+        {/* Four psychologists' diaries drawn on top of each other is not a
+            calendar anybody can read. A psychologist already sees only their
+            own, so this is for the people looking at everybody's. */}
+        {!isPsych && psychologists.length > 1 && (
+          <Select
+            value={calPsy} onChange={(e) => setCalPsy(e.target.value)}
+            style={{ minWidth: 190 }} aria-label="Show one psychologist"
+          >
+            <option value="">Everyone&rsquo;s calendar</option>
+            {psychologists.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </Select>
+        )}
         {(isPsych || role === 'Administrator') && <Button variant="secondary" onClick={openCreateBlock} iconLeft={<Icon name="clock" size={17} />}>Add availability</Button>}
-        {canBook && <Button variant="primary" onClick={() => { setError(''); setBooking({ child: '', psychologist: isPsych ? '' : '', date: '', time: '09:00', purpose: 'session', duration: 60, notes: '' }); }} iconLeft={<Icon name="calendar-plus" size={18} />}>Book appointment</Button>}
+        {/* One way in, so the drawer cannot be opened half-configured. This
+            used to be a second copy that prefilled 09:00 — the exact default
+            that had everybody booking the same slot. */}
+        {canBook && <Button variant="primary" onClick={openBooking} iconLeft={<Icon name="calendar-plus" size={18} />}>Book appointment</Button>}
       </PageHeader>
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
@@ -453,7 +590,7 @@ export default function Schedule() {
                 </div>
                 <Badge tone="neutral" size="sm">{b.capacity} slot{b.capacity === 1 ? '' : 's'}</Badge>
                 <button title="Edit" onClick={() => openEditBlock(b)} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={14} /></button>
-                <button title="Remove" onClick={() => removeBlock(b)} style={iconBtn('var(--red-700)')}><Icon name="trash-2" size={14} /></button>
+                <button title="Remove" onClick={() => askRemoveBlock(b)} style={iconBtn('var(--red-700)')}><Icon name="trash-2" size={14} /></button>
               </div>
             ))}
           </div>
@@ -487,6 +624,39 @@ export default function Schedule() {
       )}
 
       {/* Booking drawer */}
+      {removing && (
+        <ConfirmDialog
+          onClose={() => setRemoving(null)}
+          onConfirm={removePattern}
+          tone={removing.booked > 0 ? 'warning' : 'danger'}
+          icon={<Icon name={removing.booked > 0 ? 'alert-triangle' : 'trash-2'} size={19} />}
+          title={removing.blocks.length > 1
+            ? `Remove ${removing.start}–${removing.end} from ${removing.blocks.length} days?`
+            : `Remove ${removing.start}–${removing.end}?`}
+          description={removing.date
+            ? `The one-off window on ${removing.date}.`
+            : removing.days.length
+              ? `It runs on ${removing.days.map((d) => WEEKDAYS[d]).join(', ')}.`
+              : undefined}
+          confirmLabel={removing.blocks.length > 1 ? 'Remove them' : 'Remove it'}
+          cancelLabel="Keep it"
+        >
+          {removing.booked > 0 ? (
+            <Alert tone="amber" icon={<Icon name="calendar" size={17} />}>
+              <strong>{removing.booked}</strong> upcoming session
+              {removing.booked === 1 ? ' is' : 's are'} already booked inside this
+              window. Removing it does <strong>not</strong> cancel
+              {removing.booked === 1 ? ' it' : ' them'} &mdash; those were agreed
+              with somebody. It only stops new bookings being taken here.
+            </Alert>
+          ) : (
+            <div style={{ fontSize: 12.5, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              Nothing is booked inside it, so nothing is affected but future bookings.
+            </div>
+          )}
+        </ConfirmDialog>
+      )}
+
       {booking && (
         <div onClick={() => setBooking(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.32)', display: 'flex', justifyContent: 'flex-end', zIndex: 70 }}>
           <form onSubmit={book} onClick={(e) => e.stopPropagation()} style={{ width: 420, maxWidth: '92%', height: '100%', background: 'var(--surface)', boxShadow: 'var(--shadow-xl)', display: 'flex', flexDirection: 'column' }}>

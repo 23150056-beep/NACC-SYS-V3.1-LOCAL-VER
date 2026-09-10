@@ -7,12 +7,36 @@ from scheduling.models import AvailabilityBlock, Appointment
 class AvailabilityBlockSerializer(serializers.ModelSerializer):
     psychologist_name = serializers.CharField(
         source="psychologist.fullname", read_only=True, default=None)
+    booked_ahead = serializers.SerializerMethodField()
 
     class Meta:
         model = AvailabilityBlock
         fields = ["id", "psychologist", "psychologist_name", "weekday", "date",
-                  "start_time", "end_time", "capacity", "active"]
+                  "start_time", "end_time", "capacity", "active", "booked_ahead"]
         extra_kwargs = {"psychologist": {"required": False}}
+
+    def get_booked_ahead(self, obj):
+        """Sessions already booked into this window, from now on.
+
+        Removing a window does not cancel them and must not - they were agreed
+        with somebody. But "Remove this availability block?" with nothing else
+        on it hid the single fact that decides the answer.
+
+        Past and cancelled sessions are excluded: neither is a reason to
+        hesitate, and counting them would train people to ignore the number.
+        """
+        upcoming = (Appointment.objects
+                    .filter(psychologist_id=obj.psychologist_id,
+                            start__gte=timezone.now())
+                    .exclude(status=Appointment.CANCELLED)
+                    .filter(start__time__gte=obj.start_time,
+                            start__time__lt=obj.end_time))
+        if obj.date is not None:
+            upcoming = upcoming.filter(start__date=obj.date)
+        elif obj.weekday is not None:
+            # Django counts weekdays 1=Sunday..7=Saturday; Python 0=Monday.
+            upcoming = upcoming.filter(start__week_day=(obj.weekday + 2) % 7 or 7)
+        return upcoming.count()
 
     def validate(self, attrs):
         start = attrs.get("start_time") or (self.instance.start_time if self.instance else None)
