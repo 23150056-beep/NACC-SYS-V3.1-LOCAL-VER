@@ -1,6 +1,6 @@
 // RACCO I Design System — primitives ported from the Claude Design workspace kit.
 // Token-driven inline styles; one import surface for every screen.
-import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
+import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as Lucide from 'lucide-react';
 import { initialsOf } from '../utils/child';
@@ -256,15 +256,29 @@ export function EmptyState({ title, description = null, icon = null, action = nu
 
 /* ----------------------------- FormField ----------------------------- */
 export function FormField({ label, htmlFor, hint = null, error = null, required = false, children, style = {} }) {
+  /* The label was rendered but never attached to anything. `htmlFor` has been
+     a prop all along and almost no caller passed it, so screen readers found
+     an unlabelled box and axe reported it as a critical `label` violation on
+     every form in the app.
+
+     Fixed here rather than at ~200 call sites: an id is generated and pushed
+     into the control, unless the caller supplied one. Only a single element
+     child is touched, and never one that already has an id, so a field
+     wrapping two controls or a fragment is left exactly as it was. */
+  const autoId = useId();
+  const fieldId = htmlFor || autoId;
+  const labelled = (isValidElement(children) && !children.props.id && !children.props['aria-label'])
+    ? cloneElement(children, { id: fieldId })
+    : children;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, ...style }}>
       {label && (
-        <label htmlFor={htmlFor} style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 'var(--text-sm)', color: 'var(--text-strong)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <label htmlFor={fieldId} style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 'var(--text-sm)', color: 'var(--text-strong)', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           {label}
           {required && <span style={{ color: 'var(--red-500)' }}>*</span>}
         </label>
       )}
-      {children}
+      {labelled}
       {error ? (
         <span style={{ fontSize: 'var(--text-xs)', color: 'var(--red-600)', fontWeight: 600 }}>{error}</span>
       ) : (
@@ -415,6 +429,8 @@ export function Switch({ checked = false, onChange, size = 'md', disabled = fals
   const control = (
     <span
       role="switch" aria-checked={checked} tabIndex={disabled ? -1 : 0} onClick={toggle}
+      aria-label={typeof label === 'string' ? label : undefined}
+      aria-disabled={disabled || undefined}
       onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); } }}
       style={{ position: 'relative', width: d.w, height: d.h, flex: 'none', borderRadius: 'var(--radius-pill)', background: checked ? 'var(--blue-600)' : 'var(--ink-300)', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1, transition: 'background var(--dur-base) var(--ease-out)', display: 'inline-block' }}
     >

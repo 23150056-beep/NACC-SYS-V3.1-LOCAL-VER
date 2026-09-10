@@ -616,10 +616,8 @@ export default function Users() {
                       const off = state === 'deactivated';
                       return (
                         <tr
-                          key={u.id} tabIndex={0} role="button"
-                          aria-label={`${nameOf(u)} — ${u.role_name || 'no role'}, ${LIFECYCLE[state].label}. Open account.`}
+                          key={u.id}
                           onClick={() => openEdit(u)}
-                          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEdit(u); } }}
                           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--blue-50)'; }}
                           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
                           style={{ borderBottom: '1px solid var(--divider-row)', cursor: 'pointer', transition: 'background var(--dur-fast) var(--ease-out)', opacity: off ? 0.66 : 1 }}
@@ -628,7 +626,18 @@ export default function Users() {
                             <div style={{ display: 'flex', alignItems: 'center', gap: 11, minWidth: 0 }}>
                               <Avatar name={nameOf(u)} tone={off ? 'neutral' : toneFor(u.role_name)} size="sm" />
                               <div style={{ minWidth: 0 }}>
-                                <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameOf(u)}</div>
+                                {/* The focusable thing in the row, rather than
+                                    the row itself. Everything the row's old
+                                    aria-label said is said here, on a control
+                                    a keyboard can actually reach. */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); openEdit(u); }}
+                                  aria-label={`${nameOf(u)} — ${u.role_name || 'no role'}, ${LIFECYCLE[state].label}. Open account.`}
+                                  style={{ all: 'unset', cursor: 'pointer', display: 'block', maxWidth: '100%', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                                >
+                                  {nameOf(u)}
+                                </button>
                                 <div className="racco-mono" style={{ fontSize: 11.5, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
                               </div>
                             </div>

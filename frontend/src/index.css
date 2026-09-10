@@ -152,7 +152,9 @@ img, video { max-width: 100%; height: auto; }
   --amber-400: #ffac2a;
   --amber-500: #f0a02a;
   --amber-600: #d6760a;
-  --amber-700: #ad590d;
+  /* #ad590d gave 4.23:1 on --amber-100, the tint it is always drawn on.
+     This clears AA at 4.78 and is indistinguishable side by side. */
+  --amber-700: #a15209;
   --amber-800: #8c4711;
   --amber-900: #733b12;
 

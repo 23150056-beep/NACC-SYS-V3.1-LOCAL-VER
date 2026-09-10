@@ -202,7 +202,11 @@ export default function Schedule() {
     style: {
       backgroundColor: STATUS_COLOR[event.resource.status] || 'var(--blue-600)',
       borderRadius: 6, border: 'none', color: '#fff', fontSize: 12, fontWeight: 600,
-      opacity: event.resource.status === 'cancelled' ? 0.55 : 1,
+      /* No opacity fade. Dimming the whole chip took the white label down to
+         1.6:1 against its own washed-out background — a cancelled session was
+         the least readable thing on the calendar, when it is still a fact
+         somebody needs to read. The strike-through already says cancelled,
+         and the faint background is quiet enough on its own at 5.2:1. */
       textDecoration: event.resource.status === 'cancelled' ? 'line-through' : 'none',
     },
   }), []);
