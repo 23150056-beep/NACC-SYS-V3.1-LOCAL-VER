@@ -136,7 +136,9 @@ img, video { max-width: 100%; height: auto; }
   --red-200: #f2c6c8;
   --red-300: #f08387;
   --red-400: #e84e54;
-  --red-500: #e8262f;
+  /* #e8262f gave white text 4.42:1 on the notification count badge, just
+     under AA. This clears it at 5.06 and reads the same at a glance. */
+  --red-500: #d81f28;
   --red-600: #cc121b;
   --red-700: #a71117;
   --red-800: #851318;
@@ -229,8 +231,33 @@ img, video { max-width: 100%; height: auto; }
 
   --text-strong: var(--ink-900);
   --text-body: var(--ink-700);
-  --text-muted: var(--ink-500);
-  --text-faint: var(--ink-400);
+  /* Not var(--ink-500)/var(--ink-400) any more, and deliberately so.
+     Those measured 3.68:1 and 2.51:1 against white — WCAG AA asks 4.5:1 for
+     normal text, and this is a government service whose users include people
+     reading case notes on a laptop in a field office. --text-muted alone is
+     used 228 times, --text-faint 93, and --text-faint carries real content:
+     notification timestamps, empty states, who did a thing and when.
+
+     Measured against BOTH backgrounds, because most of this text sits on a
+     card rather than on white, and --ink-50 is the stricter test:
+         strong #141a26  17.4 / 16.3
+         body   #3a4356   9.9 /  9.3
+         muted  #515a6d   6.9 /  6.5
+         faint  #636d80   5.2 /  4.9  (and 4.6 on --ink-100, where the
+                                       eyebrow labels actually sit — the
+                                       first value chosen here measured 4.38
+                                       there and only a rendered audit caught
+                                       it)
+     The steps stay visible. Once both tiers must clear 4.5 they crowd
+     together, so muted moved further than it strictly had to — two tokens
+     that render identically are one token with extra bookkeeping.
+
+     The ink ramp itself is untouched: --ink-400 and --ink-500 are still used
+     for dots, tints and a border, which are decoration and not held to the
+     text rule. This is a deviation from the imported design's specified
+     values, made knowingly. */
+  --text-muted: #515a6d;
+  --text-faint: #636d80;
   --text-on-brand: #ffffff;
   --text-link: var(--blue-600);
 
