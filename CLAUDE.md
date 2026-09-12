@@ -223,6 +223,72 @@ point; it is what a divergence detector would be built to find.
 Refuses to run against a hosted database or with DEBUG=False, and the guard
 runs before anything opens a connection.
 
+**Seeded data must satisfy the rules the endpoint enforces.** This has now
+failed twice in one day. No seeded psychologist had a bookable hour, so the
+calendar refused all forty children; then the referral gate shipped and refused
+them again, because the test fixtures had referrals and the seeder did not. A
+rule and a seeder maintained separately drift, and the tests do not notice.
+Both seeders are now covered by a test that goes through the real rule, and
+`fix_demo_schedule` repairs an existing database without re-seeding it.
+
+
+## Booking and the calendar
+
+Every rule about whether a booking can exist lives in `scheduling/booking.py`,
+not in the viewset. `perform_update` was never written, so rescheduling — the
+thing a busy office does most — reached the model with nothing checked: an
+appointment could be moved outside availability, on top of another one, or into
+last week. A rule enforced on one verb is not enforced.
+
+**Three tiers, and the difference is load-bearing:**
+
+- The **availability window and its capacity are a preference.** A psychologist
+  working outside their own posted hours is their business, and
+  `own_calendar=True` waives those.
+- **Overlaps are not.** Nobody is in two places at once, whatever their role.
+- **Leave is not either.** `Unavailability` is a date range, inclusive at both
+  ends, and unlike the referral it blocks MOVES as well as new bookings — a
+  referral arriving late is paperwork catching up, but putting a session on a
+  day somebody is away is wrong whenever it is done.
+
+**The slot grid runs the same `errors_for()` the endpoint runs** — not a
+cheaper approximation. `test_everything_it_offers_can_actually_be_booked` takes
+every slot the grid offers and books it until the day empties. The moment the
+offer and the refusal are computed two different ways the screen starts lying,
+and a booking screen that lies is worse than a blank time field because it
+looks authoritative.
+
+**A child needs a case referral on file before any session is booked**, checked
+for every role. Moving an appointment that already exists is exempt, so
+children booked before the rule are not stranded by it.
+
+Declaring leave never cancels what is booked inside it, and removing an
+availability window never does either. Those sessions were agreed with
+somebody; both screens report the count and change nothing.
+
+## The adoption module
+
+Eight statutory stages, a requirement docket, and one hard gate. Built 9 Sep
+2026.
+
+- **`pipeline.admit` is the only door.** A child cannot enter without a
+  completed pre-assessment, and the check lives there rather than in a view, so
+  no second caller can be written that forgets it.
+- **Status is derived on read, never stored.** A status column can disagree
+  with the data behind it, and on a compliance tracker that disagreement is the
+  entire failure.
+- **Stage targets are rows, not constants**, because RACCO I's issuances change
+  and a correction must not need a deploy. The seeder only ever ADDS, so an
+  office's correction survives it.
+- **Nobody verifies their own upload.** That depends on the ROW rather than the
+  role, which is why it lives in `docket.py` and not a permission class. Staff
+  and administrators otherwise do the same things — it is a checklist the
+  office keeps for itself, not an approval hierarchy.
+- **The stages and the handoff backlog arrive via data migrations, not
+  `entrypoint.sh`.** A data migration runs ONCE per database, so a ninth stage
+  added later needs its own migration calling `install_stages` again — 0003
+  says so in its docstring, and a test keeps the seeders out of entrypoint.sh.
+
 ## Getting an account
 
 Two doors, one queue. Since 2 Sep 2026 a sign-up form lives at `/signup`
@@ -255,6 +321,25 @@ the only access control the system has.
   address is only what someone typed — unlike a Google one, which Google
   verified. The queue says which door each request came through for exactly
   that reason.
+
+## Signing in
+
+- **Every token carries `pwd`**, Django's `get_session_auth_hash()`, checked on
+  the access path and on refresh. Changing a password now ends the sessions
+  that used the old one; without it a refresh token kept renewing for a day and
+  "please sign in again" was theatre. **A token with no `pwd` claim is
+  refused**, so everybody signs in once after that ships. Expected, not a fault.
+- **Tokens live in `sessionStorage`**, via `api/session.js` so the client and
+  AuthContext cannot disagree about where they are. Closing the browser ends
+  the session, and it is per-TAB — a second tab signs in again.
+- **A Google account has `set_unusable_password()`.** Never flag one
+  `must_change_password`: the gate asks for the CURRENT password and
+  `check_password()` is False for an unusable one, so it locks them out with no
+  way back. `reactivate` guards this with `has_usable_password()`.
+- **Approval requires `email_verified`**, because approving emails a temporary
+  password and a mistyped address sends it to whoever owns the typo. Google
+  requests arrive verified; typed ones confirm a six-digit code. Migration 0010
+  backfilled the Google accounts already in the queue.
 
 ## The assistant app
 
@@ -412,6 +497,25 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   nothing.
 - **Cloudflare retires models** — `llama-3.1-8b` returns 410. Check
   `/api/assistant/model-health/` before assuming the code broke.
+
+## Accessibility
+
+Text tokens clear WCAG AA — measured against white, `--ink-50` AND `--ink-100`,
+because most text sits on a card and the card is the stricter test.
+`--ink-400`/`--ink-500` are untouched and still drive dots and borders, which
+are decoration and not held to the text rule.
+
+**`FormField` generates an id and injects it into its child**, so controls are
+labelled without touching ~200 call sites. Pass your own `id` or `aria-label`
+to opt out.
+
+Audit with **axe-core**, never a hand-rolled probe. Mine gave three different
+answers and each was its own bug: it missed a fixed header's background, read
+`rgba(255,255,255,0.1)` as opaque white, then sampled a badge's coloured dot
+and called it the text's background. An instrument less reliable than what it
+measures is worse than none. `/reports` and `/report/child/:id` are statically
+checked but were never axe-audited. One known violation is react-big-calendar's
+own `role="rowgroup"` markup, not ours.
 
 ## Before committing or bundling anything
 
