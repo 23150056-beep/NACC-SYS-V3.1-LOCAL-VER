@@ -41,3 +41,10 @@ yarn-error.log*
 # Demo caseload fixture — regenerate with `manage.py export_demo_data`.
 # Not committed: it is derived data, and it is large.
 demo_fixture.json
+
+# Design handoffs dropped in the repo root. The .dc.html exports and mockup
+# archives are working material from the Claude Design workspace — useful to
+# have on disk, not something the repository needs a copy of. Name them
+# explicitly rather than ignoring *.zip, so a zip that IS meant to be tracked
+# is not silently skipped.
+/*.zip
