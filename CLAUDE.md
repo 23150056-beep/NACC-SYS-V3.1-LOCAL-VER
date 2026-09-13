@@ -525,9 +525,14 @@ Audit with **axe-core**, never a hand-rolled probe. Mine gave three different
 answers and each was its own bug: it missed a fixed header's background, read
 `rgba(255,255,255,0.1)` as opaque white, then sampled a badge's coloured dot
 and called it the text's background. An instrument less reliable than what it
-measures is worse than none. `/reports` and `/report/child/:id` are statically
-checked but were never axe-audited. One known violation is react-big-calendar's
-own `role="rowgroup"` markup, not ours.
+measures is worse than none.
+
+Every screen has now been audited with real axe-core, `/reports` and
+`/report/child/:id` included — both clean on WCAG A/AA. Check the page
+actually rendered before believing a clean result: an empty shell has no
+violations either, so the audit records element and text counts beside the
+verdict. One known violation remains on `/schedule`, and it is
+react-big-calendar's own `role="rowgroup"` markup rather than ours.
 
 ## Before committing or bundling anything
 
