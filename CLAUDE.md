@@ -83,6 +83,15 @@ Three ways that verification goes wrong, all learned the hard way on 10 Sep:
   be told apart anonymously at all, because the detail route swallows the
   unknown segment as a pk and answers 401 either way. Pick an explicitly
   routed path, or check the frontend bundle instead.
+- **Capture the baseline BEFORE the push, or the hash tells you nothing.** On
+  13 Sep the live web bundle was recorded three minutes after the push, by
+  which time the new build was already serving. Fourteen minutes of an
+  unchanging hash then read as "never deployed" when it meant "deployed before
+  you looked" — the inverse of the trap above, reached the same way. The page
+  is also behind Cloudflare with `s-maxage=300` (`cf-cache-status: HIT`), so
+  the hash lags the origin by up to five minutes anyway. Grep the bundle for a
+  string only the new build contains; that answers the question outright,
+  whenever you ask it.
 - **Do not pipe a long verification through `tail`.** A background
   `manage.py test | tail -8` reported `FAILED (failures=4, errors=1)` and threw
   away every failure name with it; the whole suite had to run again to find
