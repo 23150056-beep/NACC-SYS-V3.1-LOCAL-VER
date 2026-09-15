@@ -50,8 +50,13 @@ export default function PreAssessment() {
 
   useEffect(() => {
     api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))).catch(() => {});
-    api.get('/form-templates/?type=consent').then((r) => setConsentTemplates(r.data)).catch(() => {});
-    api.get('/form-templates/?type=clinical_interview').then((r) => setInterviewTemplates(r.data)).catch(() => {});
+    // One request, split here: the rows already carry form_type, so asking
+    // the server twice for the same table was a round trip spent on a filter
+    // the payload answers.
+    api.get('/form-templates/').then((r) => {
+      setConsentTemplates(r.data.filter((t) => t.form_type === 'consent'));
+      setInterviewTemplates(r.data.filter((t) => t.form_type === 'clinical_interview'));
+    }).catch(() => {});
     api.get('/instruments/').then((r) => setInstruments(r.data)).catch(() => {});
   }, []);
 

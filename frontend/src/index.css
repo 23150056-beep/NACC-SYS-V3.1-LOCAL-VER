@@ -111,7 +111,11 @@ img, video { max-width: 100%; height: auto; }
    Derived from the official NACC/RACCO I seal & wordmark.
    ============================================================ */
 :root {
-  /* ---- Brand primaries (sampled from the seal) ---- */
+  /* ---- Brand primaries (sampled from the seal) ----
+     Provenance, not palette. The ramps below are hand-tuned hex, not
+     derived from these, so nothing reads them with var() - they are kept
+     because "where did this blue come from" is a question worth being
+     able to answer. Do not build on them; use --blue-*, --red-*, --amber-*. */
   --heart-blue: #0a1fcf;
   --heart-red: #ee1c25;
   --heart-amber: #ffac2a;
@@ -200,18 +204,11 @@ img, video { max-width: 100%; height: auto; }
   --danger-600: var(--red-600);
   --danger-700: var(--red-700);
 
-  --info-50: var(--blue-50);
-  --info-100: var(--blue-100);
-  --info-500: var(--blue-500);
-  --info-600: var(--blue-600);
-  --info-700: var(--blue-700);
 
   /* ---- Semantic aliases ---- */
   --brand: var(--blue-600);
   --brand-strong: var(--blue-700);
   --brand-soft: var(--blue-50);
-  --accent: var(--amber-400);
-  --accent-ink: var(--amber-700);
 
   --bg-app: var(--ink-100);
   /* The chrome — header and the rail behind it. Deep navy so the vivid action
@@ -272,17 +269,10 @@ img, video { max-width: 100%; height: auto; }
   --border-brand: var(--blue-200);
   --ring: color-mix(in srgb, var(--blue-500) 22%, transparent);
 
-  /* Role accent chips */
-  --role-admin: var(--blue-600);
-  --role-staff: var(--amber-500);
-  /* Was --red-500. A psychologist is not a warning, and the old value made
-     "who this is" and "something is wrong" the same colour on one screen. */
-  --role-psychologist: var(--blue-400);
+  /* Role identity colours live in ROLE_META in src/ui/index.jsx, which is
+     what RoleBadge and the avatars actually read. The tokens that used to
+     shadow them here were read by nothing. */
 
-  /* Assessment severity scale */
-  --sev-standard: var(--success-500);
-  --sev-moderate: var(--warning-500);
-  --sev-high: var(--red-500);
 
   /* ---- Typography ---- */
   --font-display: 'Baloo 2', 'Segoe UI', system-ui, sans-serif;
@@ -369,17 +359,13 @@ img, video { max-width: 100%; height: auto; }
 
   /* ---- Layout ---- */
   --topbar-h: 56px;
-  /* Left rail, in its three states. Which one is in play is decided by
-     LayoutContext from the measured window width, not by a media query — the
-     right rail's presence changes the centre pane's width too, and CSS cannot
-     see that. */
-  --rail-w: 234px;
-  --rail-w-icons: 60px;
-  --rail-right-w: 288px;
-  --rail-right-w-wide: 318px;
-  --shell-gap: 16px;
-  --shell-pad: 16px;
-  --content-max: 1200px;
+  /* Rail widths, the shell's gap and its padding are NOT here. They are
+     decided by LayoutContext from the measured window width, because the
+     right rail's presence changes the centre pane's width too and CSS
+     cannot see that. Tokens for them used to sit here reading the same
+     numbers, and nothing read the tokens - by which time --shell-gap and
+     --shell-pad had already gone stale: they said a flat 16px while
+     LayoutContext had moved to 12px below 1180. One source of truth. */
   --field-h: 40px;
   --field-h-sm: 34px;
 }

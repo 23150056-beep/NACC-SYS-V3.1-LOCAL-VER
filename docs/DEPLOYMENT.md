@@ -2,8 +2,16 @@
 
 > **V3's primary deployment target is the cloud** — see
 > [`CLOUD-DEPLOYMENT.md`](CLOUD-DEPLOYMENT.md). This document covers the
-> on-premises single-PC path, which remains supported and unchanged. Choose it
-> when the agency wants case data to stay physically on its own hardware.
+> on-premises single-PC path, which remains supported. Choose it when the
+> agency wants case data to stay physically on its own hardware.
+>
+> **Not re-tested since the cloud path landed.** It is kept because the
+> on-premises option is a real one, not because anyone has walked it through
+> recently — so treat the commands as a starting point rather than a
+> verified script. Two things are known to be off: it says `python -m venv
+> venv` where the rest of the repo uses `.venv`, and it assumes `psql` is on
+> PATH, which it is not on the development machine. Walk it once on real
+> hardware before promising it to an agency.
 
 Target: a single office PC/server at RACCO I (Windows, 8–16 GB RAM).
 Stack: Django 5.1 + PostgreSQL + React (built static) + optional Ollama.
