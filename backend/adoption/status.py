@@ -23,16 +23,8 @@ AT_RISK = "at_risk"
 WAITING = "waiting"
 ON_TRACK = "on_track"
 
-# What each one means on screen. Amber and red are the only two that ask for
-# anything; blue says "not yours to chase"; grey says "stopped".
-LABELS = {
-    ON_HOLD: "On hold",
-    COMPLETE: "Complete",
-    OVERDUE: "Overdue",
-    AT_RISK: "At risk",
-    WAITING: "Waiting",
-    ON_TRACK: "On track",
-}
+# What each value means on screen is the frontend's business: see
+# STATUS_META in frontend/src/api/adoption.js. Nothing here re-derives it.
 
 # Days left on a statutory clock before the case starts reading as at risk.
 CLOCK_WARNING_DAYS = 14

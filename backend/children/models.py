@@ -80,8 +80,9 @@ class Child(models.Model):
         ("Foster-Adopt", "Foster-Adopt"),
     ]
 
-    # Deprecated in favour of assigned_psychologist; kept for migration safety.
-    # A record is handled by an assigned psychologist.
+    # The one link between a child and the psychologist responsible for
+    # them. Every scoping rule, permission class and report reads it -
+    # see accounts/scoping.py.
     assigned_psychologist = models.ForeignKey(
         "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="assigned_children",

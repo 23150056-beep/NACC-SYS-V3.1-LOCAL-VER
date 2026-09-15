@@ -77,9 +77,14 @@ Default admin (change the password immediately): `admin@racco1.gov.ph` / `admin1
 **On Windows**, double-click `setup-local.bat` once, then `run-local.bat` to
 start it — see [`docs/LOCAL-SETUP.md`](docs/LOCAL-SETUP.md). The local copy uses
 SQLite and the local disk, so it reaches neither the live database nor the live
-bucket.
+bucket. Note that a Windows venv puts its interpreter in `.venv/Scripts/`, not
+`.venv/bin/` — so every command above reads
+`.venv/Scripts/python.exe manage.py …` there.
 
-Tests: `.venv/bin/python manage.py test` (backend suite, 379 tests).
+Tests: `.venv/Scripts/python.exe manage.py test` on Windows,
+`.venv/bin/python manage.py test` elsewhere. It runs the whole backend suite
+and takes roughly a quarter of an hour, so do not pipe it through `tail` —
+that throws away the failure names along with the noise.
 
 ## Deploying
 

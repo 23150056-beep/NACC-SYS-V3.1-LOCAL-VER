@@ -3,8 +3,6 @@
 Each rule is a plain queryset/date check. Every alert names the child and the
 gap so the dashboard list is directly actionable.
 """
-from datetime import timedelta
-
 from django.db.models import Count
 from django.utils import timezone
 

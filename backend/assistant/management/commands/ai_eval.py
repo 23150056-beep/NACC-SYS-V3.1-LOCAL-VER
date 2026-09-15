@@ -16,7 +16,6 @@ from django.core.management.base import BaseCommand
 from assistant import evaluation, prompts, tools
 from assistant.models import AssistantSetting
 from assistant.services import AIUnavailable, get_ai_client
-from accounts.models import Role
 from children.models import Child
 
 # Fixed polish inputs: Taglish as the notes are actually written, heavy Tagalog,

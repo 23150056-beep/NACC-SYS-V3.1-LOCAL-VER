@@ -844,7 +844,7 @@ export function iconBtn(color, dim = 30) {
  * and restores the element's own inline transform/shadow/filter, so it composes
  * with selected/active states without clobbering them. Give the element a
  * `transition` (var(--transition-base)) so the change animates.
- * Rows and flat text controls can't lift — use hoverTint() for those. */
+ */
 export function hoverLift({ lift = -2, shadow = 'var(--shadow-lg)', brightness = 0.98 } = {}) {
   return {
     onMouseEnter: (e) => {
@@ -862,15 +862,6 @@ export function hoverLift({ lift = -2, shadow = 'var(--shadow-lg)', brightness =
       el.style.boxShadow = el.dataset.hlShadow || '';
       el.style.filter = el.dataset.hlFilter || '';
     },
-  };
-}
-
-/* Background-tint hover for elements that must not lift (table rows, flat list
- * items). Restores whatever inline background the element already had. */
-export function hoverTint(tint = 'var(--blue-50)') {
-  return {
-    onMouseEnter: (e) => { const el = e.currentTarget; el.dataset.htBg = el.style.background; el.style.background = tint; },
-    onMouseLeave: (e) => { const el = e.currentTarget; el.style.background = el.dataset.htBg || 'transparent'; },
   };
 }
 

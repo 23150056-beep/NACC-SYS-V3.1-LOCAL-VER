@@ -31,7 +31,6 @@ not a search feature here.
 import random
 from datetime import timedelta
 
-from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone

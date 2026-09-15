@@ -9,7 +9,7 @@ export const CATEGORIES = [
   { v: 'achievement', label: 'Achievement' },
   { v: 'other', label: 'Other' },
 ];
-export const AUDIENCES = [
+const AUDIENCES = [
   { v: 'child', label: 'For children' },
   { v: 'adoptive_parent', label: 'For prospective adoptive parents' },
   { v: 'both', label: 'Both' },

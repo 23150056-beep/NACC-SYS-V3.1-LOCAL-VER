@@ -15,7 +15,6 @@ might be a typo, and a typo is a stranger's handset.
 import logging
 import secrets
 
-from django.conf import settings
 from django.core.cache import cache
 
 from accounts.sms import queue_sms, send_sms

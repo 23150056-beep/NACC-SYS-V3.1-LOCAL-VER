@@ -631,9 +631,6 @@ tr:focus-visible {
 .racco-auth-org {
   font-size: clamp(17px, 2.4vh, 26px);
 }
-.racco-auth-motto {
-  font-size: clamp(19px, 2.8vh, 30px);
-}
 
 /* min-height: 0 is the whole trick: without it a grid item refuses to shrink
    below its content, so the overflow-y below would never engage. */

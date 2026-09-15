@@ -12,8 +12,7 @@ from children.models import Child, TerminationRecord
 from children.serializers import ChildSerializer
 from clinical import reports
 from clinical.models import (
-    PreAssessment, ResultEntry, RemarkNote, TreatmentPlan,
-    PsychologicalReport, ProblemEntry, CaseReferral, OpinionnaireInvite,
+    PreAssessment, ResultEntry, RemarkNote, PsychologicalReport,
 )
 from clinical.serializers import (
     PreAssessmentSerializer, ResultEntrySerializer, RemarkNoteSerializer,

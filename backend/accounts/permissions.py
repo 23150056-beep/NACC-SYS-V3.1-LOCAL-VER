@@ -21,8 +21,9 @@ class RecordsAccess(BasePermission):
     """Read access for Admin/Staff/Psychologist; write access for Admin/Staff only.
 
     Psychologists can VIEW child/guardian records (per the RBAC matrix) but cannot
-    create, edit, archive, or delete them. Per-psychologist "assigned only" filtering
-    is deferred to Phase 2 (when assessments establish the assignment link).
+    create, edit, archive, or delete them. Per-psychologist "assigned only"
+    filtering is NOT done here - it is queryset scoping, and it lives in
+    accounts.scoping.scope_to_visible, which every child-related viewset applies.
     """
 
     def has_permission(self, request, view):

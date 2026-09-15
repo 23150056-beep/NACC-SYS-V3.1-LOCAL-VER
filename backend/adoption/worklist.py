@@ -9,8 +9,6 @@ Cases on hold and closed cases are excluded throughout. A frozen case is
 frozen on purpose, and ranking it as overdue would fill the list with problems
 nobody is permitted to fix yet.
 """
-from datetime import timedelta
-
 from django.utils import timezone
 
 from adoption import status as case_status

@@ -67,5 +67,3 @@ export function useCensus() {
     pendingAccess: 0, refreshPendingAccess: () => {},
   };
 }
-
-export const EMPTY_CENSUS = EMPTY;

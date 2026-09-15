@@ -27,7 +27,6 @@ import re
 _MOBILE = re.compile(r"^9\d{9}$")
 
 E164_LENGTH = 13          # +63 plus ten digits
-NATIONAL_LENGTH = 10      # 9XXXXXXXXX
 
 
 class InvalidPhilippineMobile(ValueError):
