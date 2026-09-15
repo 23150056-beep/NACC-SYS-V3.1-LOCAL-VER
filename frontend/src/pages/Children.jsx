@@ -92,7 +92,8 @@ export default function Children() {
 
   const load = useCallback(() => {
     // Include inactive (terminated) cases — the V2 roster shows them with chips.
-    api.get('/children/?include_archived=true').then((r) => setChildren(r.data));
+    api.get('/children/?include_archived=true').then((r) => setChildren(r.data))
+      .catch(() => toast.error('Could not load the records. Check your connection and refresh.'));
     // Active psychologists + current caseload (admin/staff endpoint — also lets Staff assign).
     api.get('/psychologists/').then((r) => setPsychologists(r.data)).catch(() => {});
     // Availability blocks power the assignment-time comparison panel — admin/staff only.
@@ -111,7 +112,7 @@ export default function Children() {
         setApptsByChild(map);
       })
       .catch(() => setApptsByChild({}));
-  }, [canManage]);
+  }, [canManage, toast]);
   useEffect(() => { load(); }, [load]);
 
   const setQ = (v) => setSearchParams(v ? { q: v } : {}, { replace: true });

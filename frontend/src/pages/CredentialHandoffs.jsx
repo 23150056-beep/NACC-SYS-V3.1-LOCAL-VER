@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import api from '../api/client';
 import { useToast } from '../context/ToastContext';
 import { Avatar, Badge, Button, EmptyState, Icon, RoleBadge, TOOLBAR } from '../ui';
@@ -20,8 +20,11 @@ export default function CredentialHandoffs() {
   const [mailed, setMailed] = useState({});       // { userId: bool }
   const [busy, setBusy] = useState(false);
 
-  const load = () => api.get('/users/').then((r) => setUsers(r.data.filter((u) => u.must_change_password)));
-  useEffect(() => { load(); }, []);
+  const load = useCallback(
+    () => api.get('/users/').then((r) => setUsers(r.data.filter((u) => u.must_change_password)))
+      .catch(() => toast.error('Could not load pending handovers.')),
+    [toast]);
+  useEffect(() => { load(); }, [load]);
 
   const generate = async (u) => {
     try {

@@ -364,7 +364,7 @@ export default function PreAssessment() {
               {child?.fullname}&apos;s profile now shows “Answered” with the instrument titles used.
             </p>
             <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
-              <Button variant="secondary" onClick={() => { setStep(0); setMaxStep(0); setPa(null); setChild(null); setSelectedInstruments([]); setProblems([]); setNotes(''); api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))); }}>Start another</Button>
+              <Button variant="secondary" onClick={() => { setStep(0); setMaxStep(0); setPa(null); setChild(null); setSelectedInstruments([]); setProblems([]); setNotes(''); api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))).catch(() => toast.error('Could not reload the children.')); }}>Start another</Button>
               <Button variant="primary" onClick={() => navigate(`/report/child/${child.id}`)}>Open child report</Button>
             </div>
           </div>
