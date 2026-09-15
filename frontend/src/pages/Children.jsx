@@ -101,8 +101,10 @@ export default function Children() {
     return loadAll(toast, [
       // Include inactive (terminated) cases — the V2 roster shows them with chips.
       () => api.get('/children/?include_archived=true').then((r) => setChildren(r.data)),
-      // Active psychologists + current caseload (admin/staff endpoint — also lets Staff assign).
-      () => api.get('/psychologists/').then((r) => setPsychologists(r.data)),
+      // Active psychologists + current caseload. Admin/staff only, at both
+      // ends: the endpoint is IsAdminOrStaff, and the list is only rendered
+      // behind canManage. Asking as a psychologist earned a guaranteed 403.
+      canManage && (() => api.get('/psychologists/').then((r) => setPsychologists(r.data))),
       // Availability blocks power the assignment-time comparison panel — admin/staff only.
       canManage && (() => api.get('/availability/').then((r) => setBlocks(r.data))),
       // Upcoming (next 7 days) scheduled appointments → roster chips + drawer list.

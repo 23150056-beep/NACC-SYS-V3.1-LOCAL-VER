@@ -68,6 +68,8 @@ export default function ChildProgressReport() {
   // own clinical text with no undo, so that path is asked for, not clicked.
   const [confirmResummarize, setConfirmResummarize] = useState(null); // { kind, id, filename }
   const isStaffOrAdmin = ['Administrator', 'Staff'].includes(user?.role_name);
+  // Mirrors INSTRUMENT_MANAGER_ROLES on the server (accounts/permissions.py).
+  const canReadTemplates = ['Administrator', 'Psychologist'].includes(user?.role_name);
 
   const load = () => api.get(`/reports/child/${id}/`).then((r) => setData(r.data)).catch(() => setData('error'));
 
@@ -91,9 +93,12 @@ export default function ChildProgressReport() {
   useEffect(() => {
     loadAll(toast, [
       isPsych && (() => api.get('/instruments/').then((r) => setInstruments(r.data))),
-      () => api.get('/form-templates/?type=self_report_gov').then((r) => setSurveyTemplates(r.data)),
+      // Administrator or Psychologist only - CanManageInstruments. Staff are
+      // refused by design, so asking as Staff was a guaranteed 403.
+      canReadTemplates && (() => api.get('/form-templates/?type=self_report_gov')
+        .then((r) => setSurveyTemplates(r.data))),
     ], 'Some options on this page could not load. Refresh to try again.');
-  }, [isPsych, toast]);
+  }, [isPsych, canReadTemplates, toast]);
 
   if (data === 'error') return <div style={PAGE}><Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>This report is unavailable.</Alert></div>;
   if (!data) return <div style={PAGE}><div style={{ color: 'var(--text-muted)' }}>Loading report…</div></div>;
@@ -145,6 +150,21 @@ export default function ChildProgressReport() {
     } catch (err) { toast.error(err.response?.data?.detail || 'Could not update the case status.'); }
   };
 
+  /* KNOWN GAP, and it predates the error reporting that exposed it.
+   *
+   * The button below is offered to `isStaffOrAdmin || canWrite`, so a member
+   * of STAFF is invited to create a QR survey - but the templates it needs
+   * come from /form-templates/, which is CanManageInstruments (Administrator
+   * or Psychologist). Staff are refused, surveyTemplates stays empty, and
+   * they land on the message below: go and create a template under
+   * Pre-Assessment Instruments. That screen is not one Staff can open
+   * either. So they are told to do something they cannot do, about a cause
+   * that is not theirs.
+   *
+   * Fixing it is a permissions decision rather than a cleanup - either Staff
+   * get read access to form templates, or the button stops being offered to
+   * them - so it is written down here rather than guessed at.
+   */
   const createInvite = async () => {
     const tpl = surveyTemplates[0];
     if (!tpl) { toast.error('Create a Self-Report (Government Form) template under Pre-Assessment Instruments first.'); return; }
