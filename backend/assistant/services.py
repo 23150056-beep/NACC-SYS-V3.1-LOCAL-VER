@@ -52,24 +52,34 @@ class OllamaClient:
         self.base_url = base_url.rstrip("/")
         self.model = model
 
+    def _post(self, path, payload):
+        """One request to the runtime, and one translation of its failures.
+
+        generate() and choose_tool() hit different endpoints but talked to
+        them with the same twelve lines and the same six-exception tuple.
+        Losing one exception from one copy is a 500 where the user should
+        have been told the assistant is unavailable.
+        """
+        req = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                return json.loads(resp.read().decode())
+        except (urllib.error.URLError, TimeoutError, OSError,
+                json.JSONDecodeError, http.client.HTTPException,
+                UnicodeDecodeError) as exc:
+            raise AIUnavailable(f"Local AI runtime unreachable: {exc}") from exc
+
     def generate(self, prompt, system=None):
         # No num_ctx, no temperature, no options block: each distinct option set
         # forces Ollama to evict and reload the model (~5-6s).
         payload = {"model": self.model, "prompt": prompt, "stream": False}
         if system:
             payload["system"] = system
-        req = urllib.request.Request(
-            f"{self.base_url}/api/generate",
-            data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=180) as resp:
-                data = json.loads(resp.read().decode())
-        except (urllib.error.URLError, TimeoutError, OSError,
-                json.JSONDecodeError, http.client.HTTPException,
-                UnicodeDecodeError) as exc:
-            raise AIUnavailable(f"Local AI runtime unreachable: {exc}") from exc
+        data = self._post("/api/generate", payload)
         return (data.get("response") or "").strip()
 
     def choose_tool(self, question, tool_payload, system=None):
@@ -85,18 +95,7 @@ class OllamaClient:
         messages.append({"role": "user", "content": question})
         payload = {"model": self.model, "messages": messages,
                    "tools": tool_payload, "stream": False}
-        req = urllib.request.Request(
-            f"{self.base_url}/api/chat",
-            data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
-            method="POST")
-        try:
-            with urllib.request.urlopen(req, timeout=180) as resp:
-                data = json.loads(resp.read().decode())
-        except (urllib.error.URLError, TimeoutError, OSError,
-                json.JSONDecodeError, http.client.HTTPException,
-                UnicodeDecodeError) as exc:
-            raise AIUnavailable(f"Local AI runtime unreachable: {exc}") from exc
+        data = self._post("/api/chat", payload)
 
         calls = (data.get("message") or {}).get("tool_calls") or []
         if not calls:

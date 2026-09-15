@@ -8,6 +8,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts.display import display_name
 from accounts.models import Role
 from accounts.scoping import role_of as _role
 from activity.models import ActivityLog
@@ -117,7 +118,7 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
                                        duration_minutes=duration,
                                        exclude_id=exclude)
         return Response({
-            "psychologist": getattr(psych, "fullname", "") or psych.get_username(),
+            "psychologist": display_name(psych),
             "date": day.isoformat(),
             "duration": duration,
             "slots": found,
@@ -154,7 +155,7 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
         today = timezone.localdate()
         slots = free_windows(psych, today, today + timedelta(days=14))
         return Response({
-            "psychologist": getattr(psych, "fullname", "") or psych.get_username(),
+            "psychologist": display_name(psych),
             "slots": slots[:6],
         })
 
@@ -214,7 +215,7 @@ class UnavailabilityViewSet(viewsets.ModelViewSet):
                               created_by=self.request.user)
         log_activity(self.request.user, ActivityLog.CREATED, ActivityLog.RECORD,
                      entity_type="Unavailability",
-                     entity_label=getattr(psychologist, "fullname", "") or "",
+                     entity_label=display_name(psychologist),
                      entity_id=obj.id, recipient=psychologist)
 
     def perform_update(self, serializer):

@@ -5,6 +5,7 @@ from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts.display import display_name
 from accounts.models import Role
 from accounts.scoping import role_of as _role, scope_to_visible
 from accounts.permissions import CanViewResults, IsAdminOrStaff
@@ -128,7 +129,7 @@ class MonitoringListView(generics.GenericAPIView):
                 "child_name": c.fullname,
                 "case_ref": f"C-{c.id:04d}",
                 "case_type": c.case_type or None,
-                "psychologist_name": (getattr(psy, "fullname", "") or getattr(psy, "username", "")) or None,
+                "psychologist_name": display_name(psy) or None,
                 "case_status": c.case_status,
                 "pre_assessment_status": c.pre_assessment_status(),
                 "latest_classification": (res.classification or None) if res else None,
@@ -274,8 +275,7 @@ class SummaryReportView(generics.GenericAPIView):
                   .select_related("assigned_psychologist")):
             if not c.assigned_psychologist_id:
                 continue
-            name = (getattr(c.assigned_psychologist, "fullname", "")
-                    or getattr(c.assigned_psychologist, "username", ""))
+            name = display_name(c.assigned_psychologist)
             caseload[name] = caseload.get(name, 0) + 1
         data["caseload_per_psychologist"] = [
             {"name": k, "caseload": v}
@@ -342,8 +342,7 @@ class DashboardView(generics.GenericAPIView):
             if c.case_status in by_case_status:
                 by_case_status[c.case_status] += 1
             if c.case_status == Child.STAGE_COUNSELING and c.assigned_psychologist_id:
-                name = (getattr(c.assigned_psychologist, "fullname", "")
-                        or getattr(c.assigned_psychologist, "username", ""))
+                name = display_name(c.assigned_psychologist)
                 counseling_per_psy[name] = counseling_per_psy.get(name, 0) + 1
 
         # Intake vs termination trend (follows the range selector, last 6 buckets).
@@ -363,8 +362,7 @@ class DashboardView(generics.GenericAPIView):
 
         today_weekday = tz.localdate().weekday()
         availability_today = [{
-            "psychologist": (getattr(b.psychologist, "fullname", "")
-                             or getattr(b.psychologist, "username", "")),
+            "psychologist": display_name(b.psychologist),
             "start": str(b.start_time)[:5], "end": str(b.end_time)[:5],
             "capacity": b.capacity,
         } for b in blocks
@@ -384,8 +382,7 @@ class DashboardView(generics.GenericAPIView):
             "time": tz.localtime(a.start).strftime("%H:%M"),
             "purpose": a.purpose,
             "status": a.status,
-            "psychologist": (getattr(a.psychologist, "fullname", "")
-                             or getattr(a.psychologist, "username", "")),
+            "psychologist": display_name(a.psychologist),
         } for a in appts_today]
 
         agg = reports.summary(pas, rng)

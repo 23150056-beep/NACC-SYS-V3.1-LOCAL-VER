@@ -1,6 +1,7 @@
 """Aggregation helpers for V2 reports. Sessions are completed pre-assessments;
 clinical judgment lives in the psychologist's own result entries — the system
 never computes scores."""
+from accounts.display import display_name
 
 
 def bucket(d, rng):
@@ -22,7 +23,7 @@ def summary(pre_assessments, rng="monthly"):
     for p in pre_assessments:
         ct = p.child.case_type or "—"
         by_case_type[ct] = by_case_type.get(ct, 0) + 1
-        name = getattr(p.psychologist, "fullname", "") or getattr(p.psychologist, "username", "—")
+        name = display_name(p.psychologist, "—")
         slot = per_psy.setdefault(name, {"name": name, "count": 0})
         slot["count"] += 1
         b = bucket(p.date, rng)

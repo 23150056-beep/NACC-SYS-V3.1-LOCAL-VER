@@ -42,10 +42,15 @@ class ChildApiTest(APITestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(len(resp.data), 1)
 
-    def test_archive_child_hides_from_list(self):
-        self._auth("staff@racco1.gov.ph", "staff1234")
-        child = Child.objects.create(fullname="Ana Lopez", case_type="Adoption")
-        self.client.post(f"/api/children/{child.id}/archive/")
+    def test_a_terminated_child_drops_out_of_the_list(self):
+        """Terminate is the only way a case goes inactive now. Staff cannot
+        take it, so this goes through the child's own psychologist."""
+        child = Child.objects.create(fullname="Ana Lopez", case_type="Adoption",
+                                     assigned_psychologist=self.psychologist)
+        self._auth("c@racco1.gov.ph", "couns1234")
+        resp = self.client.post(f"/api/children/{child.id}/terminate/", {
+            "reason_category": "Services completed", "note": "Case closed."})
+        self.assertEqual(200, resp.status_code, resp.data)
         names = [c["fullname"] for c in self.client.get("/api/children/").data]
         self.assertNotIn("Ana Lopez", names)
 

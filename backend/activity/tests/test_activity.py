@@ -78,9 +78,21 @@ class RecordHookTest(APITestCase):
         self.assertEqual(logs.first().entity_type, "Child")
         self.assertEqual(logs.first().entity_label, "Juan Cruz")
 
-    def test_archive_child_logs_record_archived(self):
+    def test_terminating_a_child_logs_record_archived(self):
+        """Terminate is what ends a case, and it is administrators (or the
+        child's own psychologist) who may - not the staff account this class
+        signs in as, which is why this signs in again."""
+        User.objects.create_user(
+            email="admin@racco1.gov.ph", username="admin", password="admin1234",
+            role=Role.objects.create(role_name=Role.ADMINISTRATOR))
+        token = self.client.post("/api/auth/login/", {
+            "email": "admin@racco1.gov.ph", "password": "admin1234"}).data["access"]
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
+
         child = Child.objects.create(fullname="Ana Lopez", case_type="Adoption")
-        self.client.post(f"/api/children/{child.id}/archive/")
+        resp = self.client.post(f"/api/children/{child.id}/terminate/", {
+            "reason_category": "Adoption finalized", "note": "Placement completed."})
+        self.assertEqual(200, resp.status_code, resp.data)
         self.assertEqual(
             ActivityLog.objects.filter(category="record", action="archived").count(), 1)
 

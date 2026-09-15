@@ -81,6 +81,25 @@ class ChildRecordAccess(RecordsAccess):
                 and obj.assigned_psychologist_id == request.user.id)
 
 
+def is_admin_or_assignee(request, child):
+    """An administrator, or the psychologist this child is assigned to.
+
+    The rule behind `terminate` and `advance-status`, which was written out
+    by hand at both. Two copies is a thin case for a helper anywhere else;
+    for the predicate deciding who may END A CASE it is one too many, and it
+    is the same reasoning that put scope_to_visible in accounts/scoping.py.
+
+    Deliberately NOT shared with an appointment's rule in
+    scheduling.views._set_status: that one turns on the appointment's own
+    psychologist rather than the child's assignee, and it also lets staff
+    cancel. Two rules that look alike are still two rules.
+    """
+    role = _role_name(request)
+    return (role == Role.ADMINISTRATOR
+            or (role == Role.PSYCHOLOGIST
+                and child.assigned_psychologist_id == request.user.id))
+
+
 class ProgressRecordAccess(BasePermission):
     """Progress log & goals. Read: admin/staff/psychologist. Write: admin or the
     child's assigned psychologist (Staff read-only). Object-level restricts a

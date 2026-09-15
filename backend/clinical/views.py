@@ -45,134 +45,144 @@ from clinical.services import extract_pdf_text
 logger = logging.getLogger(__name__)
 
 
+def _serve_attachment(obj):
+    """Authenticated download of an uploaded file. MEDIA_URL is never exposed
+    directly, so the viewset's queryset scoping is what decides who gets the
+    bytes - by the time this runs, that decision is already made.
+
+    The consent scan deliberately does NOT come through here. It is served
+    INLINE so the frontend can preview it in a blob viewer, and inline is
+    precisely what makes an uploaded .html dangerous - so it carries its own
+    content-type allowlist and nosniff header. That is a security decision,
+    not a duplication waiting to be folded in.
+    """
+    from django.http import FileResponse
+    try:
+        handle = obj.file.open("rb")
+    except (FileNotFoundError, ValueError):
+        return Response({"detail": "File is missing from storage."},
+                        status=status.HTTP_404_NOT_FOUND)
+    return FileResponse(
+        handle, as_attachment=True,
+        filename=obj.original_filename or obj.file.name.rsplit("/", 1)[-1])
 
 
-class InstrumentCatalogViewSet(viewsets.ModelViewSet):
+
+
+class _OwnedCatalogViewSet(viewsets.ModelViewSet):
+    """The two owner-scoped catalogs: instrument titles, and agency forms.
+
+    These were two classes of sixty-odd lines that differed in four strings and
+    one default. Everything else - the include_inactive filter, the
+    psychologist visibility clause, the ownership check, the forced owner on
+    update, deactivate - was duplicated verbatim, comments included. That
+    matters more than the line count, because `perform_update`'s comment
+    describes a SECURITY control: without the forced owner a psychologist can
+    hand their own row into the admin-only shared pool by sending owner=null.
+    A control with two implementations is a control that can be fixed in one of
+    them.
+
+    The one real difference is kept as a flag rather than smoothed away. When
+    an administrator creates a row with no owner, an INSTRUMENT becomes
+    agency-wide shared (owner stays null) while a FORM TEMPLATE becomes the
+    administrator's own. That asymmetry looks like an oversight and is not:
+    the instrument catalog is governance, the form list is authorship.
+    """
+
+    permission_classes = [CanManageInstruments]
+    pagination_class = None
+
+    model = None
+    entity_type = ""            # what the activity log calls one of these
+    denied_message = ""         # what a psychologist is told when refused
+    owner_defaults_to_creator = False
+
+    def get_queryset(self):
+        qs = self.model.objects.all()
+        if self.request.query_params.get("include_inactive") != "true":
+            qs = qs.filter(active=True)
+        if _role(self.request) == Role.PSYCHOLOGIST:
+            qs = qs.filter(Q(owner=self.request.user) | Q(owner__isnull=True))
+        return qs
+
+    def _log(self, obj, action_name):
+        log_activity(self.request.user, action_name, ActivityLog.RECORD,
+                     entity_type=self.entity_type, entity_label=obj.title,
+                     entity_id=obj.id)
+
+    def _assert_can_write(self, obj):
+        # Shared (owner=None) rows are admin-managed; a psychologist may only
+        # modify what they own.
+        if _role(self.request) == Role.PSYCHOLOGIST and obj.owner_id != self.request.user.id:
+            raise PermissionDenied(self.denied_message)
+
+    def perform_create(self, serializer):
+        if _role(self.request) == Role.PSYCHOLOGIST:
+            obj = serializer.save(owner=self.request.user)
+        else:
+            owner = serializer.validated_data.get("owner")
+            if owner is None and self.owner_defaults_to_creator:
+                owner = self.request.user
+            obj = serializer.save(owner=owner)
+        self._log(obj, ActivityLog.CREATED)
+
+    def perform_update(self, serializer):
+        self._assert_can_write(serializer.instance)
+        if _role(self.request) == Role.PSYCHOLOGIST:
+            # Force the owner so a psychologist cannot self-promote their own
+            # row into the admin-only shared pool via owner=null, or hand it to
+            # another user, by supplying "owner" in the body.
+            obj = serializer.save(owner=self.request.user)
+        else:
+            obj = serializer.save()
+        self._log(obj, ActivityLog.UPDATED)
+
+    def perform_destroy(self, instance):
+        self._assert_can_write(instance)
+        instance.delete()
+
+    @action(detail=True, methods=["post"])
+    def deactivate(self, request, pk=None):
+        obj = self.get_object()
+        self._assert_can_write(obj)
+        obj.active = False
+        obj.save(update_fields=["active", "updated_at"])
+        self._log(obj, ActivityLog.ARCHIVED)
+        return Response({"active": False}, status=status.HTTP_200_OK)
+
+
+class InstrumentCatalogViewSet(_OwnedCatalogViewSet):
     """Title-only instrument catalog. Psychologists manage their own entries,
-    admins manage all (catalog governance)."""
-    permission_classes = [CanManageInstruments]
-    pagination_class = None
+    administrators manage all of them (catalog governance).
+
+    There is no `activate` counterpart to deactivate, and there was not really
+    one before either: the endpoint existed, no screen called it and no test
+    covered it. If reactivating an instrument is wanted, it wants a button.
+    """
+
+    model = InstrumentCatalog
     serializer_class = InstrumentCatalogSerializer
-
-    def get_queryset(self):
-        qs = InstrumentCatalog.objects.all()
-        if self.request.query_params.get("include_inactive") != "true":
-            qs = qs.filter(active=True)
-        if _role(self.request) == Role.PSYCHOLOGIST:
-            qs = qs.filter(Q(owner=self.request.user) | Q(owner__isnull=True))
-        return qs
-
-    def _log(self, obj, action_name):
-        log_activity(self.request.user, action_name, ActivityLog.RECORD,
-                     entity_type="Instrument", entity_label=obj.title, entity_id=obj.id)
-
-    def _assert_can_write(self, obj):
-        # Shared (owner=None) catalog entries are admin-managed; psychologists
-        # may only modify instruments they own.
-        if _role(self.request) == Role.PSYCHOLOGIST and obj.owner_id != self.request.user.id:
-            raise PermissionDenied(
-                "Shared instruments are managed by the administrator.")
-
-    def perform_create(self, serializer):
-        if _role(self.request) == Role.PSYCHOLOGIST:
-            obj = serializer.save(owner=self.request.user)
-        else:
-            # No owner selected means agency-wide shared instrument.
-            obj = serializer.save(owner=serializer.validated_data.get("owner"))
-        self._log(obj, ActivityLog.CREATED)
-
-    def perform_update(self, serializer):
-        self._assert_can_write(serializer.instance)
-        if _role(self.request) == Role.PSYCHOLOGIST:
-            # Force the owner so a psychologist can't self-promote their own
-            # instrument into the admin-only shared pool via owner=null (or
-            # hand it off to another user) by supplying "owner" in the body.
-            obj = serializer.save(owner=self.request.user)
-        else:
-            obj = serializer.save()
-        self._log(obj, ActivityLog.UPDATED)
-
-    def perform_destroy(self, instance):
-        self._assert_can_write(instance)
-        instance.delete()
-
-    @action(detail=True, methods=["post"])
-    def deactivate(self, request, pk=None):
-        obj = self.get_object()
-        self._assert_can_write(obj)
-        obj.active = False
-        obj.save(update_fields=["active", "updated_at"])
-        self._log(obj, ActivityLog.ARCHIVED)
-        return Response({"active": False}, status=status.HTTP_200_OK)
-
-    @action(detail=True, methods=["post"])
-    def activate(self, request, pk=None):
-        obj = self.get_object()
-        self._assert_can_write(obj)
-        obj.active = True
-        obj.save(update_fields=["active", "updated_at"])
-        return Response({"active": True}, status=status.HTTP_200_OK)
+    entity_type = "Instrument"
+    denied_message = "Shared instruments are managed by the administrator."
+    # owner_defaults_to_creator stays False: an administrator creating one with
+    # no owner is creating an agency-wide shared instrument, deliberately.
 
 
-class AgencyFormTemplateViewSet(viewsets.ModelViewSet):
-    """Agency-authored form templates (consent, clinical interview, …).
+class AgencyFormTemplateViewSet(_OwnedCatalogViewSet):
+    """Agency-authored form templates (consent, clinical interview, ...).
     Same ownership rules as the catalog; attestation enforced by the serializer."""
-    permission_classes = [CanManageInstruments]
-    pagination_class = None
+
+    model = AgencyFormTemplate
     serializer_class = AgencyFormTemplateSerializer
+    entity_type = "AgencyForm"
+    denied_message = "Official agency forms can only be edited by an administrator."
+    # Unlike the catalog: an ownerless form an administrator creates is theirs.
+    owner_defaults_to_creator = True
 
     def get_queryset(self):
-        qs = AgencyFormTemplate.objects.all()
-        if self.request.query_params.get("include_inactive") != "true":
-            qs = qs.filter(active=True)
+        qs = super().get_queryset()
         form_type = self.request.query_params.get("type")
-        if form_type:
-            qs = qs.filter(form_type=form_type)
-        if _role(self.request) == Role.PSYCHOLOGIST:
-            qs = qs.filter(Q(owner=self.request.user) | Q(owner__isnull=True))
-        return qs
-
-    def _log(self, obj, action_name):
-        log_activity(self.request.user, action_name, ActivityLog.RECORD,
-                     entity_type="AgencyForm", entity_label=obj.title, entity_id=obj.id)
-
-    def _assert_can_write(self, obj):
-        # Shared (owner=None) official forms are admin-managed; psychologists
-        # may only modify templates they own.
-        if _role(self.request) == Role.PSYCHOLOGIST and obj.owner_id != self.request.user.id:
-            raise PermissionDenied(
-                "Official agency forms can only be edited by an administrator.")
-
-    def perform_create(self, serializer):
-        if _role(self.request) == Role.PSYCHOLOGIST:
-            obj = serializer.save(owner=self.request.user)
-        else:
-            obj = serializer.save(owner=serializer.validated_data.get("owner") or self.request.user)
-        self._log(obj, ActivityLog.CREATED)
-
-    def perform_update(self, serializer):
-        self._assert_can_write(serializer.instance)
-        if _role(self.request) == Role.PSYCHOLOGIST:
-            # Force the owner so a psychologist can't self-promote their own
-            # template into the admin-only shared pool via owner=null (or
-            # hand it off to another user) by supplying "owner" in the body.
-            obj = serializer.save(owner=self.request.user)
-        else:
-            obj = serializer.save()
-        self._log(obj, ActivityLog.UPDATED)
-
-    def perform_destroy(self, instance):
-        self._assert_can_write(instance)
-        instance.delete()
-
-    @action(detail=True, methods=["post"])
-    def deactivate(self, request, pk=None):
-        obj = self.get_object()
-        self._assert_can_write(obj)
-        obj.active = False
-        obj.save(update_fields=["active", "updated_at"])
-        self._log(obj, ActivityLog.ARCHIVED)
-        return Response({"active": False}, status=status.HTTP_200_OK)
+        return qs.filter(form_type=form_type) if form_type else qs
 
 
 class _ChildScopedClinicalViewSet(viewsets.ModelViewSet):
@@ -356,16 +366,7 @@ class PsychologicalReportViewSet(_ChildScopedClinicalViewSet):
 
     @action(detail=True, methods=["get"])
     def download(self, request, pk=None):
-        """Authenticated file serving — MEDIA_URL is never exposed directly."""
-        from django.http import FileResponse
-        obj = self.get_object()  # queryset scoping already applied
-        try:
-            handle = obj.file.open("rb")
-        except (FileNotFoundError, ValueError):
-            return Response({"detail": "File is missing from storage."},
-                            status=status.HTTP_404_NOT_FOUND)
-        return FileResponse(handle, as_attachment=True,
-                            filename=obj.original_filename or obj.file.name.rsplit("/", 1)[-1])
+        return _serve_attachment(self.get_object())
 
 
 class CaseReferralViewSet(viewsets.ModelViewSet):
@@ -414,15 +415,7 @@ class CaseReferralViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"])
     def download(self, request, pk=None):
-        from django.http import FileResponse
-        obj = self.get_object()
-        try:
-            handle = obj.file.open("rb")
-        except (FileNotFoundError, ValueError):
-            return Response({"detail": "File is missing from storage."},
-                            status=status.HTTP_404_NOT_FOUND)
-        return FileResponse(handle, as_attachment=True,
-                            filename=obj.original_filename or obj.file.name.rsplit("/", 1)[-1])
+        return _serve_attachment(self.get_object())
 
 
 class RemarkNoteViewSet(_ChildScopedClinicalViewSet):

@@ -1,4 +1,6 @@
 import logging
+
+from accounts.display import display_name
 from activity.models import ActivityLog
 
 logger = logging.getLogger(__name__)
@@ -12,8 +14,7 @@ def log_activity(actor, action, category, *, entity_type="", entity_label="", en
     """
     try:
         is_user = bool(getattr(actor, "is_authenticated", False))
-        label = ((getattr(actor, "fullname", "") or getattr(actor, "username", ""))
-                 if is_user else "System") or "System"
+        label = display_name(actor, "System") if is_user else "System"
         ActivityLog.objects.create(
             actor=actor if is_user else None,
             recipient=recipient if getattr(recipient, "is_authenticated", False) else None,

@@ -29,9 +29,27 @@ class NextSlotsTests(APITestCase):
         r = self.client.get(f"/api/availability/next-slots/?child={solo.id}")
         self.assertEqual(r.status_code, 400)
 
-    def test_response_includes_psychologist_name(self):
+    def test_response_prefers_the_psychologists_real_name(self):
+        self.psych.first_name, self.psych.last_name = "Paz", "Cruz"
+        self.psych.save()
         r = self.client.get(f"/api/availability/next-slots/?child={self.child.id}")
-        self.assertEqual(r.data["psychologist"], self.psych.fullname or self.psych.email)
+        self.assertEqual("Paz Cruz", r.data["psychologist"])
+
+    def test_response_falls_back_to_the_username(self):
+        self.assertEqual("", self.psych.fullname)
+        r = self.client.get(f"/api/availability/next-slots/?child={self.child.id}")
+        self.assertEqual(self.psych.username, r.data["psychologist"])
+
+    def test_response_never_carries_an_email_address(self):
+        """This used to fall back to get_username(), which on this model is
+        the email - so a psychologist with no name had their address handed
+        to anyone who could see the child. The previous version of this test
+        asserted `fullname or email`, which is how it went unnoticed: it
+        restated the implementation instead of saying what was wanted.
+        See accounts/display.py."""
+        self.assertEqual("", self.psych.fullname, "the case that mattered")
+        r = self.client.get(f"/api/availability/next-slots/?child={self.child.id}")
+        self.assertNotIn("@", r.data["psychologist"])
 
     def test_unknown_child_400(self):
         r = self.client.get("/api/availability/next-slots/?child=999999")

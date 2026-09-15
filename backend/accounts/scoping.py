@@ -38,13 +38,20 @@ def role_of(request):
 
 
 def visible_children(request):
-    """The Child queryset this request is allowed to see."""
+    """The Child queryset this request may see.
+
+    Scope always comes from `request.user`. No endpoint accepts an
+    "assigned to me" parameter, so no caller can widen its own view by
+    asking, and an argument the model invents is discarded before it
+    reaches a queryset.
+
+    Delegates rather than repeating the filter: this used to write the
+    psychologist clause out again, which is how it came to differ from the
+    copy in the assistant that was actually being called.
+    """
     from children.models import Child
 
-    qs = Child.objects.all()
-    if role_of(request) == Role.PSYCHOLOGIST:
-        qs = qs.filter(assigned_psychologist=request.user)
-    return qs
+    return scope_to_visible(Child.objects.all(), request, path=None)
 
 
 def scope_to_visible(qs, request, path="child"):

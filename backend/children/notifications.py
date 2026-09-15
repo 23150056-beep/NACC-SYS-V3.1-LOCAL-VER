@@ -25,18 +25,22 @@ import urllib.request
 from django.conf import settings
 from django.db import transaction
 
+from accounts.display import display_name
+
 logger = logging.getLogger(__name__)
 
 BREVO_ENDPOINT = "https://api.brevo.com/v3/smtp/email"
 _TIMEOUT = 20
 
 
-def _post(payload, description):
-    """POST one message to Brevo. `description` names which mail this is, and
-    exists only for the log: more than one kind of message goes through here,
-    and a failure that does not say which one leaves whoever is reading the
-    logs looking at the wrong feature."""
-    request = urllib.request.Request(
+def _build_request(payload):
+    """The Brevo request itself.
+
+    Shared because both senders build it identically and differ only in what
+    they do with a failure: _post returns a boolean for the log, while the
+    configuration test returns a sentence for an administrator to read.
+    """
+    return urllib.request.Request(
         BREVO_ENDPOINT,
         data=json.dumps(payload).encode("utf-8"),
         headers={
@@ -46,6 +50,14 @@ def _post(payload, description):
         },
         method="POST",
     )
+
+
+def _post(payload, description):
+    """POST one message to Brevo. `description` names which mail this is, and
+    exists only for the log: more than one kind of message goes through here,
+    and a failure that does not say which one leaves whoever is reading the
+    logs looking at the wrong feature."""
+    request = _build_request(payload)
     try:
         with urllib.request.urlopen(request, timeout=_TIMEOUT) as response:
             return response.status in (200, 201, 202)
@@ -72,11 +84,7 @@ def _post(payload, description):
 def build_payload(psychologist, case_number):
     """The message itself. Split out so a test can assert what leaves the
     building without standing up an HTTP server."""
-    recipient_name = html.escape(
-        getattr(psychologist, "fullname", "")
-        or getattr(psychologist, "username", "")
-        or "Psychologist"
-    )
+    recipient_name = html.escape(display_name(psychologist, "Psychologist"))
     return {
         "sender": {
             "name": settings.BREVO_SENDER_NAME,
@@ -178,16 +186,7 @@ def send_test_email(recipient):
         "textContent": ("This is a test from NACC SYS. If you are reading it, "
                         "temporary password emails will arrive."),
     }
-    request = urllib.request.Request(
-        BREVO_ENDPOINT,
-        data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "accept": "application/json",
-            "api-key": settings.BREVO_API_KEY,
-            "content-type": "application/json",
-        },
-        method="POST",
-    )
+    request = _build_request(payload)
     try:
         with urllib.request.urlopen(request, timeout=_TIMEOUT) as response:
             if response.status in (200, 201, 202):
@@ -226,11 +225,7 @@ def build_temporary_password_payload(user, temporary_password):
     agreements, and the rule that keeps a child's name out of the assignment
     email applies here too.
     """
-    name = html.escape(
-        getattr(user, "fullname", "")
-        or getattr(user, "username", "")
-        or "there"
-    )
+    name = html.escape(display_name(user, "there"))
     # The password is generated from a fixed alphabet, so escaping changes
     # nothing today. It is escaped anyway: the day that alphabet grows, this
     # should not become the thing that breaks the mail.

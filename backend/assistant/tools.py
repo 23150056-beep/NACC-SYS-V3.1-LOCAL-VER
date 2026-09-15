@@ -19,6 +19,9 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 import re
 
+from accounts.display import display_name
+from accounts.scoping import visible_children
+
 # Enum values the model reached for that were not in the enum. Deterministic,
 # instant, free — and the single change that took measured accuracy from 91%
 # to 100% on the spike's case set.
@@ -407,8 +410,7 @@ def capability_examples(role):
 
 
 def _scope(request):
-    from assistant.views import _visible_children      # local: avoids a cycle
-    return _visible_children(request)
+    return visible_children(request)
 
 
 def _resolve_appointments(request, args):
@@ -597,7 +599,7 @@ def _resolve_summary(request, args):
     gaps = compute_alerts(Child.objects.filter(pk=child.pk))
     return {"kind": "summary", "match": "one", "child": {
         "id": child.id, "name": child.fullname, "status": child.status,
-        "psychologist": getattr(child.assigned_psychologist, "fullname", None)},
+        "psychologist": display_name(child.assigned_psychologist) or None},
         "remarks": [{"date": str(r.date), "text": r.text} for r in remarks[:5]],
         "gaps": [a.get("type") for a in gaps]}
 
@@ -659,8 +661,7 @@ def _resolve_availability(request, args):
     for person in people.order_by("last_name", "first_name"):
         for window in availability.free_windows(person, start, end):
             items.append({
-                "psychologist": getattr(person, "fullname", "")
-                or person.get_username(),
+                "psychologist": display_name(person),
                 "email": person.email,
                 **window,
             })

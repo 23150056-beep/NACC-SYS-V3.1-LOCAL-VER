@@ -5,9 +5,6 @@ from django.utils import timezone
 class Child(models.Model):
     ACTIVE = "active"
     INACTIVE = "inactive"
-    # Back-compat alias: v1 called the non-active state "archived"; V2 renames it
-    # to inactive (a terminated/archived case) without touching shared code paths.
-    ARCHIVED = INACTIVE
     STATUS_CHOICES = [(ACTIVE, "Active"), (INACTIVE, "Inactive")]
 
     # Linear case tracker (blueprint milestones): the psychologist advances

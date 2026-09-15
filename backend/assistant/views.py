@@ -12,7 +12,7 @@ from rest_framework.response import Response
 
 from accounts.models import Role
 from accounts.scoping import (role_of as _role, role_of_user as _role_of,
-                              scope_to_visible)
+                              visible_children)
 from accounts.permissions import IsAdministrator, IsAdminOrStaff
 from assistant import evaluation, prompts, tools
 from assistant.models import AssistantJob, AssistantSetting
@@ -135,16 +135,6 @@ class AssistantJobFeedbackView(AssistantBaseView):
         return Response({"outcome": job.outcome})
 
 
-def _visible_children(request):
-    """Children this user may see — the same rule as _ChildScopedClinicalViewSet.
-
-    Scope always comes from request.user. No endpoint accepts an
-    "assigned to me" parameter, so no caller can widen its own view.
-    """
-    qs = Child.objects.all()
-    return scope_to_visible(qs, request, path=None)
-
-
 class PreSessionBriefView(AssistantBaseView):
     """Generate a brief now. This is the ~40s path — the UI reaches for
     LatestBriefView first and only falls back to here."""
@@ -153,7 +143,7 @@ class PreSessionBriefView(AssistantBaseView):
     def post(self, request, child_id):
         gate()
         try:
-            child = _visible_children(request).get(pk=child_id)
+            child = visible_children(request).get(pk=child_id)
         except Child.DoesNotExist:
             return Response({"detail": "Not found."},
                             status=status.HTTP_404_NOT_FOUND)
@@ -178,7 +168,7 @@ class LatestBriefView(AssistantBaseView):
 
     def get(self, request, child_id):
         try:
-            child = _visible_children(request).get(pk=child_id)
+            child = visible_children(request).get(pk=child_id)
         except Child.DoesNotExist:
             return Response({"detail": "Not found."},
                             status=status.HTTP_404_NOT_FOUND)
@@ -247,7 +237,7 @@ class PrefetchBriefsView(AssistantBaseView):
     def post(self, request):
         gate()
         today = timezone.localdate()
-        visible = _visible_children(request)
+        visible = visible_children(request)
         appts = Appointment.objects.filter(
             child__in=visible, status=Appointment.SCHEDULED,
             start__date=today, psychologist=request.user)
@@ -292,7 +282,7 @@ class DocumentSummaryView(AssistantBaseView):
         gate()
         model, prefix, label, author_field = _DOC_KINDS[self.kind]
         doc = model.objects.filter(
-            pk=doc_id, child__in=_visible_children(request)).first()
+            pk=doc_id, child__in=visible_children(request)).first()
         if not doc:
             return Response({"detail": "Not found."},
                             status=status.HTTP_404_NOT_FOUND)
@@ -332,7 +322,7 @@ class ConfirmSummaryView(AssistantBaseView):
     def post(self, request, doc_id):
         model, prefix, _, _ = _DOC_KINDS[self.kind]
         doc = model.objects.filter(
-            pk=doc_id, child__in=_visible_children(request)).first()
+            pk=doc_id, child__in=visible_children(request)).first()
         if not doc:
             return Response({"detail": "Not found."},
                             status=status.HTTP_404_NOT_FOUND)

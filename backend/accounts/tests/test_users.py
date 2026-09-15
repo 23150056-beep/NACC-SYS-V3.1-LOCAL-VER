@@ -230,7 +230,7 @@ class PsychologistListTest(APITestCase):
                                             first_name="Levi", last_name="Makalaya", role=self.psy_role)
         Child.objects.create(fullname="A", assigned_psychologist=self.psy)
         Child.objects.create(fullname="B", assigned_psychologist=self.psy)
-        Child.objects.create(fullname="C", assigned_psychologist=self.psy, status=Child.ARCHIVED)
+        Child.objects.create(fullname="C", assigned_psychologist=self.psy, status=Child.INACTIVE)
 
     def _auth(self, email):
         token = self.client.post("/api/auth/login/", {"email": email, "password": "pass1234"}).data["access"]
@@ -243,6 +243,18 @@ class PsychologistListTest(APITestCase):
         self.assertEqual(len(resp.data), 1)
         self.assertEqual(resp.data[0]["name"], "Levi Makalaya")
         self.assertEqual(resp.data[0]["caseload"], 2)  # archived child not counted
+
+    def test_the_psychologist_list_never_carries_an_email_address(self):
+        """It is a dropdown of names. A psychologist who has not filled in
+        theirs falls back to their username, never their address."""
+        nameless = User.objects.create_user(
+            email="nobody@racco1.gov.ph", username="nobody", password="pass1234",
+            role=self.psy_role)
+        self.assertEqual("", nameless.fullname, "the case that mattered")
+        self._auth("s@racco1.gov.ph")
+        names = [row["name"] for row in self.client.get("/api/psychologists/").data]
+        self.assertIn("nobody", names)
+        self.assertFalse([n for n in names if "@" in n], names)
 
     def test_admin_can_list_psychologists(self):
         self._auth("a@racco1.gov.ph")

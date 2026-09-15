@@ -6,6 +6,8 @@ reason a chip on the board can never disagree with the docket behind it.
 """
 from rest_framework import serializers
 
+from accounts.display import display_name
+
 from adoption import docket, status as case_status
 from adoption.models import (
     AdoptionCase, AdoptionStage, ComplianceClock, Handoff, PAP, Requirement, StageEvent,
@@ -155,7 +157,7 @@ class CaseDetailSerializer(CaseCardSerializer):
         if not handoff:
             return None
         return {
-            "name": getattr(handoff.released_by, "fullname", None),
+            "name": display_name(handoff.released_by) or None,
             "released_at": handoff.released_at,
         }
 

@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from accounts.display import display_name
 from accounts.models import Role
 from children.models import Child
 
@@ -97,7 +98,7 @@ class ChildSerializer(serializers.ModelSerializer):
             "date": t.date,
             "reason_category": t.reason_category,
             "note": t.note,
-            "terminated_by": (getattr(by, "fullname", "") or getattr(by, "username", "")) or None,
+            "terminated_by": display_name(by) or None,
         }
 
     def get_terminations(self, obj):
@@ -106,7 +107,7 @@ class ChildSerializer(serializers.ModelSerializer):
             by = t.terminated_by
             out.append({
                 "date": t.date, "reason_category": t.reason_category, "note": t.note,
-                "terminated_by": (getattr(by, "fullname", "") or getattr(by, "username", "")) or None,
+                "terminated_by": display_name(by) or None,
             })
         return out
 

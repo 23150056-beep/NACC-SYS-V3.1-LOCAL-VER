@@ -5,8 +5,10 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from accounts.display import display_name
 from accounts.models import Role
-from accounts.permissions import RecordsAccess, ChildRecordAccess
+from accounts.permissions import (ChildRecordAccess,
+                                  is_admin_or_assignee)
 from accounts.scoping import role_of, scope_to_visible
 from activity.models import ActivityLog
 from activity.services import log_activity
@@ -16,45 +18,20 @@ from accounts.sms_notifications import notify_new_assignment
 from children.serializers import ChildSerializer
 
 
-class _ArchivableViewSet(viewsets.ModelViewSet):
-    permission_classes = [RecordsAccess]
-    pagination_class = None
-    model = None
-
-    def get_queryset(self):
-        qs = self.model.objects.all().order_by("fullname")
-        if self.request.query_params.get("include_archived") != "true":
-            qs = qs.exclude(status=self.model.ARCHIVED)
-        return qs
-
-    def _log(self, obj, action_name):
-        log_activity(
-            self.request.user, action_name, ActivityLog.RECORD,
-            entity_type=self.model.__name__,
-            entity_label=getattr(obj, "fullname", ""),
-            entity_id=obj.id)
-
-    def perform_create(self, serializer):
-        obj = serializer.save()
-        self._log(obj, ActivityLog.CREATED)
-
-    def perform_update(self, serializer):
-        obj = serializer.save()
-        self._log(obj, ActivityLog.UPDATED)
-
-    @action(detail=True, methods=["post"])
-    def archive(self, request, pk=None):
-        obj = self.get_object()
-        obj.status = self.model.ARCHIVED
-        obj.save(update_fields=["status", "updated_at"])
-        self._log(obj, ActivityLog.ARCHIVED)
-        return Response({"status": "archived"}, status=status.HTTP_200_OK)
-
-
-class ChildViewSet(_ArchivableViewSet):
+# There used to be an _ArchivableViewSet above this, with one subclass and an
+# `archive` action that set a child inactive. Nothing in the frontend ever
+# called it - `terminate` is the path, and it demands a reason category and a
+# note and writes a TerminationRecord. Worse, `archive` ran under
+# RecordsAccess, whose write rule is Admin OR STAFF, so it was a
+# staff-reachable way to end a case with none of that recorded - while both
+# the terminate endpoint and the button in Children.jsx agree that staff do
+# not end cases. A generalisation with one instance was not the problem; the
+# second door was.
+class ChildViewSet(viewsets.ModelViewSet):
     model = Child
     serializer_class = ChildSerializer
     permission_classes = [ChildRecordAccess]
+    pagination_class = None
 
     def get_permissions(self):
         # Terminate/advance have their own rule (admin OR the child's assigned
@@ -86,10 +63,12 @@ class ChildViewSet(_ArchivableViewSet):
         # shows the termination details, and terminate itself must be able to
         # report "already inactive" rather than 404. Reopen also needs access
         # to inactive children by id.
-        if self.action in ("retrieve", "terminate", "reopen"):
-            qs = self.model.objects.all().order_by("fullname")
-        else:
-            qs = super().get_queryset()
+        qs = Child.objects.all().order_by("fullname")
+        if self.action not in ("retrieve", "terminate", "reopen"):
+            # The parameter is still called include_archived because the
+            # frontend sends that name; the state it means is INACTIVE.
+            if self.request.query_params.get("include_archived") != "true":
+                qs = qs.exclude(status=Child.INACTIVE)
         # consents feed the derived pre_assessment_status (No Consent Yet, …).
         # case_referrals joins the prefetch so has_case_referral costs one
         # query for the page rather than one per child — the list returns
@@ -127,7 +106,7 @@ class ChildViewSet(_ArchivableViewSet):
                    if now - v["ts"] < self.PRESENCE_TTL}
         if request.method == "POST":
             entries[str(request.user.id)] = {
-                "name": getattr(request.user, "fullname", "") or request.user.get_username(),
+                "name": display_name(request.user),
                 "role": role_of(request) or "",
                 "ts": now,
             }
@@ -148,10 +127,7 @@ class ChildViewSet(_ArchivableViewSet):
         """Move the case tracker between pre_assessment and counseling.
         Terminated is only reachable through the terminate action."""
         child = self.get_object()
-        role = role_of(request)
-        allowed = (role == Role.ADMINISTRATOR) or (
-            role == Role.PSYCHOLOGIST and child.assigned_psychologist_id == request.user.id)
-        if not allowed:
+        if not is_admin_or_assignee(request, child):
             return Response({"detail": "Only the assigned psychologist or an administrator can update the case status."},
                             status=status.HTTP_403_FORBIDDEN)
         if child.status == Child.INACTIVE:
@@ -171,10 +147,7 @@ class ChildViewSet(_ArchivableViewSet):
         """Archive a case with a required reason (V2). Sets the child inactive
         and writes a TerminationRecord. Admin or assigned psychologist only."""
         child = self.get_object()
-        role = role_of(request)
-        allowed = (role == Role.ADMINISTRATOR) or (
-            role == Role.PSYCHOLOGIST and child.assigned_psychologist_id == request.user.id)
-        if not allowed:
+        if not is_admin_or_assignee(request, child):
             return Response({"detail": "Only the assigned psychologist or an administrator can terminate this case."},
                             status=status.HTTP_403_FORBIDDEN)
         if child.status == Child.INACTIVE:
@@ -254,5 +227,5 @@ class ChildViewSet(_ArchivableViewSet):
         return Response({"matches": [{
             "id": c.id, "fullname": c.fullname, "status": c.status,
             "birth_date": c.birth_date,
-            "psychologist_name": getattr(c.assigned_psychologist, "fullname", None),
+            "psychologist_name": display_name(c.assigned_psychologist) or None,
         } for c in matches]})

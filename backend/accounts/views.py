@@ -15,6 +15,7 @@ from accounts.google_auth import (
     AccessRequestPending, SignupThrottled, link_google_account,
     resolve_google_user, verify_google_credential,
 )
+from accounts.display import display_name
 from accounts import email_verification
 from accounts.lockout import client_ip, clear_failures, is_locked, register_failure
 from accounts.models import Role, UserProfile
@@ -756,5 +757,9 @@ class PsychologistListView(generics.GenericAPIView):
                                        filter=Q(assigned_children__status=Child.ACTIVE)))
               .order_by("last_name", "first_name"))
         return Response([
-            {"id": p.id, "name": p.fullname or p.email, "caseload": p.caseload} for p in qs
+            # Not `fullname or p.email`: this list is rendered as a dropdown
+            # of names, and a psychologist who has not filled in their name
+            # should not have their address shown to everyone who opens it.
+            {"id": p.id, "name": display_name(p), "caseload": p.caseload}
+            for p in qs
         ])
