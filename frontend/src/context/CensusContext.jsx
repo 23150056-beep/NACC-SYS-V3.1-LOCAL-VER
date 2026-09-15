@@ -26,6 +26,7 @@ export function CensusProvider({ children }) {
   const [stats, setStats] = useState(EMPTY);
   const [range, setRange] = useState('monthly');
   const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
   const [pendingAccess, setPendingAccess] = useState(0);
   const isAdmin = user?.role_name === 'Administrator';
 
@@ -33,8 +34,14 @@ export function CensusProvider({ children }) {
     if (!getAccess()) return;
     setLoading(true);
     api.get(`/reports/dashboard/?range=${range}`)
-      .then((r) => setStats({ ...EMPTY, ...r.data }))
-      .catch(() => setStats(EMPTY))
+      .then((r) => { setStats({ ...EMPTY, ...r.data }); setFailed(false); })
+      // Recorded rather than announced. Falling back to EMPTY paints a
+      // census of zero, which reads as an agency with no children rather
+      // than a request that failed - but this context feeds the right rail
+      // on EVERY screen, so announcing it here put a second message on top
+      // of whatever the screen itself was already saying. The Dashboard
+      // reads `failed` and says it once, where the figures actually are.
+      .catch(() => { setStats(EMPTY); setFailed(true); })
       .finally(() => setLoading(false));
   }, [range]);
 
@@ -49,21 +56,24 @@ export function CensusProvider({ children }) {
     if (!isAdmin) { setPendingAccess(0); return; }
     api.get('/users/', { params: { include_archived: 'true' } })
       .then((r) => setPendingAccess((r.data || []).filter((u) => u.status === 'pending').length))
+      // Silent on purpose: this is a badge count on other people's screens.
+      // A missing number on the Admin tab is not worth interrupting anyone,
+      // and the queue itself reports properly when it is opened.
       .catch(() => {});
   }, [isAdmin]);
 
   useEffect(() => { if (user) refreshPendingAccess(); }, [user, refreshPendingAccess]);
 
   const value = useMemo(
-    () => ({ stats, range, setRange, loading, refresh, pendingAccess, refreshPendingAccess }),
-    [stats, range, loading, refresh, pendingAccess, refreshPendingAccess],
+    () => ({ stats, range, setRange, loading, failed, refresh, pendingAccess, refreshPendingAccess }),
+    [stats, range, loading, failed, refresh, pendingAccess, refreshPendingAccess],
   );
   return <CensusContext.Provider value={value}>{children}</CensusContext.Provider>;
 }
 
 export function useCensus() {
   return useContext(CensusContext) || {
-    stats: EMPTY, range: 'monthly', setRange: () => {}, loading: false, refresh: () => {},
+    stats: EMPTY, range: 'monthly', setRange: () => {}, loading: false, failed: false, refresh: () => {},
     pendingAccess: 0, refreshPendingAccess: () => {},
   };
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import api from '../api/client';
 import { useActivity } from '../context/ActivityContext';
 import { useAuth } from '../context/AuthContext';
@@ -7,6 +7,7 @@ import {
   Segmented, Select, TD, TH, THEAD_ROW, TR,
 } from '../ui';
 import { useToast } from '../context/ToastContext';
+import { loadAll } from '../utils/load';
 import { printBlankForm } from '../utils/printForm';
 import InstrumentFormDrawer, { CATEGORIES, EMPTY_INSTRUMENT } from '../components/InstrumentFormDrawer';
 
@@ -44,14 +45,14 @@ export default function Instruments() {
   const [tpl, setTpl] = useState(null); // template drawer
   const [error, setError] = useState('');
 
-  const load = () => {
-    api.get('/instruments/').then((r) => setInstruments(r.data)).catch(() => {});
-    api.get('/form-templates/').then((r) => setTemplates(r.data)).catch(() => {});
-  };
-  useEffect(() => {
-    load();
-    if (isAdmin) api.get('/users/').then((r) => setPsychologists(r.data.filter((u) => u.role_name === 'Psychologist'))).catch(() => {});
-  }, [isAdmin]);
+  const load = useCallback(() => loadAll(toast, [
+    () => api.get('/instruments/').then((r) => setInstruments(r.data)),
+    () => api.get('/form-templates/').then((r) => setTemplates(r.data)),
+    isAdmin && (() => api.get('/users/')
+      .then((r) => setPsychologists(r.data.filter((u) => u.role_name === 'Psychologist')))),
+  ], 'Could not load instruments and agency forms. Check your connection and refresh.'),
+  [isAdmin, toast]);
+  useEffect(() => { load(); }, [load]);
 
   const saveInstrument = async () => {
     setError('');

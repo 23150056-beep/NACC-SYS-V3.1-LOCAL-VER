@@ -263,6 +263,9 @@ export default function AssistantPanel() {
 
   // Fetched once, on first open. Someone who arrived by clicking a button has
   // typed nothing and needs a starting point.
+  // Silent on purpose: without these the panel simply opens without its
+  // suggestions, which is the same thing it does when the assistant is
+  // switched off. Every other part of it still works.
   useEffect(() => {
     if (open && !caps) getAssistantCapabilities().then(setCaps).catch(() => {});
   }, [open, caps]);

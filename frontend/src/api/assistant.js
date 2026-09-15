@@ -5,6 +5,13 @@ import api from './client';
 export const polishRemark = (text) =>
   api.post('/assistant/polish-remark/', { text }).then((r) => r.data);
 
+/* Whether a draft was accepted or discarded, for the usage metrics.
+ *
+ * Every caller deliberately ignores a failure - `catch(() => {})` at six
+ * sites, and that is correct rather than an oversight. This is telemetry
+ * about a decision the user has ALREADY made and moved on from; telling
+ * them the bookkeeping did not save would interrupt them over something
+ * they cannot act on and do not care about. */
 export const sendFeedback = (jobId, outcome) =>
   api.post(`/assistant/jobs/${jobId}/feedback/`, { outcome }).then((r) => r.data);
 

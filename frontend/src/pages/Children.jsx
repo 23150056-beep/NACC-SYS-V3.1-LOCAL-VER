@@ -10,6 +10,7 @@ import {
 import { useToast } from '../context/ToastContext';
 import { useLayout } from '../context/LayoutContext';
 import { TERMINATION_REASONS } from '../config/caseData';
+import { loadAll } from '../utils/load';
 import ChildForm, { EMPTY } from './children/ChildForm';
 import ChildDrawer, { TerminateModal } from './children/ChildDrawer';
 import { fmtDay, fmtTime, localDate } from './children/shared';
@@ -21,6 +22,10 @@ function usePresence(childId) {
   useEffect(() => {
     if (!childId) { setOthers([]); return; }
     let alive = true;
+    // Silent on purpose, and emphatically so: this repeats every ten
+    // seconds for as long as the drawer is open. A message per failed beat
+    // would bury the screen during any blip, and nobody is waiting on it -
+    // the worst case is not being told a colleague is also looking.
     const beat = () => api.post(`/children/${childId}/presence/`)
       .then((r) => alive && setOthers(r.data.others || [])).catch(() => {});
     beat();
@@ -91,27 +96,31 @@ export default function Children() {
   useEffect(() => { if (status !== 'inactive') setReasonFilter(''); }, [status]);
 
   const load = useCallback(() => {
-    // Include inactive (terminated) cases — the V2 roster shows them with chips.
-    api.get('/children/?include_archived=true').then((r) => setChildren(r.data))
-      .catch(() => toast.error('Could not load the records. Check your connection and refresh.'));
-    // Active psychologists + current caseload (admin/staff endpoint — also lets Staff assign).
-    api.get('/psychologists/').then((r) => setPsychologists(r.data)).catch(() => {});
-    // Availability blocks power the assignment-time comparison panel — admin/staff only.
-    if (canManage) api.get('/availability/').then((r) => setBlocks(r.data)).catch(() => {});
-    // Upcoming (next 7 days) scheduled appointments → roster chips + drawer list.
-    // Role-scoped server-side: psychologists get only their own caseload.
     const today = new Date();
     const weekAhead = new Date(today); weekAhead.setDate(today.getDate() + 7);
-    api.get(`/appointments/?from=${localDate(today)}&to=${localDate(weekAhead)}`)
-      .then((r) => {
-        const map = {};
-        (r.data || [])
-          .filter((a) => a.status === 'scheduled')
-          .sort((a, b) => a.start.localeCompare(b.start))
-          .forEach((a) => { (map[a.child] ||= []).push(a); });
-        setApptsByChild(map);
-      })
-      .catch(() => setApptsByChild({}));
+    return loadAll(toast, [
+      // Include inactive (terminated) cases — the V2 roster shows them with chips.
+      () => api.get('/children/?include_archived=true').then((r) => setChildren(r.data)),
+      // Active psychologists + current caseload (admin/staff endpoint — also lets Staff assign).
+      () => api.get('/psychologists/').then((r) => setPsychologists(r.data)),
+      // Availability blocks power the assignment-time comparison panel — admin/staff only.
+      canManage && (() => api.get('/availability/').then((r) => setBlocks(r.data))),
+      // Upcoming (next 7 days) scheduled appointments → roster chips + drawer list.
+      // Role-scoped server-side: psychologists get only their own caseload.
+      () => api.get(`/appointments/?from=${localDate(today)}&to=${localDate(weekAhead)}`)
+        .then((r) => {
+          const map = {};
+          (r.data || [])
+            .filter((a) => a.status === 'scheduled')
+            .sort((a, b) => a.start.localeCompare(b.start))
+            .forEach((a) => { (map[a.child] ||= []).push(a); });
+          setApptsByChild(map);
+        })
+        // Clear rather than keep: stale chips on a reloaded roster claim
+        // appointments that may no longer exist. Rethrown so the screen
+        // still reports the failure once, with everything else.
+        .catch((e) => { setApptsByChild({}); throw e; }),
+    ], 'Could not load the records. Check your connection and refresh.');
   }, [canManage, toast]);
   useEffect(() => { load(); }, [load]);
 

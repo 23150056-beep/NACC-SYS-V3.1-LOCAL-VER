@@ -27,6 +27,9 @@ export default function AdoptionSummary({ childId }) {
     let alive = true;
     api.get('/adoption/cases/', { params: { child: childId } })
       .then((r) => { if (alive) setCaseRow((r.data || [])[0] || null); })
+      // Silent on purpose: this card is additive, and it renders nothing at
+      // all for a child with no adoption case - which is the common case.
+      // The report around it owns the screen's one failure message.
       .catch(() => {});
     return () => { alive = false; };
   }, [childId]);

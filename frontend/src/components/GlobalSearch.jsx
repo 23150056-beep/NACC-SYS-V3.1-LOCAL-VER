@@ -3,8 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useLayout } from '../context/LayoutContext';
+import { useToast } from '../context/ToastContext';
 import { Icon } from '../ui';
 import { ageFrom, caseRef, initialsOf } from '../utils/child';
+import { loadAll } from '../utils/load';
 
 /* One search box, in the chrome, on every screen.
  *
@@ -23,6 +25,7 @@ export default function GlobalSearch({ open, onOpenChange }) {
   const { user } = useAuth();
   const navigate = useNavigate();
   const layout = useLayout();
+  const toast = useToast();
   const isAdmin = user?.role_name === 'Administrator';
 
   const [q, setQ] = useState('');
@@ -51,9 +54,13 @@ export default function GlobalSearch({ open, onOpenChange }) {
   useEffect(() => {
     if (!open || loaded) return;
     setLoaded(true);
-    api.get('/children/?include_archived=true').then((r) => setChildren(r.data || [])).catch(() => {});
-    if (isAdmin) api.get('/users/').then((r) => setStaff(r.data || [])).catch(() => {});
-  }, [open, loaded, isAdmin]);
+    // Silence here is worse than elsewhere: search would simply find
+    // nothing, which reads as "no such child" rather than "not loaded".
+    loadAll(toast, [
+      () => api.get('/children/?include_archived=true').then((r) => setChildren(r.data || [])),
+      isAdmin && (() => api.get('/users/').then((r) => setStaff(r.data || []))),
+    ], 'Search could not load. Results will be incomplete until you refresh.');
+  }, [open, loaded, isAdmin, toast]);
 
   useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
 

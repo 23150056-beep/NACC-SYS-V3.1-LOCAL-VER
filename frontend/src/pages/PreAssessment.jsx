@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { caseRef } from '../utils/child';
 import { Card, Button, Badge, Input, Select, FormField, FileUpload, Alert, EmptyState, Avatar, Icon, iconBtn, hoverLift, PAGE } from '../ui';
 import { PA_STATUSES, PA_STATUS_TONES } from '../config/caseData';
+import { loadAll } from '../utils/load';
 import { printBlankForm } from '../utils/printForm';
 import InstrumentFormDrawer, { EMPTY_INSTRUMENT } from '../components/InstrumentFormDrawer';
 
@@ -49,16 +50,18 @@ export default function PreAssessment() {
   const [instError, setInstError] = useState('');
 
   useEffect(() => {
-    api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))).catch(() => {});
-    // One request, split here: the rows already carry form_type, so asking
-    // the server twice for the same table was a round trip spent on a filter
-    // the payload answers.
-    api.get('/form-templates/').then((r) => {
-      setConsentTemplates(r.data.filter((t) => t.form_type === 'consent'));
-      setInterviewTemplates(r.data.filter((t) => t.form_type === 'clinical_interview'));
-    }).catch(() => {});
-    api.get('/instruments/').then((r) => setInstruments(r.data)).catch(() => {});
-  }, []);
+    loadAll(toast, [
+      () => api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))),
+      // One request, split here: the rows already carry form_type, so asking
+      // the server twice for the same table was a round trip spent on a
+      // filter the payload answers.
+      () => api.get('/form-templates/').then((r) => {
+        setConsentTemplates(r.data.filter((t) => t.form_type === 'consent'));
+        setInterviewTemplates(r.data.filter((t) => t.form_type === 'clinical_interview'));
+      }),
+      () => api.get('/instruments/').then((r) => setInstruments(r.data)),
+    ], 'Could not load the pre-assessment workspace. Check your connection and refresh.');
+  }, [toast]);
 
   const goToStep = (i) => { if (i <= maxStep) setStep(i); };
 
@@ -107,6 +110,9 @@ export default function PreAssessment() {
 
   // Instrument catalog module embedded in step 4 — add/edit titles inline
   // without leaving the wizard.
+  // Silent on purpose: this runs after saving an instrument, and the save
+  // itself already reports. A second message about the refresh would be
+  // two messages for one action.
   const reloadInstruments = () => api.get('/instruments/').then((r) => setInstruments(r.data)).catch(() => {});
   const saveInstrument = async () => {
     setInstError('');

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCensus } from '../context/CensusContext';
 import { useLayout } from '../context/LayoutContext';
-import { Icon, IconChip, MiniBar, PAGE, Segmented } from '../ui';
+import { Alert, Icon, IconChip, MiniBar, PAGE, Segmented } from '../ui';
 import { RailCards } from '../components/RightRail';
 import { caseRef, initialsOf } from '../utils/child';
 
@@ -72,7 +72,7 @@ export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const layout = useLayout();
-  const { stats, range, setRange, pendingAccess } = useCensus();
+  const { stats, range, setRange, pendingAccess, failed } = useCensus();
 
   const role = user?.role_name || 'Staff';
   const isPsych = role === 'Psychologist';
@@ -134,6 +134,15 @@ export default function Dashboard() {
 
   return (
     <div style={PAGE}>
+      {/* A banner rather than a toast: every number below it is a zero that
+          does not mean zero, and that is worth saying for as long as it is
+          true instead of for three seconds. */}
+      {failed && (
+        <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>
+          These figures could not be loaded, so everything below reads as zero.
+          Check your connection and refresh.
+        </Alert>
+      )}
       {/* Greeting + the things you came here to do. */}
       <div style={{ ...cardStyle, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 11 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' }}>

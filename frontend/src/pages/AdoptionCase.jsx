@@ -136,7 +136,13 @@ export default function AdoptionCase() {
     getCase(id).then(setData).catch(() => setData('error'));
   }, [id]);
   useEffect(() => { load(); }, [load]);
-  useEffect(() => { if (canAct) listFamilies().then(setFamilies).catch(() => {}); }, [canAct]);
+  // getCase above renders a real error state, which beats a toast. This one
+  // has nowhere to show itself: the families never arrive and the Match
+  // dropdown is simply empty, which reads as "no eligible families".
+  useEffect(() => {
+    if (canAct) listFamilies().then(setFamilies)
+      .catch(() => toast.error('Could not load the family list.'));
+  }, [canAct, toast]);
 
   const run = async (fn, okMessage) => {
     setBusy(true);

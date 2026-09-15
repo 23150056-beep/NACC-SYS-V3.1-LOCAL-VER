@@ -9,6 +9,7 @@ import {
   Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, Modal, PAGE, Select, Tabs,
 } from '../ui';
 import { PA_STATUS_TONES } from '../config/caseData';
+import { loadAll } from '../utils/load';
 import AdoptionSummary from '../components/AdoptionSummary';
 import { polishRemark, sendFeedback, getLatestBrief, generateBrief, summarizeDocument, confirmSummary } from '../api/assistant';
 
@@ -84,10 +85,15 @@ export default function ChildProgressReport() {
     load();
     /* eslint-disable-next-line */
   }, [id]);
-  useEffect(() => { if (isPsych) api.get('/instruments/').then((r) => setInstruments(r.data)).catch(() => {}); }, [isPsych]);
+  // The report's own load above renders a real error state. These two are
+  // additive - they fill the instrument picker and the opinionnaire list -
+  // and a failure leaves those controls looking empty rather than broken.
   useEffect(() => {
-    api.get('/form-templates/?type=self_report_gov').then((r) => setSurveyTemplates(r.data)).catch(() => {});
-  }, []);
+    loadAll(toast, [
+      isPsych && (() => api.get('/instruments/').then((r) => setInstruments(r.data))),
+      () => api.get('/form-templates/?type=self_report_gov').then((r) => setSurveyTemplates(r.data)),
+    ], 'Some options on this page could not load. Refresh to try again.');
+  }, [isPsych, toast]);
 
   if (data === 'error') return <div style={PAGE}><Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>This report is unavailable.</Alert></div>;
   if (!data) return <div style={PAGE}><div style={{ color: 'var(--text-muted)' }}>Loading report…</div></div>;

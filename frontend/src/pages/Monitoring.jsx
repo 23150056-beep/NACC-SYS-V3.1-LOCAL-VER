@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useLayout } from '../context/LayoutContext';
+import { useToast } from '../context/ToastContext';
 import {
   Avatar, EmptyState, Icon, Input, PAGE, PageHeader, TD, TH, THEAD_ROW, TR,
 } from '../ui';
@@ -15,12 +16,14 @@ import {
 export default function Monitoring() {
   const navigate = useNavigate();
   const layout = useLayout();
+  const toast = useToast();
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState('');
 
   useEffect(() => {
-    api.get('/reports/monitoring/').then((r) => setRows(r.data)).catch(() => {});
-  }, []);
+    api.get('/reports/monitoring/').then((r) => setRows(r.data))
+      .catch(() => toast.error('Could not load progress monitoring. Check your connection and refresh.'));
+  }, [toast]);
 
   const visible = useMemo(() => rows
     .filter((r) => (r.child_name || '').toLowerCase().includes(q.toLowerCase())

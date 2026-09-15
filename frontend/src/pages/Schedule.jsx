@@ -6,6 +6,7 @@ import 'react-big-calendar/lib/css/react-big-calendar.css';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { loadAll } from '../utils/load';
 import {
   Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, hoverLift, Icon, iconBtn, Input, PAGE, PageHeader, Select,
 } from '../ui';
@@ -169,13 +170,14 @@ export default function Schedule() {
     return { from: iso(from), to: iso(to) };
   }, [calDate]);
 
-  const load = useCallback(() => {
-    api.get(`/appointments/?from=${range.from}&to=${range.to}`).then((r) => setAppointments(r.data)).catch(() => {});
-    api.get('/availability/').then((r) => setBlocks(r.data)).catch(() => {});
-    api.get('/unavailability/?upcoming=true').then((r) => setLeave(r.data)).catch(() => {});
-    api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))).catch(() => {});
-    if (!isPsych) api.get('/psychologists/').then((r) => setPsychologists(r.data)).catch(() => {});
-  }, [isPsych, range.from, range.to]);
+  const load = useCallback(() => loadAll(toast, [
+    () => api.get(`/appointments/?from=${range.from}&to=${range.to}`).then((r) => setAppointments(r.data)),
+    () => api.get('/availability/').then((r) => setBlocks(r.data)),
+    () => api.get('/unavailability/?upcoming=true').then((r) => setLeave(r.data)),
+    () => api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))),
+    !isPsych && (() => api.get('/psychologists/').then((r) => setPsychologists(r.data))),
+  ], 'Could not load the calendar. Check your connection and refresh.'),
+  [isPsych, range.from, range.to, toast]);
   useEffect(() => { load(); }, [load]);
   // The openings for the psychologist actually chosen, on the day actually
   // chosen, at the duration actually chosen. The old version asked about the

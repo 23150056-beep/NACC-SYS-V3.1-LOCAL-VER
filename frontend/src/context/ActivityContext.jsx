@@ -56,6 +56,10 @@ export function ActivityProvider({ children }) {
     setLoading(true);
     api.get('/activity/')
       .then((r) => setEvents(r.data))
+      // Silent on purpose. This refreshes after every mutation on every
+      // screen, so reporting it would stack a second message on top of the
+      // one the action itself already shows - and the bell is ambient, not
+      // something anybody is waiting on.
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);

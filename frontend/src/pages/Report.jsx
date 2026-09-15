@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { caseRef } from '../utils/child';
@@ -9,6 +9,7 @@ import {
   PAGE, PageHeader, Select, Tabs,
 } from '../ui';
 import { useOpenFromLink } from '../utils/links';
+import { loadAll } from '../utils/load';
 
 
 const REPORT_TYPES = [
@@ -45,13 +46,13 @@ export default function Report() {
     !!upload, ['child'],
   );
 
-  const load = () => {
-    api.get('/result-entries/').then((r) => setEntries(r.data)).catch(() => {});
-    api.get('/report-files/').then((r) => setFiles(r.data)).catch(() => {});
-    api.get('/case-referrals/').then((r) => setCaseReferrals(r.data)).catch(() => {});
-    api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))).catch(() => {});
-  };
-  useEffect(() => { load(); }, []);
+  const load = useCallback(() => loadAll(toast, [
+    () => api.get('/result-entries/').then((r) => setEntries(r.data)),
+    () => api.get('/report-files/').then((r) => setFiles(r.data)),
+    () => api.get('/case-referrals/').then((r) => setCaseReferrals(r.data)),
+    () => api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))),
+  ], 'Could not load the results. Check your connection and refresh.'), [toast]);
+  useEffect(() => { load(); }, [load]);
 
   const visibleEntries = useMemo(() => entries
     .filter((e) => (e.child_name || '').toLowerCase().includes(q.toLowerCase()))
