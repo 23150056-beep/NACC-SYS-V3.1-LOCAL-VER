@@ -85,7 +85,6 @@ class MonitoringListView(generics.GenericAPIView):
     permission_classes = [CanViewResults]
 
     def get(self, request):
-        role = _role(request)
         children = (Child.objects.exclude(status=Child.INACTIVE)
                     .select_related("assigned_psychologist")
                     .prefetch_related("pre_assessments__instruments", "consents"))
@@ -322,7 +321,14 @@ class DashboardView(generics.GenericAPIView):
             blocks = blocks.filter(psychologist=request.user)
         pas = list(pas.order_by("date", "id"))
 
-        active = scoped_children.filter(status=Child.ACTIVE)
+        # Fetched once and kept. This is the endpoint CensusContext calls on
+        # every app load and every range change, and `active` used to be a
+        # queryset that got iterated for the census below AND counted three
+        # separate times in the response - four trips for one set of rows,
+        # each of them a hop to another region on the hosted deployment.
+        active_rows = list(scoped_children.filter(status=Child.ACTIVE)
+                           .select_related("assigned_psychologist"))
+        active_count = len(active_rows)
         inactive_count = scoped_children.filter(status=Child.INACTIVE).count()
 
         # Census: ACTIVE children per case type (the interview's
@@ -330,7 +336,7 @@ class DashboardView(generics.GenericAPIView):
         census_by_case_type = {}
         by_case_status = {Child.STAGE_PRE_ASSESSMENT: 0, Child.STAGE_COUNSELING: 0}
         counseling_per_psy = {}
-        for c in active.select_related("assigned_psychologist"):
+        for c in active_rows:
             ct = c.case_type or "Unspecified"
             census_by_case_type[ct] = census_by_case_type.get(ct, 0) + 1
             if c.case_status in by_case_status:
@@ -385,7 +391,7 @@ class DashboardView(generics.GenericAPIView):
         agg = reports.summary(pas, rng)
         return Response({
             "census": {
-                "active": active.count(),
+                "active": active_count,
                 "inactive": inactive_count,
                 "by_case_type": census_by_case_type,
                 "by_case_status": by_case_status,
@@ -393,8 +399,8 @@ class DashboardView(generics.GenericAPIView):
             "counseling_per_psychologist": [
                 {"name": k, "count": v}
                 for k, v in sorted(counseling_per_psy.items(), key=lambda kv: -kv[1])],
-            "total_children": active.count(),
-            "unassessed": max(0, active.count() - len({p.child_id for p in pas})),
+            "total_children": active_count,
+            "unassessed": max(0, active_count - len({p.child_id for p in pas})),
             "pending_pre_assessments": pending.count(),
             "today_schedule": schedule_strip,
             "availability_today": availability_today,

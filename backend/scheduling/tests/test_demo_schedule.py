@@ -24,8 +24,6 @@ from datetime import datetime, time, timedelta
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 
-from accounts.models import Role
-from children.models import Child
 from scheduling import booking, demo_schedule
 from scheduling.models import Appointment, AvailabilityBlock
 from scheduling.tests.test_api import SchedulingBase, child_with_referral

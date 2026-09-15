@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from accounts.models import Role
 from adoption import pipeline, worklist
-from adoption.models import AdoptionCase, AdoptionStage, ComplianceClock, PAP, Requirement
+from adoption.models import AdoptionCase, AdoptionStage, ComplianceClock, PAP
 from children.models import Child
 from clinical.models import PreAssessment
 

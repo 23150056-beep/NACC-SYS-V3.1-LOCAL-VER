@@ -30,8 +30,16 @@ User = get_user_model()
 ROWS = 12
 CEILING = 8
 
+# The dashboard is one response rather than a list, so it gets its own
+# number. Measured at 16 with the duplicate counts removed and 19 with them
+# in place; 18 leaves two queries of headroom for ordinary changes to auth
+# or filtering while still failing the moment those three come back.
+DASHBOARD_CEILING = 18
 
-class ListEndpointsDoNotScaleWithRowsTest(APITestCase):
+
+class _RowsFixture(APITestCase):
+    """ROWS children, each with their own psychologist and own records."""
+
     def setUp(self):
         self.admin_role = Role.objects.create(role_name=Role.ADMINISTRATOR)
         self.psy_role = Role.objects.create(role_name=Role.PSYCHOLOGIST)
@@ -65,6 +73,8 @@ class ListEndpointsDoNotScaleWithRowsTest(APITestCase):
             "email": "a@racco1.gov.ph", "password": "pass1234"}).data["access"]
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
 
+
+class ListEndpointsDoNotScaleWithRowsTest(_RowsFixture):
     def _assert_flat(self, url):
         # A ceiling, not assertNumQueries, which pins an exact number and would
         # turn every unrelated query change into a failure here.
@@ -92,3 +102,48 @@ class ListEndpointsDoNotScaleWithRowsTest(APITestCase):
         """Same failure, different relation: the child list renders
         psychologist_name on every row."""
         self._assert_flat("/api/children/")
+
+
+class TheDashboardDoesNotRepeatItselfTest(_RowsFixture):
+    """/api/reports/dashboard/ is the hottest endpoint in the system.
+
+    CensusContext fetches it on every app load and on every change of the range
+    selector, for every signed-in user, and the right rail and the Dashboard
+    both read that one response. It had `active` as a queryset that was
+    iterated once for the census and then counted three more times in the
+    response body - four trips for one set of rows. On SQLite that is free; on
+    the hosted deployment each one is a round trip to another region.
+
+    Two different regressions, so two different assertions. Growth with the
+    caseload is the N+1 shape the rest of this file guards. A count that stays
+    flat but is needlessly high is the shape that was actually here, and only
+    an absolute ceiling catches it.
+    """
+
+    def _dashboard_queries(self):
+        with CaptureQueriesContext(connection) as queries:
+            resp = self.client.get("/api/reports/dashboard/")
+        self.assertEqual(resp.status_code, 200)
+        return len(queries)
+
+    def test_it_does_not_grow_with_the_caseload(self):
+        before = self._dashboard_queries()
+        for i in range(ROWS):
+            Child.objects.create(fullname=f"Extra {i}", case_type="Adoption",
+                                 assigned_psychologist=self.psychologists[i])
+        after = self._dashboard_queries()
+        self.assertEqual(
+            before, after,
+            f"doubling the caseload took the dashboard from {before} queries to "
+            f"{after}. Something in it is querying per child.")
+
+    def test_it_does_not_count_the_same_rows_over_and_over(self):
+        # Headroom of two over what it costs today, so ordinary changes to
+        # filtering or auth do not have to come here and edit a number - but
+        # tight enough that restoring the three duplicate COUNT(*)s fails.
+        count = self._dashboard_queries()
+        self.assertLessEqual(
+            count, DASHBOARD_CEILING,
+            f"the dashboard ran {count} queries (ceiling {DASHBOARD_CEILING}). "
+            f"Check whether a queryset is being counted as well as iterated: "
+            f"`active` used to cost four trips for one set of rows.")

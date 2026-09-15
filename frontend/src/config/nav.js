@@ -32,6 +32,12 @@ export const SCREENS = [
   { id: 'reports', to: '/reports', label: 'Results & Reports', icon: 'clipboard-check', roles: ALL_ROLES },
 
   { id: 'summary', to: '/reports/summary', label: 'Agency Summary', icon: 'bar-chart-3', section: 'Governance', roles: ['Administrator', 'Staff'] },
+  // The readiness self-check against NACC-SAMD-GF-000. The ROUTE has existed
+  // since the module was built; this entry had not, and nothing else in the
+  // app linked to it either - so an administrator could only reach the screen
+  // by typing /samd into the address bar. A screen with no way in is not a
+  // feature, whatever is behind it.
+  { id: 'samd', to: '/samd', label: 'SAMD Readiness', icon: 'shield-check', roles: ['Administrator'] },
   // Credential Handoffs and the access queue are tabs inside this screen.
   { id: 'users', to: '/users', label: 'User Management', icon: 'user-cog', badge: 'pendingAccess', roles: ['Administrator'] },
   { id: 'settings', to: '/settings', label: 'Settings', icon: 'settings', roles: ['Administrator'] },
@@ -70,6 +76,7 @@ const MATCHERS = [
   ['/monitoring', 'monitor'],
   ['/schedule', 'calendar'],
   ['/reports', 'reports'],
+  ['/samd', 'samd'],
   ['/users', 'users'],
   ['/settings', 'settings'],
 ];

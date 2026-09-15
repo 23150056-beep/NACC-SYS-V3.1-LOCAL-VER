@@ -17,7 +17,6 @@ from datetime import timedelta
 
 from django.utils import timezone
 
-from children.models import Child
 from scheduling.models import AvailabilityBlock, Appointment
 from scheduling.tests.test_api import (
     SchedulingBase, child_with_referral, next_weekday,

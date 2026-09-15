@@ -67,6 +67,29 @@ reproduced exactly.
 The notes deliberately mix English, Tagalog and Ilocano, because notes written
 in Region I do.
 
+### The adoption tracker
+
+`seed_demo_data` fills the caseload but leaves the Adoption Tracker empty,
+because a child only enters that pipeline through a completed pre-assessment.
+To populate it:
+
+```
+.venv\Scripts\python manage.py seed_adoption_demo
+```
+
+Run it after `seed_demo_data` — it admits children who already have a
+completed assessment, through `pipeline.admit`, the same gate the application
+uses. If none exist yet it says so and stops rather than inventing a way in.
+
+The spread is the point rather than the count. It seeds one case comfortably
+on track, one three-quarters of the way through its target, one over it, one
+with a statutory clock that has already run out, and matched families whose
+CEA is close to expiry — so the board shows the states a person has to tell
+apart. A tracker where everything is green proves nothing.
+
+Same guard as `seed_demo_data`: it refuses a hosted database and refuses
+`DJANGO_DEBUG=False`, before anything opens a connection.
+
 ## The writing assistant
 
 On by default, and entirely local — nothing about it reaches the network. The

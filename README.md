@@ -83,8 +83,23 @@ bucket. Note that a Windows venv puts its interpreter in `.venv/Scripts/`, not
 
 Tests: `.venv/Scripts/python.exe manage.py test` on Windows,
 `.venv/bin/python manage.py test` elsewhere. It runs the whole backend suite
-and takes roughly a quarter of an hour, so do not pipe it through `tail` —
-that throws away the failure names along with the noise.
+and takes about twenty minutes, so do not pipe it through `tail` — that
+throws away the failure names along with the noise.
+
+Lint, both sides, before a commit:
+
+```bash
+cd backend  && .venv/Scripts/python.exe -m ruff check .
+cd frontend && npm run lint && npm run build
+```
+
+Ruff needs `pip install -r requirements-dev.txt` once. It is configured
+narrowly on purpose — see the note at the top of `backend/ruff.toml` — and it
+catches the one class of thing the suite cannot: an unused import or an
+unused local breaks nothing, so 1253 tests stay green while dead references
+accumulate. `npm run build` is not a substitute for `npm run lint`: Vite
+reports syntax errors only, and a hook left below an early return builds
+perfectly and then throws when somebody opens the page.
 
 ## Deploying
 

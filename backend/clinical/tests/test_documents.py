@@ -82,7 +82,6 @@ class PsychologicalReportTest(DocumentsBase):
 
 class ConsentScanDownloadTest(DocumentsBase):
     def test_scan_download_scoped(self):
-        from clinical.models import ConsentRecord
         self._auth("p@racco1.gov.ph")
         scan = SimpleUploadedFile("consent.pdf", b"%PDF-1.4 test", content_type="application/pdf")
         resp = self.client.post("/api/consents/", {

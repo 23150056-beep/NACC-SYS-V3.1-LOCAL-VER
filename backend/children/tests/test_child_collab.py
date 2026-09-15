@@ -1,6 +1,5 @@
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
-from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 from accounts.models import Role, User

@@ -1,0 +1,10 @@
+# Development tooling. Never installed into the runtime image: the Dockerfile
+# installs requirements.txt only, so nothing here can reach a deployed
+# container.
+#
+#   .venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+#   .venv\Scripts\python.exe -m ruff check .
+
+-r requirements.txt
+
+ruff==0.16.7

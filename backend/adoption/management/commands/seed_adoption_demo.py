@@ -14,9 +14,7 @@ is about to expire. If the board looks calm, nothing has been proven.
 import random
 from datetime import timedelta
 
-from django.conf import settings
-from django.core.management.base import BaseCommand, CommandError
-from django.db import connection
+from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from accounts.models import Role
@@ -24,6 +22,7 @@ from adoption import pipeline
 from adoption.models import AdoptionCase, AdoptionStage, ComplianceClock, PAP, Requirement
 from children.models import Child
 from clinical.models import PreAssessment
+from config.demo_guard import refuse_if_not_local
 
 FAMILIES = [
     ("Ramos", "Agoo, La Union", "CEA-2025-0114", 1),
@@ -40,13 +39,14 @@ class Command(BaseCommand):
         parser.add_argument("--count", type=int, default=9)
 
     def handle(self, *args, **options):
-        # Both guards before any write. A hosted database is identified by its
-        # engine, not by a setting somebody could have forgotten to flip.
-        if not settings.DEBUG:
-            raise CommandError("Refusing to run with DEBUG=False.")
-        if "sqlite" not in connection.settings_dict["ENGINE"]:
-            raise CommandError(
-                "Refusing to run against anything but the local SQLite copy.")
+        # Before anything opens a connection, and through the shared guard
+        # rather than a second hand-written copy of it - which is the exact
+        # thing config/demo_guard.py's docstring says it exists to prevent.
+        # The local copy it used to insist on was also stricter than its
+        # sibling seed_demo_data: docker-compose runs a LOCAL Postgres, and
+        # seeding that is fine. Hosted is what must be refused, and the
+        # shared guard refuses it by host rather than by engine.
+        refuse_if_not_local()
 
         from django.core.management import call_command
         call_command("seed_adoption_stages", verbosity=0)

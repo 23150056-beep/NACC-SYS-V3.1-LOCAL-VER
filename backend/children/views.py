@@ -245,7 +245,12 @@ class ChildViewSet(_ArchivableViewSet):
             q &= Q(birth_date=birth)
         elif not first:
             return Response({"matches": []})  # last name alone is too broad
-        matches = Child.objects.filter(q).order_by("-updated_at")[:5]
+        # select_related: every row below renders the psychologist's name, and
+        # without the join that is an extra query per match - on an endpoint the
+        # intake form calls while somebody is still typing a name.
+        matches = (Child.objects.filter(q)
+                   .select_related("assigned_psychologist")
+                   .order_by("-updated_at")[:5])
         return Response({"matches": [{
             "id": c.id, "fullname": c.fullname, "status": c.status,
             "birth_date": c.birth_date,

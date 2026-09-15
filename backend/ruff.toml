@@ -1,0 +1,25 @@
+# Runs alongside `npm run lint` before a commit - see README.
+#
+# The selection is pyflakes (F) and the syntax-error class (E9) only, and the
+# narrowness is the point. A broader default reported 397 findings here, 191 of
+# them RUF012 objecting that `permission_classes = [...]` is a mutable class
+# attribute - which is how every DRF viewset in existence is written. A linter
+# whose output is mostly noise gets muted, and the F401s it also found go unread
+# along with it.
+#
+# Deliberately NOT enabled:
+#   I001    import sorting - a 98-file reformat for no correctness gain
+#   ISC004  implicit string concatenation - used throughout for long prose
+#   RUF012  mutable class attribute - simply wrong for Django and DRF
+#   BLE001  blind except - deliberate here, and already carries its noqa
+#
+# What this DOES catch is the class of thing the test suite cannot: an unused
+# import or an unused local breaks nothing, so the suite stays green while they
+# accumulate. Twelve had built up before anyone counted, and a dead local in
+# MonitoringListView had survived a hand-written AST scan.
+
+line-length = 100
+exclude = [".venv", "staticfiles", "*/migrations/*"]
+
+[lint]
+select = ["F", "E9"]

@@ -5,7 +5,6 @@ a statutory requirement is worse than no tracker". These tests are the guard.
 """
 from django.contrib.auth import get_user_model
 from django.test import TestCase
-from django.utils import timezone
 
 from accounts.models import Role
 from adoption import pipeline

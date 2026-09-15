@@ -5,16 +5,13 @@ holds statutory documents about children, so they are tested at the endpoint
 rather than only at the service. A rule that holds in `docket.py` but is not
 enforced by the view it is reachable through is not enforced.
 """
-from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
-from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from accounts.models import Role
 from adoption import pipeline
-from adoption.models import AdoptionCase, AdoptionStage, Requirement
+from adoption.models import AdoptionCase, Requirement
 from children.models import Child
 from clinical.models import PreAssessment
 
