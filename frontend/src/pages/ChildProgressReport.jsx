@@ -10,7 +10,6 @@ import {
 } from '../ui';
 import { PA_STATUS_TONES } from '../config/caseData';
 import { loadAll } from '../utils/load';
-import AdoptionSummary from '../components/AdoptionSummary';
 import { polishRemark, sendFeedback, getLatestBrief, generateBrief, summarizeDocument, confirmSummary } from '../api/assistant';
 
 // "In her own words" reads better than a label, but gender is blank=True on
@@ -376,11 +375,6 @@ export default function ChildProgressReport() {
       </div>
 
       <div className="racco-stack racco-tabpanel" hidden={tab !== 'overview'}>
-        {/* Renders nothing unless this child is actually in the adoption
-            pipeline. For a psychologist it is the only place the case is
-            visible at all — the board is staff casework. */}
-        <AdoptionSummary childId={child.id} />
-
         <Card title="Identifying information" padding="0">
           <div style={{ padding: '4px 15px 12px' }}>
             {facts.map((f) => (

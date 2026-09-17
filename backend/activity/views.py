@@ -28,7 +28,7 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             # The recipient half is what stops this being a firehose. Every
             # `recipient=` in the codebase used to point at a psychologist, so
             # a staff member could not be told anything personally even in
-            # principle; the adoption module now addresses a case to its owner.
+            # principle; case events are now addressed to their owner.
             # It stays inside the RECORD category, so widening the filter does
             # not quietly hand staff the security audit trail as well.
             qs = qs.filter(

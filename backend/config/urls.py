@@ -13,7 +13,5 @@ urlpatterns = [
     path("api/", include("activity.urls")),
     path("api/", include("clinical.urls")),
     path("api/", include("scheduling.urls")),
-    path("api/", include("samd.urls")),
     path("api/", include("assistant.urls")),
-    path("api/adoption/", include("adoption.urls")),
 ]
