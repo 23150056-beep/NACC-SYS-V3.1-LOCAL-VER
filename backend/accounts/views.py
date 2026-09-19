@@ -464,6 +464,14 @@ class SmsConfigTestView(generics.GenericAPIView):
 
 class UserViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAdministrator]
+    # No DELETE. `archive` is how an account ends - it keeps the row, and
+    # keeping it is what stops a declined address registering again.
+    #
+    # The sharp end: archive refuses to touch the last active administrator,
+    # because an agency with no administrator has no way to make one. DELETE
+    # answered 204 to that same request and left zero administrators behind.
+    # A guard on one verb is not a guard.
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     # Unpaginated on purpose, and this is the reasoning rather than an
     # oversight. RACCO I is one regional office: a handful of psychologists,
