@@ -66,11 +66,26 @@ export default function ChildProgressReport() {
   // Re-summarising an already-confirmed document destroys the psychologist's
   // own clinical text with no undo, so that path is asked for, not clicked.
   const [confirmResummarize, setConfirmResummarize] = useState(null); // { kind, id, filename }
+  // Resolving a problem is one unlabelled tick in a row of them, and there is
+  // no unresolve anywhere in this app - the watchlist entry simply goes quiet.
+  // Cheap to ask, expensive to get wrong on the wrong row.
+  const [resolving, setResolving] = useState(null); // the problem awaiting confirmation
+  const [resolveBusy, setResolveBusy] = useState(false);
   const isStaffOrAdmin = ['Administrator', 'Staff'].includes(user?.role_name);
   // Mirrors INSTRUMENT_MANAGER_ROLES on the server (accounts/permissions.py).
   const canReadTemplates = ['Administrator', 'Psychologist'].includes(user?.role_name);
 
   const load = () => api.get(`/reports/child/${id}/`).then((r) => setData(r.data)).catch(() => setData('error'));
+
+  const resolveProblem = async () => {
+    setResolveBusy(true);
+    try {
+      await api.patch(`/problems/${resolving.id}/`, { resolved: true });
+      setResolving(null);
+      load();
+    } catch { toast.error('Could not update.'); }
+    finally { setResolveBusy(false); }
+  };
 
   const acknowledgeFlag = async (flagId) => {
     setAckBusy(flagId);
@@ -470,8 +485,9 @@ export default function ChildProgressReport() {
                   <span style={{ flex: 1, fontSize: 13, color: 'var(--text-strong)', textDecoration: p.resolved ? 'line-through' : 'none', opacity: p.resolved ? 0.7 : 1 }}>{p.description}</span>
                   {p.category && <Badge tone="neutral" size="sm">{p.category}</Badge>}
                   {canWrite && !p.resolved && (
-                    <button title="Mark resolved" className="racco-no-print" style={iconBtn('var(--success-600)')}
-                      onClick={async () => { try { await api.patch(`/problems/${p.id}/`, { resolved: true }); load(); } catch { toast.error('Could not update.'); } }}>
+                    <button title="Mark resolved" aria-label={`Mark "${p.description}" resolved`}
+                      className="racco-no-print" style={iconBtn('var(--success-600)')}
+                      onClick={() => setResolving(p)}>
                       <Icon name="check" size={14} />
                     </button>
                   )}
@@ -886,6 +902,27 @@ export default function ChildProgressReport() {
           description={`${confirmMove.childName || 'This child'} moves out of pre-assessment and into counseling. You can move them back, but the change shows in the audit trail either way.`}
           confirmLabel="Move to counseling" cancelLabel="Cancel"
         />
+      )}
+      {resolving && (
+        <ConfirmDialog
+          onClose={() => setResolving(null)}
+          onConfirm={resolveProblem}
+          busy={resolveBusy}
+          tone="brand" icon={<Icon name="check" size={19} />}
+          title="Mark this problem resolved?"
+          description="It stays on the watchlist, struck through, as part of the case history."
+          confirmLabel="Mark resolved" cancelLabel="Not yet"
+        >
+          <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--ink-50)', border: '1px solid var(--border)' }}>
+            <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{resolving.description}</div>
+            {resolving.category && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>{resolving.category}</div>}
+          </div>
+          {/* Said plainly because the screen offers no way back: there is no
+              unresolve button, here or anywhere else. */}
+          <Alert tone="warning" icon={<Icon name="alert-triangle" size={18} />}>
+            No screen can mark it unresolved again.
+          </Alert>
+        </ConfirmDialog>
       )}
       {confirmResummarize && (
         <ConfirmDialog

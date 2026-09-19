@@ -3,8 +3,8 @@ import api from '../api/client';
 import { useActivity } from '../context/ActivityContext';
 import { useAuth } from '../context/AuthContext';
 import {
-  Alert, Badge, Button, EmptyState, FormField, hoverLift, Icon, iconBtn, Input, PAGE, PageHeader,
-  Segmented, Select, TD, TH, THEAD_ROW, TR,
+  Alert, Badge, Button, ConfirmDialog, EmptyState, FormField, hoverLift, Icon, iconBtn, Input,
+  PAGE, PageHeader, Segmented, Select, TD, TH, THEAD_ROW, TR,
 } from '../ui';
 import { useToast } from '../context/ToastContext';
 import { loadAll } from '../utils/load';
@@ -44,6 +44,11 @@ export default function Instruments() {
   const [form, setForm] = useState(null); // instrument drawer
   const [tpl, setTpl] = useState(null); // template drawer
   const [error, setError] = useState('');
+  // { kind: 'instrument' | 'template', item } — awaiting confirmation. This was
+  // window.confirm, whose button says "OK" rather than the thing it is about to
+  // do, and which a browser lets a reader switch off for the rest of the visit.
+  const [deactivating, setDeactivating] = useState(null);
+  const [deactivateBusy, setDeactivateBusy] = useState(false);
 
   const load = useCallback(() => loadAll(toast, [
     () => api.get('/instruments/').then((r) => setInstruments(r.data)),
@@ -73,10 +78,19 @@ export default function Instruments() {
     }
   };
 
-  const deactivateInstrument = async (i) => {
-    if (!window.confirm(`Deactivate “${i.title}”?`)) return;
-    try { await api.post(`/instruments/${i.id}/deactivate/`); toast.success(`“${i.title}” deactivated`); load(); refreshActivity(); }
-    catch { toast.error('Could not deactivate.'); }
+  /* Both deactivations run through one dialog rather than two, because the
+     question and the consequence are identical and only the noun and the
+     endpoint change. `deactivating` carries which. */
+  const runDeactivate = async () => {
+    const { kind, item } = deactivating;
+    const path = kind === 'instrument' ? 'instruments' : 'form-templates';
+    setDeactivateBusy(true);
+    try {
+      await api.post(`/${path}/${item.id}/deactivate/`);
+      toast.success(`“${item.title}” deactivated`);
+      setDeactivating(null); load(); refreshActivity();
+    } catch { toast.error('Could not deactivate.'); }
+    finally { setDeactivateBusy(false); }
   };
 
   const setTplField = (i, patch) => setTpl((t) => ({ ...t, fields: t.fields.map((f, idx) => (idx === i ? { ...f, ...patch } : f)) }));
@@ -101,11 +115,7 @@ export default function Instruments() {
     }
   };
 
-  const deactivateTemplate = async (t) => {
-    if (!window.confirm(`Deactivate “${t.title}”?`)) return;
-    try { await api.post(`/form-templates/${t.id}/deactivate/`); toast.success(`“${t.title}” deactivated`); load(); refreshActivity(); }
-    catch { toast.error('Could not deactivate.'); }
-  };
+
 
   return (
     <div style={{ ...PAGE, position: 'relative' }}>
@@ -158,7 +168,7 @@ export default function Instruments() {
                       <td style={{ ...TD, textAlign: 'right' }}>
                         <div style={{ display: 'inline-flex', gap: 6 }}>
                           <button title={`Edit ${i.title}`} aria-label={`Edit ${i.title}`} onClick={() => { setError(''); setForm({ ...i, owner: i.owner || '' }); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={15} /></button>
-                          <button title={`Deactivate ${i.title}`} aria-label={`Deactivate ${i.title}`} onClick={() => deactivateInstrument(i)} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--red-700)')}><Icon name="archive" size={15} /></button>
+                          <button title={`Deactivate ${i.title}`} aria-label={`Deactivate ${i.title}`} onClick={() => setDeactivating({ kind: 'instrument', item: i })} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--red-700)')}><Icon name="archive" size={15} /></button>
                         </div>
                       </td>
                     </tr>
@@ -190,7 +200,7 @@ export default function Instruments() {
                           {(isAdmin || t.owner !== null) && (
                             <>
                               <button title={`Edit ${t.title}`} aria-label={`Edit ${t.title}`} onClick={() => { setError(''); setTpl({ ...t, fields: t.fields?.length ? t.fields : [blankField()], attestation: false }); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={15} /></button>
-                              <button title={`Deactivate ${t.title}`} aria-label={`Deactivate ${t.title}`} onClick={() => deactivateTemplate(t)} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--red-700)')}><Icon name="archive" size={15} /></button>
+                              <button title={`Deactivate ${t.title}`} aria-label={`Deactivate ${t.title}`} onClick={() => setDeactivating({ kind: 'template', item: t })} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--red-700)')}><Icon name="archive" size={15} /></button>
                             </>
                           )}
                         </div>
@@ -263,6 +273,33 @@ export default function Instruments() {
             </div>
           </div>
         </div>
+      )}
+
+      {deactivating && (
+        <ConfirmDialog
+          onClose={() => setDeactivating(null)}
+          onConfirm={runDeactivate}
+          busy={deactivateBusy}
+          tone="danger"
+          icon={<Icon name="archive" size={19} />}
+          title={deactivating.kind === 'instrument'
+            ? 'Deactivate this instrument?'
+            : 'Deactivate this form template?'}
+          description={deactivating.kind === 'instrument'
+            ? 'It stops being offered when a pre-assessment is put together. Pre-assessments that already list it keep it.'
+            : 'It stops being offered as a blank form to print or fill. Records already made on it are unaffected.'}
+          confirmLabel="Deactivate" cancelLabel="Keep it"
+        >
+          <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--ink-50)', border: '1px solid var(--border)', fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>
+            {deactivating.item.title}
+          </div>
+          {/* Worth saying, because it is not the usual archive-and-restore: no
+              screen can turn one back on. Reversing it is an administrator's
+              job in the Django admin. */}
+          <Alert tone="warning" icon={<Icon name="alert-triangle" size={18} />}>
+            There is no button anywhere that reactivates it afterwards.
+          </Alert>
+        </ConfirmDialog>
       )}
     </div>
   );

@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import { useToast } from '../../context/ToastContext';
-import { Button, Badge, Select, FormField, Avatar, Icon, iconBtn, hoverLift } from '../../ui';
+import {
+  Alert, Avatar, Badge, Button, ConfirmDialog, FormField, Icon, iconBtn, hoverLift, Select,
+} from '../../ui';
 import { TERMINATION_REASONS } from '../../config/caseData';
 import { PURPOSE_LABEL, StatusChip, fmtDay, fmtTime, localDate } from './shared';
 
@@ -32,6 +34,12 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
   const [referrals, setReferrals] = useState(null);
   const [refBusy, setRefBusy] = useState(false);
   const [replacing, setReplacing] = useState(null);   // the row being swapped out
+  // { row, file } - chosen, described, and not yet sent. The picker used to run
+  // straight into the upload-then-delete, so the only thing between a mis-click
+  // on Replace and a referral being swapped was the file dialog itself. Asking
+  // AFTER the file is chosen rather than before lets the question name both
+  // documents, which is the question somebody actually wants answered.
+  const [pendingReplace, setPendingReplace] = useState(null);
   const referralFileRef = useRef(null);
   const loadReferrals = useCallback(() => {
     api.get(`/case-referrals/?child=${child.id}`)
@@ -61,8 +69,11 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
      document is still there, which is the right way round: a child left with
      no referral cannot be booked, so losing the old one to a failed upload
      would be worse than keeping a wrong file a minute longer. */
-  const replaceReferral = async (file) => {
-    if (!file || !replacing) return;
+  const replaceReferral = async () => {
+    // Deliberately NOT cleared here: the dialog stays up, disabled, while the
+    // upload runs, so the confirm button cannot be pressed twice and the
+    // reader can see it is working. It closes on the way out, either way.
+    const { row: replacing, file } = pendingReplace;
     setRefBusy(true);
     try {
       const fd = new FormData();
@@ -84,6 +95,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
         : detail || 'Could not upload that file. PDF or Word only.');
     } finally {
       setRefBusy(false);
+      setPendingReplace(null);
     }
   };
 
@@ -277,7 +289,11 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
               </div>
               <input
                 ref={referralFileRef} type="file" accept=".pdf,.doc,.docx" style={{ display: 'none' }}
-                onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; replaceReferral(f); }}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  e.target.value = '';
+                  if (f && replacing) setPendingReplace({ row: replacing, file: f });
+                }}
               />
               {upcoming.length > 0 && (
                 <div>
@@ -348,6 +364,38 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
           </div>
         )}
       </div>
+
+      {pendingReplace && (
+        <ConfirmDialog
+          onClose={() => { setPendingReplace(null); setReplacing(null); }}
+          onConfirm={replaceReferral}
+          busy={refBusy}
+          tone="danger"
+          icon={<Icon name="refresh-cw" size={19} />}
+          title="Replace the case referral?"
+          confirmLabel="Replace it" cancelLabel="Keep the current one"
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--ink-50)', border: '1px solid var(--border)' }}>
+              <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 3 }}>Removed</div>
+              <div style={{ fontSize: 13, color: 'var(--text-strong)', wordBreak: 'break-all' }}>
+                {pendingReplace.row.original_filename || 'Case referral'}
+              </div>
+            </div>
+            <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--blue-50)', border: '1px solid var(--blue-200)' }}>
+              <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 3 }}>Uploaded in its place</div>
+              <div style={{ fontSize: 13, color: 'var(--text-strong)', wordBreak: 'break-all' }}>{pendingReplace.file.name}</div>
+            </div>
+          </div>
+          {/* The order is deliberate and worth saying: nothing is removed
+              until the new file is safely up, because a child with no
+              referral on file cannot be booked at all. */}
+          <Alert tone="info" icon={<Icon name="info" size={18} />}>
+            The new file uploads first. The old one is only removed once that
+            has worked.
+          </Alert>
+        </ConfirmDialog>
+      )}
     </div>
   );
 }
