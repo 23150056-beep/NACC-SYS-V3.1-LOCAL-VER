@@ -60,8 +60,7 @@ def install_availability(psychologists, capacity=DEFAULT_CAPACITY):
     """A Monday-to-Friday working week for each psychologist.
 
     `get_or_create`, so re-running fills gaps and never overwrites: a capacity
-    somebody corrected in the form survives, which is the same promise the
-    adoption stage seeder makes and for the same reason.
+    somebody corrected in the form survives.
 
     Returns the number of blocks created.
     """

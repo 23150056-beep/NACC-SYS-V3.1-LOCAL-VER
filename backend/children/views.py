@@ -32,6 +32,17 @@ class ChildViewSet(viewsets.ModelViewSet):
     serializer_class = ChildSerializer
     permission_classes = [ChildRecordAccess]
     pagination_class = None
+    # No DELETE, for the reason written above it. RecordsAccess's write rule is
+    # Admin OR STAFF, so DELETE was the archive action all over again: a
+    # staff-reachable way to end a case with none of it recorded - except worse,
+    # because every FK to Child is on_delete=CASCADE. One 204 took the child,
+    # their appointments, remarks, referrals, consents, reports and the
+    # TerminationRecords meant to outlive the case. Nothing was logged.
+    #
+    # `terminate` is the path: it demands a reason category and a note, writes
+    # a TerminationRecord and keeps the history. `reopen` undoes it. Neither is
+    # reachable by staff, which is the rule DELETE walked around.
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_permissions(self):
         # Terminate/advance have their own rule (admin OR the child's assigned

@@ -4,8 +4,8 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useActivity } from '../context/ActivityContext';
 import {
-  Avatar, Badge, Button, EmptyState, FilterPills, hoverLift, Icon, iconBtn, Input, PAGE,
-  PageHeader, Segmented, Select, TD, TH, THEAD_ROW, TOOLBAR, TR,
+  Alert, Avatar, Badge, Button, ConfirmDialog, EmptyState, FilterPills, hoverLift, Icon, iconBtn,
+  Input, PAGE, PageHeader, Segmented, Select, TD, TH, THEAD_ROW, TOOLBAR, TR,
 } from '../ui';
 import { useToast } from '../context/ToastContext';
 import { useLayout } from '../context/LayoutContext';
@@ -86,6 +86,12 @@ export default function Children() {
   const [sel, setSel] = useState(null); // detail drawer record
   const [form, setForm] = useState(null); // add/edit drawer
   const [terminating, setTerminating] = useState(null); // terminate modal record
+  // The child awaiting a reopen confirmation. This was a native browser
+  // confirm, and the same 180-character string was written out at both call
+  // sites - the row button and the drawer - which is two copies of one
+  // sentence, each free to drift away from the other.
+  const [reopening, setReopening] = useState(null);
+  const [reopenBusy, setReopenBusy] = useState(false);
   const [error, setError] = useState('');
   const others = usePresence(form?.id || sel?.id);
   // The old standalone Archive page folded in here: admin/staff viewing the
@@ -321,16 +327,19 @@ export default function Children() {
     }
   };
 
-  const reopen = async (c) => {
+  const reopen = async () => {
+    const c = reopening;
+    setReopenBusy(true);
     try {
       await api.post(`/children/${c.id}/reopen/`);
       toast.success(`${c.fullname}'s case is active again — previous records retained`);
+      setReopening(null);
       setSel(null);
       load();
       refreshActivity();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Could not reopen the case.');
-    }
+    } finally { setReopenBusy(false); }
   };
 
   // Duplicate-check warning shortcuts (Add Record form): reuse the existing
@@ -429,7 +438,7 @@ export default function Children() {
                             <button title="View full record" aria-label={`View ${c.fullname}'s record`} onClick={(e) => { e.stopPropagation(); navigate(`/report/child/${c.id}`); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--blue-600)')}><Icon name="eye" size={15} /></button>
                             {isAdmin && (
                               <button title="Reopen case" aria-label={`Reopen ${c.fullname}'s case`}
-                                onClick={(e) => { e.stopPropagation(); if (window.confirm('Reopen this case? All previous records and termination history are kept, but the psychologist assignment is cleared — assign one fresh afterwards.')) reopen(c); }}
+                                onClick={(e) => { e.stopPropagation(); setReopening(c); }}
                                 {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--success-600)')}><Icon name="rotate-ccw" size={15} /></button>
                             )}
                           </div>
@@ -495,9 +504,28 @@ export default function Children() {
         </div>
       </div>
 
-      {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} isAdmin={isAdmin} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => { if (window.confirm('Reopen this case? All previous records and termination history are kept, but the psychologist assignment is cleared — assign one fresh afterwards.')) reopen(sel); }} onClose={() => setSel(null)} />}
+      {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} isAdmin={isAdmin} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => setReopening(sel)} onClose={() => setSel(null)} />}
       {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} blocks={blocks} error={error} isPsych={isPsych} isAdmin={isAdmin} others={others} onSubmit={save} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
       {terminating && <TerminateModal child={terminating} onConfirm={terminate} onClose={() => setTerminating(null)} />}
+      {reopening && (
+        <ConfirmDialog
+          onClose={() => setReopening(null)}
+          onConfirm={reopen}
+          busy={reopenBusy}
+          tone="brand"
+          icon={<Icon name="rotate-ccw" size={19} />}
+          title={`Reopen ${reopening.fullname}'s case?`}
+          description="Records and termination history are kept — nothing is erased by reopening."
+          confirmLabel="Reopen the case" cancelLabel="Leave it closed"
+        >
+          {/* The half people forget, and the half that needs doing next: the
+              case comes back with nobody responsible for it. */}
+          <Alert tone="warning" icon={<Icon name="user-x" size={18} />}>
+            The psychologist assignment is cleared. Assign one fresh afterwards,
+            or the case sits in nobody’s caseload.
+          </Alert>
+        </ConfirmDialog>
+      )}
     </div>
   );
 }

@@ -76,9 +76,7 @@ INSTALLED_APPS = [
     "clinical",
     "scheduling",
     "activity",
-    "samd",
     "assistant",
-    "adoption",
 ]
 
 MIDDLEWARE = [

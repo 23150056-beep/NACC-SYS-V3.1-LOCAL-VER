@@ -7,6 +7,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { loadAll } from '../utils/load';
+import { exactDate } from '../utils/time';
 import {
   Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, hoverLift, Icon, iconBtn, Input, PAGE, PageHeader, Select,
 } from '../ui';
@@ -21,6 +22,45 @@ const PURPOSES = [
   { v: 'follow_up', label: 'Follow-up' },
 ];
 const STATUS_TONE = { scheduled: 'brand', completed: 'success', no_show: 'amber', cancelled: 'neutral' };
+
+/* What each outcome button asks before it does anything.
+ *
+ * `cancel` is the reason this exists. The other two are claims about a session
+ * that has already happened and can be corrected by recording the other one;
+ * a cancelled appointment cannot be marked completed at all — the server
+ * refuses and tells you to book a new one — so it is the single button on this
+ * screen that cannot be taken back. It also reads "Cancel", which everywhere
+ * else in this app closes a panel.
+ *
+ * `consequence` is what the reader does not already know. "This cannot be
+ * undone" on its own is the kind of warning people learn to click past, so
+ * each says the specific thing: what stops being possible, or where it lands. */
+const OUTCOME_CONFIRM = {
+  cancel: {
+    tone: 'danger',
+    icon: 'calendar-x',
+    title: 'Cancel this session?',
+    consequence: 'A cancelled session cannot be marked completed later — you would book a new one instead.',
+    confirmLabel: 'Cancel the session',
+    cancelLabel: 'Keep it',
+  },
+  complete: {
+    tone: 'brand',
+    icon: 'check',
+    title: 'Mark this session completed?',
+    consequence: 'This records that the session went ahead, and it shows on the child’s record.',
+    confirmLabel: 'Mark completed',
+    cancelLabel: 'Not yet',
+  },
+  no_show: {
+    tone: 'warning',
+    icon: 'alert-triangle',
+    title: 'Mark this as a no-show?',
+    consequence: 'This records that the child did not attend, and it stays on their record.',
+    confirmLabel: 'Mark no-show',
+    cancelLabel: 'Not yet',
+  },
+};
 const DURATIONS = [
   { v: 30, label: '30 min' }, { v: 45, label: '45 min' }, { v: 60, label: '1 hour' },
   { v: 90, label: '1 hr 30' }, { v: 120, label: '2 hours' },
@@ -153,6 +193,13 @@ export default function Schedule() {
   const [leave, setLeave] = useState([]);          // declared absences
   const [leaveForm, setLeaveForm] = useState(null);
   const [removingLeave, setRemovingLeave] = useState(null);
+  // { appointment, action } — the outcome awaiting confirmation. All three of
+  // these used to fire on the click itself, and `cancel` is the one that
+  // matters: the server will not let a cancelled session be marked completed
+  // afterwards, so it is a one-way door sitting under a button labelled with
+  // the same word every dialog on this screen uses for "never mind".
+  const [confirmStatus, setConfirmStatus] = useState(null);
+  const [statusBusy, setStatusBusy] = useState(false);
   // The calendar is controlled so the page knows which month is on screen and
   // can fetch that range rather than the entire history.
   const [calDate, setCalDate] = useState(() => new Date());
@@ -509,12 +556,16 @@ export default function Schedule() {
     });
   };
 
-  const setStatus = async (a, actionName) => {
+  const setStatus = async () => {
+    const { appointment: a, action: actionName } = confirmStatus;
+    setStatusBusy(true);
     try {
       await api.post(`/appointments/${a.id}/${actionName}/`);
       toast.success(`Appointment ${actionName === 'no_show' ? 'marked no-show' : actionName + 'd'}`);
-      setSel(null); load();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Could not update.'); }
+      setConfirmStatus(null); setSel(null); load();
+    } catch (err) {
+      toast.error(err.response?.data?.detail || 'Could not update.');
+    } finally { setStatusBusy(false); }
   };
 
 
@@ -837,6 +888,35 @@ export default function Schedule() {
         />
       )}
 
+      {confirmStatus && (() => {
+        const copy = OUTCOME_CONFIRM[confirmStatus.action];
+        const a = confirmStatus.appointment;
+        return (
+          <ConfirmDialog
+            onClose={() => setConfirmStatus(null)}
+            onConfirm={setStatus}
+            busy={statusBusy}
+            tone={copy.tone}
+            icon={<Icon name={copy.icon} size={19} />}
+            title={copy.title}
+            confirmLabel={copy.confirmLabel}
+            cancelLabel={copy.cancelLabel}
+          >
+            {/* Which appointment, spelled out. The dialog opens over a panel
+                the reader is about to lose sight of, and on a week view there
+                may be several sessions with the same child. */}
+            <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--ink-50)', border: '1px solid var(--border)' }}>
+              <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{a.child_name}</div>
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
+                {exactDate(a.start)} · {a.duration_minutes} min
+                {a.psychologist_name ? ` · ${a.psychologist_name}` : ''}
+              </div>
+            </div>
+            <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: 'var(--text-body)' }}>{copy.consequence}</p>
+          </ConfirmDialog>
+        );
+      })()}
+
       {removing && (
         <ConfirmDialog
           onClose={() => setRemoving(null)}
@@ -1117,13 +1197,13 @@ export default function Schedule() {
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   {(isPsych || role === 'Administrator') && (
                     <Button variant="primary" disabled={!started} title={outcomeTitle}
-                      onClick={() => setStatus(sel, 'complete')} iconLeft={<Icon name="check" size={15} />}>
+                      onClick={() => setConfirmStatus({ appointment: sel, action: 'complete' })} iconLeft={<Icon name="check" size={15} />}>
                       Completed
                     </Button>
                   )}
                   {(isPsych || role === 'Administrator') && (
                     <Button variant="secondary" disabled={!started} title={outcomeTitle}
-                      onClick={() => setStatus(sel, 'no_show')} iconLeft={<Icon name="alert-triangle" size={15} />}>
+                      onClick={() => setConfirmStatus({ appointment: sel, action: 'no_show' })} iconLeft={<Icon name="alert-triangle" size={15} />}>
                       No-show
                     </Button>
                   )}
@@ -1133,7 +1213,7 @@ export default function Schedule() {
                       Reschedule
                     </Button>
                   )}
-                  <Button variant="danger" onClick={() => setStatus(sel, 'cancel')} iconLeft={<Icon name="x" size={15} />}>Cancel</Button>
+                  <Button variant="danger" onClick={() => setConfirmStatus({ appointment: sel, action: 'cancel' })} iconLeft={<Icon name="x" size={15} />}>Cancel</Button>
                 </div>
               );
             })()}

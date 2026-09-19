@@ -283,28 +283,32 @@ Declaring leave never cancels what is booked inside it, and removing an
 availability window never does either. Those sessions were agreed with
 somebody; both screens report the count and change nothing.
 
-## The adoption module
+## Removed: the adoption tracker and SAMD readiness
 
-Eight statutory stages, a requirement docket, and one hard gate. Built 9 Sep
-2026.
+Both were removed on 17 Sep 2026 at the owner's request — the `adoption` and
+`samd` apps, their API routes, and the `/adoption`, `/adoption/case/:id` and
+`/samd` screens.
 
-- **`pipeline.admit` is the only door.** A child cannot enter without a
-  completed pre-assessment, and the check lives there rather than in a view, so
-  no second caller can be written that forgets it.
-- **Status is derived on read, never stored.** A status column can disagree
-  with the data behind it, and on a compliance tracker that disagreement is the
-  entire failure.
-- **Stage targets are rows, not constants**, because RACCO I's issuances change
-  and a correction must not need a deploy. The seeder only ever ADDS, so an
-  office's correction survives it.
-- **Nobody verifies their own upload.** That depends on the ROW rather than the
-  role, which is why it lives in `docket.py` and not a permission class. Staff
-  and administrators otherwise do the same things — it is a checklist the
-  office keeps for itself, not an approval hierarchy.
-- **The stages and the handoff backlog arrive via data migrations, not
-  `entrypoint.sh`.** A data migration runs ONCE per database, so a ninth stage
-  added later needs its own migration calling `install_stages` again — 0003
-  says so in its docstring, and a test keeps the seeders out of entrypoint.sh.
+- **The "Adoption" CASE TYPE was not removed and must not be.** It is a
+  different feature that happens to share the word: `Child.case_type`,
+  `type_of_adoption`, `TYPES_OF_ADOPTION` and the "Adoption finalized"
+  termination reason are all core case management and all still in use. Same
+  for `NACC-SAMD-GF-000` — that is the agency's paper certification form, which
+  the Agency Summary still mirrors; it was never the `samd` app.
+- **The teardown migration lives in `children`, not in either departing app**
+  (`children/0019_drop_adoption_samd`). A migration inside `adoption` would have
+  been deleted along with it, so a database that already had the tables would
+  never be told to drop them — the code goes, the tables stay, forever.
+- **It deletes the `django_migrations` rows too**, and that is the point rather
+  than tidiness: leaving `adoption.0001_initial` behind means an app called
+  `adoption` created later is read as already migrated, skipped, and its tables
+  never created. That is exactly the `ai` app trap described under "The
+  assistant app". Deleting the rows makes both names genuinely free again.
+- The models used explicit `db_table` names (`tbl_adoption_*`, `tbl_samd_*`),
+  not the `app_model` names Django would generate. A `DROP TABLE` written from
+  the app label would have silently dropped nothing.
+- Data dumped to `adoption-samd-backup.json` before the drop (312 rows, all
+  adoption; SAMD had never had a single assessment).
 
 ## Getting an account
 

@@ -26,9 +26,6 @@ import Instruments from './pages/Instruments';
 import PreAssessment from './pages/PreAssessment';
 import Schedule from './pages/Schedule';
 import Survey from './pages/Survey';
-import SamdReadiness from './pages/SamdReadiness';
-import AdoptionTracker from './pages/AdoptionTracker';
-import AdoptionCase from './pages/AdoptionCase';
 
 /* The three-column shell.
  *
@@ -84,11 +81,6 @@ export default function App() {
           <Route path="/" element={<ProtectedRoute><Shell><Dashboard /></Shell></ProtectedRoute>} />
           {/* Terminated-case archive lives inside Records (Archived filter) — no separate route. */}
           <Route path="/children" element={<ProtectedRoute roles={['Administrator', 'Staff', 'Psychologist']}><Shell><Children /></Shell></ProtectedRoute>} />
-          {/* The adoption process module: a second lifecycle that picks a
-              child up when the psychologist marks the assessment complete.
-              Casework, so psychologists are not routed here at all. */}
-          <Route path="/adoption" element={<ProtectedRoute roles={['Administrator', 'Staff']}><Shell><AdoptionTracker /></Shell></ProtectedRoute>} />
-          <Route path="/adoption/case/:id" element={<ProtectedRoute roles={['Administrator', 'Staff']}><Shell><AdoptionCase /></Shell></ProtectedRoute>} />
           <Route path="/instruments" element={<ProtectedRoute roles={INSTRUMENT_MANAGER_ROLES}><Shell><Instruments /></Shell></ProtectedRoute>} />
           <Route path="/pre-assessment" element={<ProtectedRoute roles={['Psychologist']}><Shell><PreAssessment /></Shell></ProtectedRoute>} />
           <Route path="/schedule" element={<ProtectedRoute roles={['Administrator', 'Psychologist', 'Staff']}><Shell><Schedule /></Shell></ProtectedRoute>} />
@@ -97,7 +89,6 @@ export default function App() {
           <Route path="/monitoring" element={<ProtectedRoute roles={['Administrator', 'Staff', 'Psychologist']}><Shell><Monitoring /></Shell></ProtectedRoute>} />
           <Route path="/reports/summary" element={<ProtectedRoute roles={['Administrator', 'Staff']}><Shell><AgencySummary /></Shell></ProtectedRoute>} />
           <Route path="/users" element={<ProtectedRoute roles={['Administrator']}><Shell><Users /></Shell></ProtectedRoute>} />
-          <Route path="/samd" element={<ProtectedRoute roles={['Administrator']}><Shell><SamdReadiness /></Shell></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute roles={['Administrator']}><Shell><Settings /></Shell></ProtectedRoute>} />
           {/* Demo-only profile prototype for Social Worker / Psychologist. */}
           <Route path="/profile" element={<ProtectedRoute roles={['Staff', 'Psychologist']}><Shell><MyProfile /></Shell></ProtectedRoute>} />

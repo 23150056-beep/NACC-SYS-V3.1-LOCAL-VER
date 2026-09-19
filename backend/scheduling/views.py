@@ -230,10 +230,27 @@ class UnavailabilityViewSet(viewsets.ModelViewSet):
 class AppointmentViewSet(viewsets.ModelViewSet):
     """Calendar appointments. Staff/admin book against a psychologist's
     availability; a psychologist may book freely on their own schedule.
-    Status transitions via actions (completed / no_show / cancelled)."""
+    Status transitions via actions (completed / no_show / cancelled).
+
+    There is no DELETE, and its absence is the rule rather than an omission.
+    `cancel` is how an appointment ends: it keeps the row, records who did it
+    in the activity log, and leaves the history of a session that was agreed
+    with somebody and then called off. DELETE did none of that - it answered
+    204 to anyone the queryset let through, which meant STAFF could erase an
+    appointment outright while `_set_status` below deliberately allows them
+    only to cancel one, and a psychologist could erase a COMPLETED session
+    from last week. Nothing wrote an activity row either way.
+
+    A rule enforced on one verb is not enforced. `perform_update` made that
+    point once already - see booking.py - and this is the same point in the
+    one verb nobody had written a rule for.
+    """
     permission_classes = [IsAuthenticated]
     pagination_class = None
     serializer_class = AppointmentSerializer
+    # 405 rather than 403: `cancel` is the route, and a caller who asks for
+    # the wrong verb should be told the verb is wrong.
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_queryset(self):
         qs = Appointment.objects.select_related("child", "psychologist", "booked_by")

@@ -17,10 +17,6 @@ export const SCREENS = [
   // psychologists only their own agency form templates (their instrument
   // titles live inside the Pre-Assessment wizard, step 4).
   {
-    id: 'adoption', to: '/adoption', label: 'Adoption Tracker',
-    icon: 'heart-handshake', roles: ['Administrator', 'Staff'],
-  },
-  {
     id: 'instruments', to: '/instruments', label: 'Instruments & Agency Forms',
     altLabel: { Psychologist: 'Pre-Assessment Instruments' },
     icon: 'clipboard-pen', roles: ['Administrator', 'Psychologist'],
@@ -32,12 +28,6 @@ export const SCREENS = [
   { id: 'reports', to: '/reports', label: 'Results & Reports', icon: 'clipboard-check', roles: ALL_ROLES },
 
   { id: 'summary', to: '/reports/summary', label: 'Agency Summary', icon: 'bar-chart-3', section: 'Governance', roles: ['Administrator', 'Staff'] },
-  // The readiness self-check against NACC-SAMD-GF-000. The ROUTE has existed
-  // since the module was built; this entry had not, and nothing else in the
-  // app linked to it either - so an administrator could only reach the screen
-  // by typing /samd into the address bar. A screen with no way in is not a
-  // feature, whatever is behind it.
-  { id: 'samd', to: '/samd', label: 'SAMD Readiness', icon: 'shield-check', roles: ['Administrator'] },
   // Credential Handoffs and the access queue are tabs inside this screen.
   { id: 'users', to: '/users', label: 'User Management', icon: 'user-cog', badge: 'pendingAccess', roles: ['Administrator'] },
   { id: 'settings', to: '/settings', label: 'Settings', icon: 'settings', roles: ['Administrator'] },
@@ -55,7 +45,6 @@ export const TOP_TABS = [
   { id: 'dashboard', label: 'Dashboard', roles: ALL_ROLES },
   { id: 'records', label: 'Records', roles: ALL_ROLES },
   { id: 'preassess', label: 'Pre-Assess', roles: ['Psychologist'] },
-  { id: 'adoption', label: 'Adoption', roles: ['Administrator', 'Staff'] },
   { id: 'monitor', label: 'Monitor', roles: ALL_ROLES },
   { id: 'calendar', label: 'Calendar', roles: ALL_ROLES },
   { id: 'reports', label: 'Reports', roles: ALL_ROLES },
@@ -66,8 +55,6 @@ export const TOP_TABS = [
 /* Which screen a URL belongs to. Longest prefix wins, so /reports/summary is
  * the summary and not a sub-page of reports. */
 const MATCHERS = [
-  ['/adoption/case', 'adoption'],
-  ['/adoption', 'adoption'],
   ['/reports/summary', 'summary'],
   ['/report/child', 'chart'],     // a child's chart — opened FROM Records, but its own screen
   ['/children', 'records'],
@@ -76,7 +63,6 @@ const MATCHERS = [
   ['/monitoring', 'monitor'],
   ['/schedule', 'calendar'],
   ['/reports', 'reports'],
-  ['/samd', 'samd'],
   ['/users', 'users'],
   ['/settings', 'settings'],
 ];

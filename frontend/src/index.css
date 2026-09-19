@@ -939,7 +939,7 @@ input::-ms-clear {
 
 /* Opposite of .racco-no-print: content meant ONLY for the printed page (e.g. a
    condensed summary standing in for a large interactive screen). Hidden on
-   screen, shown on print. Used by the SAMD readiness "Print summary" view. */
+   screen, shown on print. Used by the Credential Handoffs print summary. */
 .racco-print-only {
   display: none;
 }
