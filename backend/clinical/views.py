@@ -4,7 +4,7 @@ from django.db.models import Q
 from django.utils import timezone
 from rest_framework import viewsets, status, mixins
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -40,7 +40,7 @@ from clinical.serializers import (
 )
 from clinical.self_report_detection import detect_concerns
 from clinical.self_report_model_check import start_model_check
-from clinical.services import ensure_text, extract_text
+from clinical.services import extract_text
 
 logger = logging.getLogger(__name__)
 
@@ -228,12 +228,16 @@ class _ChildScopedClinicalViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         self._assert_can_write(serializer.instance.child)
-        # And the child it is moving TO. `child` is writable on update, and
-        # checking only where a record was let one PATCH put a psychologist's
-        # report or remark on a child who is not theirs.
+        # A record stays with the child it was filed for, whoever asks - the
+        # owner's decision, 24 Sep 2026. `child` is writable on update, and
+        # checking only where a record WAS once let one PATCH put a report on a
+        # child who was not the editor's; even between an editor's own children
+        # a move would leave one child's record in another's file, logged only
+        # as "updated". Naming the same child again is not a move.
         moving_to = serializer.validated_data.get("child")
-        if moving_to is not None:
-            self._assert_can_write(moving_to)
+        if moving_to is not None and moving_to != serializer.instance.child:
+            raise ValidationError({"child": "A record stays with the child it was filed for. "
+                                            "File it again for the right child."})
         obj = serializer.save()
         log_activity(self.request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type=self.model.__name__, entity_label=obj.child.fullname,
@@ -376,18 +380,6 @@ class PsychologicalReportViewSet(_ChildScopedClinicalViewSet):
         log_activity(self.request.user, ActivityLog.CREATED, ActivityLog.RECORD,
                      entity_type="PsychologicalReport", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.child.assigned_psychologist)
-
-    def perform_update(self, serializer):
-        moved = serializer.validated_data.get("child", serializer.instance.child) != serializer.instance.child
-        super().perform_update(serializer)
-        if moved:
-            # What the check found was about the child the report was filed
-            # against, and "looked at" was about those findings. Filed against
-            # another child, it is checked again, as that child's.
-            obj = serializer.instance
-            obj.check_findings = self._findings(ensure_text(obj), obj.child)
-            obj.check_reviewed = False
-            obj.save(update_fields=["check_findings", "check_reviewed"])
 
     @action(detail=False, methods=["post"])
     def check(self, request):
