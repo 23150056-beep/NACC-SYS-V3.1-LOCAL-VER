@@ -209,6 +209,16 @@ class PsychologicalReportSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("File too large (max 15 MB).")
         return f
 
+    def validate(self, attrs):
+        # The file is what the report's text, its check and its summary were
+        # read from. Swapped on an update, all three would describe a file
+        # that is no longer there - and a clean file could be filed, then
+        # replaced by one the check would have flagged.
+        if self.instance is not None and "file" in attrs:
+            raise serializers.ValidationError(
+                {"file": "A filed report's file cannot be replaced. Upload the new version as a new report."})
+        return attrs
+
 
 class CaseReferralSerializer(serializers.ModelSerializer):
     child_name = serializers.CharField(source="child.fullname", read_only=True)
