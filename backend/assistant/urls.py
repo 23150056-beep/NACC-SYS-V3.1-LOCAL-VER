@@ -3,7 +3,8 @@ from django.urls import path
 from assistant.views import (
     AssistantAskView, AssistantCapabilitiesView, ModelHealthView,
     AssistantCheckView, AssistantJobFeedbackView, AssistantMetricsView,
-    AssistantSettingView, CensusNarrativeView, ConfirmSummaryView,
+    AssistantSettingView, AssistantUnansweredView, CensusNarrativeView,
+    ConfirmSummaryView,
     DocumentSummaryView, LatestBriefView, PreSessionBriefView,
     PrefetchBriefsView, RemarkPolishView,
 )
@@ -44,4 +45,6 @@ urlpatterns = [
          name="assistant-census-narrative"),
     path("assistant/metrics/", AssistantMetricsView.as_view(),
          name="assistant-metrics"),
+    path("assistant/unanswered/", AssistantUnansweredView.as_view(),
+         name="assistant-unanswered"),
 ]

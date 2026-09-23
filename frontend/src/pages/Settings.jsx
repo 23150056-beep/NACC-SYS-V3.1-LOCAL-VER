@@ -3,7 +3,10 @@ import {
   Alert, Badge, Button, Card, FormField, Icon, Input, Note, PAGE, PageHeader, Switch, TD, TH, THEAD_ROW, TR,
 } from '../ui';
 import { useToast } from '../context/ToastContext';
-import { getAssistantSettings, saveAssistantSettings, getAssistantMetrics, checkAssistant } from '../api/assistant';
+import {
+  getAssistantSettings, saveAssistantSettings, getAssistantMetrics, checkAssistant,
+  getUnansweredQuestions,
+} from '../api/assistant';
 import { testEmailDelivery } from '../api/email';
 import { checkSmsGateway, testSmsDelivery } from '../api/sms';
 
@@ -12,6 +15,18 @@ const FEATURE_LABELS = {
   doc_intelligence: 'Document summaries',
   remark_polish: 'Remark polishing',
   census_narrative: 'Census narrative',
+  // Both ran unlabelled — the table printed the raw job type.
+  chat: 'Chatbot',
+  self_report: 'Self-report check',
+};
+
+// Why a question is on the unanswered list. Plain words: the reader is an
+// administrator deciding what the assistant should learn next.
+const WHY_LABELS = {
+  declined: 'No tool for it',
+  not_understood: "Didn't understand",
+  empty: 'Found nothing',
+  not_helpful: 'Marked not helpful',
 };
 
 
@@ -21,6 +36,7 @@ export default function Settings() {
   const [sync, setSync] = useState(true);
   const [cfg, setCfg] = useState(null);
   const [metrics, setMetrics] = useState(null);
+  const [unanswered, setUnanswered] = useState(null);
   const [saving, setSaving] = useState(false);
   const [check, setCheck] = useState(null);   // { ok, detail }
   const [checking, setChecking] = useState(false);
@@ -40,6 +56,7 @@ export default function Settings() {
       setDraft({ ollama_url: data.ollama_url, model_name: data.model_name });
     }).catch(() => setCfg('error'));
     getAssistantMetrics().then(setMetrics).catch(() => setMetrics(null));
+    getUnansweredQuestions().then(setUnanswered).catch(() => setUnanswered(null));
   }, []);
 
   const save = async (patch) => {
@@ -280,6 +297,63 @@ export default function Settings() {
             </div>
           </Card>
         )}
+
+        {/* What to teach the assistant next, from what people actually asked.
+            Roles, never names: the point is what the agency needs, not who
+            asked it. */}
+        {unanswered && (() => {
+          const b = unanswered.breakdown;
+          // Every question asked lands in exactly one clause, so the sentence
+          // adds up to the total a careful reader will check it against.
+          const other = b.greeting + b.action + b.failed;
+          return (
+            <Card eyebrow="Assistant"
+                  title={`Questions it couldn’t answer — last ${unanswered.window_days} days`}
+                  padding="16px">
+              <p style={{ margin: '0 0 12px', fontSize: 13, lineHeight: 1.5, color: 'var(--text-muted)' }}>
+                {b.total} {b.total === 1 ? 'question' : 'questions'} asked: {b.answered} answered,{' '}
+                {b.empty} found nothing, {b.declined} had no tool, {b.not_understood} not
+                understood, {other} greetings, requests to change something or outages
+                {b.unmeasured > 0 && `, and ${b.unmeasured} looked something up before answer sizes were recorded — whether ${b.unmeasured === 1 ? 'it' : 'they'} found anything is unknown`}.
+                {' '}{b.helpful} marked helpful, {b.not_helpful} not helpful.
+              </p>
+              {unanswered.questions.length === 0 ? (
+                <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
+                  Nothing yet. Questions the assistant has no tool for, can&rsquo;t follow,
+                  answers with nothing, or someone marks not helpful will collect here.
+                </p>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={THEAD_ROW}>
+                        <th scope="col" style={TH}>Question</th><th scope="col" style={TH}>Why</th>
+                        <th scope="col" style={TH}>Times</th><th scope="col" style={TH}>Last asked</th>
+                        <th scope="col" style={TH}>Asked by</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {unanswered.questions.map((q) => (
+                        <tr key={`${q.why}:${q.question}`} style={TR}>
+                          <td style={{ ...TD, wordBreak: 'break-word' }}>{q.question}</td>
+                          <td style={TD}>{WHY_LABELS[q.why] || q.why}</td>
+                          <td style={TD}>{q.times}</td>
+                          <td style={TD}>{q.last_asked}</td>
+                          <td style={TD}>{q.roles.join(', ')}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {unanswered.distinct > unanswered.questions.length && (
+                    <p style={{ margin: '8px 0 0', fontSize: 12, color: 'var(--text-muted)' }}>
+                      Showing the {unanswered.questions.length} most asked of {unanswered.distinct}.
+                    </p>
+                  )}
+                </div>
+              )}
+            </Card>
+          );
+        })()}
       </div>
     </div>
   );

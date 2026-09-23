@@ -420,6 +420,93 @@ class AssistantMetricsView(AssistantBaseView):
         return Response({"window_days": WINDOW_DAYS, "features": rows})
 
 
+def _why_unanswered(job):
+    """One reason per turn.
+
+    The mechanical reason wins when there is one, because it says what to
+    build. The asker's own verdict is shown only when nothing else explains it
+    — a full answer marked not helpful is the one case feedback alone reveals.
+    """
+    if job.answer in (AssistantJob.DECLINED, AssistantJob.NOT_UNDERSTOOD):
+        return job.answer
+    if job.answer == AssistantJob.DATA and job.result_count == 0:
+        return "empty"
+    return "not_helpful"
+
+
+class AssistantUnansweredView(AssistantBaseView):
+    """What people asked the chatbot that it could not answer, most-asked first.
+
+    The list of what to build next, taken from real use rather than guessed:
+    questions no tool fits, questions it could not parse, lookups that came
+    back empty, and answers the asker marked not helpful. Greetings, requests
+    to change something and runtime failures are counted but not listed —
+    none of them is a question the assistant should learn to answer.
+
+    Administrators only, like the usage table it sits beside. The questions are
+    already readable in the Django admin's job list, so this is a view of rows
+    that exist, not new exposure. It names the asker's ROLE and never the
+    person: the point is what the agency needs, not who asked.
+
+    Not gated, for the metrics' reason: reading history has to keep working
+    while the assistant is switched off.
+    """
+    permission_classes = [IsAdministrator]
+    LIST_LIMIT = 25
+
+    def get(self, request):
+        since = timezone.now() - timedelta(days=WINDOW_DAYS)
+        chats = AssistantJob.objects.filter(job_type="chat", created_at__gte=since)
+
+        data = Q(answer=AssistantJob.DATA)
+        breakdown = chats.aggregate(
+            total=Count("id"),
+            answered=Count("id", filter=data & Q(result_count__gt=0)),
+            empty=Count("id", filter=data & Q(result_count=0)),
+            # Lookups logged before sizes were recorded. Unknown, not empty.
+            unmeasured=Count("id", filter=data & Q(result_count__isnull=True)),
+            declined=Count("id", filter=Q(answer=AssistantJob.DECLINED)),
+            not_understood=Count("id", filter=Q(answer=AssistantJob.NOT_UNDERSTOOD)),
+            action=Count("id", filter=Q(answer=AssistantJob.ACTION)),
+            greeting=Count("id", filter=Q(answer=AssistantJob.GREETING)),
+            failed=Count("id", filter=Q(answer=AssistantJob.FAILED)),
+            helpful=Count("id", filter=Q(outcome=AssistantJob.ACCEPTED)),
+            not_helpful=Count("id", filter=Q(outcome=AssistantJob.DISCARDED)),
+        )
+
+        misses = (chats
+                  .filter(Q(answer__in=[AssistantJob.DECLINED,
+                                        AssistantJob.NOT_UNDERSTOOD])
+                          | (data & Q(result_count=0))
+                          | Q(outcome=AssistantJob.DISCARDED))
+                  .select_related("created_by__role")
+                  .order_by("-created_at"))
+        groups = {}
+        for job in misses:
+            why = _why_unanswered(job)
+            # The same question asked twice is one row with a count. Case,
+            # spacing and a trailing "?" are not a different question.
+            key = (" ".join(job.input_ref.lower().split()).rstrip("?!. "), why)
+            group = groups.get(key)
+            if group is None:
+                # Newest first, so the wording kept is the most recent.
+                group = groups[key] = {
+                    "question": job.input_ref, "why": why, "times": 0,
+                    "last_asked": timezone.localtime(job.created_at).date().isoformat(),
+                    "roles": set()}
+            group["times"] += 1
+            group["roles"].add(_role_of(job.created_by) or "Unknown")
+
+        # Most-asked first; among equals, the most recent.
+        ordered = sorted(groups.values(), key=lambda g: g["last_asked"], reverse=True)
+        ordered.sort(key=lambda g: g["times"], reverse=True)
+        for group in ordered:
+            group["roles"] = sorted(group["roles"])
+        return Response({"window_days": WINDOW_DAYS, "breakdown": breakdown,
+                         "distinct": len(ordered),
+                         "questions": ordered[:self.LIST_LIMIT]})
+
+
 class AssistantCheckView(AssistantBaseView):
     """Probe the runtime and describe what happened.
 
@@ -465,6 +552,21 @@ class AssistantCapabilitiesView(AssistantBaseView):
                          "examples": tools.capability_examples(role)})
 
 
+# answer_directly's `reason` defaults to "unsupported" in its resolver, so it
+# must default the same way here or a missing reason is logged as something
+# the user never saw.
+_DIRECT_ANSWERS = {"greeting_or_closing": AssistantJob.GREETING,
+                   "action_request": AssistantJob.ACTION}
+
+
+def _answer_kind(call):
+    """How a turn that reached a resolver ended."""
+    if call.tool != "answer_directly":
+        return AssistantJob.DATA
+    return _DIRECT_ANSWERS.get(call.args.get("reason", "unsupported"),
+                               AssistantJob.DECLINED)
+
+
 class AssistantAskView(AssistantBaseView):
     """The chatbot. A question in; a validated tool call and its result out.
 
@@ -500,6 +602,7 @@ class AssistantAskView(AssistantBaseView):
         except AIUnavailable as exc:
             AssistantJob.objects.create(
                 job_type="chat", input_ref=question[:150], ok=False,
+                answer=AssistantJob.FAILED,
                 error=str(exc)[:255], model_used=getattr(client, "model", ""),
                 latency_ms=int((time.monotonic() - started) * 1000),
                 created_by=creator)
@@ -525,6 +628,7 @@ class AssistantAskView(AssistantBaseView):
             job_type="chat", input_ref=question[:150],
             output_text=f"{call.tool}({call.args})"[:2000],
             model_used=client.model, ok=call.ok, error=call.error[:255],
+            answer="" if call.ok else AssistantJob.NOT_UNDERSTOOD,
             latency_ms=int((time.monotonic() - started) * 1000),
             created_by=creator)
 
@@ -550,15 +654,23 @@ class AssistantAskView(AssistantBaseView):
             logger.exception("Chat resolver failed: %s(%s)", call.tool, call.args)
             job.ok = False
             job.error = f"resolver failed: {call.tool}"[:255]
-            job.save(update_fields=["ok", "error"])
+            job.answer = AssistantJob.FAILED
+            job.save(update_fields=["ok", "error", "answer"])
             return Response({
                 "ok": False, "tool": call.tool,
                 "message": "I couldn't finish looking that up. Nothing was "
                            "changed — try again, or open the screen directly.",
                 "detail": "resolver failed"})
 
+        # Recorded now because only now is it known. An empty lookup is the
+        # failure this chatbot ranks worst, and until this line it left no
+        # trace: the row said which tool ran, never what it found.
+        job.answer = _answer_kind(call)
+        job.result_count = tools.result_size(result)
+        job.save(update_fields=["answer", "result_count"])
+
         return Response({"ok": True, "tool": call.tool, "echo": call.echo,
-                         "result": result})
+                         "result": result, "job": job.id})
 
 
 class ModelHealthView(AssistantBaseView):

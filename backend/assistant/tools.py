@@ -942,6 +942,33 @@ REGISTRY = {
 }
 
 
+def result_size(result):
+    """How much a lookup found. One definition, used by the chat log and by
+    ai_eval, so "answered with nothing" means the same thing in both.
+
+    None when the reply was not a lookup at all: a greeting or a refusal has
+    no size, and counting it as 0 would file every "salamat po" under the
+    empty answers.
+
+    A found child is ONE answer, not zero. The summary has no `items` when it
+    finds exactly one, and an item count read "Tell me about Maria" — answered
+    in full — as found nothing.
+    """
+    kind = result.get("kind")
+    if kind == "message":
+        return None
+    if kind == "summary":
+        match = result.get("match")
+        if match == "one":
+            return 1
+        return len(result.get("items", [])) if match == "several" else 0
+    # Counts are the answer themselves; paged lists carry their real total.
+    for key in ("count", "total"):
+        if key in result:
+            return result[key]
+    return len(result.get("items", []))
+
+
 def ollama_payload():
     """The tools array for /api/chat, derived from REGISTRY.
 

@@ -47,6 +47,11 @@ export const censusNarrative = (figures) =>
 export const getAssistantMetrics = () =>
   api.get('/assistant/metrics/').then((r) => r.data);
 
+// What people asked the chatbot that it could not answer, most-asked first.
+// Administrators only, like the metrics.
+export const getUnansweredQuestions = () =>
+  api.get('/assistant/unanswered/').then((r) => r.data);
+
 export const checkAssistant = () =>
   api.post('/assistant/check/').then((r) => r.data);
 

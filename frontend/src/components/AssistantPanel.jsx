@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { askAssistant, getAssistantCapabilities } from '../api/assistant';
+import { askAssistant, getAssistantCapabilities, sendFeedback } from '../api/assistant';
 import { useAssistant } from '../context/AssistantContext';
 import { Icon } from '../ui';
 
@@ -58,6 +58,40 @@ function Typing() {
           }}
         />
       ))}
+    </div>
+  );
+}
+
+// WCAG 2.2 AA target size: 24px square, not the 13px icon inside it.
+const THUMB = {
+  width: 24, height: 24, display: 'inline-flex', alignItems: 'center',
+  justifyContent: 'center', border: '1px solid var(--border)',
+  borderRadius: 'var(--radius-md)', background: 'var(--surface)',
+  color: 'var(--text-muted)', cursor: 'pointer', padding: 0,
+};
+
+/* Did this answer help? The verdict lands on the same log row as the answer,
+ * which is what lets an administrator see an answer that LOOKED fine and was
+ * not — the one failure no amount of logging on the server can detect. */
+function Feedback({ rated, onRate }) {
+  const row = {
+    display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, paddingTop: 7,
+    borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)',
+  };
+  if (rated === 'helpful' || rated === 'not_helpful') {
+    return <div style={row}>Thanks — noted.</div>;
+  }
+  return (
+    <div style={row}>
+      <span>{rated === 'error' ? "Couldn't save that — try again?" : 'Did this help?'}</span>
+      <button type="button" style={THUMB} aria-label="This answer helped"
+              onClick={() => onRate('helpful')}>
+        <Icon name="thumbs-up" size={13} />
+      </button>
+      <button type="button" style={THUMB} aria-label="This answer did not help"
+              onClick={() => onRate('not_helpful')}>
+        <Icon name="thumbs-down" size={13} />
+      </button>
     </div>
   );
 }
@@ -329,6 +363,18 @@ export default function AssistantPanel() {
     input.current?.focus();
   }, [busy]);
 
+  // Optimistic: the thanks shows at once, and only a failed save brings the
+  // buttons back. Rating is a courtesy the user does us; making them wait on
+  // it is how nobody rates anything.
+  const rate = useCallback(async (index, job, verdict) => {
+    setTurns((prev) => prev.map((t, i) => (i === index ? { ...t, rated: verdict } : t)));
+    try {
+      await sendFeedback(job, verdict === 'helpful' ? 'accepted' : 'discarded');
+    } catch {
+      setTurns((prev) => prev.map((t, i) => (i === index ? { ...t, rated: 'error' } : t)));
+    }
+  }, []);
+
   if (!open) {
     return (
       <button
@@ -532,6 +578,9 @@ export default function AssistantPanel() {
                       </div>
                     )}
                     {t.ok ? <Answer result={t.result} /> : <Line muted>{t.message}</Line>}
+                    {t.ok && t.job && t.result?.reason !== 'greeting_or_closing' && (
+                      <Feedback rated={t.rated} onRate={(v) => rate(i, t.job, v)} />
+                    )}
                   </>
                 )}
               </div>

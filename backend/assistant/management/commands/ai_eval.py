@@ -373,9 +373,10 @@ class Command(BaseCommand):
                     # psychologist and an empty one for an administrator.
                     for role, req in callers:
                         result = tools.REGISTRY[call.tool]["resolve"](req, call.args)
-                        n = result.get("count", result.get(
-                            "total", len(result.get("items", []))))
-                        if not n:
+                        # The same definition the chat log records, so the
+                        # eval and real use agree on what "empty" means.
+                        n = tools.result_size(result)
+                        if n == 0:
                             # The silent failure: a confident empty answer.
                             found[f"empty answer ({role})"] = [
                                 f"{call.args or 'no args'}"]
