@@ -45,7 +45,40 @@ ALIASES = {
     },
     "status": {
         "aktibo": "active", "buhay": "active", "tapos": "terminated",
+        "closed": "terminated", "inactive": "terminated", "archived": "terminated",
         "lahat": "any", "all": "any",
+    },
+    # get_statistics. The model reaches for the word the user used, so the
+    # user's words are what these map from. An empty value means the default,
+    # never a rejection: the routing was right.
+    "measure": {
+        "": "children", "child": "children", "kids": "children", "kid": "children",
+        "bata": "children", "mga bata": "children", "caseload": "children",
+        "cases": "children", "case": "children",
+        "intakes": "intake", "admission": "intake", "admissions": "intake",
+        "new": "intake", "new children": "intake", "bagong bata": "intake",
+        "closure": "closures", "closed": "closures", "termination": "closures",
+        "terminations": "closures", "terminated": "closures",
+        "pre-assessment": "pre_assessments", "pre-assessments": "pre_assessments",
+        "pre_assessment": "pre_assessments", "preassessments": "pre_assessments",
+        "pending": "pre_assessments",
+        "session": "sessions", "appointments": "sessions", "appointment": "sessions",
+        "visits": "sessions", "attendance": "sessions", "no-show": "sessions",
+        "no-shows": "sessions", "no show": "sessions", "no shows": "sessions",
+        "noshow": "sessions", "noshows": "sessions", "no-show rate": "sessions",
+    },
+    "by": {
+        "": "none", "total": "none", "all": "none", "nothing": "none",
+        "type": "case_type", "case type": "case_type", "casetype": "case_type",
+        "stage": "case_stage", "case stage": "case_stage", "case_status": "case_stage",
+        "age": "age_band", "age group": "age_band", "age groups": "age_band",
+        "age_group": "age_band", "edad": "age_band",
+        "gender": "sex", "kasarian": "sex",
+        "psychologists": "psychologist", "assigned psychologist": "psychologist",
+        "per psychologist": "psychologist", "caseload": "psychologist",
+        "reasons": "reason", "why": "reason", "dahilan": "reason",
+        "months": "month", "monthly": "month", "per month": "month", "buwan": "month",
+        "outcome": "status", "outcomes": "status", "attendance": "status",
     },
     # Measured: asked "how many users are in the system?", the model answered
     # role="any" against an enum offering "anyone". The near-miss is what this
@@ -121,6 +154,10 @@ def validate(tool, raw_args):
         if param not in supplied:
             if meta.get("required"):
                 errors.append(f"'{param}' is required.")
+            elif "default" in meta:
+                # Filled here rather than in the resolver so the echo, the log
+                # and the eval all see the arguments the answer actually used.
+                args[param] = meta["default"]
             continue
         value, err = _coerce(param, supplied[param], meta)
         if err:
@@ -173,7 +210,11 @@ def correct_obvious_misroute(question, call):
     A question naming both — "how many children were referred by staff?" — is
     left alone, because children are the subject and the tool can answer it.
     """
-    if not call.ok or call.tool != "count_my_children":
+    # get_statistics counts children when `measure` is children, which is what
+    # count_my_children did before it was folded in — and the misroute this
+    # guards against came from exactly that count.
+    if (not call.ok or call.tool != "get_statistics"
+            or call.args.get("measure") != "children"):
         return call
     low = _PUNCT.sub(" ", str(question or "").lower())
     words = f" {low} "
@@ -291,6 +332,9 @@ APPOINTMENT_PERIODS = tuple(p for p in PERIODS if not p.endswith("_year"))
 # included, because a session completed this morning belongs in the answer.
 FUTURE_ONLY = {"tomorrow", "next_week"}
 
+# How many sessions a single schedule answer lists. `total` carries the rest.
+APPOINTMENT_PAGE = 25
+
 
 def _week_start(day):
     """The Sunday on or before `day`.
@@ -360,18 +404,25 @@ def period_range(period, today=None):
 # nothing, and CHAT_SYSTEM stays byte-identical so the prefix cache stays warm.
 _CAN_ASK = {
     "Psychologist": (
-        "your schedule, how many children are in your caseload, children with "
-        "a particular concern, a summary of one child, who needs follow-up, "
-        "and which children have flagged something in their own words"),
+        "your schedule, numbers about your caseload — how many children, by "
+        "case type, stage, age or sex, new intakes or closures, and your "
+        "attendance and no-shows — children "
+        "with a particular concern, a summary of one child, who needs "
+        "follow-up, and which children have flagged something in their own "
+        "words"),
     "Administrator": (
-        "the agency's schedule, how many children the agency is handling, "
+        "the agency's schedule, the agency's numbers — children by case type, "
+        "stage, age, sex or psychologist, new intakes, closures and why, and "
+        "attendance and no-shows — "
         "children with a particular concern, a summary of one child, who needs "
         "follow-up, and which children have flagged something in their own "
         "words"),
     "Staff": (
-        "the schedule, how many children the agency is handling, children with "
-        "a particular concern, a summary of one child, and who needs "
-        "follow-up"),
+        "the schedule, the agency's numbers — children by case type, stage, "
+        "age, sex or psychologist, new intakes, closures and why, and "
+        "attendance and no-shows — "
+        "children with a particular concern, a summary of one child, and who "
+        "needs follow-up"),
 }
 _CAN_ASK_DEFAULT = _CAN_ASK["Psychologist"]
 
@@ -382,14 +433,19 @@ _EXAMPLES = {
                      "How many children do I have?",
                      "Who flagged something worrying?",
                      "Who needs follow-up?"],
+    # One statistics question per role that has the Agency Summary, taken
+    # from what that screen answers. Each one is an ai_eval case: a suggested
+    # question that routes wrong is worse than no suggestion.
     "Administrator": ["Who needs follow-up?",
                       "Who flagged something worrying?",
-                      "Any children with anxiety?",
+                      "Active children by case type?",
                       "What was scheduled last week?"],
+    # "Tell me about a child by name" went: it is an instruction, not a
+    # question, and typed as-is it names no child.
     "Staff": ["Who needs follow-up?",
               "Any children with anxiety?",
               "What's on this week?",
-              "Tell me about a child by name"],
+              "Caseload per psychologist?"],
 }
 
 GREETING_REPLY = "Hello — what would you like to look up?"
@@ -413,7 +469,33 @@ def _scope(request):
     return visible_children(request)
 
 
+def _scope_appointments(request, qs):
+    """(queryset, own) under the schedule's rule — the Dashboard's, the
+    Calendar's and the appointments API's: only a psychologist is narrowed to
+    their own calendar. One copy, used by the schedule answer and by the
+    attendance numbers, so the two cannot scope a session differently."""
+    from accounts.models import Role
+    from accounts.scoping import role_of
+    own = role_of(request) == Role.PSYCHOLOGIST
+    return (qs.filter(psychologist=request.user) if own else qs), own
+
+
 def _resolve_appointments(request, args):
+    """The schedule, scoped the way the Dashboard scopes it.
+
+    A psychologist sees their own sessions. Staff and administrators hold none,
+    so they see the agency's — which is what the Dashboard's schedule strip
+    already shows them, and what the panel's own suggested questions ask for:
+    "What was scheduled last week?" is an administrator's example. Filtering
+    every role by `psychologist=request.user` answered that example "Nothing
+    recorded" for two roles out of three, while the screen behind the panel
+    listed the day's sessions. A confident empty answer contradicting the
+    screen is the worst failure this chatbot has.
+
+    Paged like the flags, and for the same reason: a month across the agency
+    runs to hundreds of rows, and a list cut short without saying so reads as
+    the whole schedule. `total` always carries the real count.
+    """
     from django.utils import timezone
     from scheduling.models import Appointment
 
@@ -428,25 +510,301 @@ def _resolve_appointments(request, args):
                 else [Appointment.SCHEDULED, Appointment.COMPLETED,
                       Appointment.NO_SHOW])
 
-    appts = (Appointment.objects
-             .filter(psychologist=request.user, status__in=statuses,
-                     start__date__gte=start, start__date__lt=end)
-             .select_related("child").order_by("start"))
-    return {"kind": "appointments", "when": period, "items": [
-        {"child": a.child.fullname,
-         "when": timezone.localtime(a.start).strftime("%a %d %b, %H:%M"),
-         "purpose": a.get_purpose_display(),
-         "status": a.status} for a in appts]}
+    appts, own = _scope_appointments(request, Appointment.objects.filter(
+        status__in=statuses, start__date__gte=start, start__date__lt=end))
+    appts = appts.select_related("child", "psychologist").order_by("start")
+
+    total = appts.count()
+    return {"kind": "appointments", "when": period,
+            "scope": "own" if own else "agency", "total": total, "items": [
+                {"child": a.child.fullname,
+                 "psychologist": display_name(a.psychologist),
+                 "when": timezone.localtime(a.start).strftime("%a %d %b, %H:%M"),
+                 "purpose": a.get_purpose_display(),
+                 "status": a.status} for a in appts[:APPOINTMENT_PAGE]]}
 
 
-def _resolve_count(request, args):
+# --- statistics -------------------------------------------------------------
+#
+# Only numbers a screen already shows, counted the way that screen counts them,
+# so the chatbot and the screen cannot disagree:
+#
+#   children by case type or case stage .... the Dashboard's census
+#   children by age group, sex, psychologist  the Agency Summary
+#   intake and closures by month ............ the Dashboard's intake vs termination
+#   closures by reason ...................... the Agency Summary
+#   pending pre-assessments ................. the Dashboard
+#   sessions and the no-show rate ........... the Agency Summary's attendance
+#
+# A measure no screen has defined yet waits until one does, or the two will
+# count it differently. The no-show rate waited for exactly that: its
+# definition lives in clinical.reports.attendance, and the screen came first.
+
+STAT_MEASURES = ("children", "intake", "closures", "pre_assessments", "sessions")
+STAT_BREAKDOWNS = ("none", "case_type", "case_stage", "age_band", "sex",
+                   "psychologist", "reason", "month", "status")
+STAT_BY = {
+    "children": {"none", "case_type", "case_stage", "age_band", "sex", "psychologist"},
+    "intake": {"none", "month"},
+    "closures": {"none", "reason", "month"},
+    "pre_assessments": {"none"},
+    # Attendance, by clinical.reports.attendance — the Agency Summary's card.
+    # Deliberately no "by psychologist": a no-show is the child's absence, and
+    # a table of no-show rates per psychologist reads as a scorecard of the
+    # psychologists. That is a decision for the agency, not for a chatbot.
+    "sessions": {"none", "status"},
+}
+# Events in time. Children and pending pre-assessments are counted as of today.
+STAT_DATED = {"intake", "closures", "sessions"}
+
+_BY_WORDS = {"case_type": "case type", "case_stage": "case stage",
+             "age_band": "age group", "sex": "sex", "psychologist": "psychologist",
+             "reason": "reason", "month": "month", "status": "status"}
+_MEASURE_WORDS = {"children": "children", "intake": "new intakes",
+                  "closures": "case closures", "pre_assessments": "pending pre-assessments",
+                  "sessions": "sessions"}
+# Not categories, so they sort last whatever their count.
+_LEFTOVERS = {"Unspecified", "Unassigned"}
+
+_DASHBOARD = {"label": "Dashboard", "path": "/"}
+_SUMMARY = {"label": "Agency Summary", "path": "/reports/summary"}
+
+
+def _stat_screen(measure, by, role):
+    """The screen that shows this number, if the caller can open it."""
+    from accounts.models import Role
+    summary = ((measure == "children" and by in ("age_band", "sex", "psychologist"))
+               or (measure == "closures" and by == "reason")
+               or measure == "sessions")
+    if not summary:
+        return _DASHBOARD
+    # The Agency Summary is Administrators and Staff only. A link somebody
+    # cannot open is worse than no link.
+    return None if role == Role.PSYCHOLOGIST else _SUMMARY
+
+
+def _stat_subject(measure, status, by, span, total):
+    """What the number counts — "active children, by case type". Built once
+    here so the panel cannot word it differently; the headline is the total
+    followed by this, and the panel shows the two apart for a plain total."""
+    one = total == 1
+    if measure == "children":
+        head = {"active": f"active {'child' if one else 'children'}",
+                "terminated": f"{'child' if one else 'children'} with a closed case",
+                "any": f"{'child' if one else 'children'} on record"}[status]
+    elif measure == "intake":
+        head = f"new {'child' if one else 'children'} added"
+    elif measure == "closures":
+        head = f"{'case' if one else 'cases'} closed"
+    elif measure == "sessions":
+        head = "session" if one else "sessions"
+    else:
+        head = f"pending pre-assessment{'' if one else 's'}"
+    if measure in STAT_DATED:
+        # `span` is the window actually counted, never the one asked for: a
+        # by-month answer with no period counts six months, and saying "all
+        # time" over it would state a number for a window it did not count.
+        head += span
+    if by != "none":
+        head += f", by {_BY_WORDS[by]}"
+    return head
+
+
+def _sorted_rows(counts, order=None):
+    """Rows in a stated order, or most first with the leftovers last."""
+    if order is not None:
+        rows = [(label, counts.get(label, 0)) for label in order]
+        rows += [(label, n) for label, n in counts.items() if label not in order and n]
+    else:
+        rows = sorted(counts.items(),
+                      key=lambda kv: (kv[0] in _LEFTOVERS, -kv[1], kv[0]))
+    return [{"label": label, "count": n} for label, n in rows]
+
+
+def _child_rows(children, by, today):
+    """Children counted by one attribute, each the way its screen counts it."""
     from children.models import Child
-    qs = _scope(request)
-    if args["status"] == "active":
-        qs = qs.filter(status=Child.ACTIVE)
-    elif args["status"] == "terminated":
-        qs = qs.exclude(status=Child.ACTIVE)
-    return {"kind": "count", "status": args["status"], "count": qs.count()}
+    from clinical.reports import AGE_BANDS, UNSPECIFIED_AGE, age_band
+
+    counts, order = {}, None
+    for c in children:
+        if by == "case_type":                      # Dashboard census
+            label = c.case_type or "Unspecified"
+        elif by == "case_stage":                   # Dashboard census
+            label = c.get_case_status_display() if c.case_status else "Unspecified"
+        elif by == "age_band":                     # Agency Summary, shared rule
+            label = age_band(c.birth_date, today)
+        elif by == "sex":                          # Agency Summary
+            label = c.gender if c.gender in ("Male", "Female") else "Unspecified"
+        else:                                      # psychologist — Agency Summary
+            label = display_name(c.assigned_psychologist) or "Unassigned"
+        counts[label] = counts.get(label, 0) + 1
+
+    # The official form's order for age, and every band shown even at zero,
+    # because the form shows them all. Stages and sexes likewise.
+    if by == "age_band":
+        order = [label for label, _, _ in AGE_BANDS] + (
+            [UNSPECIFIED_AGE] if counts.get(UNSPECIFIED_AGE) else [])
+    elif by == "case_stage":
+        order = [label for value, label in Child.CASE_STATUS_CHOICES
+                 if value != Child.STAGE_TERMINATED or counts.get(label)]
+    elif by == "sex":
+        order = ["Male", "Female"] + (["Unspecified"] if counts.get("Unspecified") else [])
+    return _sorted_rows(counts, order)
+
+
+def _month_rows(dates, start, end, today):
+    """Month by month, oldest first, zero months included — a month with no
+    intakes is part of the answer. Never past the current month."""
+    from clinical.reports import bucket
+    stop = min(end, _next_month(_month_start(today)))
+    counts = {}
+    for d in dates:
+        key = bucket(d, "monthly")
+        counts[key] = counts.get(key, 0) + 1
+    rows, m = [], _month_start(start)
+    while m < stop:
+        rows.append({"label": m.strftime("%b %Y"),
+                     "count": counts.get(bucket(m, "monthly"), 0)})
+        m = _next_month(m)
+    return rows
+
+
+def _resolve_statistics(request, args):
+    """Counts and breakdowns, scoped exactly as the screens scope them.
+
+    Replaces count_my_children, which is `measure=children` here with its
+    defaults filled in. A breakdown a measure does not have, or a period on
+    something counted as of today, is answered with the total and a note —
+    never refused, because the routing was right and the question deserves
+    its number.
+    """
+    from django.utils import timezone
+    from accounts.scoping import role_of, scope_to_visible
+    from children.models import Child, TerminationRecord
+    from clinical.models import PreAssessment
+
+    measure, status = args.get("measure", "children"), args.get("status", "active")
+    by, period = args.get("by", "none"), args.get("period")
+    today = timezone.localdate()
+    notes = []
+
+    if by not in STAT_BY[measure]:
+        notes.append(f"{_MEASURE_WORDS[measure].capitalize()} can't be broken down "
+                     f"by {_BY_WORDS[by]} yet, so this is the total.")
+        by = "none"
+    if period and measure not in STAT_DATED:
+        notes.append("Counted as of today — a period doesn't apply. For children "
+                     "added in a period, ask about new intakes.")
+        period = None
+    start = end = None
+    if period:
+        start, end = period_range(period, today)
+    elif by == "month":
+        # No period asked for: the last six months, as the Dashboard shows.
+        start = _month_start(today)
+        for _ in range(5):
+            start = _previous_month(start)
+        end = _next_month(_month_start(today))
+
+    rows = []
+    if measure == "children":
+        qs = scope_to_visible(Child.objects.all(), request, path=None)
+        if status == "active":
+            qs = qs.filter(status=Child.ACTIVE)
+        elif status == "terminated":
+            qs = qs.exclude(status=Child.ACTIVE)
+        if by == "psychologist":
+            qs = qs.select_related("assigned_psychologist")
+        children = list(qs)
+        total = len(children)
+        if by != "none":
+            rows = _child_rows(children, by, today)
+    elif measure == "intake":
+        qs = scope_to_visible(Child.objects.all(), request, path=None)
+        if start:
+            qs = qs.filter(created_at__date__gte=start, created_at__date__lt=end)
+        dates = [timezone.localtime(c.created_at).date() for c in qs.only("created_at")]
+        total = len(dates)
+        if by == "month":
+            rows = _month_rows(dates, start, end, today)
+    elif measure == "closures":
+        qs = scope_to_visible(TerminationRecord.objects.all(), request)
+        if start:
+            qs = qs.filter(date__gte=start, date__lt=end)
+        closures = list(qs.only("date", "reason_category"))
+        total = len(closures)
+        if by == "reason":                         # Agency Summary
+            counts = {}
+            for t in closures:
+                counts[t.reason_category] = counts.get(t.reason_category, 0) + 1
+            rows = _sorted_rows(counts)
+        elif by == "month":
+            rows = _month_rows([t.date for t in closures], start, end, today)
+    elif measure == "sessions":                    # Agency Summary's attendance card
+        from clinical.reports import attendance
+        from scheduling.models import Appointment
+        qs, _own = _scope_appointments(request, Appointment.objects.only("status", "start"))
+        if start:
+            qs = qs.filter(start__date__gte=start, start__date__lt=end)
+        att = attendance(qs, timezone.now())
+        total = att["sessions"]
+        if by == "status":
+            rows = [{"label": label, "count": att[key]} for label, key in (
+                ("Completed", "completed"), ("No-show", "no_show"),
+                ("Not yet recorded", "unrecorded"), ("Upcoming", "upcoming"))
+                if att[key] or key in ("completed", "no_show")]
+        notes.insert(0, _attendance_note(att))
+    else:                                          # pending pre-assessments — Dashboard
+        total = scope_to_visible(
+            PreAssessment.objects.exclude(status=PreAssessment.COMPLETED), request).count()
+
+    if period:
+        span = " " + period.replace("_", " ")
+    elif start:
+        span = " in the last six months"
+    else:
+        span = ", all time"
+    subject = _stat_subject(measure, status, by, span, total)
+    return {"kind": "breakdown", "measure": measure, "by": by,
+            "status": status if measure == "children" else None,
+            "period": period, "total": total, "rows": rows,
+            "subject": subject, "title": f"{total} {subject}",
+            "note": " ".join(notes),
+            "screen": _stat_screen(measure, by, role_of(request))}
+
+
+def _attendance_note(att):
+    """The rate, and what it leaves out — said every time, because a rate whose
+    denominator nobody can see invites the wrong reading."""
+    parts = []
+    if att["took_place"]:
+        parts.append(f"No-show rate {att['no_show_rate']}% — {att['no_show']} of the "
+                     f"{att['took_place']} sessions that took place.")
+    else:
+        parts.append("No session in this period has taken place yet, so there is "
+                     "no no-show rate.")
+    if att["unrecorded"]:
+        parts.append(f"{att['unrecorded']} past "
+                     f"{'session has' if att['unrecorded'] == 1 else 'sessions have'} "
+                     "not been recorded yet and "
+                     f"{'is' if att['unrecorded'] == 1 else 'are'} left out of the rate.")
+    if att["cancelled"]:
+        parts.append(f"{att['cancelled']} cancelled, not counted.")
+    return " ".join(parts)
+
+
+def _stats_echo(a):
+    """Built from the arguments alone, like every echo — it cannot see the
+    caller, so it never says "your"."""
+    measure = a.get("measure", "children")
+    what = (f"{a.get('status', 'active')} children" if measure == "children"
+            else _MEASURE_WORDS[measure])
+    if a.get("period"):
+        what += " " + a["period"].replace("_", " ")
+    if a.get("by", "none") != "none":
+        what += f" by {_BY_WORDS[a['by']]}"
+    return f"Looking up: {what}"
 
 
 def _singular(word):
@@ -578,7 +936,16 @@ def _resolve_summary(request, args):
     # and nothing gets looser. Only when that finds nothing does the search
     # widen to any single word — which is what rescues "Maria Reyes" for a
     # record reading "Maria Santos", and "si Maria" for "Maria".
-    matches = list(_scope(request).filter(fullname__icontains=args["name"])[:6])
+    #
+    # Before either: a name that is EXACTLY one child's recorded name means that
+    # child, even when it also sits inside another record — "Maria Santos"
+    # inside "Maria Santos-Cruz". Without this, choosing a name from the
+    # "which one?" list asked the same question again. Two children recorded
+    # under the identical name still come back as "several": a name cannot
+    # tell them apart, and guessing between them would be worse.
+    exact = list(_scope(request).filter(fullname__iexact=args["name"].strip())[:2])
+    matches = (exact if len(exact) == 1 else
+               list(_scope(request).filter(fullname__icontains=args["name"])[:6]))
     if not matches:
         query = Q()
         for word in _name_words(args["name"]):
@@ -779,22 +1146,39 @@ REGISTRY = {
             "question about the calendar, the schedule, or work already done "
             "in a period. Do NOT use this to search for children."),
         "schema": {"when": {"enum": list(APPOINTMENT_PERIODS), "required": True}},
-        "echo": lambda a: f"Looking up: your appointments {a['when'].replace('_', ' ')}",
+        # Not "your": the echo sees only the arguments, and an administrator
+        # asking this is looking at the agency's calendar, not their own.
+        "echo": lambda a: f"Looking up: appointments {a['when'].replace('_', ' ')}",
         "resolve": _resolve_appointments,
     },
-    "count_my_children": {
+    "get_statistics": {
+        # Replaces count_my_children, which is measure=children here, in the
+        # same position in the tools array.
+        #
+        # Deliberately no "use for questions starting 'how many'". That phrase
+        # in count_my_children's description is what answered "how many
+        # psychologists are in the system?" with a child count. What this
+        # counts is named by its subject, children and cases, not by the shape
+        # of the question.
         "description": (
-            "How many CHILDREN are in the user's caseload. Counts children "
-            "only. Do NOT use to count psychologists, staff, users, "
-            "appointments, reports, or anything else — this tool can only "
-            "count children, and answering a question about staff with a "
-            "child count is wrong. Do NOT use for schedule questions."),
-        "schema": {"status": {"enum": ["active", "terminated", "any"],
-                              "required": True}},
-        # No "you have": the echo is built from arguments alone and cannot see
-        # the caller, and an administrator has no caseload of their own.
-        "echo": lambda a: f"Looking up: how many {a['status']} children",
-        "resolve": _resolve_count,
+            "Numbers about children and cases: the count of children, and how "
+            "they break down by case type, case stage, age group, sex or the "
+            "psychologist they are assigned to; new intakes and case closures "
+            "in a period, and closures by reason; pre-assessments still "
+            "pending; attendance — sessions held, no-shows and the no-show "
+            "rate in a period. Use for a count of children or cases, for "
+            "attendance, or for breaking them down by a category or by month."),
+        "schema": {
+            "measure": {"enum": list(STAT_MEASURES), "required": False,
+                        "default": "children"},
+            "status": {"enum": ["active", "terminated", "any"], "required": False,
+                       "default": "active"},
+            "by": {"enum": list(STAT_BREAKDOWNS), "required": False,
+                   "default": "none"},
+            "period": {"enum": list(PERIODS), "required": False},
+        },
+        "echo": _stats_echo,
+        "resolve": _resolve_statistics,
     },
     "search_children_by_concern": {
         "description": (
@@ -891,13 +1275,15 @@ REGISTRY = {
     },
     "answer_directly": {
         "description": (
+            # It used to claim "how many psychologists, staff or users" as
+            # well — written before count_people existed, and never removed
+            # when that tool took the question over. Two descriptions claiming
+            # one question is a routing coin-toss, and the tools array is read
+            # as one prompt.
             "Use when NO other tool fits: greetings, thanks, sign-offs, general "
-            "knowledge, questions about what words mean, or anything not about "
-            "this user's schedule, children or caseload. This includes "
-            "questions about PEOPLE WHO WORK HERE — how many psychologists, "
-            "staff or users the system has — and questions about the system "
-            "itself. Answering one of those with a child count would be "
-            "wrong; use this instead."),
+            "knowledge, questions about what words mean, questions about the "
+            "system itself, or anything not about this user's schedule, "
+            "children or caseload."),
         # `reason` is telemetry, not logic — the response is the same fixed
         # copy either way. Requiring it turned the one case in 28 where the
         # model omitted it into a failed turn, so it defaults instead.
@@ -908,6 +1294,137 @@ REGISTRY = {
         "resolve": _resolve_direct,
     },
 }
+
+
+# --- follow-ups -------------------------------------------------------------
+#
+# Refinements of an answer, offered as ready-made calls the panel runs WITHOUT
+# the model: "By sex?", "This week?", a name from a "which one?" list. They
+# cannot misroute because nothing routes them, and they answer in milliseconds
+# rather than seconds.
+#
+# They are not a new trust boundary. The model's output was always untrusted
+# input to validate(); a call the panel sends goes through the same validator,
+# and every resolver takes scope from request.user, never from arguments — so a
+# forged chip reaches nothing a perfectly behaved model could not.
+
+FOLLOWUP_LIMIT = 4
+
+# Periods one step either side, for the schedule and availability answers.
+_NEAR_WHEN = {
+    "today": ("tomorrow", "this_week"), "tomorrow": ("today", "this_week"),
+    "yesterday": ("today", "last_week"), "this_week": ("last_week", "next_week"),
+    "last_week": ("this_week", "last_month"), "next_week": ("this_week",),
+    "this_month": ("last_month", "this_week"), "last_month": ("this_month",),
+}
+_NEAR_BOOKING = {"today": ("tomorrow", "this_week"), "tomorrow": ("this_week", "next_week"),
+                 "this_week": ("next_week",), "next_week": ("this_week",)}
+_PERIOD_CHIP = {p: p.replace("_", " ").capitalize() + "?" for p in PERIODS}
+_BY_CHIP = {"case_type": "By case type?", "age_band": "By age group?", "sex": "By sex?",
+            "psychologist": "By psychologist?", "case_stage": "By case stage?",
+            "reason": "By reason?", "month": "Month by month?", "status": "By status?"}
+# Most asked-for first: the NACC form's own breakdowns, then caseload.
+_BY_ORDER = ("case_type", "age_band", "sex", "psychologist", "case_stage",
+             "reason", "month", "status")
+
+
+def _followup_statistics(args, result, role):
+    from accounts.models import Role
+    measure, by = result["measure"], result["by"]
+    for b in _BY_ORDER:
+        # A psychologist's "by psychologist" is one row with their own name.
+        if (b in STAT_BY[measure] and b != by
+                and not (b == "psychologist" and role == Role.PSYCHOLOGIST)):
+            yield _BY_CHIP[b], {**args, "by": b}
+    if measure in STAT_DATED:
+        for p in ("this_month", "this_year", "last_year"):
+            if p != result["period"]:
+                yield _PERIOD_CHIP[p], {**args, "period": p}
+
+
+def _followup_appointments(args, result, role):
+    for p in _NEAR_WHEN.get(args["when"], ()):
+        yield _PERIOD_CHIP[p], {"when": p}
+
+
+def _followup_availability(args, result, role):
+    for p in _NEAR_BOOKING.get(args["when"], ()):
+        yield _PERIOD_CHIP[p], {"when": p}
+
+
+def _followup_flags(args, result, role):
+    if args.get("state", "unreviewed") != "all":
+        yield "Include reviewed ones?", {**args, "state": "all"}
+    for p in ("this_month", "this_year"):
+        if p != args.get("period"):
+            yield _PERIOD_CHIP[p], {**args, "period": p}
+
+
+def _followup_summary(args, result, role):
+    # "Several children match — which one?" becomes a choice, not a retype.
+    # Exact full names: the resolver lets an exact match win, so this lands.
+    if result.get("match") == "several":
+        for item in result["items"]:
+            yield item["name"], {"name": item["name"]}
+
+
+_FOLLOWUPS = {
+    "get_statistics": _followup_statistics,
+    "list_my_appointments": _followup_appointments,
+    "find_availability": _followup_availability,
+    "list_self_report_flags": _followup_flags,
+    "get_child_summary": _followup_summary,
+}
+# The only tools the follow-up endpoint will run: the ones chips come from.
+FOLLOWUP_TOOLS = frozenset(_FOLLOWUPS)
+
+
+def followups(call, result, role):
+    """Refinements of this answer as [{label, tool, args}], ready to send back.
+
+    Each offer is put through validate() before it is made, so a chip can never
+    produce a call the server would refuse — and the args sent back are the
+    validated ones, defaults and all.
+    """
+    make = _FOLLOWUPS.get(call.tool)
+    if not call.ok or make is None or result.get("kind") == "message":
+        return []
+    limit = 6 if call.tool == "get_child_summary" else FOLLOWUP_LIMIT
+    out = []
+    for label, raw in make(call.args, result, role):
+        offer = validate(call.tool, raw)
+        if offer.ok:
+            out.append({"label": label, "tool": call.tool, "args": offer.args})
+        if len(out) == limit:
+            break
+    return out
+
+
+def result_size(result):
+    """How much a lookup found. One definition, used by the chat log and by
+    ai_eval, so "answered with nothing" means the same thing in both.
+
+    None when the reply was not a lookup at all: a greeting or a refusal has
+    no size, and counting it as 0 would file every "salamat po" under the
+    empty answers.
+
+    A found child is ONE answer, not zero. The summary has no `items` when it
+    finds exactly one, and an item count read "Tell me about Maria" — answered
+    in full — as found nothing.
+    """
+    kind = result.get("kind")
+    if kind == "message":
+        return None
+    if kind == "summary":
+        match = result.get("match")
+        if match == "one":
+            return 1
+        return len(result.get("items", [])) if match == "several" else 0
+    # Counts are the answer themselves; paged lists carry their real total.
+    for key in ("count", "total"):
+        if key in result:
+            return result[key]
+    return len(result.get("items", []))
 
 
 def ollama_payload():

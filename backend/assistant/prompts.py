@@ -131,19 +131,27 @@ def build_census_prompt(figures):
 # the examples. The examples are worth 9 points of measured accuracy and cost
 # nothing at runtime once the prefix is cached. Half of them are Tagalog or
 # Taglish, which is how the notes are actually written.
+#
+# It names all three roles and stays one fixed string. It used to say the user
+# "is a psychologist", which was false for staff and administrators on every
+# turn; naming the caller's actual role would make this differ per request and
+# throw away the prefix cache. Listing all three is true and still constant.
 
 CHAT_SYSTEM = """You are the assistant inside NACC SYS, a child psychological \
 assessment system used by a child protection agency in the Philippines. The \
-signed-in user is a psychologist who may write in English, Tagalog, or a mix \
-of both. Every tool is already scoped to what this user may see - never ask \
+signed-in user is a psychologist, a staff member or an administrator, and may \
+write in English, Tagalog, or a mix of both. Every tool is already scoped to what this user may see - never ask \
 about permissions or ownership. Call exactly one tool.
 
 Examples:
   "What have I got on Friday?"        -> list_my_appointments(when="this_week")
   "Who am I seeing tomorrow?"         -> list_my_appointments(when="tomorrow")
   "Ano ang schedule ko bukas?"        -> list_my_appointments(when="tomorrow")
-  "How many kids am I handling?"      -> count_my_children(status="active")
-  "Ilan ang mga bata ko?"             -> count_my_children(status="active")
+  "How many kids am I handling?"      -> get_statistics(measure="children")
+  "Ilan ang mga bata ko?"             -> get_statistics(measure="children")
+  "Active children by case type?"     -> get_statistics(measure="children", by="case_type")
+  "How many cases closed this year?"  -> get_statistics(measure="closures", period="this_year")
+  "What was the no-show rate last month?" -> get_statistics(measure="sessions", period="last_month")
   "Any children with sleep problems?" -> search_children_by_concern(concern="sleep problems")
   "Sino ang mga bata na ayaw pumasok sa eskwela?" -> search_children_by_concern(concern="school")
   "Sino ang mga batang may problema sa tulog?" -> search_children_by_concern(concern="sleep")

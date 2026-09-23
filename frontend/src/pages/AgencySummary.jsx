@@ -12,7 +12,7 @@ const RANGES = [
   { value: 'monthly', label: 'Monthly' },
   { value: 'yearly', label: 'Annual' },
 ];
-const EMPTY = { total: 0, children: 0, by_case_type: {}, per_psychologist: [], trend: [], terminations_by_reason: {}, pending_pre_assessments: 0, caseload_per_psychologist: [], nacc_service_users: { age_groups: [], case_categories: [] } };
+const EMPTY = { total: 0, children: 0, by_case_type: {}, per_psychologist: [], trend: [], terminations_by_reason: {}, pending_pre_assessments: 0, caseload_per_psychologist: [], nacc_service_users: { age_groups: [], case_categories: [] }, attendance: { sessions: 0, completed: 0, no_show: 0, unrecorded: 0, upcoming: 0, cancelled: 0, took_place: 0, no_show_rate: null } };
 
 export default function AgencySummary() {
   const toast = useToast();
@@ -40,6 +40,13 @@ export default function AgencySummary() {
   const caseMix = Object.entries(d.by_case_type || {}).sort((a, b) => b[1] - a[1]);
   const caseMixMax = Math.max(1, ...caseMix.map(([, v]) => v));
   const terminations = Object.entries(d.terminations_by_reason || {}).sort((a, b) => b[1] - a[1]);
+  const att = d.attendance || EMPTY.attendance;
+  // Not-yet-recorded and upcoming only when there are any: a row of zeros
+  // about sessions that do not exist is noise on a governance screen.
+  const attRows = [['Completed', att.completed], ['No-show', att.no_show],
+    ['Not yet recorded', att.unrecorded], ['Upcoming', att.upcoming]]
+    .filter(([label, v]) => v > 0 || label === 'Completed' || label === 'No-show');
+  const attMax = Math.max(1, ...attRows.map(([, v]) => v));
   const termMax = Math.max(1, ...terminations.map(([, v]) => v));
 
   const writeNarrative = async () => {
@@ -204,6 +211,36 @@ export default function AgencySummary() {
       </Card>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 12 }}>
+        {/* Attendance, by the one definition in clinical/reports.py that the
+            assistant's statistics use too — so "what's our no-show rate?"
+            and this card cannot disagree. The rule is printed on the card:
+            a rate whose denominator nobody can see invites the wrong reading. */}
+        <Card eyebrow="All sessions on record" title="Attendance" padding="14px 16px">
+          {att.sessions === 0 && att.cancelled === 0
+            ? <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>No sessions on record.</p>
+            : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                  <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 30, lineHeight: 1, color: 'var(--text-strong)' }}>
+                    {att.no_show_rate === null ? '—' : `${att.no_show_rate}%`}
+                  </span>
+                  <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                    no-show rate · {att.no_show} of {att.took_place} {att.took_place === 1 ? 'session' : 'sessions'} that took place
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+                  {attRows.map(([label, v]) => (
+                    <MiniBar key={label} label={label} value={v} pct={`${Math.round((v / attMax) * 100)}%`} color="var(--blue-500)" />
+                  ))}
+                </div>
+                <p style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text-muted)', marginTop: 12 }}>
+                  The rate counts sessions whose time has passed and that were recorded as completed or no-show.
+                  {' '}Cancelled sessions ({att.cancelled}) and past sessions nobody has recorded yet are left out.
+                </p>
+              </>
+            )}
+        </Card>
+
         <Card title="Terminations by reason" padding="14px 16px">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
             {terminations.length === 0

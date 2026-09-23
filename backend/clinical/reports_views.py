@@ -149,38 +149,26 @@ def _nacc_service_users():
     NACC-SAMD-GF-000 (June 2025). Always computed over ACTIVE children —
     unlike the rest of the summary, it is NOT filtered by the `range` param."""
     from django.utils import timezone as tz
+    # The bands live in clinical.reports because the assistant's statistics
+    # use the same rule, and must never put a child in a different band.
+    from clinical.reports import AGE_BANDS, UNSPECIFIED_AGE, age_band
     today = tz.localdate()
 
-    def age_of(birth_date):
-        if not birth_date:
-            return None
-        return today.year - birth_date.year - (
-            (today.month, today.day) < (birth_date.month, birth_date.day))
-
-    bands = [
-        ("Infants and Young Children (0-6)", 0, 6),
-        ("Middle Childhood (7-11)", 7, 11),
-        ("Adolescents (12-17)", 12, 17),
-        ("Young Adults (18+)", 18, None),
-    ]
-    age_rows = {label: {"label": label, "male": 0, "female": 0, "total": 0} for label, _, _ in bands}
-    unspecified_age_row = {"label": "Unspecified age", "male": 0, "female": 0, "total": 0}
+    age_rows = {label: {"label": label, "male": 0, "female": 0, "total": 0}
+                for label, _, _ in AGE_BANDS}
+    unspecified_age_row = {"label": UNSPECIFIED_AGE, "male": 0, "female": 0, "total": 0}
     has_unspecified_age = False
 
     category_counts = {}
     unspecified_category_count = 0
 
     for c in Child.objects.filter(status=Child.ACTIVE):
-        age = age_of(c.birth_date)
-        row = None
-        if age is not None:
-            for label, lo, hi in bands:
-                if age >= lo and (hi is None or age <= hi):
-                    row = age_rows[label]
-                    break
-        if row is None:
+        label = age_band(c.birth_date, today)
+        if label == UNSPECIFIED_AGE:
             row = unspecified_age_row
             has_unspecified_age = True
+        else:
+            row = age_rows[label]
         if c.gender == "Male":
             row["male"] += 1
         elif c.gender == "Female":
@@ -192,7 +180,7 @@ def _nacc_service_users():
         else:
             unspecified_category_count += 1
 
-    age_groups = [age_rows[label] for label, _, _ in bands]
+    age_groups = [age_rows[label] for label, _, _ in AGE_BANDS]
     if has_unspecified_age:
         age_groups.append(unspecified_age_row)
 
@@ -230,6 +218,14 @@ def _summary_csv(data):
     w.writerow(["Termination reason", "Count"])
     for k, v in data["terminations_by_reason"].items():
         w.writerow([k, v])
+    w.writerow([])
+    att = data["attendance"]
+    w.writerow(["Attendance", "Count"])
+    for label, key in (("Completed", "completed"), ("No-show", "no_show"),
+                       ("Not yet recorded", "unrecorded"), ("Upcoming", "upcoming"),
+                       ("Cancelled (not counted)", "cancelled")):
+        w.writerow([label, att[key]])
+    w.writerow(["No-show rate (%)", "" if att["no_show_rate"] is None else att["no_show_rate"]])
     w.writerow([])
     w.writerow(["NACC Service Users by Age Group"])
     w.writerow(["Age Group", "Male", "Female", "Total"])
@@ -281,6 +277,18 @@ class SummaryReportView(generics.GenericAPIView):
             {"name": k, "caseload": v}
             for k, v in sorted(caseload.items(), key=lambda kv: -kv[1])]
         data["nacc_service_users"] = _nacc_service_users()
+
+        # Attendance over the same from/to window as the rest of the summary,
+        # by the one definition in clinical.reports that the assistant's
+        # statistics also use. Agency-wide: this screen is Admin and Staff.
+        from django.utils import timezone as tz
+        from scheduling.models import Appointment
+        appts = Appointment.objects.only("status", "start")
+        if frm:
+            appts = appts.filter(start__date__gte=frm)
+        if to:
+            appts = appts.filter(start__date__lte=to)
+        data["attendance"] = reports.attendance(appts, tz.now())
 
         # NB: `format` is reserved by DRF content negotiation, so use `export`.
         if request.query_params.get("export") == "csv":

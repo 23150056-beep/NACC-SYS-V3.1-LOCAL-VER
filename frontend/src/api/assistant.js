@@ -47,6 +47,11 @@ export const censusNarrative = (figures) =>
 export const getAssistantMetrics = () =>
   api.get('/assistant/metrics/').then((r) => r.data);
 
+// What people asked the chatbot that it could not answer, most-asked first.
+// Administrators only, like the metrics.
+export const getUnansweredQuestions = () =>
+  api.get('/assistant/unanswered/').then((r) => r.data);
+
 export const checkAssistant = () =>
   api.post('/assistant/check/').then((r) => r.data);
 
@@ -55,6 +60,11 @@ export const checkAssistant = () =>
 // assistant is off or the runtime is down; the panel says so and stays usable.
 export const askAssistant = (question) =>
   api.post('/assistant/ask/', { question }).then((r) => r.data);
+
+// A follow-up chip: the ready-made call the last answer offered, run without
+// the model. Sent back exactly as offered — the server validates it again.
+export const runFollowup = ({ tool, args, label }) =>
+  api.post('/assistant/followup/', { tool, args, label }).then((r) => r.data);
 
 // What this user can ask, and a few example questions. Served rather than
 // hardcoded so the empty panel and the assistant's own refusal text cannot

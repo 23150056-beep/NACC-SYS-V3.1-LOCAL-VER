@@ -44,32 +44,32 @@ class AskTestBase(APITestCase):
 class AskHappyPathTest(AskTestBase):
     def test_returns_the_tool_the_echo_and_the_result(self):
         res = self._ask("how many children do I have?",
-                        "count_my_children", {"status": "active"})
+                        "get_statistics", {"status": "active"})
         self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data["tool"], "count_my_children")
+        self.assertEqual(res.data["tool"], "get_statistics")
         self.assertIn("active", res.data["echo"])
-        self.assertEqual(res.data["result"]["count"], 1)
+        self.assertEqual(res.data["result"]["total"], 1)
 
     def test_audits_the_question_and_the_call(self):
-        self._ask("ilan ang mga bata ko?", "count_my_children", {"status": "aktibo"})
+        self._ask("ilan ang mga bata ko?", "get_statistics", {"status": "aktibo"})
         job = AssistantJob.objects.get()
         self.assertEqual(job.job_type, "chat")
         self.assertIn("ilan ang mga bata", job.input_ref)
-        self.assertIn("count_my_children", job.output_text)
+        self.assertIn("get_statistics", job.output_text)
         self.assertEqual(job.created_by, self.psy)
 
     def test_a_tagalog_enum_value_is_aliased_before_it_reaches_the_queryset(self):
         res = self._ask("ilan ang mga bata ko?",
-                        "count_my_children", {"status": "aktibo"})
+                        "get_statistics", {"status": "aktibo"})
         self.assertEqual(res.data["result"]["status"], "active")
 
     def test_scope_comes_from_the_caller_not_the_model(self):
         # The model inventing an "assigned_to_me" argument must not widen the
         # caller's view — the argument is discarded and the queryset is scoped
         # by request.user regardless.
-        res = self._ask("how many children?", "count_my_children",
+        res = self._ask("how many children?", "get_statistics",
                         {"status": "active", "assigned_to_me": False})
-        self.assertEqual(res.data["result"]["count"], 1)
+        self.assertEqual(res.data["result"]["total"], 1)
 
 
 class AskRejectionTest(AskTestBase):
@@ -151,20 +151,20 @@ class AskMisrouteTest(AskTestBase):
 
     def test_a_staff_question_does_not_return_a_child_count(self):
         res = self._ask("how many psychologist are in the system?",
-                        "count_my_children", {"status": "active"})
+                        "get_statistics", {"status": "active"})
         self.assertEqual("answer_directly", res.data["tool"])
-        self.assertNotIn("count", res.data["result"])
+        self.assertNotIn("total", res.data["result"])
 
     def test_it_says_what_it_can_do_instead(self):
         res = self._ask("How many staff are in the system?",
-                        "count_my_children", {"status": "active"})
+                        "get_statistics", {"status": "active"})
         self.assertIn("children", res.data["result"]["text"].lower())
 
     def test_a_real_child_count_still_answers(self):
         res = self._ask("How many children am I handling?",
-                        "count_my_children", {"status": "active"})
-        self.assertEqual("count_my_children", res.data["tool"])
-        self.assertEqual(1, res.data["result"]["count"])
+                        "get_statistics", {"status": "active"})
+        self.assertEqual("get_statistics", res.data["tool"])
+        self.assertEqual(1, res.data["result"]["total"])
 
 
 class CapabilitiesEndpointTest(APITestCase):
@@ -194,25 +194,25 @@ class AskResolverFailureTest(AskTestBase):
     raises must not leave a row claiming the turn succeeded."""
 
     def test_a_resolver_crash_does_not_500(self):
-        with patch.dict(tools.REGISTRY["count_my_children"],
+        with patch.dict(tools.REGISTRY["get_statistics"],
                         {"resolve": lambda *a, **k: 1 / 0}):
             res = self._ask("how many children do I have?",
-                            "count_my_children", {"status": "active"})
+                            "get_statistics", {"status": "active"})
         self.assertEqual(res.status_code, 200)
         self.assertFalse(res.data["ok"])
 
     def test_a_resolver_crash_is_audited_as_a_failure(self):
-        with patch.dict(tools.REGISTRY["count_my_children"],
+        with patch.dict(tools.REGISTRY["get_statistics"],
                         {"resolve": lambda *a, **k: 1 / 0}):
             self._ask("how many children do I have?",
-                      "count_my_children", {"status": "active"})
+                      "get_statistics", {"status": "active"})
         job = AssistantJob.objects.get()
         self.assertFalse(job.ok)
         self.assertIn("resolver failed", job.error)
 
     def test_it_never_claims_a_result_it_does_not_have(self):
-        with patch.dict(tools.REGISTRY["count_my_children"],
+        with patch.dict(tools.REGISTRY["get_statistics"],
                         {"resolve": lambda *a, **k: 1 / 0}):
             res = self._ask("how many children do I have?",
-                            "count_my_children", {"status": "active"})
+                            "get_statistics", {"status": "active"})
         self.assertNotIn("result", res.data)

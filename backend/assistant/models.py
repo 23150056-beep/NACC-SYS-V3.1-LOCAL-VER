@@ -65,6 +65,27 @@ class AssistantJob(models.Model):
     ok = models.BooleanField(default=True)
     error = models.CharField(max_length=255, blank=True)
     outcome = models.CharField(max_length=10, choices=OUTCOME_CHOICES, default=PENDING)
+
+    # Chat only: how the turn ended, recorded at the moment it is known,
+    # because nothing can reconstruct it afterwards. output_text holds the tool
+    # call, not what the tool found — so an answer that routed perfectly and
+    # came back empty looked exactly like a good one here, and "answered with
+    # nothing" (the failure the eval ranks worst) was invisible in real use.
+    DATA, DECLINED, ACTION, GREETING = "data", "declined", "action", "greeting"
+    NOT_UNDERSTOOD, FAILED = "not_understood", "failed"
+    ANSWER_CHOICES = [
+        (DATA, "Looked something up"),
+        (DECLINED, "Declined: no tool for it"),
+        (ACTION, "Declined: asked to change something"),
+        (GREETING, "Greeting"),
+        (NOT_UNDERSTOOD, "Not understood"),
+        (FAILED, "Failed"),
+    ]
+    answer = models.CharField(max_length=20, choices=ANSWER_CHOICES, blank=True)
+    # How many rows a DATA answer found; 0 is the empty answer. Null for every
+    # other kind of turn, and for rows written before sizes were recorded —
+    # those are unknown, not empty.
+    result_count = models.PositiveIntegerField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="assistant_jobs")

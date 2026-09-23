@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { askAssistant, getAssistantCapabilities } from '../api/assistant';
+import { Link } from 'react-router-dom';
+import {
+  askAssistant, getAssistantCapabilities, runFollowup, sendFeedback,
+} from '../api/assistant';
 import { useAssistant } from '../context/AssistantContext';
 import { Icon } from '../ui';
 
@@ -62,19 +65,128 @@ function Typing() {
   );
 }
 
+/* A suggestion pill. One component for the empty panel's example questions
+ * and for the follow-ups under an answer, so the two cannot drift apart. The
+ * small size is still 26px tall — above WCAG 2.2's 24px target minimum. */
+function Chip({ children, onClick, disabled = false, small = false }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        cursor: disabled ? 'default' : 'pointer',
+        padding: small ? '5px 11px' : '7px 12px',
+        background: 'var(--surface)',
+        border: '1px solid var(--border-strong)',
+        borderRadius: 'var(--radius-pill)',
+        color: 'var(--text-body)', font: 'inherit', fontSize: small ? 12 : 12.5,
+        opacity: disabled ? 0.6 : 1,
+        transition: 'background var(--dur-fast) var(--ease-out)',
+      }}
+      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = 'var(--surface-brand-soft)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--surface)'; }}
+    >{children}</button>
+  );
+}
+
+// WCAG 2.2 AA target size: 24px square, not the 13px icon inside it.
+const THUMB = {
+  width: 24, height: 24, display: 'inline-flex', alignItems: 'center',
+  justifyContent: 'center', border: '1px solid var(--border)',
+  borderRadius: 'var(--radius-md)', background: 'var(--surface)',
+  color: 'var(--text-muted)', cursor: 'pointer', padding: 0,
+};
+
+/* Did this answer help? The verdict lands on the same log row as the answer,
+ * which is what lets an administrator see an answer that LOOKED fine and was
+ * not — the one failure no amount of logging on the server can detect. */
+function Feedback({ rated, onRate }) {
+  const row = {
+    display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, paddingTop: 7,
+    borderTop: '1px solid var(--border)', fontSize: 11, color: 'var(--text-muted)',
+  };
+  if (rated === 'helpful' || rated === 'not_helpful') {
+    return <div style={row}>Thanks — noted.</div>;
+  }
+  return (
+    <div style={row}>
+      <span>{rated === 'error' ? "Couldn't save that — try again?" : 'Did this help?'}</span>
+      <button type="button" style={THUMB} aria-label="This answer helped"
+              onClick={() => onRate('helpful')}>
+        <Icon name="thumbs-up" size={13} />
+      </button>
+      <button type="button" style={THUMB} aria-label="This answer did not help"
+              onClick={() => onRate('not_helpful')}>
+        <Icon name="thumbs-down" size={13} />
+      </button>
+    </div>
+  );
+}
+
 function Answer({ result }) {
   const { kind } = result || {};
 
-  if (kind === 'count') {
+  if (kind === 'breakdown') {
+    // get_statistics. A plain total is a figure, styled like the headcount
+    // answer so every "how many" reads as the same kind of answer. A breakdown
+    // is a table with a thin bar per row: the table carries every value and is
+    // what a screen reader gets; the bars are decorative and only help the eye
+    // compare. One hue for one series, --blue-500 because it passes the
+    // palette checks against this surface where --brand's darker step does not.
+    const rows = result.rows || [];
+    const max = Math.max(1, ...rows.map((r) => r.count));
     return (
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <span style={{
-          fontFamily: 'var(--font-display)', fontSize: 26,
-          fontWeight: 700, color: 'var(--text-strong)', lineHeight: 1.1,
-        }}>{result.count}</span>
-        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-          {result.status === 'any' ? 'children on record' : `${result.status} children`}
-        </span>
+      <div>
+        {rows.length === 0 ? (
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{
+              fontFamily: 'var(--font-display)', fontSize: 26,
+              fontWeight: 700, color: 'var(--text-strong)', lineHeight: 1.1,
+            }}>{result.total}</span>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{result.subject}</span>
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+            <caption style={{
+              captionSide: 'top', textAlign: 'left', padding: '0 0 6px',
+              fontSize: 13, fontWeight: 700, color: 'var(--text-strong)',
+            }}>{result.title}</caption>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.label}>
+                  <th scope="row" style={{
+                    textAlign: 'left', fontWeight: 400, color: 'var(--text-strong)',
+                    padding: '3px 8px 3px 0', verticalAlign: 'middle', wordBreak: 'break-word',
+                  }}>{r.label}</th>
+                  <td aria-hidden="true" style={{ width: '38%', padding: '3px 0', verticalAlign: 'middle' }}>
+                    {r.count > 0 && (
+                      <div style={{
+                        height: 8, minWidth: 2, width: `${(100 * r.count) / max}%`,
+                        background: 'var(--blue-500)', borderRadius: '0 4px 4px 0',
+                      }} />
+                    )}
+                  </td>
+                  <td style={{
+                    textAlign: 'right', padding: '3px 0 3px 8px', verticalAlign: 'middle',
+                    color: 'var(--text-strong)', fontVariantNumeric: 'tabular-nums',
+                    whiteSpace: 'nowrap',
+                  }}>{r.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {result.note && <Line muted>{result.note}</Line>}
+        {/* The screen this number comes from, when the reader can open it —
+            the check on a number that looks wrong is one click away. */}
+        {result.screen && (
+          <div style={{ marginTop: 6 }}>
+            <Link to={result.screen.path} style={{
+              fontSize: 12, fontWeight: 600, color: 'var(--brand)',
+            }}>Open {result.screen.label}</Link>
+          </div>
+        )}
       </div>
     );
   }
@@ -123,19 +235,38 @@ function Answer({ result }) {
         .includes(result.when);
       return <Line muted>{past ? 'Nothing recorded.' : 'Nothing scheduled.'}</Line>;
     }
-    return result.items.map((a, i) => (
-      <Line key={i}>
-        <strong>{a.child}</strong>
-        <span style={{ color: 'var(--text-muted)' }}> · {a.when} · {a.purpose}</span>
-        {a.status && a.status !== 'scheduled' && (
-          <span style={{
-            marginLeft: 6, padding: '1px 6px', borderRadius: 'var(--radius-pill)',
-            fontSize: 11, fontWeight: 700, textTransform: 'capitalize',
-            background: 'var(--ink-50)', color: 'var(--text-muted)',
-          }}>{a.status.replace('_', ' ')}</span>
+    // Staff and administrators hold no sessions, so they get the agency's
+    // calendar — said out loud, with whose session each row is, because the
+    // same question answers differently for a psychologist.
+    const agency = result.scope === 'agency';
+    return (
+      <>
+        {agency && <Line muted>Across the agency:</Line>}
+        {result.items.map((a, i) => (
+          <Line key={i}>
+            <strong>{a.child}</strong>
+            <span style={{ color: 'var(--text-muted)' }}>
+              {' '}· {a.when} · {a.purpose}{agency && a.psychologist ? ` · ${a.psychologist}` : ''}
+            </span>
+            {a.status && a.status !== 'scheduled' && (
+              <span style={{
+                marginLeft: 6, padding: '1px 6px', borderRadius: 'var(--radius-pill)',
+                fontSize: 11, fontWeight: 700, textTransform: 'capitalize',
+                background: 'var(--ink-50)', color: 'var(--text-muted)',
+              }}>{a.status.replace('_', ' ')}</span>
+            )}
+          </Line>
+        ))}
+        {/* A month across the agency is hundreds of rows. A cut-off list must
+            never read as the whole calendar. */}
+        {result.total > result.items.length && (
+          <Line muted>
+            Showing {result.items.length} of {result.total}. Open the Calendar
+            to see the rest.
+          </Line>
         )}
-      </Line>
-    ));
+      </>
+    );
   }
 
   if (kind === 'children') {
@@ -281,18 +412,18 @@ export default function AssistantPanel() {
   useEffect(() => { if (open) toBottom(); }, [open, turns, busy, toBottom]);
   useEffect(() => { if (open) input.current?.focus(); }, [open]);
 
-  const send = useCallback(async (text) => {
-    const asked = (text ?? '').trim();
+  // One path for a typed question and a follow-up chip: the turn appears at
+  // once, the answer replaces the dots, and a failure never breaks the panel.
+  const submit = useCallback(async (asked, run) => {
     if (!asked || busy) return;
     setBusy(true);
-    setQuestion('');
     // The question appears immediately, the way a message does everywhere
     // else. Waiting for the round trip to show it makes the app feel broken.
     setTurns((prev) => [...prev, { asked, pending: true }]);
 
     let answered;
     try {
-      answered = await askAssistant(asked);
+      answered = await run();
     } catch (err) {
       // 503 is the assistant switched off or the runtime down. Neither is an
       // error the user caused, and neither may break the panel.
@@ -309,6 +440,30 @@ export default function AssistantPanel() {
     setBusy(false);
     input.current?.focus();
   }, [busy]);
+
+  const send = useCallback((text) => {
+    const asked = (text ?? '').trim();
+    if (!asked || busy) return;
+    setQuestion('');
+    submit(asked, () => askAssistant(asked));
+  }, [busy, submit]);
+
+  // A chip runs the call it was offered, without the model. The user's side of
+  // the conversation shows the chip's own words, as if they had typed them —
+  // and anything half-typed in the box is left alone.
+  const follow = useCallback((f) => submit(f.label, () => runFollowup(f)), [submit]);
+
+  // Optimistic: the thanks shows at once, and only a failed save brings the
+  // buttons back. Rating is a courtesy the user does us; making them wait on
+  // it is how nobody rates anything.
+  const rate = useCallback(async (index, job, verdict) => {
+    setTurns((prev) => prev.map((t, i) => (i === index ? { ...t, rated: verdict } : t)));
+    try {
+      await sendFeedback(job, verdict === 'helpful' ? 'accepted' : 'discarded');
+    } catch {
+      setTurns((prev) => prev.map((t, i) => (i === index ? { ...t, rated: 'error' } : t)));
+    }
+  }, []);
 
   if (!open) {
     return (
@@ -439,21 +594,7 @@ export default function AssistantPanel() {
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginTop: 12 }}>
               {(caps?.examples ?? SUGGESTIONS).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => send(s)}
-                  style={{
-                    cursor: 'pointer', padding: '7px 12px',
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: 'var(--radius-pill)',
-                    color: 'var(--text-body)', font: 'inherit', fontSize: 12.5,
-                    transition: 'background var(--dur-fast) var(--ease-out)',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-brand-soft)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--surface)'; }}
-                >{s}</button>
+                <Chip key={s} onClick={() => send(s)}>{s}</Chip>
               ))}
             </div>
             <div style={{ display: 'flex', gap: 9, marginTop: 12, padding: '10px 12px', background: 'var(--surface)', borderLeft: '3px solid var(--border-strong)', borderRadius: '0 8px 8px 0' }}>
@@ -513,10 +654,27 @@ export default function AssistantPanel() {
                       </div>
                     )}
                     {t.ok ? <Answer result={t.result} /> : <Line muted>{t.message}</Line>}
+                    {t.ok && t.job && t.result?.reason !== 'greeting_or_closing' && (
+                      <Feedback rated={t.rated} onRate={(v) => rate(i, t.job, v)} />
+                    )}
                   </>
                 )}
               </div>
             </div>
+
+            {/* Refinements of the latest answer. Offered by the server, run
+                without the model — they cannot misroute, and they answer at
+                once. Only under the newest turn: that is where refining happens. */}
+            {i === turns.length - 1 && !t.pending && t.ok && t.followups?.length > 0 && (
+              <div role="group" aria-label="Follow-up questions"
+                   style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginLeft: 32 }}>
+                {t.followups.map((f) => (
+                  <Chip key={f.label} small disabled={busy} onClick={() => follow(f)}>
+                    {f.label}
+                  </Chip>
+                ))}
+              </div>
+            )}
           </div>
         ))}
       </div>
