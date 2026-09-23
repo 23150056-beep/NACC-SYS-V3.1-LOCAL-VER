@@ -15,7 +15,9 @@ section below is background for reading code, not a to-do list.
 
 **Since 27 Aug 2026 work is pushed to a separate repository**, so that pushing
 cannot deploy anything. See "Getting changes onto GitHub" — the short version
-is that `git push` is safe and `git push origin` is not.
+is that what makes a push safe is the REPOSITORY it lands in, not the remote's
+name. Run `git remote -v` and read the URL; in this clone `origin` is the safe
+one.
 
 ## Commit authorship
 
@@ -32,21 +34,37 @@ it stands.
 
 ## Getting changes onto GitHub
 
-**There are two remotes, and only one of them is safe.** Changed 27 Aug 2026.
+**What is safe is the REPOSITORY, not the remote name.** Corrected 20 Sep
+2026 — the table below used to name remotes, and the names differ per clone.
 
-| Remote | Repository | Deploys Render |
-|---|---|---|
-| `local-ver` | `NACC-SYS-V3.1-LOCAL-VER` | **no** |
-| `origin` | `NACC-SYS-V3` | **yes, on `cloud-setup`** |
+| Repository | Deploys Render |
+|---|---|
+| `NACC-SYS-V3.1-LOCAL-VER` | **no** — the demo builds from it, live never does |
+| `NACC-SYS-V3` | **yes, on `cloud-setup`** |
 
-The branch `cloud-setup` tracks `local-ver/main`, so:
+**Check the URL before pushing, every time**, because the alias lies:
+
+```
+git remote -v
+```
+
+In the clone at `C:\reyNACC\NACC-SYS-V3.1-LOCAL-VER` there is exactly ONE
+remote, it is called **`origin`**, and it points at
+`NACC-SYS-V3.1-LOCAL-VER` — the safe one. There is no `local-ver` remote here
+and no `live-push` branch; nothing configured in this clone can reach the
+repository that deploys live. So here:
 
 ```
 git push
 ```
 
-is correct and goes to the local-version repo. It cannot touch the live
-services, which are built from the other repository.
+is correct and goes to the local-version repo.
+
+That is the opposite of what the older wording implied, and a session that
+trusts the alias instead of reading the URL gets it exactly backwards in one
+direction or the other. The clone at `C:\dev\nacc-sys-v3` is the one with two
+remotes, where `origin` IS the live repo and the warnings below apply as
+written.
 
 **A push is not a deploy, and on 30 Aug 2026 it demonstrably was not.** The
 line above used to say a push auto-deploys the demo "once the Blueprint is
@@ -99,13 +117,16 @@ Three ways that verification goes wrong, all learned the hard way on 10 Sep:
   abort on a large minified file and print nothing, which reads exactly like
   "the string is absent".
 
-**Do not `git push origin`** — the owner has said he does not want Render
+**Do not push to `NACC-SYS-V3`** — the owner has said he does not want Render
 touched, and that push is what deploys it. Pushing there needs asking first, in
-so many words.
+so many words. In the other clone (the one under `C:\dev`, see below) that
+repository is `origin`; in this one it is not configured at all. Read the URL,
+not the alias.
 
 ### When he does say to push live
 
-**A plain `git push origin` is wrong, and will be refused.** The two lineages
+**A plain push straight across to `NACC-SYS-V3` is wrong, and will be
+refused.** The two lineages
 have diverged permanently and on purpose: `render.yaml` here names the demo
 services and points at a Neon branch and an empty R2 bucket, while the live
 repo's names `nacc-v3-api`/`nacc-v3-web` and points at production. Forcing this
@@ -113,8 +134,12 @@ file onto live is how the live deployment lost its file storage once already —
 the repair is commit `5d9342a`, "Restore the live Render blueprint that the
 demo's file overwrote".
 
-There is a local branch `live-push` tracking `origin/cloud-setup`. Merge into
-it rather than pushing across:
+Merge into a branch tracking the live repo rather than pushing across. In the
+other clone (the one under `C:\dev`) that branch is `live-push` and the live
+repo is `origin`, which is what the commands below assume. **In this clone
+neither exists** — add the remote first (`git remote add live
+https://github.com/23150056-beep/NACC-SYS-V3.git`) and substitute `live` for
+`origin` throughout:
 
 ```
 git checkout live-push && git pull
@@ -169,7 +194,9 @@ Facts that cost real time when forgotten:
   rather than a typo.
 - Build the bundle from a commit the owner definitely has:
   `git bundle create <file> <their-HEAD>..cloud-setup`.
-- Verify a push landed with `git ls-remote local-ver` rather than asking.
+- Verify a push landed with `git ls-remote <remote> <branch>` rather than
+  asking — compare it against `git rev-parse HEAD`. In this clone that is
+  `git ls-remote origin cloud-setup`.
 
 ## Infrastructure (live — reference only, see Scope)
 

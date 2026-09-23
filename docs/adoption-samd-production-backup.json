@@ -1,0 +1,277 @@
+{
+  "_note": "Adoption and SAMD tables as they stood on the Neon PRODUCTION branch immediately before children/0019_drop_adoption_samd was deployed to live. That migration is deliberately irreversible and entrypoint.sh runs migrate on every deploy, so this is the only copy. Taken through Neon's SQL Editor because no production credential exists on the developer machine. The seven tables not listed here were verified empty by count in the same session.",
+  "captured_at": "2026-09-19T20:48:33.9669+00:00",
+  "source": "Neon branch 'production', database 'neondb', project nacc-v3",
+  "empty_tables_verified": [
+    "tbl_adoption_case",
+    "tbl_adoption_pap",
+    "tbl_adoption_stage_event",
+    "tbl_adoption_requirement",
+    "tbl_adoption_clock",
+    "tbl_samd_assessment",
+    "tbl_samd_response"
+  ],
+  "tables": {
+    "tbl_adoption_stage": [
+      {
+        "id": 1,
+        "number": 1,
+        "name": "Case review & endorsement",
+        "owner_role": "Staff",
+        "target_days": 14
+      },
+      {
+        "id": 2,
+        "number": 2,
+        "name": "CDCLAA issuance",
+        "owner_role": "Legal unit",
+        "target_days": 60
+      },
+      {
+        "id": 3,
+        "number": 3,
+        "name": "Child study & docketing",
+        "owner_role": "Assigned social worker",
+        "target_days": 30
+      },
+      {
+        "id": 4,
+        "number": 4,
+        "name": "Matching conference",
+        "owner_role": "RACCC panel",
+        "target_days": 45
+      },
+      {
+        "id": 5,
+        "number": 5,
+        "name": "PAPA issued",
+        "owner_role": "NACC regional director",
+        "target_days": 30
+      },
+      {
+        "id": 6,
+        "number": 6,
+        "name": "Supervised trial custody",
+        "owner_role": "Social worker",
+        "target_days": 180
+      },
+      {
+        "id": 7,
+        "number": 7,
+        "name": "Adoption order",
+        "owner_role": "NACC central",
+        "target_days": 60
+      },
+      {
+        "id": 8,
+        "number": 8,
+        "name": "Finalized & post-placement",
+        "owner_role": "Staff",
+        "target_days": null
+      }
+    ],
+    "tbl_adoption_requirement_template": [
+      {
+        "id": 1,
+        "code": "psych_report_attached",
+        "label": "Psychologist's report attached",
+        "owned_externally": false,
+        "position": 0,
+        "stage_id": 1
+      },
+      {
+        "id": 2,
+        "code": "case_plan_confirmed",
+        "label": "Case plan confirmed as Adoption",
+        "owned_externally": false,
+        "position": 1,
+        "stage_id": 1
+      },
+      {
+        "id": 3,
+        "code": "consent_on_file",
+        "label": "Guardian / child consent on file",
+        "owned_externally": false,
+        "position": 2,
+        "stage_id": 1
+      },
+      {
+        "id": 4,
+        "code": "owner_assigned",
+        "label": "Case owner assigned",
+        "owned_externally": false,
+        "position": 3,
+        "stage_id": 1
+      },
+      {
+        "id": 5,
+        "code": "petition_filed",
+        "label": "Petition for CDCLAA filed",
+        "owned_externally": false,
+        "position": 0,
+        "stage_id": 2
+      },
+      {
+        "id": 6,
+        "code": "publication_elapsed",
+        "label": "Publication period elapsed",
+        "owned_externally": true,
+        "position": 1,
+        "stage_id": 2
+      },
+      {
+        "id": 7,
+        "code": "cdclaa_issued",
+        "label": "CDCLAA document uploaded and verified",
+        "owned_externally": true,
+        "position": 2,
+        "stage_id": 2
+      },
+      {
+        "id": 8,
+        "code": "study_report_signed",
+        "label": "Social case study report signed by supervisor",
+        "owned_externally": false,
+        "position": 0,
+        "stage_id": 3
+      },
+      {
+        "id": 9,
+        "code": "health_dental_current",
+        "label": "Health & dental record current",
+        "owned_externally": false,
+        "position": 1,
+        "stage_id": 3
+      },
+      {
+        "id": 10,
+        "code": "profile_packet_complete",
+        "label": "Child profile packet complete",
+        "owned_externally": false,
+        "position": 2,
+        "stage_id": 3
+      },
+      {
+        "id": 11,
+        "code": "conference_held",
+        "label": "Matching conference held",
+        "owned_externally": false,
+        "position": 0,
+        "stage_id": 4
+      },
+      {
+        "id": 12,
+        "code": "minutes_uploaded",
+        "label": "Conference minutes uploaded",
+        "owned_externally": false,
+        "position": 1,
+        "stage_id": 4
+      },
+      {
+        "id": 13,
+        "code": "pap_selected",
+        "label": "Prospective adoptive parents selected",
+        "owned_externally": false,
+        "position": 2,
+        "stage_id": 4
+      },
+      {
+        "id": 14,
+        "code": "papa_uploaded",
+        "label": "Pre-Adoption Placement Authority uploaded",
+        "owned_externally": true,
+        "position": 0,
+        "stage_id": 5
+      },
+      {
+        "id": 15,
+        "code": "pap_credentials_valid",
+        "label": "PAP's CEA and home study still unexpired",
+        "owned_externally": false,
+        "position": 1,
+        "stage_id": 5
+      },
+      {
+        "id": 16,
+        "code": "placement_date_set",
+        "label": "Placement date set",
+        "owned_externally": false,
+        "position": 2,
+        "stage_id": 5
+      },
+      {
+        "id": 17,
+        "code": "placement_recorded",
+        "label": "Placement date recorded",
+        "owned_externally": false,
+        "position": 0,
+        "stage_id": 6
+      },
+      {
+        "id": 18,
+        "code": "visit_reports_filed",
+        "label": "Minimum supervisory visit reports filed",
+        "owned_externally": false,
+        "position": 1,
+        "stage_id": 6
+      },
+      {
+        "id": 19,
+        "code": "trial_period_elapsed",
+        "label": "Trial period elapsed",
+        "owned_externally": false,
+        "position": 2,
+        "stage_id": 6
+      },
+      {
+        "id": 20,
+        "code": "final_recommendation_signed",
+        "label": "Final recommendation signed",
+        "owned_externally": false,
+        "position": 3,
+        "stage_id": 6
+      },
+      {
+        "id": 21,
+        "code": "adoption_order_issued",
+        "label": "Order of adoption issued",
+        "owned_externally": true,
+        "position": 0,
+        "stage_id": 7
+      },
+      {
+        "id": 22,
+        "code": "certificate_of_finality",
+        "label": "Certificate of finality received",
+        "owned_externally": true,
+        "position": 1,
+        "stage_id": 7
+      },
+      {
+        "id": 23,
+        "code": "amended_birth_certificate",
+        "label": "Amended birth certificate on file",
+        "owned_externally": true,
+        "position": 0,
+        "stage_id": 8
+      },
+      {
+        "id": 24,
+        "code": "post_placement_reports",
+        "label": "Post-placement reports complete",
+        "owned_externally": false,
+        "position": 1,
+        "stage_id": 8
+      }
+    ],
+    "tbl_adoption_handoff": [
+      {
+        "id": 1,
+        "released_at": "2026-08-20T14:02:09.936601+00:00",
+        "child_id": 3,
+        "pre_assessment_id": 1,
+        "released_by_id": 8
+      }
+    ]
+  }
+}
