@@ -519,10 +519,29 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
 `docs/CLOUD-DEPLOYMENT.md` §11-12; design in
 `docs/superpowers/specs/2026-08-27-free-secure-web-deployment-design.md`.
 
-- **It deploys from `local-ver`, never `origin`.** Services are `nacc-v3-demo-*`;
-  the live ones are `nacc-v3-api`/`nacc-v3-web`, built from the other repo.
-  Whether a push actually reaches the demo is a question with an answer, not an
-  assumption — see "A push is not a deploy" above.
+- **It builds from `NACC-SYS-V3.1-LOCAL-VER`, and from `main`.** Services are
+  `nacc-v3-demo-*`; the live ones are `nacc-v3-api`/`nacc-v3-web`, built from
+  `NACC-SYS-V3`. (This bullet used to name the REMOTES — "from `local-ver`,
+  never `origin`" — which is the framing the 20 Sep correction above disowned,
+  because the aliases differ per clone.) The BRANCH is the half nobody wrote
+  down, and it is not what the rest of these notes imply: work accumulates on
+  `cloud-setup`, Render watches `main`, and a commit sitting on `cloud-setup`
+  alone has never been near the demo. So `git log origin/main..origin/cloud-setup`
+  is the list of what is written and not deployed — on 23 Sep 2026 that was
+  three commits, the oldest five days old. Whether a push actually reaches the
+  demo is still a question with an answer rather than an assumption — see "A
+  push is not a deploy" above.
+- **GitHub’s deployment records say what Render was asked to build**, and they
+  are readable when the demo itself is not. Render writes a row per build to
+  `api.github.com/repos/<owner>/<repo>/deployments`: the branch is in
+  `environment` (`main - nacc-v3-demo-api`), the commit in `sha`, and each row’s
+  `statuses_url` says whether the build passed. That is how the branch above was
+  established — 100 records, both services, every one of them `main` — and it
+  works from a sandbox whose egress proxy refuses `*.onrender.com`, which is
+  where every curl-the-endpoint check in these notes dies. It reports what was
+  REQUESTED and whether it built, never what the container is serving, so it
+  narrows "did it ship" without closing it: a successful record plus a served
+  string is the whole answer.
 - **The database is a Neon BRANCH** named `demo`, off a default branch called
   **`production`** (not `main`). It exists so the demo inherits the real
   accounts while its writes — and this repo's newer migrations — never reach
