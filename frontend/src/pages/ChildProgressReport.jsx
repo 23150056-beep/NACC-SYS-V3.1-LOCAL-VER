@@ -11,6 +11,7 @@ import {
 import { PA_STATUS_TONES } from '../config/caseData';
 import { loadAll } from '../utils/load';
 import { polishRemark, sendFeedback, getLatestBrief, generateBrief, summarizeDocument, confirmSummary } from '../api/assistant';
+import ReportCheckNote from '../components/ReportCheckNote';
 
 // "In her own words" reads better than a label, but gender is blank=True on
 // the model and must never render as an empty string.
@@ -241,8 +242,8 @@ export default function ChildProgressReport() {
   const draftSummary = async (kind, docId) => {
     setSummaryBusy(true);
     try {
-      const { draft } = await summarizeDocument(kind, docId);
-      setSummary({ kind, id: docId, text: draft, confirmed: false });
+      const { draft, coverage } = await summarizeDocument(kind, docId);
+      setSummary({ kind, id: docId, text: draft, confirmed: false, coverage });
     } catch (err) {
       toast.error(err.response?.status === 503
         ? 'The assistant is unavailable right now.'
@@ -634,6 +635,7 @@ export default function ChildProgressReport() {
                       <p style={{ fontSize: 12.5, color: 'var(--text-body)', margin: 0, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{f.ai_summary}</p>
                     </div>
                   )}
+                  <ReportCheckNote report={f} canReview={canAdvance} onReviewed={load} />
                 </div>
                 <Button variant="ghost" size="sm" disabled={summaryBusy} className="racco-no-print"
                         onClick={() => f.ai_summary_confirmed
@@ -970,7 +972,14 @@ export default function ChildProgressReport() {
             AI-drafted decision support, not a diagnosis. Edit freely — confirming
             makes this your own clinical text.
           </Alert>
-          <textarea rows={14} style={textarea} value={summary.text}
+          {/* A long report is read in part. Saying which part is what lets the
+              person confirming this know what the draft could not have seen. */}
+          {summary.coverage && (
+            <Alert tone="warning" title="Read in part." style={{ marginBottom: 12 }}>
+              {summary.coverage}
+            </Alert>
+          )}
+          <textarea rows={14} style={textarea} value={summary.text} aria-label="Summary draft"
                     onChange={(e) => setSummary({ ...summary, text: e.target.value })} />
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
             <Button variant="ghost" onClick={() => setSummary(null)}>Cancel</Button>

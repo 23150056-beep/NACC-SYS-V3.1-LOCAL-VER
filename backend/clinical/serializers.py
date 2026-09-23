@@ -153,17 +153,53 @@ class PsychologicalReportSerializer(serializers.ModelSerializer):
     child_name = serializers.CharField(source="child.fullname", read_only=True)
     author_name = serializers.CharField(source="author.fullname", read_only=True, default=None)
     has_text = serializers.SerializerMethodField()
+    check_findings = serializers.SerializerMethodField()
 
     class Meta:
         model = PsychologicalReport
         fields = ["id", "child", "child_name", "author", "author_name", "file",
                   "original_filename", "report_type", "coverage",
-                  "ai_summary", "ai_summary_confirmed", "has_text", "created_at"]
-        read_only_fields = ["author", "original_filename", "ai_summary", "ai_summary_confirmed"]
+                  "ai_summary", "ai_summary_confirmed", "has_text",
+                  "check_findings", "check_reviewed", "created_at"]
+        read_only_fields = ["author", "original_filename", "ai_summary", "ai_summary_confirmed",
+                            "check_reviewed"]
         extra_kwargs = {"file": {"write_only": True}}
 
     def get_has_text(self, obj):
         return bool(obj.extracted_text)
+
+    def get_check_findings(self, obj):
+        """What the check found, minus any other child the READER cannot see.
+
+        The check named children the uploader could see. The reader may be
+        somebody else - the psychologist a child was reassigned to - and
+        "Mentions Juan Cruz, another child on record" would tell them the
+        agency holds a record for a child who is not theirs. With no reader
+        known, those findings are left out rather than shown to anyone.
+        """
+        from clinical.report_check import OTHER_CHILD
+        findings = obj.check_findings or []
+        if not any(f.get("kind") == OTHER_CHILD for f in findings):
+            return findings
+        visible = self._visible_child_ids()
+        return [f for f in findings
+                if f.get("kind") != OTHER_CHILD or visible is None or f.get("child") in visible]
+
+    def _visible_child_ids(self):
+        """None for "every child"; else the ids this request may see. Worked
+        out once per response, however many reports it lists."""
+        if "_visible_child_ids" not in self.context:
+            from accounts.models import Role
+            from accounts.scoping import role_of, visible_children
+            request = self.context.get("request")
+            if request is None:
+                ids = set()
+            elif role_of(request) == Role.PSYCHOLOGIST:
+                ids = set(visible_children(request).values_list("id", flat=True))
+            else:
+                ids = None
+            self.context["_visible_child_ids"] = ids
+        return self.context["_visible_child_ids"]
 
     def validate_file(self, f):
         ext = (f.name.rsplit(".", 1)[-1] if "." in f.name else "").lower()

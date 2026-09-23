@@ -42,7 +42,7 @@ from clinical.models import (
     AgencyFormTemplate, ConsentRecord, InstrumentCatalog, OpinionnaireInvite,
     PreAssessment, ProblemEntry, RemarkNote, ResultEntry, TreatmentPlan)
 from locations.models import Barangay, Municipality, Province
-from clinical import demo_referrals
+from clinical import demo_referrals, demo_reports
 from scheduling import demo_schedule
 from scheduling.models import Appointment
 
@@ -218,6 +218,12 @@ class Command(BaseCommand):
             list(Child.objects.filter(status=Child.ACTIVE)),
             uploaded_by=User.objects.filter(role__role_name=Role.STAFF).first())
 
+        # Reports are files too, in three layouts on purpose: the report
+        # features have to cope with every psychologist's own format.
+        reports = demo_reports.install_reports(
+            Child.objects.filter(status=Child.ACTIVE)
+            .select_related("assigned_psychologist").order_by("pk"))
+
         moved, _ = demo_schedule.realign_appointments()
 
         self.stdout.write("")
@@ -225,6 +231,7 @@ class Command(BaseCommand):
             f"Built {made['children']} children across {len(psychologists)} psychologists."))
         self.stdout.write(f"  {moved} appointments placed in clinic hours")
         self.stdout.write(f"  {referrals} case referrals written")
+        self.stdout.write(f"  {reports} psychological reports written")
         for label in ("steady", "declining", "divergent"):
             self.stdout.write(f"  {label:<12} {made[label]:>3}")
         self.stdout.write(

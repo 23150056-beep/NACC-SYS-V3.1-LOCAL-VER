@@ -213,6 +213,16 @@ class TheImportedCaseloadIsBookableTest(TestCase):
         for child in Child.objects.all():
             self.assertTrue(booking.referral_on_file(child), child.fullname)
 
+    def test_every_imported_child_has_a_readable_report_by_its_psychologist(self):
+        # Reports are files, like referrals, so the fixture cannot carry them.
+        # Written after the reassignment: the author is who the child is with now.
+        from clinical.models import PsychologicalReport
+        call_command("import_demo_data", fixture=str(self.fixture))
+        for child in Child.objects.all():
+            report = PsychologicalReport.objects.get(child=child)
+            self.assertEqual(child.assigned_psychologist_id, report.author_id)
+            self.assertIn("## ", report.extracted_text, child.fullname)
+
     def test_it_reports_what_it_had_to_add(self):
         out = StringIO()
         call_command("import_demo_data", fixture=str(self.fixture), stdout=out)

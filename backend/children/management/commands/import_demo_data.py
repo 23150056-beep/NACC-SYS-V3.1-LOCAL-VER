@@ -10,7 +10,8 @@ branch — left alone, every child would point at the wrong person or at nobody,
 and a caseload nobody can see is not a demo.
 
 It also finishes the job, because loading rows is not the same as loading a
-working system. Booking refuses a child with no case referral and a
+working system. Invented psychological reports are installed here too, for
+the same reason referrals are: they are files, and the fixture holds rows. Booking refuses a child with no case referral and a
 psychologist with no posted hours, and the fixture carries neither: referrals
 are files rather than rows, and availability belongs to the accounts on the
 branch, not to the seeder's. `fix_demo_schedule` repairs both and refuses to
@@ -26,7 +27,7 @@ from django.db import transaction
 
 from accounts.models import Role
 from children.models import Child
-from clinical import demo_referrals
+from clinical import demo_referrals, demo_reports
 from scheduling import demo_schedule
 
 
@@ -87,6 +88,12 @@ class Command(BaseCommand):
             list(Child.objects.filter(status=Child.ACTIVE)),
             uploaded_by=User.objects.filter(role__role_name=Role.STAFF).first())
         self.stdout.write(f"  case referrals: {referrals} written")
+        # After the reassignment above: a report's author is the psychologist
+        # the child now belongs to, and its check runs from their viewpoint.
+        reports = demo_reports.install_reports(
+            Child.objects.filter(status=Child.ACTIVE)
+            .select_related("assigned_psychologist").order_by("pk"))
+        self.stdout.write(f"  psychological reports: {reports} written")
 
         if email:
             user = User.objects.get(email=email)

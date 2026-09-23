@@ -72,7 +72,8 @@ class ChildReportView(generics.GenericAPIView):
             "result_entries": ResultEntrySerializer(results, many=True).data,
             "remarks": RemarkNoteSerializer(remarks, many=True).data,
             "treatment_plans": TreatmentPlanSerializer(plans, many=True).data,
-            "reports": PsychologicalReportSerializer(files, many=True).data,
+            "reports": PsychologicalReportSerializer(
+                files, many=True, context={"request": request}).data,
             "problems": ProblemEntrySerializer(problems, many=True).data,
             "case_referrals": CaseReferralSerializer(case_referrals, many=True).data,
             "opinionnaires": OpinionnaireInviteSerializer(opinionnaires, many=True).data,

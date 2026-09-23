@@ -21,6 +21,7 @@ from assistant.services import (AIUnavailable, DISCLAIMER, OpenAICompatibleClien
                                 gate, get_ai_client, run_job, services_lock)
 from children.models import Child
 from clinical.models import CaseReferral, PsychologicalReport
+from clinical.services import ensure_text
 from scheduling.models import Appointment
 
 logger = logging.getLogger(__name__)
@@ -293,11 +294,14 @@ class DocumentSummaryView(AssistantBaseView):
                 and getattr(doc, f"{author_field}_id") != request.user.id):
             return Response({"detail": "Not found."},
                             status=status.HTTP_404_NOT_FOUND)
-        if not (doc.extracted_text or "").strip():
+        if not ensure_text(doc).strip():
             return Response(
                 {"detail": "No text could be extracted from this document."},
                 status=status.HTTP_400_BAD_REQUEST)
 
+        # A long report is read in part; the draft says which part, so the
+        # psychologist confirming it knows what it could not have seen.
+        coverage = prompts.fit_document(doc.extracted_text)[1]
         draft, job = run_job(
             "doc_intelligence",
             prompts.build_summary_prompt(doc.extracted_text, label),
@@ -307,7 +311,7 @@ class DocumentSummaryView(AssistantBaseView):
         doc.ai_summary = draft
         doc.ai_summary_confirmed = False
         doc.save(update_fields=["ai_summary", "ai_summary_confirmed"])
-        return Response({"draft": draft, "job_id": job.id,
+        return Response({"draft": draft, "job_id": job.id, "coverage": coverage,
                          "disclaimer": DISCLAIMER})
 
 
