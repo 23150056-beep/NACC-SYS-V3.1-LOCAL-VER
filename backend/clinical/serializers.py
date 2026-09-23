@@ -244,6 +244,15 @@ class CaseReferralSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("File too large (max 15 MB).")
         return f
 
+    def validate(self, attrs):
+        # As for reports: the text and the summary were read from this file.
+        # The screens replace a referral by filing a new one and deleting the
+        # old, never by swapping the file underneath them.
+        if self.instance is not None and "file" in attrs:
+            raise serializers.ValidationError(
+                {"file": "A filed referral's file cannot be replaced. Upload the new version as a new referral."})
+        return attrs
+
 
 class RemarkNoteSerializer(serializers.ModelSerializer):
     child_name = serializers.CharField(source="child.fullname", read_only=True)

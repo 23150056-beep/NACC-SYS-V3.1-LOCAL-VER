@@ -44,6 +44,21 @@ from clinical.services import extract_text
 
 logger = logging.getLogger(__name__)
 
+# The one answer to "may this record move to another child?" - no, for anyone:
+# the owner's decision, 24 Sep 2026. Shared by the clinical records and the
+# case referral, which have separate viewsets and must not drift apart.
+_STAYS_WITH_CHILD = {"child": "A record stays with the child it was filed for. "
+                              "File it again for the right child."}
+
+
+def _refuse_a_move(serializer):
+    """Refuse an update that changes the record's child. Naming the same
+    child again is not a move, so a client that sends the whole row back
+    still saves."""
+    moving_to = serializer.validated_data.get("child")
+    if moving_to is not None and moving_to != serializer.instance.child:
+        raise ValidationError(_STAYS_WITH_CHILD)
+
 
 def _serve_attachment(obj):
     """Authenticated download of an uploaded file. MEDIA_URL is never exposed
@@ -233,11 +248,8 @@ class _ChildScopedClinicalViewSet(viewsets.ModelViewSet):
         # checking only where a record WAS once let one PATCH put a report on a
         # child who was not the editor's; even between an editor's own children
         # a move would leave one child's record in another's file, logged only
-        # as "updated". Naming the same child again is not a move.
-        moving_to = serializer.validated_data.get("child")
-        if moving_to is not None and moving_to != serializer.instance.child:
-            raise ValidationError({"child": "A record stays with the child it was filed for. "
-                                            "File it again for the right child."})
+        # as "updated".
+        _refuse_a_move(serializer)
         obj = serializer.save()
         log_activity(self.request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type=self.model.__name__, entity_label=obj.child.fullname,
@@ -455,6 +467,10 @@ class CaseReferralViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         self._assert_can_write()
+        # Fixed to its child like every clinical record. A referral is also
+        # what lets a child's sessions be booked, so a moved one would quietly
+        # unlock one child's calendar and lock another's.
+        _refuse_a_move(serializer)
         serializer.save()
 
     def perform_destroy(self, instance):

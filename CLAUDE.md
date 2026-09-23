@@ -531,7 +531,10 @@ none of the real ones has been seen.
   that, one PATCH could put a psychologist's report on a child who was not
   theirs. No screen ever sent a change of child; a record filed for the wrong
   child is filed again for the right one. A report's file cannot be replaced
-  by an update either. Case referrals are a separate viewset and not covered.
+  by an update either. Case referrals follow the same two rules through their
+  own viewset (`_refuse_a_move` is shared) - a moved referral would unlock one
+  child's calendar and lock another's. The screens replace a referral by
+  filing a new one and deleting the old.
 - **Word files are read now, not only PDFs** (`clinical/services.py`, standard
   library only). `.doc` (Word 97-2003) still cannot be; the screen says so.
   Reports uploaded before this are read the first time something needs their

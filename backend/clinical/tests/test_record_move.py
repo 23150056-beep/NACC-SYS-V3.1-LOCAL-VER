@@ -18,7 +18,7 @@ from rest_framework.test import APIClient
 
 from accounts.models import Role
 from children.models import Child
-from clinical.models import (ClinicalInterviewRecord, ConsentRecord, PreAssessment,
+from clinical.models import (CaseReferral, ClinicalInterviewRecord, ConsentRecord, PreAssessment,
                              ProblemEntry, PsychologicalReport, RemarkNote,
                              ResultEntry, TreatmentPlan)
 from clinical.urls import router
@@ -143,3 +143,52 @@ class ReportUpdateTest(_Caseloads):
         report.refresh_from_db()
         self.assertEqual("age", report.check_findings[0]["kind"])
         self.assertTrue(report.check_reviewed)
+
+
+class CaseReferralUpdateTest(_Caseloads):
+    """Case referrals have their own viewset (staff and administrators write
+    them) and the same rule, decided 24 Sep 2026. A referral is also what lets
+    a child's sessions be booked, so moving one would quietly unlock one
+    child's calendar and lock another's. The screens replace a referral by
+    filing a new one and deleting the old, never by editing it."""
+
+    def setUp(self):
+        super().setUp()
+        self.staff = get_user_model().objects.create_user(
+            email="s@racco1.gov.ph", username="s", password="pass1234",
+            role=Role.objects.create(role_name=Role.STAFF))
+        self.referral = CaseReferral(child=self.mine, uploaded_by=self.staff,
+                                     original_filename="referral.pdf",
+                                     extracted_text="Referred by the DSWD field office.",
+                                     ai_summary="Referred for counselling.")
+        self.referral.file.save("referral.pdf", ContentFile(b"%PDF-1.4 stand-in"), save=True)
+        self.url = f"/api/case-referrals/{self.referral.pk}/"
+
+    def test_not_moved_by_staff_or_an_administrator(self):
+        for user in (self.staff, self.admin):
+            with self.subTest(user.email):
+                res = self.patch(user, self.url, {"child": self.theirs.pk})
+                self.assertEqual(400, res.status_code, res.data)
+                self.assertIn("child", res.data)
+                self.referral.refresh_from_db()
+                self.assertEqual(self.mine, self.referral.child)
+
+    def test_its_file_cannot_be_replaced(self):
+        before = (self.referral.file.name, self.referral.extracted_text, self.referral.ai_summary)
+        swap = SimpleUploadedFile("other.pdf", b"%PDF-1.4 other", content_type="application/pdf")
+        res = self.patch(self.staff, self.url, {"file": swap}, fmt="multipart")
+        self.assertEqual(400, res.status_code, res.data)
+        self.assertIn("file", res.data)
+        self.referral.refresh_from_db()
+        self.assertEqual(before, (self.referral.file.name, self.referral.extracted_text,
+                                  self.referral.ai_summary))
+
+    def test_its_description_can_still_be_edited(self):
+        res = self.patch(self.staff, self.url, {"child": self.mine.pk, "description": "Intake referral"})
+        self.assertEqual(200, res.status_code, res.data)
+        self.referral.refresh_from_db()
+        self.assertEqual("Intake referral", self.referral.description)
+
+    def test_a_psychologist_still_cannot_edit_one(self):
+        res = self.patch(self.psy, self.url, {"description": "x"})
+        self.assertEqual(403, res.status_code, res.data)
