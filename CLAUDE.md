@@ -519,6 +519,17 @@ Built 23 Sep 2026. Psychologists upload their own report files, each in their
 own format; there are no report templates in the system yet, on purpose -
 none of the real ones has been seen.
 
+- **One upload form, two doors.** A report is filed from Results & Reports or
+  from the child's own record (Results & reports tab; a referral from
+  Casework), both through `components/UploadDrawer.jsx`. The check before
+  filing lives in that component, so it cannot be on one screen and missing
+  from the other - keep it that way rather than copying the form.
+- **An update checks the child a record moves TO**, not only the one it was
+  on (`_ChildScopedClinicalViewSet.perform_update`, all eight clinical record
+  types). Before 24 Sep 2026 one PATCH could put a psychologist's report on a
+  child who was not theirs. A report's file cannot be replaced by an update,
+  and a report moved to another child is checked again as that child's.
+  Whether records should move at all is an open question for the owner.
 - **Word files are read now, not only PDFs** (`clinical/services.py`, standard
   library only). `.doc` (Word 97-2003) still cannot be; the screen says so.
   Reports uploaded before this are read the first time something needs their

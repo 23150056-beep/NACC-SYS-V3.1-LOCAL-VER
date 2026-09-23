@@ -40,7 +40,7 @@ from clinical.serializers import (
 )
 from clinical.self_report_detection import detect_concerns
 from clinical.self_report_model_check import start_model_check
-from clinical.services import extract_text
+from clinical.services import ensure_text, extract_text
 
 logger = logging.getLogger(__name__)
 
@@ -228,6 +228,12 @@ class _ChildScopedClinicalViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         self._assert_can_write(serializer.instance.child)
+        # And the child it is moving TO. `child` is writable on update, and
+        # checking only where a record was let one PATCH put a psychologist's
+        # report or remark on a child who is not theirs.
+        moving_to = serializer.validated_data.get("child")
+        if moving_to is not None:
+            self._assert_can_write(moving_to)
         obj = serializer.save()
         log_activity(self.request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type=self.model.__name__, entity_label=obj.child.fullname,
@@ -370,6 +376,18 @@ class PsychologicalReportViewSet(_ChildScopedClinicalViewSet):
         log_activity(self.request.user, ActivityLog.CREATED, ActivityLog.RECORD,
                      entity_type="PsychologicalReport", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.child.assigned_psychologist)
+
+    def perform_update(self, serializer):
+        moved = serializer.validated_data.get("child", serializer.instance.child) != serializer.instance.child
+        super().perform_update(serializer)
+        if moved:
+            # What the check found was about the child the report was filed
+            # against, and "looked at" was about those findings. Filed against
+            # another child, it is checked again, as that child's.
+            obj = serializer.instance
+            obj.check_findings = self._findings(ensure_text(obj), obj.child)
+            obj.check_reviewed = False
+            obj.save(update_fields=["check_findings", "check_reviewed"])
 
     @action(detail=False, methods=["post"])
     def check(self, request):
