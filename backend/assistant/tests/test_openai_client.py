@@ -39,9 +39,9 @@ class ChooseToolTest(SimpleTestCase):
 
     def test_reads_a_structured_tool_call(self):
         name, args = self._call({"choices": [{"message": {"tool_calls": [
-            {"function": {"name": "count_my_children",
+            {"function": {"name": "get_statistics",
                           "arguments": '{"status": "active"}'}}]}}]})
-        self.assertEqual("count_my_children", name)
+        self.assertEqual("get_statistics", name)
         self.assertEqual({"status": "active"}, args)
 
     def test_accepts_arguments_already_parsed(self):
@@ -54,9 +54,9 @@ class ChooseToolTest(SimpleTestCase):
         # The validator downstream handles a missing argument; a 500 here would
         # turn a recoverable turn into an error page.
         name, args = self._call({"choices": [{"message": {"tool_calls": [
-            {"function": {"name": "count_my_children",
+            {"function": {"name": "get_statistics",
                           "arguments": "not json at all"}}]}}]})
-        self.assertEqual("count_my_children", name)
+        self.assertEqual("get_statistics", name)
         self.assertEqual({}, args)
 
     def test_prose_instead_of_a_tool_call_returns_none(self):
@@ -69,7 +69,7 @@ class ChooseToolTest(SimpleTestCase):
         # Exactly what qwen3-30b does. Not a tool call, and inventing one from
         # unparsed text would be worse than declining.
         name, _ = self._call({"choices": [{"message": {
-            "content": '<tool_call>\n{"name": "count_my_children"}\n</tool_call>'}}]})
+            "content": '<tool_call>\n{"name": "get_statistics"}\n</tool_call>'}}]})
         self.assertIsNone(name)
 
     def test_an_empty_response_returns_none(self):

@@ -161,7 +161,7 @@ class EndToEndTest(UnansweredBase):
         cfg.save()
         self.client.force_authenticate(self.psy)
         with patch.object(services.OllamaClient, "choose_tool",
-                          return_value=("count_my_children", {"status": "active"})):
+                          return_value=("get_statistics", {"status": "active"})):
             asked = self.client.post("/api/assistant/ask/",
                                      {"question": "How many kids do I have?"},
                                      format="json")

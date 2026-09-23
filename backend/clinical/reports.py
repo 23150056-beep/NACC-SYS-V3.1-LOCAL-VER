@@ -4,6 +4,40 @@ never computes scores."""
 from accounts.display import display_name
 
 
+# NACC-SAMD-GF-000's "Service Users" age groups, in the form's own order.
+# Shared by the Agency Summary and the assistant's statistics: two copies of
+# this rule would eventually put the same child in two different bands.
+AGE_BANDS = [
+    ("Infants and Young Children (0-6)", 0, 6),
+    ("Middle Childhood (7-11)", 7, 11),
+    ("Adolescents (12-17)", 12, 17),
+    ("Young Adults (18+)", 18, None),
+]
+UNSPECIFIED_AGE = "Unspecified age"
+
+
+def age_on(birth_date, today):
+    """Whole years on `today`, or None when there is no birth date."""
+    if not birth_date:
+        return None
+    return today.year - birth_date.year - (
+        (today.month, today.day) < (birth_date.month, birth_date.day))
+
+
+def age_band(birth_date, today):
+    """The AGE_BANDS label a birth date falls in, or UNSPECIFIED_AGE.
+
+    A missing birth date and one that gives no band (a date in the future)
+    both land in UNSPECIFIED_AGE, which is where the census always put them.
+    """
+    age = age_on(birth_date, today)
+    if age is not None:
+        for label, lo, hi in AGE_BANDS:
+            if age >= lo and (hi is None or age <= hi):
+                return label
+    return UNSPECIFIED_AGE
+
+
 def bucket(d, rng):
     if rng == "yearly":
         return str(d.year)

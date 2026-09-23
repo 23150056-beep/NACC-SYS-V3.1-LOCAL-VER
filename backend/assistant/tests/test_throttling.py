@@ -47,7 +47,7 @@ class ChatThrottleTest(APITestCase):
 
     def _ask(self):
         with patch.object(services.OllamaClient, "choose_tool",
-                          return_value=("count_my_children", {"status": "active"})):
+                          return_value=("get_statistics", {"status": "active"})):
             return self.client.post(URL, {"question": "how many?"}, format="json")
 
     def test_allows_questions_up_to_the_ceiling(self):
@@ -103,6 +103,6 @@ class DraftThrottleTest(APITestCase):
         for _ in range(4):
             self._polish()
         with patch.object(services.OllamaClient, "choose_tool",
-                          return_value=("count_my_children", {"status": "active"})):
+                          return_value=("get_statistics", {"status": "active"})):
             res = self.client.post(URL, {"question": "how many?"}, format="json")
         self.assertEqual(200, res.status_code)

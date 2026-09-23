@@ -23,8 +23,11 @@ class NormalisesKeysTest(SimpleTestCase):
         self.assertEqual(call.args, {"when": "today"})
 
     def test_strips_surrounding_whitespace(self):
-        call = tools.validate("count_my_children", {"  status  ": "active"})
-        self.assertEqual(call.args, {"status": "active"})
+        call = tools.validate("get_statistics", {"  status  ": "terminated"})
+        # The key is cleaned and the value kept. Not the whole dict: the
+        # schema's defaults are filled in beside it.
+        self.assertEqual("terminated", call.args["status"])
+        self.assertNotIn("  status  ", call.args)
 
 
 class CoercesEnumsTest(SimpleTestCase):
@@ -79,7 +82,7 @@ class RejectsUnknownTest(SimpleTestCase):
         # Scope must never come from the model. No tool declares an
         # "assigned_to_me" parameter, so an invented one is discarded rather
         # than reaching a queryset.
-        call = tools.validate("count_my_children",
+        call = tools.validate("get_statistics",
                               {"status": "active", "assigned_to_me": False})
         self.assertTrue(call.ok)
         self.assertNotIn("assigned_to_me", call.args)
@@ -156,7 +159,7 @@ class MisrouteGuardTest(SimpleTestCase):
     confident number. A confidently wrong answer is worse than "I can't".
     """
 
-    def _guard(self, question, tool="count_my_children", args=None):
+    def _guard(self, question, tool="get_statistics", args=None):
         call = tools.validate(tool, args if args is not None else {"status": "active"})
         return tools.correct_obvious_misroute(question, call)
 
@@ -178,16 +181,16 @@ class MisrouteGuardTest(SimpleTestCase):
 
     def test_a_real_child_count_is_untouched(self):
         call = self._guard("How many children am I handling?")
-        self.assertEqual("count_my_children", call.tool)
+        self.assertEqual("get_statistics", call.tool)
         self.assertEqual("active", call.args["status"])
 
     def test_a_tagalog_child_count_is_untouched(self):
-        self.assertEqual("count_my_children", self._guard("Ilan ang mga bata ko?").tool)
+        self.assertEqual("get_statistics", self._guard("Ilan ang mga bata ko?").tool)
 
     def test_a_question_naming_both_still_counts_children(self):
         # "children" is the subject; "staff" is incidental. Guarding this would
         # refuse a question the tool can actually answer.
-        self.assertEqual("count_my_children",
+        self.assertEqual("get_statistics",
                          self._guard("How many children were referred by staff?").tool)
 
     def test_it_only_guards_the_count_tool(self):
@@ -197,7 +200,7 @@ class MisrouteGuardTest(SimpleTestCase):
         self.assertEqual("get_child_summary", call.tool)
 
     def test_a_rejected_call_is_left_alone(self):
-        call = tools.validate("count_my_children", {"status": "someday"})
+        call = tools.validate("get_statistics", {"status": "someday"})
         guarded = tools.correct_obvious_misroute("how many staff?", call)
         self.assertFalse(guarded.ok)
 

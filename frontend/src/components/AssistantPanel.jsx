@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { askAssistant, getAssistantCapabilities, sendFeedback } from '../api/assistant';
 import { useAssistant } from '../context/AssistantContext';
 import { Icon } from '../ui';
@@ -99,16 +100,66 @@ function Feedback({ rated, onRate }) {
 function Answer({ result }) {
   const { kind } = result || {};
 
-  if (kind === 'count') {
+  if (kind === 'breakdown') {
+    // get_statistics. A plain total is a figure, styled like the headcount
+    // answer so every "how many" reads as the same kind of answer. A breakdown
+    // is a table with a thin bar per row: the table carries every value and is
+    // what a screen reader gets; the bars are decorative and only help the eye
+    // compare. One hue for one series, --blue-500 because it passes the
+    // palette checks against this surface where --brand's darker step does not.
+    const rows = result.rows || [];
+    const max = Math.max(1, ...rows.map((r) => r.count));
     return (
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-        <span style={{
-          fontFamily: 'var(--font-display)', fontSize: 26,
-          fontWeight: 700, color: 'var(--text-strong)', lineHeight: 1.1,
-        }}>{result.count}</span>
-        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-          {result.status === 'any' ? 'children on record' : `${result.status} children`}
-        </span>
+      <div>
+        {rows.length === 0 ? (
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+            <span style={{
+              fontFamily: 'var(--font-display)', fontSize: 26,
+              fontWeight: 700, color: 'var(--text-strong)', lineHeight: 1.1,
+            }}>{result.total}</span>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{result.subject}</span>
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+            <caption style={{
+              captionSide: 'top', textAlign: 'left', padding: '0 0 6px',
+              fontSize: 13, fontWeight: 700, color: 'var(--text-strong)',
+            }}>{result.title}</caption>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.label}>
+                  <th scope="row" style={{
+                    textAlign: 'left', fontWeight: 400, color: 'var(--text-strong)',
+                    padding: '3px 8px 3px 0', verticalAlign: 'middle', wordBreak: 'break-word',
+                  }}>{r.label}</th>
+                  <td aria-hidden="true" style={{ width: '38%', padding: '3px 0', verticalAlign: 'middle' }}>
+                    {r.count > 0 && (
+                      <div style={{
+                        height: 8, minWidth: 2, width: `${(100 * r.count) / max}%`,
+                        background: 'var(--blue-500)', borderRadius: '0 4px 4px 0',
+                      }} />
+                    )}
+                  </td>
+                  <td style={{
+                    textAlign: 'right', padding: '3px 0 3px 8px', verticalAlign: 'middle',
+                    color: 'var(--text-strong)', fontVariantNumeric: 'tabular-nums',
+                    whiteSpace: 'nowrap',
+                  }}>{r.count}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {result.note && <Line muted>{result.note}</Line>}
+        {/* The screen this number comes from, when the reader can open it —
+            the check on a number that looks wrong is one click away. */}
+        {result.screen && (
+          <div style={{ marginTop: 6 }}>
+            <Link to={result.screen.path} style={{
+              fontSize: 12, fontWeight: 600, color: 'var(--brand)',
+            }}>Open {result.screen.label}</Link>
+          </div>
+        )}
       </div>
     );
   }

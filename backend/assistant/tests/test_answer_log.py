@@ -54,7 +54,7 @@ class AnswerRecordedTest(AskTestBase):
 
     def test_a_lookup_that_found_something(self):
         res = self._ask("how many children do I have?",
-                        "count_my_children", {"status": "active"})
+                        "get_statistics", {"status": "active"})
         job = self._job()
         self.assertEqual(AssistantJob.DATA, job.answer)
         self.assertEqual(1, job.result_count)
@@ -98,10 +98,10 @@ class AnswerRecordedTest(AskTestBase):
         self.assertIsNone(job.result_count)
 
     def test_a_resolver_that_raised_is_failed(self):
-        with patch.dict(tools.REGISTRY["count_my_children"],
+        with patch.dict(tools.REGISTRY["get_statistics"],
                         {"resolve": lambda *a, **k: 1 / 0}):
             self._ask("how many children do I have?",
-                      "count_my_children", {"status": "active"})
+                      "get_statistics", {"status": "active"})
         job = self._job()
         self.assertEqual(AssistantJob.FAILED, job.answer)
         self.assertIsNone(job.result_count)

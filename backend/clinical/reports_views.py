@@ -149,38 +149,26 @@ def _nacc_service_users():
     NACC-SAMD-GF-000 (June 2025). Always computed over ACTIVE children —
     unlike the rest of the summary, it is NOT filtered by the `range` param."""
     from django.utils import timezone as tz
+    # The bands live in clinical.reports because the assistant's statistics
+    # use the same rule, and must never put a child in a different band.
+    from clinical.reports import AGE_BANDS, UNSPECIFIED_AGE, age_band
     today = tz.localdate()
 
-    def age_of(birth_date):
-        if not birth_date:
-            return None
-        return today.year - birth_date.year - (
-            (today.month, today.day) < (birth_date.month, birth_date.day))
-
-    bands = [
-        ("Infants and Young Children (0-6)", 0, 6),
-        ("Middle Childhood (7-11)", 7, 11),
-        ("Adolescents (12-17)", 12, 17),
-        ("Young Adults (18+)", 18, None),
-    ]
-    age_rows = {label: {"label": label, "male": 0, "female": 0, "total": 0} for label, _, _ in bands}
-    unspecified_age_row = {"label": "Unspecified age", "male": 0, "female": 0, "total": 0}
+    age_rows = {label: {"label": label, "male": 0, "female": 0, "total": 0}
+                for label, _, _ in AGE_BANDS}
+    unspecified_age_row = {"label": UNSPECIFIED_AGE, "male": 0, "female": 0, "total": 0}
     has_unspecified_age = False
 
     category_counts = {}
     unspecified_category_count = 0
 
     for c in Child.objects.filter(status=Child.ACTIVE):
-        age = age_of(c.birth_date)
-        row = None
-        if age is not None:
-            for label, lo, hi in bands:
-                if age >= lo and (hi is None or age <= hi):
-                    row = age_rows[label]
-                    break
-        if row is None:
+        label = age_band(c.birth_date, today)
+        if label == UNSPECIFIED_AGE:
             row = unspecified_age_row
             has_unspecified_age = True
+        else:
+            row = age_rows[label]
         if c.gender == "Male":
             row["male"] += 1
         elif c.gender == "Female":
@@ -192,7 +180,7 @@ def _nacc_service_users():
         else:
             unspecified_category_count += 1
 
-    age_groups = [age_rows[label] for label, _, _ in bands]
+    age_groups = [age_rows[label] for label, _, _ in AGE_BANDS]
     if has_unspecified_age:
         age_groups.append(unspecified_age_row)
 

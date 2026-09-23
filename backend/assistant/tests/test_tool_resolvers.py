@@ -207,12 +207,12 @@ class AppointmentsResolverTest(ResolverTestBase):
 
 class CountResolverTest(ResolverTestBase):
     def test_counts_only_children_the_caller_can_see(self):
-        out = self._resolve(self.psy, "count_my_children", {"status": "active"})
-        self.assertEqual(1, out["count"])
+        out = self._resolve(self.psy, "get_statistics", {"status": "active"})
+        self.assertEqual(1, out["total"])
 
     def test_an_administrator_counts_every_child(self):
-        out = self._resolve(self.admin, "count_my_children", {"status": "active"})
-        self.assertEqual(2, out["count"])
+        out = self._resolve(self.admin, "get_statistics", {"status": "active"})
+        self.assertEqual(2, out["total"])
 
 
 class ConcernResolverTest(ResolverTestBase):
@@ -600,8 +600,8 @@ class GreetingGuardTest(SimpleTestCase):
 
     def test_it_never_touches_a_data_tool(self):
         call = tools.correct_greeting(
-            "hello", tools.ToolCall(tool="count_my_children", args={"status": "active"}))
-        self.assertEqual(call.tool, "count_my_children")
+            "hello", tools.ToolCall(tool="get_statistics", args={"status": "active"}))
+        self.assertEqual(call.tool, "get_statistics")
 
 
 class ConcernStopwordTest(ResolverTestBase):

@@ -45,8 +45,12 @@ CHAT_CASES = [
      {"when": "tomorrow"}),
     ("appointments tl", "Sino ang makikita ko bukas?", "list_my_appointments", False,
      {"when": "tomorrow"}),
-    ("count en", "How many children am I handling?", "count_my_children", True, None),
-    ("count tl", "Ilan ang mga bata ko?", "count_my_children", True, None),
+    # count_my_children became get_statistics(measure=children). Same two
+    # questions, same expectation, and now the measure is checked as well.
+    ("count en", "How many children am I handling?", "get_statistics", True,
+     {"measure": "children", "by": "none"}),
+    ("count tl", "Ilan ang mga bata ko?", "get_statistics", True,
+     {"measure": "children", "by": "none"}),
     ("concern en", "Any children with school refusal?",
      "search_children_by_concern", True, None),
     ("concern tl", "Sino ang mga bata na ayaw pumasok sa eskwela?",
@@ -114,6 +118,21 @@ CHAT_CASES = [
      {"reason": "greeting_or_closing"}),
     ("name partial", "Tell me about Maria", "get_child_summary", False, None),
     ("action en", "Book Ana for Friday", "answer_directly", False, None),
+    # get_statistics. The two panel suggestions first: a suggested question
+    # that routes wrong is worse than none. "Caseload per psychologist?" is
+    # the one to watch - it names psychologists, and so do count_people's
+    # questions and list_unassigned_children's.
+    ("stats type en", "Active children by case type?", "get_statistics", True,
+     {"measure": "children", "by": "case_type"}),
+    ("stats caseload en", "Caseload per psychologist?", "get_statistics", True,
+     {"measure": "children", "by": "psychologist"}),
+    ("stats age en", "How many children are in each age group?",
+     "get_statistics", True, {"measure": "children", "by": "age_band"}),
+    # No result expected: the demo seeder closes no cases.
+    ("stats closures en", "How many cases were closed this year?",
+     "get_statistics", False, {"measure": "closures", "period": "this_year"}),
+    ("stats pending tl", "Ilan ang pending na pre-assessment?", "get_statistics",
+     False, {"measure": "pre_assessments"}),
 ]
 
 
