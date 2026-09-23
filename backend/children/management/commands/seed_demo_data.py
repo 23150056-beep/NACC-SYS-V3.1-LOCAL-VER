@@ -302,6 +302,10 @@ class Command(BaseCommand):
         months = options["months"]
         counts = {"children": 0, "steady": 0, "declining": 0, "divergent": 0,
                   "remarks": 0, "reports": 0, "appts": 0, "problems": 0}
+        # Its own stream, so drawing from it leaves every other invented value
+        # exactly where the main one put it: the same seed still gives the same
+        # names, cohorts and histories as before this existed.
+        pace = random.Random(options["seed"] + 1)
 
         for i in range(n):
             # 55% steady, 25% declining, 20% divergent — enough of each to see,
@@ -352,9 +356,15 @@ class Command(BaseCommand):
                 date=intake + timedelta(days=2),
                 status=ConsentRecord.SIGNED, recorded_by=psych)
 
+            # Completed a few days to three weeks after it was started. Stamped
+            # with the moment the seeder ran, every one took months, and time in
+            # pre-assessment measured the seeder instead of the caseload.
+            started = intake + timedelta(days=5)
             pa = PreAssessment.objects.create(
-                child=child, psychologist=psych, date=intake + timedelta(days=5),
-                status="completed", completed_at=timezone.now())
+                child=child, psychologist=psych, date=started, status="completed",
+                completed_at=timezone.make_aware(timezone.datetime.combine(
+                    started + timedelta(days=pace.randint(3, 21)),
+                    timezone.datetime.min.time().replace(hour=15))))
             pa.instruments.add(rng.choice(instruments))
 
             for desc, cat in rng.sample(PROBLEMS, rng.randint(1, 3)):

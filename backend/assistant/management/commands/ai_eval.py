@@ -144,6 +144,12 @@ CHAT_CASES = [
      "get_statistics", False, {"measure": "first_session_wait"}),
     ("stats wait tl", "Gaano katagal naghihintay ang mga bata bago ang unang session?",
      "get_statistics", False, {"measure": "first_session_wait"}),
+    # Time in pre-assessment. Its neighbour is the pending count, and the two
+    # share every word but "how long".
+    ("stats pa time en", "How long do pre-assessments take to complete?",
+     "get_statistics", False, {"measure": "pre_assessment_duration"}),
+    ("stats pa time tl", "Gaano katagal bago matapos ang pre-assessment?",
+     "get_statistics", False, {"measure": "pre_assessment_duration"}),
 ]
 
 

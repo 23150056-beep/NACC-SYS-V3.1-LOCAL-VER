@@ -78,6 +78,16 @@ ALIASES = {
         "wait for first session": "first_session_wait",
         "wait_for_first_session": "first_session_wait",
         "unang session": "first_session_wait", "paghihintay": "first_session_wait",
+        "pre-assessment time": "pre_assessment_duration",
+        "pre_assessment_time": "pre_assessment_duration",
+        "time in pre-assessment": "pre_assessment_duration",
+        "time_in_pre_assessment": "pre_assessment_duration",
+        "pre-assessment duration": "pre_assessment_duration",
+        "pre_assessment_length": "pre_assessment_duration",
+        "pre-assessment length": "pre_assessment_duration",
+        "assessment time": "pre_assessment_duration", "duration": "pre_assessment_duration",
+        "turnaround": "pre_assessment_duration",
+        "tagal ng pre-assessment": "pre_assessment_duration",
     },
     "by": {
         "": "none", "total": "none", "all": "none", "nothing": "none",
@@ -418,22 +428,24 @@ _CAN_ASK = {
     "Psychologist": (
         "your schedule, numbers about your caseload — how many children, by "
         "case type, stage, age or sex, new intakes or closures, your "
-        "attendance and no-shows, and how long your children waited for a "
-        "first session — children "
+        "attendance and no-shows, how long your children waited for a "
+        "first session, and how long pre-assessments took — children "
         "with a particular concern, a summary of one child, who needs "
         "follow-up, and which children have flagged something in their own "
         "words"),
     "Administrator": (
         "the agency's schedule, the agency's numbers — children by case type, "
         "stage, age, sex or psychologist, new intakes, closures and why, "
-        "attendance and no-shows, and the wait for a first session — "
+        "attendance and no-shows, the wait for a first session, and time in "
+        "pre-assessment — "
         "children with a particular concern, a summary of one child, who needs "
         "follow-up, and which children have flagged something in their own "
         "words"),
     "Staff": (
         "the schedule, the agency's numbers — children by case type, stage, "
         "age, sex or psychologist, new intakes, closures and why, "
-        "attendance and no-shows, and the wait for a first session — "
+        "attendance and no-shows, the wait for a first session, and time in "
+        "pre-assessment — "
         "children with a particular concern, a summary of one child, and who "
         "needs follow-up"),
 }
@@ -549,13 +561,14 @@ def _resolve_appointments(request, args):
 #   pending pre-assessments ................. the Dashboard
 #   sessions and the no-show rate ........... the Agency Summary's attendance
 #   the wait for a first session ............ the Agency Summary's wait card
+#   time in pre-assessment .................. the Agency Summary's pre-assessment card
 #
 # A measure no screen has defined yet waits until one does, or the two will
 # count it differently. The no-show rate waited for exactly that: its
 # definition lives in clinical.reports.attendance, and the screen came first.
 
 STAT_MEASURES = ("children", "intake", "closures", "pre_assessments", "sessions",
-                 "first_session_wait")
+                 "first_session_wait", "pre_assessment_duration")
 STAT_BREAKDOWNS = ("none", "case_type", "case_stage", "age_band", "sex",
                    "psychologist", "reason", "month", "status")
 STAT_BY = {
@@ -571,10 +584,14 @@ STAT_BY = {
     # By clinical.reports.first_session_wait — the Agency Summary's wait card.
     # No "by psychologist", for attendance's reason: a wait is the agency's.
     "first_session_wait": {"none"},
+    # By clinical.reports.pre_assessment_duration, the Agency Summary's card.
+    "pre_assessment_duration": {"none"},
 }
 # Events in time. Children and pending pre-assessments are counted as of today.
 # A wait is dated by the day it ended: the child's first completed session.
-STAT_DATED = {"intake", "closures", "sessions", "first_session_wait"}
+# A pre-assessment's duration likewise, by the day it was completed.
+STAT_DATED = {"intake", "closures", "sessions", "first_session_wait",
+              "pre_assessment_duration"}
 
 _BY_WORDS = {"case_type": "case type", "case_stage": "case stage",
              "age_band": "age group", "sex": "sex", "psychologist": "psychologist",
@@ -582,7 +599,8 @@ _BY_WORDS = {"case_type": "case type", "case_stage": "case stage",
 _MEASURE_WORDS = {"children": "children", "intake": "new intakes",
                   "closures": "case closures", "pre_assessments": "pending pre-assessments",
                   "sessions": "sessions",
-                  "first_session_wait": "waits for a first session"}
+                  "first_session_wait": "waits for a first session",
+                  "pre_assessment_duration": "time in pre-assessment"}
 # Not categories, so they sort last whatever their count.
 _LEFTOVERS = {"Unspecified", "Unassigned"}
 
@@ -595,7 +613,7 @@ def _stat_screen(measure, by, role):
     from accounts.models import Role
     summary = ((measure == "children" and by in ("age_band", "sex", "psychologist"))
                or (measure == "closures" and by == "reason")
-               or measure in ("sessions", "first_session_wait"))
+               or measure in ("sessions", "first_session_wait", "pre_assessment_duration"))
     if not summary:
         return _DASHBOARD
     # The Agency Summary is Administrators and Staff only. A link somebody
@@ -620,6 +638,8 @@ def _stat_subject(measure, status, by, span, total):
         head = "session" if one else "sessions"
     elif measure == "first_session_wait":
         head = f"{'child' if one else 'children'} seen for a first session"
+    elif measure == "pre_assessment_duration":
+        head = f"pre-assessment{'' if one else 's'} completed"
     else:
         head = f"pending pre-assessment{'' if one else 's'}"
     if measure in STAT_DATED:
@@ -729,7 +749,8 @@ def _resolve_statistics(request, args):
             start = _previous_month(start)
         end = _next_month(_month_start(today))
 
-    rows, wait = [], None
+    # `median` is (days, what) for a measure the question asks about in days.
+    rows, median = [], None
     if measure == "children":
         qs = scope_to_visible(Child.objects.all(), request, path=None)
         if status == "active":
@@ -783,6 +804,14 @@ def _resolve_statistics(request, args):
                                   today, start, end)
         total = wait["seen"]
         notes.insert(0, _wait_note(wait, dated=start is not None))
+        median = (wait["median_days"], "median wait for a first session")
+    elif measure == "pre_assessment_duration":     # Agency Summary's pre-assessment card
+        from clinical.reports import pre_assessment_duration
+        dur = pre_assessment_duration(scope_to_visible(PreAssessment.objects.all(), request),
+                                      start, end)
+        total = dur["completed"]
+        notes.insert(0, _duration_note(dur, dated=start is not None))
+        median = (dur["median_days"], "median time in pre-assessment")
     else:                                          # pending pre-assessments — Dashboard
         total = scope_to_visible(
             PreAssessment.objects.exclude(status=PreAssessment.COMPLETED), request).count()
@@ -796,11 +825,11 @@ def _resolve_statistics(request, args):
     subject = _stat_subject(measure, status, by, span, total)
     # The figure the question asked for, when it is not the count: "how long
     # do children wait?" is answered in days. `total` stays the number of
-    # children behind it, so an answer about nobody still reads as empty.
+    # children or pre-assessments behind it, so an answer about nobody still
+    # reads as empty.
     figure = None
-    if wait and wait["median_days"] is not None:
-        figure = {"value": _days(wait["median_days"]),
-                  "label": "median wait for a first session" + span}
+    if median and median[0] is not None:
+        figure = {"value": _days(median[0]), "label": median[1] + span}
     return {"kind": "breakdown", "measure": measure, "by": by,
             "status": status if measure == "children" else None,
             "period": period, "total": total, "rows": rows,
@@ -856,6 +885,31 @@ def _wait_note(wait, dated):
         n = wait["before_record"]
         parts.append(f"{n} not counted: the first session is dated before the "
                      f"record was created.")
+    return " ".join(parts)
+
+
+def _duration_note(dur, dated):
+    """What the median counts and what it leaves out, as the wait's note does."""
+    n = dur["completed"]
+    if n:
+        parts = [f"{n} {'pre-assessment' if n == 1 else 'pre-assessments'} completed, "
+                 "counted from the start date to the day it was completed. "
+                 f"Longest {_days(dur['longest_days'])}."]
+    elif dated:
+        parts = ["No pre-assessment was completed in this period, so there is no "
+                 "time to measure."]
+    else:
+        parts = ["No pre-assessment has been completed yet, so there is no time "
+                 "to measure."]
+    if dur["open"]:
+        parts.append(f"{dur['open']} still open — not counted until completed.")
+    if dur["no_completion_date"]:
+        parts.append(f"{dur['no_completion_date']} completed with no completion date "
+                     "recorded — not counted.")
+    if dur["completed_before_start"]:
+        k = dur["completed_before_start"]
+        parts.append(f"{k} marked completed before {'its' if k == 1 else 'their'} start "
+                     "date — not counted.")
     return " ".join(parts)
 
 
@@ -1231,9 +1285,11 @@ REGISTRY = {
             "psychologist they are assigned to; new intakes and case closures "
             "in a period, and closures by reason; pre-assessments still "
             "pending; attendance — sessions held, no-shows and the no-show "
-            "rate in a period; how long children wait for a first session. "
-            "Use for a count of children or cases, for attendance or waiting "
-            "times, or for breaking them down by a category or by month."),
+            "rate in a period; how long children wait for a first session; "
+            "how long pre-assessments take from start to completion. Use for a "
+            "count of children or cases, for attendance, waiting times or "
+            "pre-assessment times, or for breaking them down by a category or "
+            "by month."),
         "schema": {
             "measure": {"enum": list(STAT_MEASURES), "required": False,
                         "default": "children"},

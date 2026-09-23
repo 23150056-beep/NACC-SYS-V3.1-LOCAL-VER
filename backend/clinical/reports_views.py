@@ -239,6 +239,18 @@ def _summary_csv(data):
                         "before_record")):
         w.writerow([label, "" if wait[key] is None else wait[key]])
     w.writerow([])
+    dur = data["pre_assessment_duration"]
+    w.writerow(["Time in pre-assessment", "Value"])
+    for label, key in (("Pre-assessments completed", "completed"),
+                       ("Median days from start date to completion", "median_days"),
+                       ("Longest (days)", "longest_days"),
+                       ("Still open (not counted)", "open"),
+                       ("Completed with no completion date (not counted)",
+                        "no_completion_date"),
+                       ("Completed before the start date (not counted)",
+                        "completed_before_start")):
+        w.writerow([label, "" if dur[key] is None else dur[key]])
+    w.writerow([])
     w.writerow(["NACC Service Users by Age Group"])
     w.writerow(["Age Group", "Male", "Female", "Total"])
     for row in data["nacc_service_users"]["age_groups"]:
@@ -307,6 +319,11 @@ class SummaryReportView(generics.GenericAPIView):
         from datetime import date, timedelta
         data["first_session_wait"] = reports.first_session_wait(
             Child.objects.all(), tz.localdate(),
+            start=date.fromisoformat(frm) if frm else None,
+            end=date.fromisoformat(to) + timedelta(days=1) if to else None)
+        # Time in pre-assessment, the same window, by the day each was completed.
+        data["pre_assessment_duration"] = reports.pre_assessment_duration(
+            PreAssessment.objects.all(),
             start=date.fromisoformat(frm) if frm else None,
             end=date.fromisoformat(to) + timedelta(days=1) if to else None)
 

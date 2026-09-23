@@ -135,6 +135,56 @@ def first_session_wait(children, today, start=None, end=None):
     }
 
 
+# Time in pre-assessment, defined once and by the owner's choice: from the
+# pre-assessment's own start date (the day somebody started it here) to the
+# day it was completed. Pending and in-progress ones are left out until they
+# are completed; they are counted as still open, as of today, and nothing more.
+#
+# Also left out, and counted beside the figure:
+#
+#   * completed with no completion time recorded. The app stamps one on every
+#     completion, so this is an imported or older row. It has no end to
+#     measure to.
+#   * completed before its own start date. The start date stays editable after
+#     completion, so this can be typed. A negative duration is not a duration.
+#
+# `start` and `end` (end exclusive, either may be None) pick pre-assessments by
+# the day they were completed. The undated ones cannot be placed in a window,
+# so they are counted whatever the window: they may belong to it.
+def pre_assessment_duration(pre_assessments, start=None, end=None):
+    """Median and longest days from start to completion for a PreAssessment
+    queryset already scoped to the caller, with what it leaves out beside it."""
+    from statistics import median
+
+    from django.utils import timezone
+
+    from clinical.models import PreAssessment
+
+    days, undated, before_start = [], 0, 0
+    for began, done in (pre_assessments.filter(status=PreAssessment.COMPLETED)
+                        .values_list("date", "completed_at")):
+        if done is None:
+            undated += 1
+            continue
+        finished = timezone.localtime(done).date()
+        if (start is not None and finished < start) or (end is not None and finished >= end):
+            continue
+        if finished < began:
+            before_start += 1
+        else:
+            days.append((finished - began).days)
+
+    mid = median(days) if days else None
+    return {
+        "completed": len(days),
+        "median_days": int(mid) if mid is not None and mid == int(mid) else mid,
+        "longest_days": max(days) if days else None,
+        "no_completion_date": undated,
+        "completed_before_start": before_start,
+        "open": pre_assessments.exclude(status=PreAssessment.COMPLETED).count(),
+    }
+
+
 def bucket(d, rng):
     if rng == "yearly":
         return str(d.year)
