@@ -7,6 +7,7 @@ name reached a clinical draft unnoticed.
 
     manage.py ai_eval                      # every feature, 2 reps
     manage.py ai_eval --feature polish     # one feature
+    manage.py ai_eval --feature summary    # long reports, fitted vs whole
     manage.py ai_eval --reps 5 --limit 6   # more evidence, more children
 """
 import time
@@ -138,6 +139,18 @@ CHAT_CASES = [
     # get_statistics would be a right answer scored as a wrong tool.
     ("stats noshow en", "What was the no-show rate last month?", "get_statistics",
      False, {"measure": "sessions", "period": "last_month"}),
+    # The wait. "first session" sits next to "sessions" and "intake" next to
+    # new intakes, so these two watch for the measure landing on a neighbour.
+    ("stats wait en", "How long do children wait before their first session?",
+     "get_statistics", False, {"measure": "first_session_wait"}),
+    ("stats wait tl", "Gaano katagal naghihintay ang mga bata bago ang unang session?",
+     "get_statistics", False, {"measure": "first_session_wait"}),
+    # Time in pre-assessment. Its neighbour is the pending count, and the two
+    # share every word but "how long".
+    ("stats pa time en", "How long do pre-assessments take to complete?",
+     "get_statistics", False, {"measure": "pre_assessment_duration"}),
+    ("stats pa time tl", "Gaano katagal bago matapos ang pre-assessment?",
+     "get_statistics", False, {"measure": "pre_assessment_duration"}),
 ]
 
 
@@ -206,6 +219,14 @@ SELF_REPORT_CASES = [
 _TAGALOG_HINT = ("naki", "nag-", "ang ", " sa ", " ng ", "mga ", "hindi", "bata")
 
 
+def _follows_summary_shape(text):
+    """Whether a summary kept to SUMMARY_INSTRUCTIONS' three parts. Loose on
+    wording, strict on presence: all three must be there."""
+    low = text.lower()
+    return ("background" in low and ("concern" in low or "presenting" in low)
+            and "recommend" in low)
+
+
 def _looks_taglish(text):
     low = text.lower()
     return any(h in low for h in _TAGALOG_HINT)
@@ -216,12 +237,13 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument("--feature",
-                            choices=["brief", "polish", "chat", "self_report", "all"],
+                            choices=["brief", "polish", "chat", "self_report", "summary",
+                                     "all"],
                             default="all")
         parser.add_argument("--reps", type=int, default=2,
                             help="Runs per case; the model is not deterministic.")
         parser.add_argument("--limit", type=int, default=3,
-                            help="Children to sample for briefs.")
+                            help="Children to sample for briefs; reports for summaries.")
 
     def handle(self, *args, **options):
         cfg = AssistantSetting.load()
@@ -241,6 +263,8 @@ class Command(BaseCommand):
             totals.append(self._chat(options["reps"]))
         if options["feature"] in ("self_report", "all"):
             totals.append(self._self_report(options["reps"]))
+        if options["feature"] in ("summary", "all"):
+            totals.extend(self._summaries(options["reps"], options["limit"]))
 
         self.stdout.write("\n" + "=" * 62)
         self.stdout.write("SUMMARY")
@@ -335,6 +359,55 @@ class Command(BaseCommand):
 
         return ("REMARK POLISH", runs, counts, self._median(latencies))
 
+
+    def _summaries(self, reps, limit):
+        """Summaries of the longest reports on file - the long ones are what
+        prompts.fit_document exists for.
+
+        A report over the budget is also run WHOLE, the way every summary was
+        built before fitting, so the difference is measured rather than
+        argued: does the draft still follow the three-part instruction, and
+        does it name anyone the document does not. "Instructions lost" is the
+        failure fitting is meant to prevent - the runtime cutting the prompt
+        to fit its window and taking the instructions with it.
+        """
+        from clinical.models import PsychologicalReport
+
+        reports = sorted(PsychologicalReport.objects.exclude(extracted_text=""),
+                         key=lambda r: -len(r.extracted_text))[:limit]
+        self.stdout.write("\n" + "=" * 62)
+        self.stdout.write(f"SUMMARIES — {len(reports)} longest report(s) x {reps} reps "
+                          f"(budget {prompts.SUMMARY_BUDGET_CHARS} chars)")
+        totals = {}
+        for report in reports:
+            text = report.extracted_text
+            variants = [("fitted", prompts.build_summary_prompt(text, "psychological report"))]
+            if len(text) > prompts.SUMMARY_BUDGET_CHARS:
+                variants.append(("whole", prompts.SUMMARY_INSTRUCTIONS
+                                 + f"(psychological report)\n{text}"))
+            for variant, prompt in variants:
+                runs, counts, latencies = totals.setdefault(
+                    variant, [0, {"invented names": 0, "repeated lines": 0,
+                                  "repeated words": 0, "instructions lost": 0}, []])
+                self.stdout.write(f"\n  {report.original_filename} [{variant}, "
+                                  f"{len(prompt)} chars sent]")
+                for rep in range(reps):
+                    try:
+                        out, ms = self._generate(prompt, prompts.SUMMARY_SYSTEM)
+                    except AIUnavailable as exc:
+                        self.stdout.write(f"    rep{rep}: UNAVAILABLE — {exc}")
+                        continue
+                    totals[variant][0] += 1
+                    latencies.append(ms)
+                    flags = self._score(prompt, out, expect_english=False)
+                    if not _follows_summary_shape(out):
+                        flags["instructions lost"] = ["no background / concerns / "
+                                                      "recommendations structure"]
+                    for key in flags:
+                        counts[key] += 1
+                    self._report(rep, ms, flags, sample=out, text=out)
+        return [(f"SUMMARIES ({variant})", runs, counts, self._median(latencies))
+                for variant, (runs, counts, latencies) in totals.items()]
 
     def _chat(self, reps):
         """Route a question, validate it, and run the resolver for real.

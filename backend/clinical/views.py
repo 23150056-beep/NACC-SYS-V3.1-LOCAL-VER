@@ -40,7 +40,7 @@ from clinical.serializers import (
 )
 from clinical.self_report_detection import detect_concerns
 from clinical.self_report_model_check import start_model_check
-from clinical.services import extract_pdf_text
+from clinical.services import extract_text
 
 logger = logging.getLogger(__name__)
 
@@ -351,18 +351,58 @@ class PsychologicalReportViewSet(_ChildScopedClinicalViewSet):
     author_field = "author"
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
+    def _findings(self, text, child):
+        """clinical.report_check against the children this caller can see -
+        never wider, or the check would answer "is there a record for this
+        name?" for children the caller has no access to."""
+        from clinical.report_check import check_for
+        return check_for(self.request, text, child)
+
     def perform_create(self, serializer):
-        self._assert_can_write(serializer.validated_data["child"])
+        child = serializer.validated_data["child"]
+        self._assert_can_write(child)
         upload = serializer.validated_data["file"]
-        extracted = ""
-        if upload.name.lower().endswith(".pdf"):
-            extracted = extract_pdf_text(upload)
+        extracted = extract_text(upload)
         obj = serializer.save(author=self.request.user,
                               original_filename=upload.name,
-                              extracted_text=extracted)
+                              extracted_text=extracted,
+                              check_findings=self._findings(extracted, child))
         log_activity(self.request.user, ActivityLog.CREATED, ActivityLog.RECORD,
                      entity_type="PsychologicalReport", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.child.assigned_psychologist)
+
+    @action(detail=False, methods=["post"])
+    def check(self, request):
+        """What the check says about a file before it is filed. Saves nothing.
+
+        The upload form asks this first, so a report carrying another child's
+        name is caught while it can still be swapped for the right file,
+        rather than after it is in the case file.
+        """
+        from children.models import Child
+        child_id = request.data.get("child")
+        child = (scope_to_visible(Child.objects.all(), request, path=None)
+                 .filter(pk=child_id).first() if str(child_id).isdigit() else None)
+        if child is None:
+            return Response({"child": "Choose a child."}, status=status.HTTP_400_BAD_REQUEST)
+        self._assert_can_write(child)
+        upload = request.FILES.get("file")
+        if upload is None:
+            return Response({"file": "Choose a file."}, status=status.HTTP_400_BAD_REQUEST)
+        self.get_serializer().validate_file(upload)
+        text = extract_text(upload)
+        return Response({"readable": bool(text),
+                         "findings": self._findings(text, child) if text else []})
+
+    @action(detail=True, methods=["post"], url_path="review-check")
+    def review_check(self, request, pk=None):
+        """Somebody who may edit this report has looked at what the check
+        found. The findings stay on the row; only the flag goes."""
+        obj = self.get_object()
+        self._assert_can_write(obj.child)
+        obj.check_reviewed = True
+        obj.save(update_fields=["check_reviewed"])
+        return Response(self.get_serializer(obj).data)
 
     @action(detail=True, methods=["get"])
     def download(self, request, pk=None):
@@ -395,9 +435,7 @@ class CaseReferralViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         self._assert_can_write()
         upload = serializer.validated_data["file"]
-        extracted = ""
-        if upload.name.lower().endswith(".pdf"):
-            extracted = extract_pdf_text(upload)
+        extracted = extract_text(upload)
         obj = serializer.save(uploaded_by=self.request.user,
                               original_filename=upload.name,
                               extracted_text=extracted)

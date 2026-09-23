@@ -42,7 +42,7 @@ from clinical.models import (
     AgencyFormTemplate, ConsentRecord, InstrumentCatalog, OpinionnaireInvite,
     PreAssessment, ProblemEntry, RemarkNote, ResultEntry, TreatmentPlan)
 from locations.models import Barangay, Municipality, Province
-from clinical import demo_referrals
+from clinical import demo_referrals, demo_reports
 from scheduling import demo_schedule
 from scheduling.models import Appointment
 
@@ -218,6 +218,12 @@ class Command(BaseCommand):
             list(Child.objects.filter(status=Child.ACTIVE)),
             uploaded_by=User.objects.filter(role__role_name=Role.STAFF).first())
 
+        # Reports are files too, in three layouts on purpose: the report
+        # features have to cope with every psychologist's own format.
+        reports = demo_reports.install_reports(
+            Child.objects.filter(status=Child.ACTIVE)
+            .select_related("assigned_psychologist").order_by("pk"))
+
         moved, _ = demo_schedule.realign_appointments()
 
         self.stdout.write("")
@@ -225,6 +231,7 @@ class Command(BaseCommand):
             f"Built {made['children']} children across {len(psychologists)} psychologists."))
         self.stdout.write(f"  {moved} appointments placed in clinic hours")
         self.stdout.write(f"  {referrals} case referrals written")
+        self.stdout.write(f"  {reports} psychological reports written")
         for label in ("steady", "declining", "divergent"):
             self.stdout.write(f"  {label:<12} {made[label]:>3}")
         self.stdout.write(
@@ -302,6 +309,10 @@ class Command(BaseCommand):
         months = options["months"]
         counts = {"children": 0, "steady": 0, "declining": 0, "divergent": 0,
                   "remarks": 0, "reports": 0, "appts": 0, "problems": 0}
+        # Its own stream, so drawing from it leaves every other invented value
+        # exactly where the main one put it: the same seed still gives the same
+        # names, cohorts and histories as before this existed.
+        pace = random.Random(options["seed"] + 1)
 
         for i in range(n):
             # 55% steady, 25% declining, 20% divergent — enough of each to see,
@@ -337,6 +348,13 @@ class Command(BaseCommand):
                 assigned_psychologist=psych,
                 case_status=rng.choice(["pre_assessment", "counseling"]),
             )
+            # The record dates from intake, as it would for a child entered at
+            # intake. Left at the moment the seeder ran, every seeded session
+            # predates its own record and the wait for a first session has
+            # nothing to measure. auto_now_add ignores a value passed to
+            # create(), hence the update.
+            Child.objects.filter(pk=child.pk).update(created_at=timezone.make_aware(
+                timezone.datetime.combine(intake, timezone.datetime.min.time())))
             counts["children"] += 1
 
             ConsentRecord.objects.create(
@@ -345,9 +363,15 @@ class Command(BaseCommand):
                 date=intake + timedelta(days=2),
                 status=ConsentRecord.SIGNED, recorded_by=psych)
 
+            # Completed a few days to three weeks after it was started. Stamped
+            # with the moment the seeder ran, every one took months, and time in
+            # pre-assessment measured the seeder instead of the caseload.
+            started = intake + timedelta(days=5)
             pa = PreAssessment.objects.create(
-                child=child, psychologist=psych, date=intake + timedelta(days=5),
-                status="completed", completed_at=timezone.now())
+                child=child, psychologist=psych, date=started, status="completed",
+                completed_at=timezone.make_aware(timezone.datetime.combine(
+                    started + timedelta(days=pace.randint(3, 21)),
+                    timezone.datetime.min.time().replace(hour=15))))
             pa.instruments.add(rng.choice(instruments))
 
             for desc, cat in rng.sample(PROBLEMS, rng.randint(1, 3)):

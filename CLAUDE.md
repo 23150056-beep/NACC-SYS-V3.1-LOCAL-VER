@@ -513,6 +513,39 @@ Built 27 Aug 2026. Flags distress in a child's own words. Design in
 - `manage.py scan_self_reports` backfills and is idempotent; re-run it after
   adding a phrase.
 
+## Reports
+
+Built 23 Sep 2026. Psychologists upload their own report files, each in their
+own format; there are no report templates in the system yet, on purpose -
+none of the real ones has been seen.
+
+- **Word files are read now, not only PDFs** (`clinical/services.py`, standard
+  library only). `.doc` (Word 97-2003) still cannot be; the screen says so.
+  Reports uploaded before this are read the first time something needs their
+  text (`ensure_text`), because the hosted copies have no shell for a
+  backfill; `manage.py check_reports` does it locally.
+- **Headings are found from the file itself** and marked `## `, the agency
+  form convention. Measured against the two real Word forms in
+  `docs/agency-forms/`: neither uses a heading style or bold - one marks
+  headings in capitals, the other as plain Roman-numbered lines - so all four
+  signals count. Arabic numbering does not: that is a recommendation list.
+- **The check before filing is deterministic** (`clinical/report_check.py`):
+  another child's full name, another case number, an age, birthday or sex that
+  is not this child's. It never blocks. It compares against the children the
+  **uploader can see** - comparing against every child would tell a
+  psychologist whether the agency holds a record for a name. The same goes
+  for whoever reads the report later: a psychologist a child is reassigned to
+  is not shown a finding naming a child who is not theirs, and with no reader
+  known those findings are left out. Tests hold both.
+- **Summaries are fitted** (`prompts.fit_document`): the whole text used to go
+  to a model whose window is a few thousand tokens. 8,000 characters is
+  arithmetic, not a measurement - `ai_eval --feature summary` measures it,
+  fitted against whole, on the machine that runs the model.
+- **Demo reports come in three layouts** (`clinical/demo_reports.py`), turned
+  over within each psychologist's children - turned over across the list they
+  fell in step with the seeder's round-robin and each psychologist saw one.
+  Exactly one carries another child's name, for the check to find.
+
 ## The demo deployment
 
 Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in

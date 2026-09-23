@@ -115,7 +115,114 @@ def build_remark_prompt(raw_text):
 
 def build_summary_prompt(extracted_text, kind):
     # `kind` labels the document for the reader; it goes after the static block.
-    return SUMMARY_INSTRUCTIONS + f"({kind})\n{extracted_text}"
+    return SUMMARY_INSTRUCTIONS + f"({kind})\n{fit_document(extracted_text)[0]}"
+
+
+# --- long documents -------------------------------------------------------
+#
+# The whole extracted text used to follow the instructions - up to 200,000
+# characters. Nothing sets the model's context window on the agency machine
+# (setting it per call measured 6x slower), so it is the runtime's default, a
+# few thousand tokens. A real report overflows that, and what the runtime then
+# drops to make room is not this code's choice - it may be the instructions.
+# So the document is fitted here, on purpose, and the draft says what it read.
+#
+# 8,000 characters is roughly 2,000-2,700 tokens of English or Taglish: with
+# the instructions and room for the answer, inside a 4,096-token window. That
+# is arithmetic, not a measurement - `manage.py ai_eval --feature summary`
+# measures it on the machine that runs the model.
+SUMMARY_BUDGET_CHARS = 8000
+# Below this, a section is not worth starting: a heading and one line.
+_MIN_SECTION_CHARS = 400
+
+# What a summary of (background, concerns, recommendations) reads first when a
+# report is too long to read whole, by words in the section's own heading.
+# Recommendations come first because they are usually last in the file - the
+# part a cut from the end would lose.
+_SUMMARY_PRIORITY = (
+    ("recommend", "impression", "plan", "conclusion"),
+    ("reason", "referral", "presenting", "concern", "problem"),
+    ("background", "history", "family", "social", "identifying"),
+    ("finding", "result", "observation", "assessment", "summary"),
+)
+
+
+def _sections(text):
+    """[(heading or None, body)] from the "## " lines the extractor writes."""
+    out, heading, lines = [], None, []
+    for line in text.splitlines():
+        if line.startswith("## "):
+            if heading is not None or any(l.strip() for l in lines):
+                out.append((heading, "\n".join(lines).strip()))
+            heading, lines = line[3:].strip(), []
+        else:
+            lines.append(line)
+    if heading is not None or any(l.strip() for l in lines):
+        out.append((heading, "\n".join(lines).strip()))
+    return out
+
+
+def _cut(body, limit):
+    """At most `limit` characters, ending at a line break where there is one."""
+    if len(body) <= limit:
+        return body
+    part = body[:limit]
+    end = part.rfind("\n")
+    return (part[:end] if end > limit // 2 else part).rstrip() + " [...]"
+
+
+def _priority(heading):
+    words = (heading or "").lower()
+    for rank, keys in enumerate(_SUMMARY_PRIORITY):
+        if any(k in words for k in keys):
+            return rank
+    return len(_SUMMARY_PRIORITY)
+
+
+def fit_document(text, budget=SUMMARY_BUDGET_CHARS):
+    """(what the model is given, what was left out - or None if nothing was).
+
+    With headings, whole sections are kept in the order a summary needs them
+    and put back in the document's own order. Without them, the beginning and
+    the end are kept - where reports put who, why and what next.
+    """
+    text = (text or "").strip()
+    if len(text) <= budget:
+        return text, None
+    sections = [s for s in _sections(text) if s[0]]
+    if len(sections) >= 2:
+        order = sorted(range(len(sections)), key=lambda i: (_priority(sections[i][0]), i))
+        kept, left = {}, budget
+        for i in order:
+            heading, body = sections[i]
+            size = len(heading) + 4 + len(body)
+            if size <= left:
+                kept[i] = body
+                left -= size
+            elif left >= _MIN_SECTION_CHARS:
+                kept[i] = _cut(body, left - len(heading) - 4)
+                left = 0
+            if left < _MIN_SECTION_CHARS:
+                break
+        fitted = "\n".join(f"## {sections[i][0]}\n{kept[i]}" for i in sorted(kept))
+        # Name what the draft could NOT have seen - that is what the person
+        # confirming it needs to know - rather than everything it did.
+        left_out = [sections[i][0] for i in range(len(sections)) if i not in kept]
+        partial = [sections[i][0] for i in sorted(kept) if kept[i] != sections[i][1]]
+        note = ["This report is too long to read in one go."]
+        if left_out:
+            note.append(f"Not read: {', '.join(left_out)}.")
+        if partial:
+            note.append(f"Only the first part of {', '.join(partial)} was read.")
+        return fitted, " ".join(note)
+    head, tail = int(budget * 0.6), int(budget * 0.4)
+    start = text[:head]
+    start = start[:start.rfind("\n")] if "\n" in start else start
+    end = text[-tail:]
+    end = end[end.find("\n") + 1:] if "\n" in end else end
+    return (f"{start.rstrip()}\n[...]\n{end.lstrip()}",
+            "This report is too long to read in one go, and has no headings to choose "
+            "by. Only its beginning and its end were read.")
 
 
 def build_census_prompt(figures):
@@ -152,6 +259,8 @@ Examples:
   "Active children by case type?"     -> get_statistics(measure="children", by="case_type")
   "How many cases closed this year?"  -> get_statistics(measure="closures", period="this_year")
   "What was the no-show rate last month?" -> get_statistics(measure="sessions", period="last_month")
+  "How long do children wait for a first session?" -> get_statistics(measure="first_session_wait")
+  "How long do pre-assessments take?" -> get_statistics(measure="pre_assessment_duration")
   "Any children with sleep problems?" -> search_children_by_concern(concern="sleep problems")
   "Sino ang mga bata na ayaw pumasok sa eskwela?" -> search_children_by_concern(concern="school")
   "Sino ang mga batang may problema sa tulog?" -> search_children_by_concern(concern="sleep")

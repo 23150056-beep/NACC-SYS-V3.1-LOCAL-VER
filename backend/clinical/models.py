@@ -202,6 +202,12 @@ class PsychologicalReport(models.Model):
     extracted_text = models.TextField(blank=True)
     ai_summary = models.TextField(null=True, blank=True)
     ai_summary_confirmed = models.BooleanField(default=False)
+    # clinical.report_check's findings when the file was filed - another
+    # child's name, a case number or age that is not this child's. Kept on
+    # the row so the flag is still there for whoever reads the report next,
+    # until somebody who may edit the report marks it looked at.
+    check_findings = models.JSONField(default=list, blank=True)
+    check_reviewed = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

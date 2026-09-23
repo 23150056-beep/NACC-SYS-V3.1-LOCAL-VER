@@ -9,6 +9,8 @@ import {
   PAGE, PageHeader, Select, Tabs,
 } from '../ui';
 import { useOpenFromLink } from '../utils/links';
+import ReportCheckNote from '../components/ReportCheckNote';
+import { hasCheckNote } from '../utils/reportCheck';
 import { loadAll } from '../utils/load';
 
 
@@ -93,6 +95,29 @@ export default function Report() {
     e.preventDefault();
     setError('');
     if (!upload.child || !upload.fileObj) { setError('Choose a child and a file.'); return; }
+    // A report is checked before it is filed, while it can still be swapped
+    // for the right file: another child's name or case number left in from
+    // the report it was started from. Nothing found and readable means it is
+    // filed straight away; otherwise the findings are shown and the next
+    // press files it as it is.
+    if (upload.kind === 'report' && !upload.check) {
+      const probe = new FormData();
+      probe.append('child', upload.child);
+      probe.append('file', upload.fileObj);
+      setUpload((u) => ({ ...u, checking: true }));
+      try {
+        const { data } = await api.post('/report-files/check/', probe,
+          { headers: { 'Content-Type': 'multipart/form-data' } });
+        if (data.findings.length || !data.readable) {
+          setUpload((u) => ({ ...u, checking: false, check: data }));
+          return;
+        }
+      } catch (err) {
+        setUpload((u) => ({ ...u, checking: false }));
+        setError(JSON.stringify(err.response?.data || 'Could not check the file.'));
+        return;
+      }
+    }
     const fd = new FormData();
     fd.append('child', upload.child);
     fd.append('file', upload.fileObj);
@@ -224,6 +249,11 @@ export default function Report() {
               >
                 <Icon name="download" size={16} />
               </button>
+              {hasCheckNote(f) && (
+                <div style={{ flexBasis: '100%', paddingLeft: 48 }}>
+                  <ReportCheckNote report={f} canReview={isPsych || role === 'Administrator'} onReviewed={load} />
+                </div>
+              )}
             </div>
           ))
         ) : (
@@ -282,15 +312,29 @@ export default function Report() {
             <div className="racco-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
               {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{error}</Alert>}
               <FormField label="Child" required>
-                <Select value={upload.child} onChange={(e) => setUpload({ ...upload, child: e.target.value })}>
+                <Select value={upload.child} onChange={(e) => setUpload({ ...upload, child: e.target.value, check: null })}>
                   <option value="">— Select child —</option>
                   {children.map((c) => <option key={c.id} value={c.id}>{c.fullname}</option>)}
                 </Select>
               </FormField>
               <FormField label={upload.kind === 'case_referral' ? 'Case referral file (PDF / Word)' : 'Report file (PDF / Word)'} required hint={upload.kind === 'case_referral' ? "The child's official case referral document." : 'Your own report, in your own format.'}>
                 <FileUpload file={upload.fileObj} accept=".pdf,.doc,.docx"
-                  onChange={(f) => setUpload({ ...upload, fileObj: f })} />
+                  onChange={(f) => setUpload({ ...upload, fileObj: f, check: null })} />
               </FormField>
+              {upload.check?.findings?.length > 0 && (
+                <Alert tone="warning" title="Check before filing." icon={<Icon name="alert-triangle" size={18} />}>
+                  <ul style={{ margin: '4px 0 6px', paddingLeft: 18 }}>
+                    {upload.check.findings.map((f) => <li key={f.message} style={{ marginBottom: 2 }}>{f.message}</li>)}
+                  </ul>
+                  Choose a different file, or upload this one as it is.
+                </Alert>
+              )}
+              {upload.check && !upload.check.readable && (
+                <Alert tone="info" title="This file could not be read.">
+                  It can still be uploaded, but without its text it cannot be checked or summarised.
+                  Saved as .docx, or as a PDF with real text rather than a scan, it can be.
+                </Alert>
+              )}
               {upload.kind !== 'case_referral' && (
                 <FormField label="Report type">
                   <Select value={upload.report_type} onChange={(e) => setUpload({ ...upload, report_type: e.target.value })}>
@@ -303,7 +347,10 @@ export default function Report() {
               </FormField>
             </div>
             <div style={{ padding: 16, borderTop: '1px solid var(--border)' }}>
-              <Button type="submit" variant="primary" fullWidth iconLeft={<Icon name="file-up" size={16} />}>Upload</Button>
+              <Button type="submit" variant="primary" fullWidth disabled={upload.checking}
+                      iconLeft={<Icon name="file-up" size={16} />}>
+                {upload.checking ? 'Checking…' : upload.check ? 'Upload anyway' : 'Upload'}
+              </Button>
             </div>
           </form>
         </div>

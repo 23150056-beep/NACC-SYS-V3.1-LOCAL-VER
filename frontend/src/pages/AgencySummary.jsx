@@ -12,7 +12,45 @@ const RANGES = [
   { value: 'monthly', label: 'Monthly' },
   { value: 'yearly', label: 'Annual' },
 ];
-const EMPTY = { total: 0, children: 0, by_case_type: {}, per_psychologist: [], trend: [], terminations_by_reason: {}, pending_pre_assessments: 0, caseload_per_psychologist: [], nacc_service_users: { age_groups: [], case_categories: [] }, attendance: { sessions: 0, completed: 0, no_show: 0, unrecorded: 0, upcoming: 0, cancelled: 0, took_place: 0, no_show_rate: null } };
+const EMPTY = { total: 0, children: 0, by_case_type: {}, per_psychologist: [], trend: [], terminations_by_reason: {}, pending_pre_assessments: 0, caseload_per_psychologist: [], nacc_service_users: { age_groups: [], case_categories: [] }, attendance: { sessions: 0, completed: 0, no_show: 0, unrecorded: 0, upcoming: 0, cancelled: 0, took_place: 0, no_show_rate: null }, first_session_wait: { seen: 0, median_days: null, longest_days: null, before_record: 0, waiting: 0, longest_waiting_days: null }, pre_assessment_duration: { completed: 0, median_days: null, longest_days: null, no_completion_date: 0, completed_before_start: 0, open: 0 } };
+
+const days = (n) => `${n} ${n === 1 ? 'day' : 'days'}`;
+
+// A median in days with what it leaves out beside it, never instead of it,
+// and the rule printed underneath: a figure whose definition nobody can see
+// invites the wrong reading. Rows about nobody are left off, as on the
+// attendance card. Shared by the wait and the pre-assessment cards, whose
+// definitions live in clinical/reports.py beside the assistant's.
+function MedianDaysCard({ eyebrow, title, median, caption, facts, rule, empty }) {
+  const shown = facts.filter(([, v]) => v !== null);
+  return (
+    <Card eyebrow={eyebrow} title={title} padding="14px 16px">
+      {empty
+        ? <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{empty}</p>
+        : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 30, lineHeight: 1, color: 'var(--text-strong)' }}>
+                {median === null ? '—' : days(median)}
+              </span>
+              <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{caption}</span>
+            </div>
+            {shown.length > 0 && (
+              <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 12px', margin: 0, fontSize: 12.5 }}>
+                {shown.map(([label, v]) => (
+                  <div key={label} style={{ display: 'contents' }}>
+                    <dt style={{ fontWeight: 700, color: 'var(--text-strong)' }}>{label}</dt>
+                    <dd style={{ margin: 0, color: 'var(--text-strong)', fontVariantNumeric: 'tabular-nums' }}>{v}</dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+            <p style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text-muted)', marginTop: 12 }}>{rule}</p>
+          </>
+        )}
+    </Card>
+  );
+}
 
 export default function AgencySummary() {
   const toast = useToast();
@@ -48,6 +86,16 @@ export default function AgencySummary() {
     .filter(([label, v]) => v > 0 || label === 'Completed' || label === 'No-show');
   const attMax = Math.max(1, ...attRows.map(([, v]) => v));
   const termMax = Math.max(1, ...terminations.map(([, v]) => v));
+  const wait = d.first_session_wait || EMPTY.first_session_wait;
+  const dur = d.pre_assessment_duration || EMPTY.pre_assessment_duration;
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  // Two different gaps in the record, so two rows rather than one sum.
+  const durGaps = [
+    dur.no_completion_date
+      ? `${dur.no_completion_date} ${dur.no_completion_date === 1 ? 'has' : 'have'} no completion date` : null,
+    dur.completed_before_start
+      ? `${dur.completed_before_start} ${dur.completed_before_start === 1 ? 'was completed before its' : 'were completed before their'} start date` : null,
+  ];
 
   const writeNarrative = async () => {
     setNarrativeBusy(true);
@@ -240,6 +288,38 @@ export default function AgencySummary() {
               </>
             )}
         </Card>
+
+        <MedianDaysCard
+          eyebrow="All children on record" title="Wait for a first session"
+          median={wait.median_days}
+          caption={`median wait · ${plural(wait.seen, 'child', 'children')} seen`}
+          empty={wait.seen === 0 && wait.waiting === 0 && wait.before_record === 0
+            ? 'No child has been seen or is waiting.' : null}
+          facts={[
+            ['Longest wait', wait.longest_days === null ? null : days(wait.longest_days)],
+            ['Still waiting now', wait.waiting === 0 ? null
+              : `${plural(wait.waiting, 'child', 'children')} · longest ${days(wait.longest_waiting_days)} so far`],
+            ['Not counted', wait.before_record === 0 ? null
+              : `${wait.before_record} whose first session is dated before their record`],
+          ]}
+          rule={'Counted from the day a child’s record was created here to their first session recorded as completed. '
+            + 'Children still waiting are not in the median, and neither is a first session dated before the record existed.'}
+        />
+
+        <MedianDaysCard
+          eyebrow="All pre-assessments on record" title="Time in pre-assessment"
+          median={dur.median_days}
+          caption={`median · ${plural(dur.completed, 'pre-assessment', 'pre-assessments')} completed`}
+          empty={dur.completed === 0 && dur.open === 0 && dur.no_completion_date === 0 && dur.completed_before_start === 0
+            ? 'No pre-assessment has been started.' : null}
+          facts={[
+            ['Longest', dur.longest_days === null ? null : days(dur.longest_days)],
+            ['Still open', dur.open === 0 ? null : `${dur.open} · counted once completed`],
+            ['Not counted', durGaps[0]],
+            [durGaps[0] ? 'Also not counted' : 'Not counted', durGaps[1]],
+          ]}
+          rule="Counted from a pre-assessment’s start date to the day it was completed. Pending and in-progress ones are left out until they are completed."
+        />
 
         <Card title="Terminations by reason" padding="14px 16px">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
