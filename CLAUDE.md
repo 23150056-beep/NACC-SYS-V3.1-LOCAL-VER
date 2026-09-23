@@ -519,6 +519,11 @@ Built 23 Sep 2026. Psychologists upload their own report files, each in their
 own format; there are no report templates in the system yet, on purpose -
 none of the real ones has been seen.
 
+- **One upload form, two doors.** A report is filed from Results & Reports or
+  from the child's own record (Results & reports tab; a referral from
+  Casework), both through `components/UploadDrawer.jsx`. The check before
+  filing lives in that component, so it cannot be on one screen and missing
+  from the other - keep it that way rather than copying the form.
 - **Word files are read now, not only PDFs** (`clinical/services.py`, standard
   library only). `.doc` (Word 97-2003) still cannot be; the screen says so.
   Reports uploaded before this are read the first time something needs their

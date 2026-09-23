@@ -132,3 +132,13 @@ export const SURRENDERED_BY = [
  * and served over /api/locations/. Region I alone is 125 cities and
  * municipalities and 3,265 barangays — not a list to maintain by hand, and the
  * short version that lived here could not spell most real addresses. */
+
+// PsychologicalReport.TYPE_CHOICES (clinical/models.py), in the same order.
+export const REPORT_TYPES = [
+  { v: 'initial', label: 'Initial Evaluation' },
+  { v: 'progress', label: 'Progress Report' },
+  { v: 'final', label: 'Final Report' },
+  { v: 'other', label: 'Other' },
+];
+
+export const reportTypeLabel = (v) => REPORT_TYPES.find((t) => t.v === v)?.label || v;

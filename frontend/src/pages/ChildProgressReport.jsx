@@ -8,10 +8,11 @@ import { useToast } from '../context/ToastContext';
 import {
   Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, Modal, PAGE, Select, Tabs,
 } from '../ui';
-import { PA_STATUS_TONES } from '../config/caseData';
+import { PA_STATUS_TONES, reportTypeLabel } from '../config/caseData';
 import { loadAll } from '../utils/load';
 import { polishRemark, sendFeedback, getLatestBrief, generateBrief, summarizeDocument, confirmSummary } from '../api/assistant';
 import ReportCheckNote from '../components/ReportCheckNote';
+import UploadDrawer from '../components/UploadDrawer';
 
 // "In her own words" reads better than a label, but gender is blank=True on
 // the model and must never render as an empty string.
@@ -72,6 +73,9 @@ export default function ChildProgressReport() {
   // Cheap to ask, expensive to get wrong on the wrong row.
   const [resolving, setResolving] = useState(null); // the problem awaiting confirmation
   const [resolveBusy, setResolveBusy] = useState(false);
+  // Filing a report or a referral from the record itself, rather than sending
+  // the psychologist off to Results & Reports and leaving them there.
+  const [upload, setUpload] = useState(null); // 'report' | 'case_referral'
   const isStaffOrAdmin = ['Administrator', 'Staff'].includes(user?.role_name);
   // Mirrors INSTRUMENT_MANAGER_ROLES on the server (accounts/permissions.py).
   const canReadTemplates = ['Administrator', 'Psychologist'].includes(user?.role_name);
@@ -614,16 +618,23 @@ export default function ChildProgressReport() {
 
       {/* Uploaded reports */}
       <Card eyebrow="Documents" title="Psychological reports" padding="0">
+        {canWrite && (
+          <div style={{ padding: '12px 16px', display: 'flex', justifyContent: 'flex-end' }} className="racco-no-print">
+            <Button variant="primary" onClick={() => setUpload('report')} iconLeft={<Icon name="upload" size={15} />}>Upload report</Button>
+          </div>
+        )}
         {data.reports.length === 0 ? (
-          <div style={{ padding: 18, fontSize: 13, color: 'var(--text-muted)' }}>No uploaded reports. Upload from Results &amp; Reports.</div>
+          <div style={{ padding: canWrite ? '0 18px 18px' : 18, fontSize: 13, color: 'var(--text-muted)' }}>
+            No reports uploaded yet{canWrite ? ' — your own report, in your own format, PDF or Word.' : '.'}
+          </div>
         ) : (
-          <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <div style={{ padding: canWrite ? '0 16px 16px' : 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {data.reports.map((f) => (
               <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', background: 'var(--ink-50)' }}>
                 <Icon name="file-text" size={18} style={{ color: 'var(--blue-600)' }} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.original_filename}</div>
-                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{f.report_type}{f.coverage ? ` · ${f.coverage}` : ''} · {f.author_name || '—'} · {(f.created_at || '').slice(0, 10)}</div>
+                  <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{reportTypeLabel(f.report_type)}{f.coverage ? ` · ${f.coverage}` : ''} · {f.author_name || '—'} · {(f.created_at || '').slice(0, 10)}</div>
                   {f.ai_summary && f.ai_summary_confirmed && (
                     <div style={{ marginTop: 6, padding: '8px 10px', borderRadius: 'var(--radius-md)', background: 'var(--blue-50)', border: '1px solid var(--blue-100)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
@@ -761,7 +772,7 @@ export default function ChildProgressReport() {
               {isStaffOrAdmin && (
                 <Button
                   variant="primary" size="sm"
-                  onClick={() => navigate(`/reports?upload=1&child=${child.id}`)}
+                  onClick={() => setUpload('case_referral')}
                   iconLeft={<Icon name="upload" size={15} />}
                 >
                   Upload case referral
@@ -963,6 +974,10 @@ export default function ChildProgressReport() {
             </Button>
           </div>
         </Modal>
+      )}
+
+      {upload && (
+        <UploadDrawer kind={upload} child={child} onClose={() => setUpload(null)} onUploaded={load} />
       )}
 
       {/* Document summary modal */}

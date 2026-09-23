@@ -5,21 +5,15 @@ import { caseRef } from '../utils/child';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import {
-  Alert, Avatar, Badge, Button, EmptyState, FileUpload, FormField, Icon, iconBtn, IconChip, Input, Note,
-  PAGE, PageHeader, Select, Tabs,
+  Avatar, Badge, Button, EmptyState, Icon, iconBtn, IconChip, Input, Note, PAGE, PageHeader, Tabs,
 } from '../ui';
 import { useOpenFromLink } from '../utils/links';
+import { reportTypeLabel } from '../config/caseData';
 import ReportCheckNote from '../components/ReportCheckNote';
+import UploadDrawer from '../components/UploadDrawer';
 import { hasCheckNote } from '../utils/reportCheck';
 import { loadAll } from '../utils/load';
 
-
-const REPORT_TYPES = [
-  { v: 'initial', label: 'Initial Evaluation' },
-  { v: 'progress', label: 'Progress Report' },
-  { v: 'final', label: 'Final Report' },
-  { v: 'other', label: 'Other' },
-];
 
 export default function Report() {
   const { user } = useAuth();
@@ -34,12 +28,11 @@ export default function Report() {
   const [caseReferrals, setCaseReferrals] = useState([]);
   const [children, setChildren] = useState([]);
   const [q, setQ] = useState('');
-  const [upload, setUpload] = useState(null); // upload drawer state (report or case referral)
-  const [error, setError] = useState('');
+  const [upload, setUpload] = useState(null); // { kind: 'report' | 'case_referral', child }
   const [openChild, setOpenChild] = useState(null);
 
-  const openReportUpload = (childId = '') => { setError(''); setUpload({ kind: 'report', child: childId ? String(childId) : '', report_type: 'progress', coverage: '', fileObj: null }); };
-  const openReferralUpload = (childId = '') => { setError(''); setUpload({ kind: 'case_referral', child: childId ? String(childId) : '', coverage: '', fileObj: null }); };
+  const openReportUpload = (childId = '') => setUpload({ kind: 'report', child: childId || '' });
+  const openReferralUpload = (childId = '') => setUpload({ kind: 'case_referral', child: childId || '' });
   // `?upload=1&child=12` — arriving from a child's record should not then ask
   // which child, the same way the booking link carries one.
   useOpenFromLink(
@@ -89,52 +82,6 @@ export default function Report() {
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     const a = document.createElement('a'); a.href = url; a.download = 'result-entries.csv'; a.click();
     URL.revokeObjectURL(url);
-  };
-
-  const doUpload = async (e) => {
-    e.preventDefault();
-    setError('');
-    if (!upload.child || !upload.fileObj) { setError('Choose a child and a file.'); return; }
-    // A report is checked before it is filed, while it can still be swapped
-    // for the right file: another child's name or case number left in from
-    // the report it was started from. Nothing found and readable means it is
-    // filed straight away; otherwise the findings are shown and the next
-    // press files it as it is.
-    if (upload.kind === 'report' && !upload.check) {
-      const probe = new FormData();
-      probe.append('child', upload.child);
-      probe.append('file', upload.fileObj);
-      setUpload((u) => ({ ...u, checking: true }));
-      try {
-        const { data } = await api.post('/report-files/check/', probe,
-          { headers: { 'Content-Type': 'multipart/form-data' } });
-        if (data.findings.length || !data.readable) {
-          setUpload((u) => ({ ...u, checking: false, check: data }));
-          return;
-        }
-      } catch (err) {
-        setUpload((u) => ({ ...u, checking: false }));
-        setError(JSON.stringify(err.response?.data || 'Could not check the file.'));
-        return;
-      }
-    }
-    const fd = new FormData();
-    fd.append('child', upload.child);
-    fd.append('file', upload.fileObj);
-    if (upload.kind === 'case_referral') {
-      fd.append('description', upload.coverage || '');
-    } else {
-      fd.append('report_type', upload.report_type);
-      fd.append('coverage', upload.coverage || '');
-    }
-    try {
-      await api.post(upload.kind === 'case_referral' ? '/case-referrals/' : '/report-files/',
-        fd, { headers: { 'Content-Type': 'multipart/form-data' } });
-      toast.success(upload.kind === 'case_referral' ? 'Case referral uploaded' : 'Report uploaded');
-      setUpload(null); load();
-    } catch (err) {
-      setError(JSON.stringify(err.response?.data || 'Upload failed'));
-    }
   };
 
   const downloadCaseReferral = async (f) => {
@@ -240,7 +187,7 @@ export default function Report() {
                 <span style={{ display: 'block', fontWeight: 700, fontSize: 13, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.original_filename}</span>
                 <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)' }}>{f.child_name} · {caseRef(f.child)} · {f.author_name || 'unknown author'}</span>
               </span>
-              <Badge tone="brand" size="sm">{REPORT_TYPES.find((t) => t.v === f.report_type)?.label || f.report_type}</Badge>
+              <Badge tone="brand" size="sm">{reportTypeLabel(f.report_type)}</Badge>
               <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)', width: 120, flex: 'none' }}>{f.coverage || '—'}</span>
               <span className="racco-mono" style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-body)', width: 86, textAlign: 'right', flex: 'none' }}>{(f.created_at || '').slice(0, 10)}</span>
               <button
@@ -304,56 +251,10 @@ export default function Report() {
         )}
       </div>
       {upload && (
-        <div onClick={() => setUpload(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.32)', display: 'flex', justifyContent: 'flex-end', zIndex: 70, animation: 'racco-fade-in var(--dur-base) var(--ease-out)' }}>
-          <form onSubmit={doUpload} onClick={(e) => e.stopPropagation()} style={{ width: 440, maxWidth: '92%', height: '100%', background: 'var(--surface)', boxShadow: 'var(--shadow-xl)', display: 'flex', flexDirection: 'column', animation: 'racco-slide-left var(--dur-slow) var(--ease-out)' }}>
-            <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--border)', background: 'var(--ink-50)', fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>
-              {upload.kind === 'case_referral' ? 'Upload Case Referral' : 'Upload Psychological Report'}
-            </div>
-            <div className="racco-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{error}</Alert>}
-              <FormField label="Child" required>
-                <Select value={upload.child} onChange={(e) => setUpload({ ...upload, child: e.target.value, check: null })}>
-                  <option value="">— Select child —</option>
-                  {children.map((c) => <option key={c.id} value={c.id}>{c.fullname}</option>)}
-                </Select>
-              </FormField>
-              <FormField label={upload.kind === 'case_referral' ? 'Case referral file (PDF / Word)' : 'Report file (PDF / Word)'} required hint={upload.kind === 'case_referral' ? "The child's official case referral document." : 'Your own report, in your own format.'}>
-                <FileUpload file={upload.fileObj} accept=".pdf,.doc,.docx"
-                  onChange={(f) => setUpload({ ...upload, fileObj: f, check: null })} />
-              </FormField>
-              {upload.check?.findings?.length > 0 && (
-                <Alert tone="warning" title="Check before filing." icon={<Icon name="alert-triangle" size={18} />}>
-                  <ul style={{ margin: '4px 0 6px', paddingLeft: 18 }}>
-                    {upload.check.findings.map((f) => <li key={f.message} style={{ marginBottom: 2 }}>{f.message}</li>)}
-                  </ul>
-                  Choose a different file, or upload this one as it is.
-                </Alert>
-              )}
-              {upload.check && !upload.check.readable && (
-                <Alert tone="info" title="This file could not be read.">
-                  It can still be uploaded, but without its text it cannot be checked or summarised.
-                  Saved as .docx, or as a PDF with real text rather than a scan, it can be.
-                </Alert>
-              )}
-              {upload.kind !== 'case_referral' && (
-                <FormField label="Report type">
-                  <Select value={upload.report_type} onChange={(e) => setUpload({ ...upload, report_type: e.target.value })}>
-                    {REPORT_TYPES.map((t) => <option key={t.v} value={t.v}>{t.label}</option>)}
-                  </Select>
-                </FormField>
-              )}
-              <FormField label={upload.kind === 'case_referral' ? 'Description' : 'Session / date coverage'}>
-                <Input value={upload.coverage} onChange={(e) => setUpload({ ...upload, coverage: e.target.value })} placeholder={upload.kind === 'case_referral' ? 'e.g. Intake case referral' : 'e.g. Sessions 1-3, Jan-Mar 2026'} />
-              </FormField>
-            </div>
-            <div style={{ padding: 16, borderTop: '1px solid var(--border)' }}>
-              <Button type="submit" variant="primary" fullWidth disabled={upload.checking}
-                      iconLeft={<Icon name="file-up" size={16} />}>
-                {upload.checking ? 'Checking…' : upload.check ? 'Upload anyway' : 'Upload'}
-              </Button>
-            </div>
-          </form>
-        </div>
+        <UploadDrawer
+          kind={upload.kind} childOptions={children} initialChild={upload.child}
+          onClose={() => setUpload(null)} onUploaded={load}
+        />
       )}
     </div>
   );
