@@ -75,6 +75,66 @@ def attendance(appointments, now):
     return out
 
 
+# The wait for a first session, defined once and by the owner's choice: from
+# the day the child's record was created in this system to the day of their
+# first session recorded as COMPLETED. A booking that has not happened yet, a
+# no-show and a cancellation are not a first session.
+#
+# Left out of the figure, on purpose, and counted on their own:
+#
+#   * a first completed session dated BEFORE the record was created. That is
+#     a file typed in after care had already started. A negative wait is not a
+#     wait, and calling it zero would be a guess.
+#   * an active child with no completed session yet. Their wait has not ended,
+#     so it has no length; they are counted with the longest wait so far,
+#     because a median over only the children who were seen says nothing about
+#     the ones who were not.
+#
+# `start` and `end` (end exclusive, either may be None) pick children by the
+# day of that first session: a wait is counted when it ends. Still-waiting is
+# always as of today.
+def first_session_wait(children, today, start=None, end=None):
+    """Median and longest wait in days for a Child queryset already scoped to
+    the caller, with the children left out of it counted beside it."""
+    from statistics import median
+
+    from django.db.models import Min, Q
+    from django.utils import timezone
+
+    from children.models import Child
+    from scheduling.models import Appointment
+
+    waits, waiting, before_record = [], [], 0
+    rows = children.annotate(first=Min(
+        "appointments__start",
+        filter=Q(appointments__status=Appointment.COMPLETED),
+    )).values_list("created_at", "first", "status")
+    for created, first, status in rows:
+        opened = timezone.localtime(created).date()
+        if first is None:
+            if status == Child.ACTIVE:
+                waiting.append((today - opened).days)
+            continue
+        seen = timezone.localtime(first).date()
+        if (start is not None and seen < start) or (end is not None and seen >= end):
+            continue
+        if seen < opened:
+            before_record += 1
+        else:
+            waits.append((seen - opened).days)
+
+    mid = median(waits) if waits else None
+    return {
+        "seen": len(waits),
+        # A whole number of days, or a half when the count is even.
+        "median_days": int(mid) if mid is not None and mid == int(mid) else mid,
+        "longest_days": max(waits) if waits else None,
+        "before_record": before_record,
+        "waiting": len(waiting),
+        "longest_waiting_days": max(waiting) if waiting else None,
+    }
+
+
 def bucket(d, rng):
     if rng == "yearly":
         return str(d.year)

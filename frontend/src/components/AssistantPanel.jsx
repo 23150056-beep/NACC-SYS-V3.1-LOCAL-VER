@@ -136,15 +136,18 @@ function Answer({ result }) {
     // palette checks against this surface where --brand's darker step does not.
     const rows = result.rows || [];
     const max = Math.max(1, ...rows.map((r) => r.count));
+    // A figure, when the server sends one, is what the question asked for
+    // when that is not a count — "how long do children wait?" is in days.
+    const figure = result.figure || { value: result.total, label: result.subject };
     return (
       <div>
         {rows.length === 0 ? (
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 4 }}>
             <span style={{
               fontFamily: 'var(--font-display)', fontSize: 26,
               fontWeight: 700, color: 'var(--text-strong)', lineHeight: 1.1,
-            }}>{result.total}</span>
-            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{result.subject}</span>
+            }}>{figure.value}</span>
+            <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{figure.label}</span>
           </div>
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>

@@ -337,6 +337,13 @@ class Command(BaseCommand):
                 assigned_psychologist=psych,
                 case_status=rng.choice(["pre_assessment", "counseling"]),
             )
+            # The record dates from intake, as it would for a child entered at
+            # intake. Left at the moment the seeder ran, every seeded session
+            # predates its own record and the wait for a first session has
+            # nothing to measure. auto_now_add ignores a value passed to
+            # create(), hence the update.
+            Child.objects.filter(pk=child.pk).update(created_at=timezone.make_aware(
+                timezone.datetime.combine(intake, timezone.datetime.min.time())))
             counts["children"] += 1
 
             ConsentRecord.objects.create(

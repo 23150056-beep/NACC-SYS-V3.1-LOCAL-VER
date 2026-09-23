@@ -152,6 +152,7 @@ Examples:
   "Active children by case type?"     -> get_statistics(measure="children", by="case_type")
   "How many cases closed this year?"  -> get_statistics(measure="closures", period="this_year")
   "What was the no-show rate last month?" -> get_statistics(measure="sessions", period="last_month")
+  "How long do children wait for a first session?" -> get_statistics(measure="first_session_wait")
   "Any children with sleep problems?" -> search_children_by_concern(concern="sleep problems")
   "Sino ang mga bata na ayaw pumasok sa eskwela?" -> search_children_by_concern(concern="school")
   "Sino ang mga batang may problema sa tulog?" -> search_children_by_concern(concern="sleep")

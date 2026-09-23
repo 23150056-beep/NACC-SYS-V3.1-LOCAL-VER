@@ -138,6 +138,12 @@ CHAT_CASES = [
     # get_statistics would be a right answer scored as a wrong tool.
     ("stats noshow en", "What was the no-show rate last month?", "get_statistics",
      False, {"measure": "sessions", "period": "last_month"}),
+    # The wait. "first session" sits next to "sessions" and "intake" next to
+    # new intakes, so these two watch for the measure landing on a neighbour.
+    ("stats wait en", "How long do children wait before their first session?",
+     "get_statistics", False, {"measure": "first_session_wait"}),
+    ("stats wait tl", "Gaano katagal naghihintay ang mga bata bago ang unang session?",
+     "get_statistics", False, {"measure": "first_session_wait"}),
 ]
 
 

@@ -227,6 +227,18 @@ def _summary_csv(data):
         w.writerow([label, att[key]])
     w.writerow(["No-show rate (%)", "" if att["no_show_rate"] is None else att["no_show_rate"]])
     w.writerow([])
+    wait = data["first_session_wait"]
+    w.writerow(["Wait for a first session", "Value"])
+    for label, key in (("Children seen for a first session", "seen"),
+                       ("Median days from record created to first completed session",
+                        "median_days"),
+                       ("Longest wait (days)", "longest_days"),
+                       ("Active children still waiting", "waiting"),
+                       ("Longest wait so far (days)", "longest_waiting_days"),
+                       ("First session dated before the record (not counted)",
+                        "before_record")):
+        w.writerow([label, "" if wait[key] is None else wait[key]])
+    w.writerow([])
     w.writerow(["NACC Service Users by Age Group"])
     w.writerow(["Age Group", "Male", "Female", "Total"])
     for row in data["nacc_service_users"]["age_groups"]:
@@ -289,6 +301,14 @@ class SummaryReportView(generics.GenericAPIView):
         if to:
             appts = appts.filter(start__date__lte=to)
         data["attendance"] = reports.attendance(appts, tz.now())
+
+        # The wait for a first session, over the same window, counted by the
+        # day it ended. `to` is inclusive here and the definition's end is not.
+        from datetime import date, timedelta
+        data["first_session_wait"] = reports.first_session_wait(
+            Child.objects.all(), tz.localdate(),
+            start=date.fromisoformat(frm) if frm else None,
+            end=date.fromisoformat(to) + timedelta(days=1) if to else None)
 
         # NB: `format` is reserved by DRF content negotiation, so use `export`.
         if request.query_params.get("export") == "csv":

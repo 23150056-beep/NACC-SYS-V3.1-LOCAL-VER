@@ -12,7 +12,7 @@ const RANGES = [
   { value: 'monthly', label: 'Monthly' },
   { value: 'yearly', label: 'Annual' },
 ];
-const EMPTY = { total: 0, children: 0, by_case_type: {}, per_psychologist: [], trend: [], terminations_by_reason: {}, pending_pre_assessments: 0, caseload_per_psychologist: [], nacc_service_users: { age_groups: [], case_categories: [] }, attendance: { sessions: 0, completed: 0, no_show: 0, unrecorded: 0, upcoming: 0, cancelled: 0, took_place: 0, no_show_rate: null } };
+const EMPTY = { total: 0, children: 0, by_case_type: {}, per_psychologist: [], trend: [], terminations_by_reason: {}, pending_pre_assessments: 0, caseload_per_psychologist: [], nacc_service_users: { age_groups: [], case_categories: [] }, attendance: { sessions: 0, completed: 0, no_show: 0, unrecorded: 0, upcoming: 0, cancelled: 0, took_place: 0, no_show_rate: null }, first_session_wait: { seen: 0, median_days: null, longest_days: null, before_record: 0, waiting: 0, longest_waiting_days: null } };
 
 export default function AgencySummary() {
   const toast = useToast();
@@ -48,6 +48,18 @@ export default function AgencySummary() {
     .filter(([label, v]) => v > 0 || label === 'Completed' || label === 'No-show');
   const attMax = Math.max(1, ...attRows.map(([, v]) => v));
   const termMax = Math.max(1, ...terminations.map(([, v]) => v));
+  const wait = d.first_session_wait || EMPTY.first_session_wait;
+  const days = (n) => `${n} ${n === 1 ? 'day' : 'days'}`;
+  // Beside the median, never instead of it: who was seen, how long the worst
+  // wait was, and who is not in the figure at all. Rows about nobody are left
+  // off, as on the attendance card.
+  const waitFacts = [
+    ['Longest wait', wait.longest_days === null ? null : days(wait.longest_days)],
+    ['Still waiting now', wait.waiting === 0 ? null
+      : `${wait.waiting} ${wait.waiting === 1 ? 'child' : 'children'} · longest ${days(wait.longest_waiting_days)} so far`],
+    ['Not counted', wait.before_record === 0 ? null
+      : `${wait.before_record} whose first session is dated before their record`],
+  ].filter(([, v]) => v !== null);
 
   const writeNarrative = async () => {
     setNarrativeBusy(true);
@@ -236,6 +248,40 @@ export default function AgencySummary() {
                 <p style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text-muted)', marginTop: 12 }}>
                   The rate counts sessions whose time has passed and that were recorded as completed or no-show.
                   {' '}Cancelled sessions ({att.cancelled}) and past sessions nobody has recorded yet are left out.
+                </p>
+              </>
+            )}
+        </Card>
+
+        {/* The wait for a first session, by clinical/reports.py's one
+            definition, which the assistant uses too. The rule is printed on
+            the card for the same reason as attendance's. */}
+        <Card eyebrow="All children on record" title="Wait for a first session" padding="14px 16px">
+          {wait.seen === 0 && wait.waiting === 0 && wait.before_record === 0
+            ? <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>No child has been seen or is waiting.</p>
+            : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+                  <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 30, lineHeight: 1, color: 'var(--text-strong)' }}>
+                    {wait.median_days === null ? '—' : days(wait.median_days)}
+                  </span>
+                  <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                    median wait · {wait.seen} {wait.seen === 1 ? 'child' : 'children'} seen
+                  </span>
+                </div>
+                {waitFacts.length > 0 && (
+                  <dl style={{ display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 12px', margin: 0, fontSize: 12.5 }}>
+                    {waitFacts.map(([label, v]) => (
+                      <div key={label} style={{ display: 'contents' }}>
+                        <dt style={{ fontWeight: 700, color: 'var(--text-strong)' }}>{label}</dt>
+                        <dd style={{ margin: 0, color: 'var(--text-strong)', fontVariantNumeric: 'tabular-nums' }}>{v}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+                <p style={{ fontSize: 12, lineHeight: 1.5, color: 'var(--text-muted)', marginTop: 12 }}>
+                  Counted from the day a child&rsquo;s record was created here to their first session recorded as completed.
+                  {' '}Children still waiting are not in the median, and neither is a first session dated before the record existed.
                 </p>
               </>
             )}
