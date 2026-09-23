@@ -879,7 +879,16 @@ def _resolve_summary(request, args):
     # and nothing gets looser. Only when that finds nothing does the search
     # widen to any single word — which is what rescues "Maria Reyes" for a
     # record reading "Maria Santos", and "si Maria" for "Maria".
-    matches = list(_scope(request).filter(fullname__icontains=args["name"])[:6])
+    #
+    # Before either: a name that is EXACTLY one child's recorded name means that
+    # child, even when it also sits inside another record — "Maria Santos"
+    # inside "Maria Santos-Cruz". Without this, choosing a name from the
+    # "which one?" list asked the same question again. Two children recorded
+    # under the identical name still come back as "several": a name cannot
+    # tell them apart, and guessing between them would be worse.
+    exact = list(_scope(request).filter(fullname__iexact=args["name"].strip())[:2])
+    matches = (exact if len(exact) == 1 else
+               list(_scope(request).filter(fullname__icontains=args["name"])[:6]))
     if not matches:
         query = Q()
         for word in _name_words(args["name"]):
@@ -1227,6 +1236,110 @@ REGISTRY = {
         "resolve": _resolve_direct,
     },
 }
+
+
+# --- follow-ups -------------------------------------------------------------
+#
+# Refinements of an answer, offered as ready-made calls the panel runs WITHOUT
+# the model: "By sex?", "This week?", a name from a "which one?" list. They
+# cannot misroute because nothing routes them, and they answer in milliseconds
+# rather than seconds.
+#
+# They are not a new trust boundary. The model's output was always untrusted
+# input to validate(); a call the panel sends goes through the same validator,
+# and every resolver takes scope from request.user, never from arguments — so a
+# forged chip reaches nothing a perfectly behaved model could not.
+
+FOLLOWUP_LIMIT = 4
+
+# Periods one step either side, for the schedule and availability answers.
+_NEAR_WHEN = {
+    "today": ("tomorrow", "this_week"), "tomorrow": ("today", "this_week"),
+    "yesterday": ("today", "last_week"), "this_week": ("last_week", "next_week"),
+    "last_week": ("this_week", "last_month"), "next_week": ("this_week",),
+    "this_month": ("last_month", "this_week"), "last_month": ("this_month",),
+}
+_NEAR_BOOKING = {"today": ("tomorrow", "this_week"), "tomorrow": ("this_week", "next_week"),
+                 "this_week": ("next_week",), "next_week": ("this_week",)}
+_PERIOD_CHIP = {p: p.replace("_", " ").capitalize() + "?" for p in PERIODS}
+_BY_CHIP = {"case_type": "By case type?", "age_band": "By age group?", "sex": "By sex?",
+            "psychologist": "By psychologist?", "case_stage": "By case stage?",
+            "reason": "By reason?", "month": "Month by month?"}
+# Most asked-for first: the NACC form's own breakdowns, then caseload.
+_BY_ORDER = ("case_type", "age_band", "sex", "psychologist", "case_stage",
+             "reason", "month")
+
+
+def _followup_statistics(args, result, role):
+    from accounts.models import Role
+    measure, by = result["measure"], result["by"]
+    for b in _BY_ORDER:
+        # A psychologist's "by psychologist" is one row with their own name.
+        if (b in STAT_BY[measure] and b != by
+                and not (b == "psychologist" and role == Role.PSYCHOLOGIST)):
+            yield _BY_CHIP[b], {**args, "by": b}
+    if measure in STAT_DATED:
+        for p in ("this_month", "this_year", "last_year"):
+            if p != result["period"]:
+                yield _PERIOD_CHIP[p], {**args, "period": p}
+
+
+def _followup_appointments(args, result, role):
+    for p in _NEAR_WHEN.get(args["when"], ()):
+        yield _PERIOD_CHIP[p], {"when": p}
+
+
+def _followup_availability(args, result, role):
+    for p in _NEAR_BOOKING.get(args["when"], ()):
+        yield _PERIOD_CHIP[p], {"when": p}
+
+
+def _followup_flags(args, result, role):
+    if args.get("state", "unreviewed") != "all":
+        yield "Include reviewed ones?", {**args, "state": "all"}
+    for p in ("this_month", "this_year"):
+        if p != args.get("period"):
+            yield _PERIOD_CHIP[p], {**args, "period": p}
+
+
+def _followup_summary(args, result, role):
+    # "Several children match — which one?" becomes a choice, not a retype.
+    # Exact full names: the resolver lets an exact match win, so this lands.
+    if result.get("match") == "several":
+        for item in result["items"]:
+            yield item["name"], {"name": item["name"]}
+
+
+_FOLLOWUPS = {
+    "get_statistics": _followup_statistics,
+    "list_my_appointments": _followup_appointments,
+    "find_availability": _followup_availability,
+    "list_self_report_flags": _followup_flags,
+    "get_child_summary": _followup_summary,
+}
+# The only tools the follow-up endpoint will run: the ones chips come from.
+FOLLOWUP_TOOLS = frozenset(_FOLLOWUPS)
+
+
+def followups(call, result, role):
+    """Refinements of this answer as [{label, tool, args}], ready to send back.
+
+    Each offer is put through validate() before it is made, so a chip can never
+    produce a call the server would refuse — and the args sent back are the
+    validated ones, defaults and all.
+    """
+    make = _FOLLOWUPS.get(call.tool)
+    if not call.ok or make is None or result.get("kind") == "message":
+        return []
+    limit = 6 if call.tool == "get_child_summary" else FOLLOWUP_LIMIT
+    out = []
+    for label, raw in make(call.args, result, role):
+        offer = validate(call.tool, raw)
+        if offer.ok:
+            out.append({"label": label, "tool": call.tool, "args": offer.args})
+        if len(out) == limit:
+            break
+    return out
 
 
 def result_size(result):

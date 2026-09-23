@@ -61,6 +61,11 @@ export const checkAssistant = () =>
 export const askAssistant = (question) =>
   api.post('/assistant/ask/', { question }).then((r) => r.data);
 
+// A follow-up chip: the ready-made call the last answer offered, run without
+// the model. Sent back exactly as offered — the server validates it again.
+export const runFollowup = ({ tool, args, label }) =>
+  api.post('/assistant/followup/', { tool, args, label }).then((r) => r.data);
+
 // What this user can ask, and a few example questions. Served rather than
 // hardcoded so the empty panel and the assistant's own refusal text cannot
 // drift apart — there is one answer to "what can I ask", not two.

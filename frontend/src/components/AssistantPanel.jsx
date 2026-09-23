@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { askAssistant, getAssistantCapabilities, sendFeedback } from '../api/assistant';
+import {
+  askAssistant, getAssistantCapabilities, runFollowup, sendFeedback,
+} from '../api/assistant';
 import { useAssistant } from '../context/AssistantContext';
 import { Icon } from '../ui';
 
@@ -60,6 +62,31 @@ function Typing() {
         />
       ))}
     </div>
+  );
+}
+
+/* A suggestion pill. One component for the empty panel's example questions
+ * and for the follow-ups under an answer, so the two cannot drift apart. The
+ * small size is still 26px tall — above WCAG 2.2's 24px target minimum. */
+function Chip({ children, onClick, disabled = false, small = false }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      style={{
+        cursor: disabled ? 'default' : 'pointer',
+        padding: small ? '5px 11px' : '7px 12px',
+        background: 'var(--surface)',
+        border: '1px solid var(--border-strong)',
+        borderRadius: 'var(--radius-pill)',
+        color: 'var(--text-body)', font: 'inherit', fontSize: small ? 12 : 12.5,
+        opacity: disabled ? 0.6 : 1,
+        transition: 'background var(--dur-fast) var(--ease-out)',
+      }}
+      onMouseEnter={(e) => { if (!disabled) e.currentTarget.style.background = 'var(--surface-brand-soft)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--surface)'; }}
+    >{children}</button>
   );
 }
 
@@ -385,18 +412,18 @@ export default function AssistantPanel() {
   useEffect(() => { if (open) toBottom(); }, [open, turns, busy, toBottom]);
   useEffect(() => { if (open) input.current?.focus(); }, [open]);
 
-  const send = useCallback(async (text) => {
-    const asked = (text ?? '').trim();
+  // One path for a typed question and a follow-up chip: the turn appears at
+  // once, the answer replaces the dots, and a failure never breaks the panel.
+  const submit = useCallback(async (asked, run) => {
     if (!asked || busy) return;
     setBusy(true);
-    setQuestion('');
     // The question appears immediately, the way a message does everywhere
     // else. Waiting for the round trip to show it makes the app feel broken.
     setTurns((prev) => [...prev, { asked, pending: true }]);
 
     let answered;
     try {
-      answered = await askAssistant(asked);
+      answered = await run();
     } catch (err) {
       // 503 is the assistant switched off or the runtime down. Neither is an
       // error the user caused, and neither may break the panel.
@@ -413,6 +440,18 @@ export default function AssistantPanel() {
     setBusy(false);
     input.current?.focus();
   }, [busy]);
+
+  const send = useCallback((text) => {
+    const asked = (text ?? '').trim();
+    if (!asked || busy) return;
+    setQuestion('');
+    submit(asked, () => askAssistant(asked));
+  }, [busy, submit]);
+
+  // A chip runs the call it was offered, without the model. The user's side of
+  // the conversation shows the chip's own words, as if they had typed them —
+  // and anything half-typed in the box is left alone.
+  const follow = useCallback((f) => submit(f.label, () => runFollowup(f)), [submit]);
 
   // Optimistic: the thanks shows at once, and only a failed save brings the
   // buttons back. Rating is a courtesy the user does us; making them wait on
@@ -555,21 +594,7 @@ export default function AssistantPanel() {
             </div>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7, marginTop: 12 }}>
               {(caps?.examples ?? SUGGESTIONS).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => send(s)}
-                  style={{
-                    cursor: 'pointer', padding: '7px 12px',
-                    background: 'var(--surface)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: 'var(--radius-pill)',
-                    color: 'var(--text-body)', font: 'inherit', fontSize: 12.5,
-                    transition: 'background var(--dur-fast) var(--ease-out)',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-brand-soft)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--surface)'; }}
-                >{s}</button>
+                <Chip key={s} onClick={() => send(s)}>{s}</Chip>
               ))}
             </div>
             <div style={{ display: 'flex', gap: 9, marginTop: 12, padding: '10px 12px', background: 'var(--surface)', borderLeft: '3px solid var(--border-strong)', borderRadius: '0 8px 8px 0' }}>
@@ -636,6 +661,20 @@ export default function AssistantPanel() {
                 )}
               </div>
             </div>
+
+            {/* Refinements of the latest answer. Offered by the server, run
+                without the model — they cannot misroute, and they answer at
+                once. Only under the newest turn: that is where refining happens. */}
+            {i === turns.length - 1 && !t.pending && t.ok && t.followups?.length > 0 && (
+              <div role="group" aria-label="Follow-up questions"
+                   style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginLeft: 32 }}>
+                {t.followups.map((f) => (
+                  <Chip key={f.label} small disabled={busy} onClick={() => follow(f)}>
+                    {f.label}
+                  </Chip>
+                ))}
+              </div>
+            )}
           </div>
         ))}
       </div>

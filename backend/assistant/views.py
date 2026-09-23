@@ -456,7 +456,10 @@ class AssistantUnansweredView(AssistantBaseView):
 
     def get(self, request):
         since = timezone.now() - timedelta(days=WINDOW_DAYS)
-        chats = AssistantJob.objects.filter(job_type="chat", created_at__gte=since)
+        # Typed questions only: see FOLLOWUP_MODEL.
+        chats = (AssistantJob.objects
+                 .filter(job_type="chat", created_at__gte=since)
+                 .exclude(model_used=FOLLOWUP_MODEL))
 
         data = Q(answer=AssistantJob.DATA)
         breakdown = chats.aggregate(
@@ -567,6 +570,71 @@ def _answer_kind(call):
                                AssistantJob.DECLINED)
 
 
+# What a follow-up chip's turn records as the model that answered it: none did.
+# The unanswered-questions card leaves these turns out — "This year?" means
+# nothing out of context, and a refinement that finds nothing is not a
+# question anybody typed.
+FOLLOWUP_MODEL = "follow-up (no model)"
+
+
+def _answer(request, call, question, model_used, started):
+    """Log the turn, run the lookup, record how it ended, and respond.
+
+    One path for both ways a turn arrives — a typed question the model routed,
+    and a follow-up chip that skipped the model — so the log, the failure
+    handling and the response cannot differ between them.
+    """
+    creator = request.user if request.user.is_authenticated else None
+    job = AssistantJob.objects.create(
+        job_type="chat", input_ref=question[:150],
+        output_text=f"{call.tool}({call.args})"[:2000],
+        model_used=model_used, ok=call.ok, error=call.error[:255],
+        answer="" if call.ok else AssistantJob.NOT_UNDERSTOOD,
+        latency_ms=int((time.monotonic() - started) * 1000),
+        created_by=creator)
+
+    if not call.ok:
+        # Never guess. Say what happened and what it can do instead — from
+        # capability_text, not a copy. This sentence was written before the
+        # flags tool existed and never learned about it, which is what a
+        # second hardcoded list of capabilities always does.
+        return Response({
+            "ok": False, "tool": call.tool,
+            "message": f"I didn't follow that. {tools.capability_text(_role(request))}",
+            "detail": call.error})
+
+    # The audit row is written above, before the queryset runs, so a
+    # resolver that raises would leave a row saying the turn succeeded —
+    # the log would agree the question was answered while the user saw a
+    # 500. Nothing is swallowed: the traceback goes to the logger and the
+    # failure goes to the row. The panel already renders ok:false, so the
+    # assistant declines instead of breaking the screen it is docked on.
+    try:
+        result = tools.REGISTRY[call.tool]["resolve"](request, call.args)
+    except Exception:                                        # noqa: BLE001
+        logger.exception("Chat resolver failed: %s(%s)", call.tool, call.args)
+        job.ok = False
+        job.error = f"resolver failed: {call.tool}"[:255]
+        job.answer = AssistantJob.FAILED
+        job.save(update_fields=["ok", "error", "answer"])
+        return Response({
+            "ok": False, "tool": call.tool,
+            "message": "I couldn't finish looking that up. Nothing was "
+                       "changed — try again, or open the screen directly.",
+            "detail": "resolver failed"})
+
+    # Recorded now because only now is it known. An empty lookup is the
+    # failure this chatbot ranks worst, and until this line it left no
+    # trace: the row said which tool ran, never what it found.
+    job.answer = _answer_kind(call)
+    job.result_count = tools.result_size(result)
+    job.save(update_fields=["answer", "result_count"])
+
+    return Response({"ok": True, "tool": call.tool, "echo": call.echo,
+                     "result": result, "job": job.id,
+                     "followups": tools.followups(call, result, _role(request))})
+
+
 class AssistantAskView(AssistantBaseView):
     """The chatbot. A question in; a validated tool call and its result out.
 
@@ -624,53 +692,41 @@ class AssistantAskView(AssistantBaseView):
         # And a greeting is a greeting even when the model forgets to say
         # so, which it does two times in three.
         call = tools.correct_greeting(question, call)
-        job = AssistantJob.objects.create(
-            job_type="chat", input_ref=question[:150],
-            output_text=f"{call.tool}({call.args})"[:2000],
-            model_used=client.model, ok=call.ok, error=call.error[:255],
-            answer="" if call.ok else AssistantJob.NOT_UNDERSTOOD,
-            latency_ms=int((time.monotonic() - started) * 1000),
-            created_by=creator)
+        return _answer(request, call, question, client.model, started)
 
+
+class AssistantFollowupView(AssistantBaseView):
+    """A follow-up chip: a ready-made tool call, run without the model.
+
+    The panel only sends calls it was offered by tools.followups, but nothing
+    here relies on that. The tool must be one that chips come from, the
+    arguments go through the same validator as the model's, and every resolver
+    takes scope from request.user — so a forged chip reaches nothing a
+    perfectly behaved model could not. A call the validator refuses is a 400
+    rather than "I didn't follow that": no model misunderstood anything, the
+    request itself is wrong.
+
+    Same switch and same rate budget as typed questions. The budget exists for
+    the model more than for the database, but one door per person is simpler
+    to reason about than two — and when there are two budgets, the cheaper
+    door is the one that gets hammered.
+    """
+    throttle_scope = "assistant_chat"
+
+    def post(self, request):
+        gate()
+        started = time.monotonic()
+        tool, args, label = (request.data.get(k) for k in ("tool", "args", "label"))
+        if tool not in tools.FOLLOWUP_TOOLS or not isinstance(args, dict):
+            return Response({"detail": "That is not a follow-up the assistant offers."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if not isinstance(label, str) or not label.strip() or len(label) > MAX_QUESTION:
+            return Response({"detail": "A follow-up needs the label it was offered with."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        call = tools.validate(tool, args)
         if not call.ok:
-            # Never guess. Say what happened and what it can do instead — from
-            # capability_text, not a copy. This sentence was written before the
-            # flags tool existed and never learned about it, which is what a
-            # second hardcoded list of capabilities always does.
-            return Response({
-                "ok": False, "tool": call.tool,
-                "message": f"I didn't follow that. {tools.capability_text(_role(request))}",
-                "detail": call.error})
-
-        # The audit row is written above, before the queryset runs, so a
-        # resolver that raises would leave a row saying the turn succeeded —
-        # the log would agree the question was answered while the user saw a
-        # 500. Nothing is swallowed: the traceback goes to the logger and the
-        # failure goes to the row. The panel already renders ok:false, so the
-        # assistant declines instead of breaking the screen it is docked on.
-        try:
-            result = tools.REGISTRY[call.tool]["resolve"](request, call.args)
-        except Exception:                                        # noqa: BLE001
-            logger.exception("Chat resolver failed: %s(%s)", call.tool, call.args)
-            job.ok = False
-            job.error = f"resolver failed: {call.tool}"[:255]
-            job.answer = AssistantJob.FAILED
-            job.save(update_fields=["ok", "error", "answer"])
-            return Response({
-                "ok": False, "tool": call.tool,
-                "message": "I couldn't finish looking that up. Nothing was "
-                           "changed — try again, or open the screen directly.",
-                "detail": "resolver failed"})
-
-        # Recorded now because only now is it known. An empty lookup is the
-        # failure this chatbot ranks worst, and until this line it left no
-        # trace: the row said which tool ran, never what it found.
-        job.answer = _answer_kind(call)
-        job.result_count = tools.result_size(result)
-        job.save(update_fields=["answer", "result_count"])
-
-        return Response({"ok": True, "tool": call.tool, "echo": call.echo,
-                         "result": result, "job": job.id})
+            return Response({"detail": call.error}, status=status.HTTP_400_BAD_REQUEST)
+        return _answer(request, call, label.strip(), FOLLOWUP_MODEL, started)
 
 
 class ModelHealthView(AssistantBaseView):
