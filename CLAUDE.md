@@ -519,10 +519,28 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
 `docs/CLOUD-DEPLOYMENT.md` §11-12; design in
 `docs/superpowers/specs/2026-08-27-free-secure-web-deployment-design.md`.
 
-- **It deploys from `local-ver`, never `origin`.** Services are `nacc-v3-demo-*`;
-  the live ones are `nacc-v3-api`/`nacc-v3-web`, built from the other repo.
-  Whether a push actually reaches the demo is a question with an answer, not an
+- **It builds from `NACC-SYS-V3.1-LOCAL-VER`, branch `cloud-setup`.** Services
+  are `nacc-v3-demo-*`; the live ones are `nacc-v3-api`/`nacc-v3-web`, built
+  from `NACC-SYS-V3`. Read off the API service's own header in the Render
+  dashboard on 23 Sep 2026 — `cloud-setup` → `79466d7`, Live — which is the
+  only authority for this. The web service was not checked; do not assume it
+  matches. `main` is not what the API watches: a push there built nothing.
+  (This bullet used to name REMOTES — "from `local-ver`, never `origin`" —
+  the framing the 20 Sep correction above disowned.) Whether a push actually
+  reaches the demo is still a question with an answer rather than an
   assumption — see "A push is not a deploy" above.
+- **GitHub’s deployment records lie about the branch and the commit.** Render
+  writes a row per build to `api.github.com/repos/<owner>/<repo>/deployments`,
+  but with `ref=main` and an environment named `main - nacc-v3-demo-*`, stale
+  from whenever that name was set — and GitHub fills in `sha` by resolving
+  that ref, so every row shows `main`’s head at that moment, not what Render
+  built. On 23 Sep a session read 100 of these as proof the demo builds from
+  `main`, wrote it into this file, pushed to `main`, then spent half an hour
+  diagnosing a "missing" deploy. Lined up against commit times, each row had
+  landed about five seconds after a `cloud-setup` commit. The timestamp and the
+  success status are real; the branch and the sha are not. Same lesson as the
+  axe-core note under Accessibility: an instrument less reliable than what it
+  measures is worse than none.
 - **The database is a Neon BRANCH** named `demo`, off a default branch called
   **`production`** (not `main`). It exists so the demo inherits the real
   accounts while its writes — and this repo's newer migrations — never reach
