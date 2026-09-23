@@ -82,12 +82,76 @@ class AppointmentsResolverTest(ResolverTestBase):
         out = self._resolve(self.psy, "list_my_appointments", {"when": "tomorrow"})
         self.assertEqual([], out["items"])
 
-    def test_an_administrator_has_no_appointments_of_their_own(self):
-        # Correct, not a bug: an administrator sees every child but holds no
-        # sessions, so "who am I seeing" honestly returns nothing.
+    # --- scope: the Dashboard's rule --------------------------------------
+    #
+    # This used to assert that an administrator gets NOTHING, reasoning that
+    # they hold no sessions so "who am I seeing" honestly returns empty. True
+    # for that one phrasing, and wrong for the questions the panel suggests to
+    # them: "What was scheduled last week?" is an administrator's example, and
+    # it answered "Nothing recorded" while the Dashboard behind the panel
+    # listed the day's sessions. The schedule now follows the Dashboard: a
+    # psychologist sees their own, everyone else sees the agency's.
+
+    def _staff(self):
+        role = Role.objects.create(role_name=Role.STAFF)
+        return User.objects.create_user(
+            email="s@racco1.gov.ph", username="s", password="pass1234", role=role)
+
+    def test_a_psychologist_still_sees_only_their_own(self):
         self._appt(self.mine, self.psy)
+        self._appt(self.theirs, self.other)
+        out = self._resolve(self.psy, "list_my_appointments", {"when": "today"})
+        self.assertEqual("own", out["scope"])
+        self.assertEqual(["Maria Santos"], [a["child"] for a in out["items"]])
+        self.assertEqual(1, out["total"])
+
+    def test_an_administrator_sees_the_agency_schedule(self):
+        self._appt(self.mine, self.psy)
+        self._appt(self.theirs, self.other)
         out = self._resolve(self.admin, "list_my_appointments", {"when": "today"})
-        self.assertEqual([], out["items"])
+        self.assertEqual("agency", out["scope"])
+        self.assertEqual({"Maria Santos", "Juan Dela Cruz"},
+                         {a["child"] for a in out["items"]})
+        self.assertEqual(2, out["total"])
+
+    def test_staff_see_the_agency_schedule(self):
+        # Staff are the ones who book. An empty calendar is the least useful
+        # answer the assistant could give them.
+        self._appt(self.mine, self.psy)
+        self._appt(self.theirs, self.other)
+        out = self._resolve(self._staff(), "list_my_appointments", {"when": "today"})
+        self.assertEqual("agency", out["scope"])
+        self.assertEqual(2, out["total"])
+
+    def test_agency_rows_say_whose_session_it_is(self):
+        # Across the agency the child's name alone does not say who is seeing
+        # them, and that is the half a staff member booking around it needs.
+        self._appt(self.theirs, self.other)
+        out = self._resolve(self.admin, "list_my_appointments", {"when": "today"})
+        from accounts.display import display_name
+        self.assertEqual(display_name(self.other), out["items"][0]["psychologist"])
+
+    def test_the_agency_scope_matches_the_dashboard(self):
+        # Parity, not a copy of the rule: both answers come from the database,
+        # and they must list the same sessions for the same caller.
+        from rest_framework.test import APIClient
+        self._appt(self.mine, self.psy)
+        self._appt(self.theirs, self.other)
+        client = APIClient()
+        client.force_authenticate(self.admin)
+        strip = client.get("/api/reports/dashboard/").data["today_schedule"]
+        out = self._resolve(self.admin, "list_my_appointments", {"when": "today"})
+        self.assertEqual(sorted(s["child_name"] for s in strip),
+                         sorted(a["child"] for a in out["items"]))
+
+    def test_a_long_schedule_is_paged_and_says_so(self):
+        # A month across the agency runs to hundreds of rows. A list cut short
+        # without its total reads as the whole calendar.
+        for _ in range(tools.APPOINTMENT_PAGE + 3):
+            self._appt(self.theirs, self.other)
+        out = self._resolve(self.admin, "list_my_appointments", {"when": "today"})
+        self.assertEqual(tools.APPOINTMENT_PAGE, len(out["items"]))
+        self.assertEqual(tools.APPOINTMENT_PAGE + 3, out["total"])
 
     # --- periods, and the status that belongs to each ---------------------
 

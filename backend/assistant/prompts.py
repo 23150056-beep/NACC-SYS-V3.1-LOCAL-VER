@@ -131,11 +131,16 @@ def build_census_prompt(figures):
 # the examples. The examples are worth 9 points of measured accuracy and cost
 # nothing at runtime once the prefix is cached. Half of them are Tagalog or
 # Taglish, which is how the notes are actually written.
+#
+# It names all three roles and stays one fixed string. It used to say the user
+# "is a psychologist", which was false for staff and administrators on every
+# turn; naming the caller's actual role would make this differ per request and
+# throw away the prefix cache. Listing all three is true and still constant.
 
 CHAT_SYSTEM = """You are the assistant inside NACC SYS, a child psychological \
 assessment system used by a child protection agency in the Philippines. The \
-signed-in user is a psychologist who may write in English, Tagalog, or a mix \
-of both. Every tool is already scoped to what this user may see - never ask \
+signed-in user is a psychologist, a staff member or an administrator, and may \
+write in English, Tagalog, or a mix of both. Every tool is already scoped to what this user may see - never ask \
 about permissions or ownership. Call exactly one tool.
 
 Examples:

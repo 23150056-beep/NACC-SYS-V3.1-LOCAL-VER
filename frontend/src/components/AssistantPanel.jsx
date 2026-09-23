@@ -123,19 +123,38 @@ function Answer({ result }) {
         .includes(result.when);
       return <Line muted>{past ? 'Nothing recorded.' : 'Nothing scheduled.'}</Line>;
     }
-    return result.items.map((a, i) => (
-      <Line key={i}>
-        <strong>{a.child}</strong>
-        <span style={{ color: 'var(--text-muted)' }}> · {a.when} · {a.purpose}</span>
-        {a.status && a.status !== 'scheduled' && (
-          <span style={{
-            marginLeft: 6, padding: '1px 6px', borderRadius: 'var(--radius-pill)',
-            fontSize: 11, fontWeight: 700, textTransform: 'capitalize',
-            background: 'var(--ink-50)', color: 'var(--text-muted)',
-          }}>{a.status.replace('_', ' ')}</span>
+    // Staff and administrators hold no sessions, so they get the agency's
+    // calendar — said out loud, with whose session each row is, because the
+    // same question answers differently for a psychologist.
+    const agency = result.scope === 'agency';
+    return (
+      <>
+        {agency && <Line muted>Across the agency:</Line>}
+        {result.items.map((a, i) => (
+          <Line key={i}>
+            <strong>{a.child}</strong>
+            <span style={{ color: 'var(--text-muted)' }}>
+              {' '}· {a.when} · {a.purpose}{agency && a.psychologist ? ` · ${a.psychologist}` : ''}
+            </span>
+            {a.status && a.status !== 'scheduled' && (
+              <span style={{
+                marginLeft: 6, padding: '1px 6px', borderRadius: 'var(--radius-pill)',
+                fontSize: 11, fontWeight: 700, textTransform: 'capitalize',
+                background: 'var(--ink-50)', color: 'var(--text-muted)',
+              }}>{a.status.replace('_', ' ')}</span>
+            )}
+          </Line>
+        ))}
+        {/* A month across the agency is hundreds of rows. A cut-off list must
+            never read as the whole calendar. */}
+        {result.total > result.items.length && (
+          <Line muted>
+            Showing {result.items.length} of {result.total}. Open the Calendar
+            to see the rest.
+          </Line>
         )}
-      </Line>
-    ));
+      </>
+    );
   }
 
   if (kind === 'children') {

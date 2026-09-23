@@ -94,6 +94,16 @@ CHAT_CASES = [
     # asks. The year lives on the flags tool, where reviewing over one is real.
     ("month en", "What appointments do I have this month?",
      "list_my_appointments", False, {"when": "this_month"}),
+    # The panel's own suggested questions for administrators and staff. Neither
+    # was measured, and both were answered "Nothing recorded" for those roles
+    # until the schedule followed the Dashboard's scope. No result is expected:
+    # demo sessions sit on five fixed dates, so any given week may hold none.
+    # The scope itself is pinned by resolver tests; what a live model can get
+    # wrong here is the routing and the period.
+    ("agency last week en", "What was scheduled last week?",
+     "list_my_appointments", False, {"when": "last_week"}),
+    ("agency this week en", "What's on this week?",
+     "list_my_appointments", False, {"when": "this_week"}),
     ("flags year en", "Has anything been flagged this year?",
      "list_self_report_flags", False, {"period": "this_year"}),
     ("flags en", "Who flagged something worrying?",
@@ -113,6 +123,37 @@ class _EvalRequest:
 
     def __init__(self, user):
         self.user = user
+
+
+def eval_callers():
+    """One caller per role that has an account: [(role name, request)].
+
+    The eval used to ask everything as one psychologist, so staff and
+    administrators were never measured — which is how the schedule answered
+    "Nothing recorded" for both, including to the questions the panel itself
+    suggests to them. Routing does not depend on who asks (the prompt and the
+    tools array are the same for everyone); the ANSWER does. So each question
+    is routed once and resolved under every caller.
+
+    The psychologist is one with a caseload, or "found nothing" measures an
+    empty caseload rather than the tool. A role with no active account is left
+    out and the report says so, rather than skipping the whole feature.
+    """
+    from django.contrib.auth import get_user_model
+    from accounts.models import Role
+
+    User = get_user_model()
+    callers = []
+    psy = (Child.objects.exclude(assigned_psychologist=None)
+           .values_list("assigned_psychologist", flat=True).first())
+    if psy is not None:
+        callers.append((Role.PSYCHOLOGIST, _EvalRequest(User.objects.get(pk=psy))))
+    for role in (Role.STAFF, Role.ADMINISTRATOR):
+        user = (User.objects.filter(role__role_name=role, status=User.ACTIVE)
+                .order_by("pk").first())
+        if user is not None:
+            callers.append((role, _EvalRequest(user)))
+    return callers
 
 
 FEELING_Q = "How are you feeling this week?"
@@ -274,20 +315,25 @@ class Command(BaseCommand):
     def _chat(self, reps):
         """Route a question, validate it, and run the resolver for real.
 
-        The resolver runs against the live database under a real psychologist's
-        scope, so "found nothing" is measured rather than assumed.
+        The resolver runs against the live database under each role's own
+        scope, so "found nothing" is measured rather than assumed — for staff
+        and administrators as well as psychologists. See eval_callers().
         """
-        user = (Child.objects.exclude(assigned_psychologist=None)
-                .values_list("assigned_psychologist", flat=True).first())
-        if user is None:
-            self.stdout.write("\nCHAT — no psychologist has a caseload; skipped.")
+        from accounts.models import Role
+
+        callers = eval_callers()
+        if not callers:
+            self.stdout.write("\nCHAT — no account to ask as; skipped.")
             return ("chat", 0, {}, 0)
-        from django.contrib.auth import get_user_model
-        request = _EvalRequest(get_user_model().objects.get(pk=user))
 
         self.stdout.write("\n" + "=" * 62)
         self.stdout.write(f"CHAT — {len(CHAT_CASES)} cases x {reps} reps")
-        self.stdout.write(f"Caller: {request.user.email}")
+        for role, req in callers:
+            self.stdout.write(f"Caller: {role:<14} {req.user.email}")
+        present = {role for role, _ in callers}
+        for role in (Role.PSYCHOLOGIST, Role.STAFF, Role.ADMINISTRATOR):
+            if role not in present:
+                self.stdout.write(f"Caller: {role:<14} none — NOT MEASURED")
 
         runs, flags, latencies = 0, {}, []
         payload = tools.ollama_payload()
@@ -323,11 +369,16 @@ class Command(BaseCommand):
                 if not call.ok:
                     found["rejected"] = [call.error]
                 elif expect_hits:
-                    result = tools.REGISTRY[call.tool]["resolve"](request, call.args)
-                    n = result.get("count", len(result.get("items", [])))
-                    if not n:
-                        # The silent failure: a confident empty answer.
-                        found["empty answer"] = [f"{call.args or 'no args'}"]
+                    # Per role: the same routed call can be a full answer for a
+                    # psychologist and an empty one for an administrator.
+                    for role, req in callers:
+                        result = tools.REGISTRY[call.tool]["resolve"](req, call.args)
+                        n = result.get("count", result.get(
+                            "total", len(result.get("items", []))))
+                        if not n:
+                            # The silent failure: a confident empty answer.
+                            found[f"empty answer ({role})"] = [
+                                f"{call.args or 'no args'}"]
                 # The other silent failure: the right tool asked the wrong
                 # question. kahapon routed perfectly and requested today.
                 if call.ok and expected_args:

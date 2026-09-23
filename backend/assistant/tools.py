@@ -291,6 +291,9 @@ APPOINTMENT_PERIODS = tuple(p for p in PERIODS if not p.endswith("_year"))
 # included, because a session completed this morning belongs in the answer.
 FUTURE_ONLY = {"tomorrow", "next_week"}
 
+# How many sessions a single schedule answer lists. `total` carries the rest.
+APPOINTMENT_PAGE = 25
+
 
 def _week_start(day):
     """The Sunday on or before `day`.
@@ -414,7 +417,24 @@ def _scope(request):
 
 
 def _resolve_appointments(request, args):
+    """The schedule, scoped the way the Dashboard scopes it.
+
+    A psychologist sees their own sessions. Staff and administrators hold none,
+    so they see the agency's — which is what the Dashboard's schedule strip
+    already shows them, and what the panel's own suggested questions ask for:
+    "What was scheduled last week?" is an administrator's example. Filtering
+    every role by `psychologist=request.user` answered that example "Nothing
+    recorded" for two roles out of three, while the screen behind the panel
+    listed the day's sessions. A confident empty answer contradicting the
+    screen is the worst failure this chatbot has.
+
+    Paged like the flags, and for the same reason: a month across the agency
+    runs to hundreds of rows, and a list cut short without saying so reads as
+    the whole schedule. `total` always carries the real count.
+    """
     from django.utils import timezone
+    from accounts.models import Role
+    from accounts.scoping import role_of
     from scheduling.models import Appointment
 
     period = args["when"]
@@ -428,15 +448,23 @@ def _resolve_appointments(request, args):
                 else [Appointment.SCHEDULED, Appointment.COMPLETED,
                       Appointment.NO_SHOW])
 
-    appts = (Appointment.objects
-             .filter(psychologist=request.user, status__in=statuses,
-                     start__date__gte=start, start__date__lt=end)
-             .select_related("child").order_by("start"))
-    return {"kind": "appointments", "when": period, "items": [
-        {"child": a.child.fullname,
-         "when": timezone.localtime(a.start).strftime("%a %d %b, %H:%M"),
-         "purpose": a.get_purpose_display(),
-         "status": a.status} for a in appts]}
+    appts = Appointment.objects.filter(
+        status__in=statuses, start__date__gte=start, start__date__lt=end)
+    # The Dashboard's rule, through the same helper: only a psychologist is
+    # narrowed to their own calendar.
+    own = role_of(request) == Role.PSYCHOLOGIST
+    if own:
+        appts = appts.filter(psychologist=request.user)
+    appts = appts.select_related("child", "psychologist").order_by("start")
+
+    total = appts.count()
+    return {"kind": "appointments", "when": period,
+            "scope": "own" if own else "agency", "total": total, "items": [
+                {"child": a.child.fullname,
+                 "psychologist": display_name(a.psychologist),
+                 "when": timezone.localtime(a.start).strftime("%a %d %b, %H:%M"),
+                 "purpose": a.get_purpose_display(),
+                 "status": a.status} for a in appts[:APPOINTMENT_PAGE]]}
 
 
 def _resolve_count(request, args):
@@ -779,7 +807,9 @@ REGISTRY = {
             "question about the calendar, the schedule, or work already done "
             "in a period. Do NOT use this to search for children."),
         "schema": {"when": {"enum": list(APPOINTMENT_PERIODS), "required": True}},
-        "echo": lambda a: f"Looking up: your appointments {a['when'].replace('_', ' ')}",
+        # Not "your": the echo sees only the arguments, and an administrator
+        # asking this is looking at the agency's calendar, not their own.
+        "echo": lambda a: f"Looking up: appointments {a['when'].replace('_', ' ')}",
         "resolve": _resolve_appointments,
     },
     "count_my_children": {
@@ -891,13 +921,15 @@ REGISTRY = {
     },
     "answer_directly": {
         "description": (
+            # It used to claim "how many psychologists, staff or users" as
+            # well — written before count_people existed, and never removed
+            # when that tool took the question over. Two descriptions claiming
+            # one question is a routing coin-toss, and the tools array is read
+            # as one prompt.
             "Use when NO other tool fits: greetings, thanks, sign-offs, general "
-            "knowledge, questions about what words mean, or anything not about "
-            "this user's schedule, children or caseload. This includes "
-            "questions about PEOPLE WHO WORK HERE — how many psychologists, "
-            "staff or users the system has — and questions about the system "
-            "itself. Answering one of those with a child count would be "
-            "wrong; use this instead."),
+            "knowledge, questions about what words mean, questions about the "
+            "system itself, or anything not about this user's schedule, "
+            "children or caseload."),
         # `reason` is telemetry, not logic — the response is the same fixed
         # copy either way. Requiring it turned the one case in 28 where the
         # model omitted it into a failed turn, so it defaults instead.
