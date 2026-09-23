@@ -133,6 +133,11 @@ CHAT_CASES = [
      "get_statistics", False, {"measure": "closures", "period": "this_year"}),
     ("stats pending tl", "Ilan ang pending na pre-assessment?", "get_statistics",
      False, {"measure": "pre_assessments"}),
+    # Attendance. Watch "month tl" above with this one: "Ilan ang appointments
+    # ko ngayong buwan?" now has two tools that can answer it, and moving to
+    # get_statistics would be a right answer scored as a wrong tool.
+    ("stats noshow en", "What was the no-show rate last month?", "get_statistics",
+     False, {"measure": "sessions", "period": "last_month"}),
 ]
 
 

@@ -38,6 +38,43 @@ def age_band(birth_date, today):
     return UNSPECIFIED_AGE
 
 
+# Attendance, defined once. The Agency Summary shows it and the assistant
+# counts it, and the two must never define "no-show rate" differently.
+#
+# A session took place if its time has passed and somebody recorded it as
+# COMPLETED (attended) or NO_SHOW (missed). The rate is missed over those two.
+# Left out of the rate, on purpose:
+#
+#   * CANCELLED - called off in advance. Nobody failed to attend.
+#   * time passed, still SCHEDULED - nobody recorded what happened. That is a
+#     gap in the record, not an attendance outcome, so it is counted on its
+#     own ("not yet recorded") instead of being guessed into either side.
+#
+# `sessions` is everything that is not cancelled, which is what the schedule
+# answer calls a session too.
+def attendance(appointments, now):
+    """Counts and the no-show rate (whole percent, or None) for Appointment rows."""
+    from scheduling.models import Appointment
+
+    out = {"completed": 0, "no_show": 0, "unrecorded": 0, "upcoming": 0, "cancelled": 0}
+    for a in appointments:
+        if a.status == Appointment.CANCELLED:
+            out["cancelled"] += 1
+        elif a.status == Appointment.COMPLETED:
+            out["completed"] += 1
+        elif a.status == Appointment.NO_SHOW:
+            out["no_show"] += 1
+        elif a.start < now:
+            out["unrecorded"] += 1
+        else:
+            out["upcoming"] += 1
+    took_place = out["completed"] + out["no_show"]
+    out["took_place"] = took_place
+    out["sessions"] = took_place + out["unrecorded"] + out["upcoming"]
+    out["no_show_rate"] = round(100 * out["no_show"] / took_place) if took_place else None
+    return out
+
+
 def bucket(d, rng):
     if rng == "yearly":
         return str(d.year)

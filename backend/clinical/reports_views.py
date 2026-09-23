@@ -219,6 +219,14 @@ def _summary_csv(data):
     for k, v in data["terminations_by_reason"].items():
         w.writerow([k, v])
     w.writerow([])
+    att = data["attendance"]
+    w.writerow(["Attendance", "Count"])
+    for label, key in (("Completed", "completed"), ("No-show", "no_show"),
+                       ("Not yet recorded", "unrecorded"), ("Upcoming", "upcoming"),
+                       ("Cancelled (not counted)", "cancelled")):
+        w.writerow([label, att[key]])
+    w.writerow(["No-show rate (%)", "" if att["no_show_rate"] is None else att["no_show_rate"]])
+    w.writerow([])
     w.writerow(["NACC Service Users by Age Group"])
     w.writerow(["Age Group", "Male", "Female", "Total"])
     for row in data["nacc_service_users"]["age_groups"]:
@@ -269,6 +277,18 @@ class SummaryReportView(generics.GenericAPIView):
             {"name": k, "caseload": v}
             for k, v in sorted(caseload.items(), key=lambda kv: -kv[1])]
         data["nacc_service_users"] = _nacc_service_users()
+
+        # Attendance over the same from/to window as the rest of the summary,
+        # by the one definition in clinical.reports that the assistant's
+        # statistics also use. Agency-wide: this screen is Admin and Staff.
+        from django.utils import timezone as tz
+        from scheduling.models import Appointment
+        appts = Appointment.objects.only("status", "start")
+        if frm:
+            appts = appts.filter(start__date__gte=frm)
+        if to:
+            appts = appts.filter(start__date__lte=to)
+        data["attendance"] = reports.attendance(appts, tz.now())
 
         # NB: `format` is reserved by DRF content negotiation, so use `export`.
         if request.query_params.get("export") == "csv":
