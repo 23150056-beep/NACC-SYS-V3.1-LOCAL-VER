@@ -6,7 +6,7 @@ import {
 import { PROCEED, useConfirm } from '../../context/ConfirmContext';
 import {
   ADMISSION, BIRTH_STATUSES, CASE_CATEGORIES, CASE_CATEGORY_OPTIONS, CASE_TYPES, CASE_TYPE_FIELDS,
-  LEGAL_STATUSES, PLACEMENT, SURRENDERED_BY, TYPES_OF_ADOPTION, caseTypesFor, dateFieldFor,
+  LEGAL_STATUSES, PLACEMENT, TYPES_OF_ADOPTION, caseTypesFor, dateFieldFor,
   requiredFields,
 } from '../../config/caseData';
 
@@ -420,11 +420,14 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, bloc
                 </Select>
               </FormField>
               {asksFor('surrendered_by') && (
-                <FormField label="Previous Custodian" required error={fieldError('surrendered_by')}>
-                  <Select value={form.surrendered_by || ''} onChange={(e) => setForm({ ...form, surrendered_by: e.target.value })}>
-                    <option value="">— Select —</option>
-                    {withRetired(SURRENDERED_BY, form.surrendered_by).map((v) => <option key={v} value={v}>{optionLabel(SURRENDERED_BY, v)}</option>)}
-                  </Select>
+                /* Typed, not picked: staff record who actually had the child
+                   - a name, a relationship, an office - which no short list
+                   covers. */
+                <FormField label="Previous Custodian" required error={fieldError('surrendered_by')}
+                  hint="Who had the child before — a name, relationship or office.">
+                  <Input value={form.surrendered_by || ''} maxLength={150}
+                    placeholder="e.g. Rosa Dela Cruz (maternal aunt)"
+                    onChange={(e) => setForm({ ...form, surrendered_by: e.target.value })} />
                 </FormField>
               )}
               {asksFor('type_of_adoption') && (

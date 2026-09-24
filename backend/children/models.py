@@ -60,13 +60,6 @@ class Child(models.Model):
         ("Orphaned", "Orphaned"),
     ]
 
-    # Who surrendered the child to NACC / RACCO I.
-    SURRENDERED_BY_CHOICES = [
-        ("Social Worker", "Social Worker"),
-        ("Police", "Police"),
-        ("Relatives", "Relatives"),
-    ]
-
     # New fields below match the agency's official "I. Identifying
     # Information" intake form (2026-07). "N/A" became "Unknown" and "Child"
     # was retired on 24 Sep 2026; a record still holding "Child" keeps it
@@ -137,7 +130,12 @@ class Child(models.Model):
     case_type = models.CharField(max_length=150, blank=True, choices=CASE_TYPE_CHOICES)
     # Official agency "Identifying Information" intake form Category list.
     case_category = models.CharField(max_length=50, blank=True, choices=CASE_CATEGORY_CHOICES)
-    surrendered_by = models.CharField(max_length=50, blank=True, choices=SURRENDERED_BY_CHOICES)
+    # "Previous Custodian" on the form: who had the child before, written in
+    # by staff. It was a three-item placeholder list (Social Worker / Police /
+    # Relatives) until 24 Sep 2026, when staff asked to type the actual
+    # custodian - a name, a relationship, an office. The old values are still
+    # valid text and were left as they were.
+    surrendered_by = models.CharField(max_length=150, blank=True)
     # Remaining "I. Identifying Information" fields not already covered above.
     place_of_birth_or_found = models.CharField(max_length=150, blank=True)
     birth_status = models.CharField(max_length=20, blank=True, choices=BIRTH_STATUS_CHOICES)

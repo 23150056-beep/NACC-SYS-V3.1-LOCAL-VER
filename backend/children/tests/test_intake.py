@@ -213,6 +213,23 @@ class CreatingARecordTest(_Staff):
         r = self.post(case_category="Orphaned", birth_status="Unknown")
         self.assertEqual(201, r.status_code, r.data)
 
+    def test_the_previous_custodian_is_typed_in(self):
+        """Free text since 24 Sep 2026 - staff write who actually had the
+        child. Still required where the case asks it, and a blank is a blank
+        however many spaces it is typed with."""
+        r = self.post(surrendered_by="Rosa Dela Cruz (maternal aunt), Brgy. Catbangen")
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertEqual("Rosa Dela Cruz (maternal aunt), Brgy. Catbangen", r.data["surrendered_by"])
+        r = self.post(last_name="Reyes", surrendered_by="Relatives")
+        self.assertEqual(201, r.status_code, "a value from the old list is still fine")
+        for blank in ("", "   "):
+            r = self.post(last_name="Cruz", surrendered_by=blank)
+            self.assertEqual(400, r.status_code, repr(blank))
+            self.assertIn("surrendered_by", r.data)
+        r = self.post(last_name="Lim", surrendered_by="x" * 151)
+        self.assertEqual(400, r.status_code)
+        self.assertIn("surrendered_by", r.data)
+
     def test_no_date_in_the_future_or_before_the_child_was_born(self):
         tomorrow = (timezone.localdate() + timedelta(days=1)).isoformat()
         for field in ("date_found", "date_of_placement_to_custodian"):
