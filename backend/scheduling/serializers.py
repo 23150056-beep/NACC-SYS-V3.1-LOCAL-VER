@@ -79,6 +79,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
     child_name = serializers.SerializerMethodField()
     case_ref = serializers.SerializerMethodField()
     referred_by_name = serializers.SerializerMethodField()
+    has_referral = serializers.SerializerMethodField()
     name_hidden = serializers.SerializerMethodField()
     psychologist_name = serializers.CharField(
         source="psychologist.fullname", read_only=True, default=None)
@@ -87,7 +88,8 @@ class AppointmentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Appointment
-        fields = ["id", "child", "child_name", "case_ref", "referred_by_name", "name_hidden",
+        fields = ["id", "child", "child_name", "case_ref", "referred_by_name", "has_referral",
+                  "name_hidden",
                   "psychologist", "psychologist_name",
                   "start", "duration_minutes", "purpose", "status",
                   "pre_assessment", "notes", "booked_by", "booked_by_name", "created_at"]
@@ -95,7 +97,7 @@ class AppointmentSerializer(serializers.ModelSerializer):
         extra_kwargs = {"psychologist": {"required": False}}
 
     def _who(self, obj):
-        # Computed once per row and shared by the four fields below.
+        # Computed once per row and shared by the five fields below.
         cache = self.__dict__.setdefault("_who_cache", {})
         if obj.pk not in cache:
             request = self.context.get("request")
@@ -110,6 +112,9 @@ class AppointmentSerializer(serializers.ModelSerializer):
 
     def get_referred_by_name(self, obj):
         return self._who(obj)["referred_by_name"]
+
+    def get_has_referral(self, obj):
+        return self._who(obj)["has_referral"]
 
     def get_name_hidden(self, obj):
         return self._who(obj)["name_hidden"]

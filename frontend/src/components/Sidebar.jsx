@@ -5,7 +5,7 @@ import { useLayout } from '../context/LayoutContext';
 import { useCensus } from '../context/CensusContext';
 import { Icon, ROLE_META, roleLabel } from '../ui';
 import { railIsActive, railRowsFor, screenIdFor } from '../config/nav';
-import { initialsOf, PURPOSE_LABEL } from '../utils/child';
+import { initialsOf, PURPOSE_LABEL, scheduleName } from '../utils/child';
 
 /* The left rail: every destination, labelled, in the order the work happens.
  *
@@ -68,13 +68,16 @@ export default function Sidebar() {
       seen.add(id);
       out.push(entry);
     };
+    // scheduleName: a staff member sees a case reference, not a name, for a
+    // child someone else referred - same as the calendar (CLAUDE.md, Names on
+    // the schedule). child_name is null for those.
     (stats.today_schedule || []).forEach((a) => push(a.child_id, {
-      id: a.child_id, name: a.child_name,
+      id: a.child_id, name: scheduleName(a), initials: a.child_name ? initialsOf(a.child_name) : '#',
       meta: `${a.time} · ${PURPOSE_LABEL[a.purpose] || a.purpose}`,
       dot: a.status === 'completed' ? 'var(--success-500)' : 'var(--amber-500)',
     }));
     (stats.care_gaps || []).forEach((g) => push(g.child_id, {
-      id: g.child_id, name: g.child_name, meta: g.message,
+      id: g.child_id, name: g.child_name, initials: initialsOf(g.child_name), meta: g.message,
       dot: GAP_DOT[g.severity] || 'var(--blue-400)',
     }));
     return out;
@@ -165,7 +168,7 @@ export default function Sidebar() {
             >
               <span style={{ position: 'relative', flex: 'none' }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', background: 'var(--blue-100)', color: 'var(--blue-700)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 10.5 }}>
-                  {initialsOf(p.name)}
+                  {p.initials}
                 </span>
                 <span style={{ position: 'absolute', right: -1, bottom: -1, width: 9, height: 9, borderRadius: '50%', background: p.dot, border: '2px solid var(--bg-app)' }} />
               </span>

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import { Alert, Button, Icon, Modal } from '../ui';
+import PdfFrame from './PdfFrame';
+import { pdfObjectUrl } from '../utils/pdf';
 
 /* Reading a psychologist's report on screen instead of downloading it
  * (24 Sep 2026: staff asked to see the psychologist's reports).
@@ -40,7 +42,7 @@ export default function ReportViewer({ report, onClose, onDownload }) {
           const res = await api.get(`/report-files/${report.id}/download/`, { responseType: 'blob' });
           // Typed as a PDF here, whatever came back: a blob inherits this
           // page's origin, so it must never be something a browser runs.
-          url = URL.createObjectURL(new Blob([res.data], { type: 'application/pdf' }));
+          url = pdfObjectUrl(res.data);
           if (live) setState({ url });
         } else {
           const { data } = await api.get(`/report-files/${report.id}/text/`);
@@ -72,12 +74,7 @@ export default function ReportViewer({ report, onClose, onDownload }) {
            className="racco-scroll">
         {state.loading && <div style={{ padding: 16, color: 'var(--text-muted)' }}>Opening the report…</div>}
         {state.error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>The report could not be opened. Try downloading it instead.</Alert>}
-        {state.url && (
-          /* sandbox with no allow-scripts, as for the consent scan: the src is
-             a blob: URL on this page's origin. Do not add allow-scripts. */
-          <iframe title={`Report: ${report.original_filename}`} src={state.url} sandbox=""
-                  referrerPolicy="no-referrer" style={{ width: '100%', height: '100%', border: 'none' }} />
-        )}
+        {state.url && <PdfFrame url={state.url} title={`Report: ${report.original_filename}`} />}
         {state.text !== undefined && (state.readable
           ? <div style={{ padding: '4px 6px' }}><ReportText text={state.text} /></div>
           : (

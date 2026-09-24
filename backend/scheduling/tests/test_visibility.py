@@ -104,6 +104,21 @@ class ScheduleNamesTest(TestCase):
         self.assertIsNone(self._rows(self.editha)[self.ana.id]["child_name"])
         self.assertEqual("Ana Cruz", self._rows(self.rosa)[self.ana.id]["child_name"])
 
+    def test_a_referral_whose_uploader_is_gone_is_still_a_referral(self):
+        # uploaded_by is SET_NULL. Reading that as "no referral on file" would
+        # tell a social worker a booked child has no referral when it has one.
+        CaseReferral.objects.filter(child=self.ben).update(uploaded_by=None)
+        ben = self._rows(self.editha)[self.ben.id]
+        self.assertIsNone(ben["child_name"])
+        self.assertIsNone(ben["referred_by_name"])
+        self.assertTrue(ben["has_referral"])
+        self.assertFalse(self._rows(self.editha)[self.cara.id]["has_referral"])
+        req = APIRequestFactory().get("/api/assistant/ask/")
+        req.user = self.editha
+        said = {item["child"] for item in tools.REGISTRY["list_my_appointments"]["resolve"](
+            req, {"when": "tomorrow"})["items"]}
+        self.assertIn(f"C-{self.ben.id:04d} (referrer unknown)", said)
+
     def test_a_booking_answers_the_same_way(self):
         client = APIClient()
         client.force_authenticate(self.editha)

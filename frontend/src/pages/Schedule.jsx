@@ -1224,7 +1224,8 @@ export default function Schedule() {
                 <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{new Date(sel.start).toLocaleString()} · {sel.duration_minutes} min</div>
                 <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
                   {sel.child_name ? `${sel.case_ref} · ` : ''}
-                  {sel.referred_by_name ? `Referred by ${sel.referred_by_name}` : 'No case referral on file'}
+                  {sel.referred_by_name ? `Referred by ${sel.referred_by_name}`
+                    : sel.has_referral ? 'Referrer unknown' : 'No case referral on file'}
                 </div>
               </div>
               <Badge tone={STATUS_TONE[sel.status]} dot>{sel.status.replace('_', '-')}</Badge>

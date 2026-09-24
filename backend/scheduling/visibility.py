@@ -66,6 +66,9 @@ def who(user, child):
         "child_name": child.fullname if visible else None,
         "case_ref": case_ref(child),
         "referred_by_name": (display_name(by) or None) if by is not None else None,
+        # Separate from the name: a referral whose uploader's account row is
+        # gone (SET_NULL) is still a referral, and must not read as "none".
+        "has_referral": referral is not None,
         "name_hidden": not visible,
     }
 
@@ -76,4 +79,8 @@ def label(user, child):
     if w["child_name"]:
         return w["child_name"]
     ref = w["referred_by_name"]
-    return f"{w['case_ref']} (referred by {ref})" if ref else f"{w['case_ref']} (no referral on file)"
+    if ref:
+        return f"{w['case_ref']} (referred by {ref})"
+    if w["has_referral"]:
+        return f"{w['case_ref']} (referrer unknown)"
+    return f"{w['case_ref']} (no referral on file)"

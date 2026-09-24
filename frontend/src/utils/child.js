@@ -79,5 +79,6 @@ export function shortName(full = '') {
 export function scheduleName(a) {
   if (a.child_name) return a.child_name;
   const ref = a.case_ref || (a.child ? caseRef(a.child) : 'A child');
-  return a.referred_by_name ? `${ref} · Ref. ${shortName(a.referred_by_name)}` : `${ref} · no referral on file`;
+  if (a.referred_by_name) return `${ref} · Ref. ${shortName(a.referred_by_name)}`;
+  return a.has_referral ? `${ref} · referrer unknown` : `${ref} · no referral on file`;
 }

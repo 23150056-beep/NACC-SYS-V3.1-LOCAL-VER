@@ -558,10 +558,18 @@ none of the real ones has been seen.
   arithmetic, not a measurement - `ai_eval --feature summary` measures it,
   fitted against whole, on the machine that runs the model.
 - **Reports are read on screen too** (24 Sep 2026, staff asked): a PDF in a
-  sandboxed frame - scripts off, typed as a PDF whatever came back, as for
-  consent scans - and a Word file as its text, headings kept, through
+  frame, and a Word file as its text, headings kept, through
   `/report-files/<id>/text/`. Same object and queryset as the download, so it
   shows nobody anything the Download button would not.
+- **A PDF frame must NOT be sandboxed** (`components/PdfFrame.jsx`, shared with
+  the consent-scan preview). Chrome refuses a PDF in a sandboxed frame outright
+  - its viewer is a plugin and no sandbox flag allows one - and shows a grey
+  broken-file icon. The consent preview did exactly that from 2 Sep to 24 Sep,
+  unnoticed, because headless checks never looked at the frame. The lock is
+  the blob's type instead: `utils/pdf.js` types every framed blob as
+  `application/pdf` itself, so it reaches the PDF viewer and never renders as
+  a page. Measured: an HTML file uploaded as `.pdf` shows "failed to load" and
+  runs nothing. Check a frame in headful Chromium (`xvfb-run`), not headless.
 - **Print on a child's record prints a psychological report**
   (`components/PsychReportPrint.jsx`), not the screen: identifying
   information, reason for referral, background, procedures, observations,
@@ -652,7 +660,14 @@ Pascua"**. Administrators and psychologists see names.
   there; this is how a schedule is displayed, not what staff may know.
 - The latest referral decides, so replacing one moves the name to whoever
   filed the new one. A child with no referral on file reads "no referral on
-  file". `test_the_rule_costs_no_query_per_row` holds the prefetch.
+  file"; a referral whose uploader's row is gone reads "referrer unknown"
+  (`has_referral`), not "none". `test_the_rule_costs_no_query_per_row` holds
+  the prefetch.
+- **Every screen that shows a schedule row goes through `scheduleName()`**
+  (`utils/child.js`): the calendar, the Today card, the left rail's "Needs you
+  today". The rail read `child_name` directly and showed staff a blank row for
+  every masked child - `child_name` is null there by design, so a screen that
+  reads it raw is the bug.
 
 ## Confirmations
 
