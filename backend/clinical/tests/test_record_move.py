@@ -1,12 +1,14 @@
-"""A clinical record stays on a child its editor may write to.
+"""A clinical record stays with the child it was filed for.
 
 perform_update checked the child a record was on BEFORE the change, and every
 serializer in this family leaves `child` writable, so one PATCH could move a
-psychologist's report, remark or plan onto a child who is not theirs - accepted
-with a 200, and then out of their own sight. The destination is checked too.
+psychologist's report, remark or plan onto a child who was not theirs -
+accepted with a 200, and then out of their own sight.
 
-Moving a record between two children the editor may write to is unchanged:
-whether that should be possible at all is the owner's call, not this fix's.
+The owner then decided (24 Sep 2026) that a record is not moved at all, by
+anyone: not between an editor's own children, not by an administrator. No
+screen ever sent a change of child, so nothing in the app loses anything; a
+record filed for the wrong child is filed again for the right one.
 """
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
@@ -16,10 +18,9 @@ from rest_framework.test import APIClient
 
 from accounts.models import Role
 from children.models import Child
-from clinical.models import (ClinicalInterviewRecord, ConsentRecord, PreAssessment,
+from clinical.models import (CaseReferral, ClinicalInterviewRecord, ConsentRecord, PreAssessment,
                              ProblemEntry, PsychologicalReport, RemarkNote,
                              ResultEntry, TreatmentPlan)
-from clinical.report_check import OTHER_CHILD
 from clinical.urls import router
 from clinical.views import _ChildScopedClinicalViewSet
 
@@ -77,43 +78,29 @@ class RecordMoveTest(_Caseloads):
                   if issubclass(viewset, _ChildScopedClinicalViewSet)}
         self.assertEqual(shared, set(ENDPOINTS))
 
-    def test_a_record_cannot_be_moved_to_another_psychologists_child(self):
+    def assert_refused(self, user, to, allowed=(400,)):
         for prefix, make in ENDPOINTS.items():
             with self.subTest(prefix):
                 row = make(self.mine, self.psy)
-                res = self.patch(self.psy, f"/api/{prefix}/{row.pk}/", {"child": self.theirs.pk})
-                self.assertEqual(403, res.status_code, res.data)
+                res = self.patch(user, f"/api/{prefix}/{row.pk}/", {"child": to.pk})
+                self.assertIn(res.status_code, allowed, res.data)
+                if res.status_code == 400:
+                    self.assertIn("child", res.data)
                 row.refresh_from_db()
                 self.assertEqual(self.mine, row.child)
 
-    def test_nor_by_the_other_psychologist_onto_theirs(self):
-        # The same hole from the other side: B cannot even see A's record, so
-        # it is refused before the destination is looked at.
-        for prefix, make in ENDPOINTS.items():
-            with self.subTest(prefix):
-                row = make(self.mine, self.psy)
-                res = self.patch(self.other, f"/api/{prefix}/{row.pk}/", {"child": self.theirs.pk})
-                self.assertIn(res.status_code, (403, 404), res.data)
-                row.refresh_from_db()
-                self.assertEqual(self.mine, row.child)
+    def test_not_to_another_psychologists_child(self):
+        self.assert_refused(self.psy, self.theirs)
 
-    def test_between_the_editors_own_children_is_unchanged(self):
-        for prefix, make in ENDPOINTS.items():
-            with self.subTest(prefix):
-                row = make(self.mine, self.psy)
-                res = self.patch(self.psy, f"/api/{prefix}/{row.pk}/", {"child": self.mine_too.pk})
-                self.assertEqual(200, res.status_code, res.data)
-                row.refresh_from_db()
-                self.assertEqual(self.mine_too, row.child)
+    def test_not_between_the_editors_own_children(self):
+        self.assert_refused(self.psy, self.mine_too)
 
-    def test_an_administrator_may_still_move_one(self):
-        for prefix, make in ENDPOINTS.items():
-            with self.subTest(prefix):
-                row = make(self.mine, self.psy)
-                res = self.patch(self.admin, f"/api/{prefix}/{row.pk}/", {"child": self.theirs.pk})
-                self.assertEqual(200, res.status_code, res.data)
-                row.refresh_from_db()
-                self.assertEqual(self.theirs, row.child)
+    def test_not_by_an_administrator(self):
+        self.assert_refused(self.admin, self.theirs)
+
+    def test_nor_by_a_psychologist_the_record_is_not_theirs(self):
+        # B cannot see A's record, so it is refused before its child is read.
+        self.assert_refused(self.other, self.theirs, allowed=(403, 404))
 
     def test_naming_the_same_child_again_is_not_a_move(self):
         # A client that sends the whole row back, child included, still saves.
@@ -127,7 +114,7 @@ class RecordMoveTest(_Caseloads):
 class ReportUpdateTest(_Caseloads):
     """The report's text, its check and its summary were all read from one
     file filed against one child. An update cannot swap the file underneath
-    them, and a report moved to another child is checked against that child."""
+    them, and the child is fixed like every other record's."""
 
     def test_the_file_cannot_be_replaced(self):
         report = _report(self.mine, self.psy)
@@ -147,23 +134,7 @@ class ReportUpdateTest(_Caseloads):
         report.refresh_from_db()
         self.assertEqual(("final", "Sessions 1-6"), (report.report_type, report.coverage))
 
-    def test_moved_between_own_children_it_is_checked_again(self):
-        # Filed against Maria, whose name it carries: nothing to see. Moved to
-        # Pedro, it now names another child - and a finding already marked
-        # looked at was about the other filing, so that goes too.
-        report = _report(self.mine, self.psy)
-        report.check_findings = []
-        report.check_reviewed = True
-        report.save()
-        res = self.patch(self.psy, f"/api/report-files/{report.pk}/", {"child": self.mine_too.pk})
-        self.assertEqual(200, res.status_code, res.data)
-        report.refresh_from_db()
-        self.assertIn((OTHER_CHILD, self.mine.pk),
-                      [(f["kind"], f.get("child")) for f in report.check_findings])
-        self.assertFalse(report.check_reviewed)
-        self.assertEqual(report.check_findings, res.data["check_findings"])
-
-    def test_an_edit_that_does_not_move_it_leaves_the_check_alone(self):
+    def test_an_edit_leaves_what_the_check_found_alone(self):
         report = _report(self.mine, self.psy)
         report.check_findings = [{"kind": "age", "message": "Age 12 is not this child's."}]
         report.check_reviewed = True
@@ -172,3 +143,52 @@ class ReportUpdateTest(_Caseloads):
         report.refresh_from_db()
         self.assertEqual("age", report.check_findings[0]["kind"])
         self.assertTrue(report.check_reviewed)
+
+
+class CaseReferralUpdateTest(_Caseloads):
+    """Case referrals have their own viewset (staff and administrators write
+    them) and the same rule, decided 24 Sep 2026. A referral is also what lets
+    a child's sessions be booked, so moving one would quietly unlock one
+    child's calendar and lock another's. The screens replace a referral by
+    filing a new one and deleting the old, never by editing it."""
+
+    def setUp(self):
+        super().setUp()
+        self.staff = get_user_model().objects.create_user(
+            email="s@racco1.gov.ph", username="s", password="pass1234",
+            role=Role.objects.create(role_name=Role.STAFF))
+        self.referral = CaseReferral(child=self.mine, uploaded_by=self.staff,
+                                     original_filename="referral.pdf",
+                                     extracted_text="Referred by the DSWD field office.",
+                                     ai_summary="Referred for counselling.")
+        self.referral.file.save("referral.pdf", ContentFile(b"%PDF-1.4 stand-in"), save=True)
+        self.url = f"/api/case-referrals/{self.referral.pk}/"
+
+    def test_not_moved_by_staff_or_an_administrator(self):
+        for user in (self.staff, self.admin):
+            with self.subTest(user.email):
+                res = self.patch(user, self.url, {"child": self.theirs.pk})
+                self.assertEqual(400, res.status_code, res.data)
+                self.assertIn("child", res.data)
+                self.referral.refresh_from_db()
+                self.assertEqual(self.mine, self.referral.child)
+
+    def test_its_file_cannot_be_replaced(self):
+        before = (self.referral.file.name, self.referral.extracted_text, self.referral.ai_summary)
+        swap = SimpleUploadedFile("other.pdf", b"%PDF-1.4 other", content_type="application/pdf")
+        res = self.patch(self.staff, self.url, {"file": swap}, fmt="multipart")
+        self.assertEqual(400, res.status_code, res.data)
+        self.assertIn("file", res.data)
+        self.referral.refresh_from_db()
+        self.assertEqual(before, (self.referral.file.name, self.referral.extracted_text,
+                                  self.referral.ai_summary))
+
+    def test_its_description_can_still_be_edited(self):
+        res = self.patch(self.staff, self.url, {"child": self.mine.pk, "description": "Intake referral"})
+        self.assertEqual(200, res.status_code, res.data)
+        self.referral.refresh_from_db()
+        self.assertEqual("Intake referral", self.referral.description)
+
+    def test_a_psychologist_still_cannot_edit_one(self):
+        res = self.patch(self.psy, self.url, {"description": "x"})
+        self.assertEqual(403, res.status_code, res.data)
