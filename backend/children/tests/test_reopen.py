@@ -1,6 +1,7 @@
 from rest_framework import status
 from rest_framework.test import APITestCase
 from accounts.models import Role
+from activity.models import ActivityLog
 from children.models import Child, TerminationRecord
 from children.tests.test_child_collab import make_user
 
@@ -8,6 +9,7 @@ from children.tests.test_child_collab import make_user
 class ReopenTests(APITestCase):
     def setUp(self):
         self.admin = make_user("ra@t.ph", Role.ADMINISTRATOR)
+        self.staff = make_user("rs@t.ph", Role.STAFF)
         self.psych = make_user("rp@t.ph", Role.PSYCHOLOGIST)
         self.child = Child.objects.create(
             fullname="Back Again", status=Child.INACTIVE,
@@ -39,10 +41,38 @@ class ReopenTests(APITestCase):
         self.assertEqual(self.child.case_type, "Foster Care")
         self.assertEqual(self.child.terminations.count(), 1)
 
-    def test_non_admin_cannot_reopen(self):
+    def test_staff_can_reopen_and_it_is_logged(self):
+        # The owner's decision, 24 Sep 2026: staff run intake, and a child
+        # returning to the clinic arrives at intake. Reopening restores and
+        # erases nothing, so it no longer waits on an administrator.
+        self.client.force_authenticate(self.staff)
+        before = ActivityLog.objects.count()
+        r = self.client.post(f"/api/children/{self.child.id}/reopen/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK, r.data)
+        self.child.refresh_from_db()
+        self.assertEqual(self.child.status, Child.ACTIVE)
+        self.assertEqual(self.child.case_status, Child.STAGE_PRE_ASSESSMENT)
+        self.assertIsNone(self.child.assigned_psychologist)
+        self.assertEqual(self.child.terminations.count(), 1)  # history kept
+        self.assertEqual(before + 1, ActivityLog.objects.count())
+
+    def test_a_psychologist_still_cannot_reopen(self):
         self.client.force_authenticate(self.psych)
         r = self.client.post(f"/api/children/{self.child.id}/reopen/")
         self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+        self.child.refresh_from_db()
+        self.assertEqual(self.child.status, Child.INACTIVE)
+
+    def test_staff_still_cannot_terminate(self):
+        # Only reopening moved. Ending a case stays with the assigned
+        # psychologist or an administrator.
+        active = Child.objects.create(fullname="Still Here", assigned_psychologist=self.psych)
+        self.client.force_authenticate(self.staff)
+        r = self.client.post(f"/api/children/{active.id}/terminate/",
+                             {"reason_category": "Services completed", "note": "x"})
+        self.assertEqual(r.status_code, status.HTTP_403_FORBIDDEN)
+        active.refresh_from_db()
+        self.assertEqual(active.status, Child.ACTIVE)
 
     def test_reopen_active_child_400(self):
         self.client.force_authenticate(self.admin)
@@ -55,3 +85,14 @@ class ReopenTests(APITestCase):
         r = self.client.get(f"/api/children/{self.child.id}/")
         self.assertEqual(len(r.data["terminations"]), 1)
         self.assertEqual(r.data["terminations"][0]["reason_category"], "Services completed")
+
+    def test_who_else_is_viewing_works_on_an_archived_record(self):
+        # The drawer an archived case is reopened from sends this every few
+        # seconds; it answered 404 for inactive children.
+        self.client.force_authenticate(self.staff)
+        r = self.client.post(f"/api/children/{self.child.id}/presence/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK, r.data)
+        self.client.force_authenticate(self.admin)
+        r = self.client.get(f"/api/children/{self.child.id}/presence/")
+        self.assertEqual(r.status_code, status.HTTP_200_OK, r.data)
+        self.assertEqual(1, len(r.data["others"]))

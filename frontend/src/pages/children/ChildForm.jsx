@@ -32,7 +32,7 @@ export const EMPTY = {
 const FORM_STEPS = ['Identity', 'Address', 'Case', 'Recommendation', 'Assignment'];
 
 
-export default function ChildForm({ form, setForm, draftKey, psychologists, blocks = [], error, isPsych = false, isAdmin = false, others = [], onSubmit, onClose, onReopen, onOpenExisting }) {
+export default function ChildForm({ form, setForm, draftKey, psychologists, blocks = [], error, isPsych = false, canReopen = false, others = [], onSubmit, onClose, onReopen, onOpenExisting }) {
   const [step, setStep] = useState(1);
   // Reopening the form for a different record starts at the beginning again.
   useEffect(() => { setStep(1); }, [form.id]);
@@ -251,9 +251,9 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, bloc
                         </Badge>
                         {m.birth_date && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>b. {m.birth_date}</span>}
                         {m.status === 'inactive'
-                          ? (isAdmin
+                          ? (canReopen
                               ? <Button variant="secondary" onClick={() => onReopen(m)} iconLeft={<Icon name="rotate-ccw" size={14} />}>Reopen this record instead</Button>
-                              : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Ask an administrator to reopen this archived record instead of creating a new one.</span>)
+                              : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Ask staff or an administrator to reopen this archived record instead of creating a new one.</span>)
                           : <Button variant="secondary" onClick={() => onOpenExisting(m)} iconLeft={<Icon name="eye" size={14} />}>Open existing record</Button>}
                       </div>
                     ))}

@@ -40,8 +40,9 @@ class ChildViewSet(viewsets.ModelViewSet):
     # TerminationRecords meant to outlive the case. Nothing was logged.
     #
     # `terminate` is the path: it demands a reason category and a note, writes
-    # a TerminationRecord and keeps the history. `reopen` undoes it. Neither is
-    # reachable by staff, which is the rule DELETE walked around.
+    # a TerminationRecord and keeps the history. It is not reachable by staff,
+    # which is the rule DELETE walked around. `reopen` undoes it and erases
+    # nothing, and since 24 Sep 2026 staff may reopen (see `reopen`).
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_permissions(self):
@@ -73,9 +74,11 @@ class ChildViewSet(viewsets.ModelViewSet):
         # Inactive (terminated) cases stay reachable by id - the profile view
         # shows the termination details, and terminate itself must be able to
         # report "already inactive" rather than 404. Reopen also needs access
-        # to inactive children by id.
+        # to inactive children by id, and so does presence: the drawer of an
+        # archived record is where it is reopened from, and two people there
+        # should see each other, not a silent 404 every ten seconds.
         qs = Child.objects.all().order_by("fullname")
-        if self.action not in ("retrieve", "terminate", "reopen"):
+        if self.action not in ("retrieve", "terminate", "reopen", "presence"):
             # The parameter is still called include_archived because the
             # frontend sends that name; the state it means is INACTIVE.
             if self.request.query_params.get("include_archived") != "true":
@@ -142,7 +145,7 @@ class ChildViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Only the assigned psychologist or an administrator can update the case status."},
                             status=status.HTTP_403_FORBIDDEN)
         if child.status == Child.INACTIVE:
-            return Response({"detail": "This case is terminated; an administrator can reopen it from the child's record."},
+            return Response({"detail": "This case is terminated; staff or an administrator can reopen it from the child's record."},
                             status=status.HTTP_400_BAD_REQUEST)
         new_status = request.data.get("case_status")
         if new_status not in (Child.STAGE_PRE_ASSESSMENT, Child.STAGE_COUNSELING):
@@ -190,14 +193,19 @@ class ChildViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def reopen(self, request, pk=None):
-        """Admin-only: a terminated child returned to the clinic. Reactivate
-        the case on top of the archived record — history is retained, but the
-        psychologist assignment is cleared: a reopened case returns to the
-        pool for staff/admin to assign fresh."""
+        """Staff or an administrator: a terminated child returned to the
+        clinic. Reactivate the case on top of the archived record — history is
+        retained, but the psychologist assignment is cleared: a reopened case
+        returns to the pool for staff/admin to assign fresh.
+
+        Administrator-only until 24 Sep 2026, when the owner opened it to
+        staff: they run intake, a returning child arrives at intake, and
+        reopening restores rather than erases. Terminating stays with the
+        assigned psychologist or an administrator."""
         child = self.get_object()
         role = role_of(request)
-        if role != Role.ADMINISTRATOR:
-            return Response({"detail": "Only an administrator can reopen a terminated case."},
+        if role not in (Role.ADMINISTRATOR, Role.STAFF):
+            return Response({"detail": "Only staff or an administrator can reopen a terminated case."},
                             status=status.HTTP_403_FORBIDDEN)
         if child.status != Child.INACTIVE:
             return Response({"detail": "This case is already active."},

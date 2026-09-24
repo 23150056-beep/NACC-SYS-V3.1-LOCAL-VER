@@ -4,16 +4,17 @@ import { useAuth } from '../context/AuthContext';
 import { useCensus } from '../context/CensusContext';
 import { useLayout } from '../context/LayoutContext';
 import { Alert, Icon, IconChip, MiniBar, PAGE, Segmented } from '../ui';
-import { RailCards } from '../components/RightRail';
+import { ActivityCard, CensusCard, TodayCard } from '../components/RightRail';
 import { caseRef, initialsOf } from '../utils/child';
 
 /* One prioritised stream, not eleven equal tiles.
  *
  * The old dashboard laid every source of information out at the same size, so
  * "four children need a decision today" sat beside a mini calendar with the
- * same visual weight. This reads top to bottom in the order the day actually
- * runs: what needs a decision, then the shape of the caseload, then the
- * pipeline, then the team.
+ * same visual weight. This reads top to bottom: the figures, which is what
+ * staff and the others open it for (the owner, 24 Sep 2026 - they used to be
+ * at the bottom), then the team's, then what needs a decision, then the
+ * longer-range chart.
  *
  * The day's schedule, the live census figures and the activity stream are not
  * here — they are the right rail, which stays put while this column scrolls.
@@ -172,8 +173,61 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Care gaps. First, and bordered in red, because it is the only block
-          on the page that is asking for a decision today. */}
+      {/* The numbers first: staff and the others come here for the figures,
+          and they were at the bottom (the owner, 24 Sep 2026). Without a third
+          column the rail's census figures lead them. */}
+      {!layout.rightRailOn && <CensusCard wide />}
+
+      {/* The figures. Highlighted the way care gaps are, in the brand colour
+          rather than red: a header band and a border, and the numbers larger
+          than anything else on the page. */}
+      <div style={{ ...cardStyle, border: '1px solid var(--blue-200)' }}>
+        <div style={{ background: 'var(--blue-50)' }}>
+          <CardHead icon="hourglass" tone="warning" title="Pre-assessments waiting on someone" meta={`${stats.pending_pre_assessments ?? 0} open`} />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1, background: 'var(--divider)' }}>
+          {[
+            { label: 'Not yet started', n: stats.unassessed ?? 0, hint: 'Active children with no completed pre-assessment', fg: 'var(--red-700)' },
+            { label: 'In progress', n: stats.pending_pre_assessments ?? 0, hint: 'Started, waiting on interview or instrument titles', fg: 'var(--warning-700)' },
+            { label: 'In counseling', n: (census.by_case_status || {}).counseling ?? 0, hint: 'Pre-assessment closed; the case moved on', fg: 'var(--blue-700)' },
+          ].map((b) => (
+            <div key={b.label} style={{ background: 'var(--surface)', padding: '13px 14px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+              <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 'var(--text-3xs)', letterSpacing: '0.08em', textTransform: 'uppercase', color: b.fg }}>{b.label}</span>
+              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 32, lineHeight: 1, color: 'var(--text-strong)', fontVariantNumeric: 'tabular-nums' }}>{b.n}</span>
+              <span style={{ fontSize: 12, lineHeight: 1.45, color: 'var(--text-muted)' }}>{b.hint}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* The team. A psychologist has no business reading their colleagues'
+          throughput, so this is the one block they do not get. */}
+      {!isPsych && perPsych.length > 0 && (
+        <div style={cardStyle}>
+          <CardHead title="Clinical team this range" meta="completed sessions" />
+          <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {perPsych.map((p) => (
+              <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: '50%', flex: 'none', background: 'var(--ink-50)', color: 'var(--text-body)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 11 }}>
+                  {initialsOf(p.name)}
+                </span>
+                <span style={{ width: 170, flex: 'none', fontWeight: 700, fontSize: 13, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
+                <span style={{ flex: 1, minWidth: 40, height: 8, borderRadius: 'var(--radius-pill)', background: 'var(--divider)', overflow: 'hidden' }}>
+                  <span style={{ display: 'block', height: '100%', borderRadius: 'var(--radius-pill)', background: 'var(--blue-600)', width: `${Math.round(((p.count ?? 0) / perPsychMax) * 100)}%` }} />
+                </span>
+                <span className="racco-mono" style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-strong)', width: 28, textAlign: 'right', flex: 'none' }}>{p.count ?? 0}</span>
+                <span style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)', width: 96, textAlign: 'right', flex: 'none' }}>
+                  {caseload[p.name] != null ? `${caseload[p.name]} active` : '—'}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Care gaps. Bordered in red, because it is the only block on the page
+          asking for a decision today - straight after the figures, above the
+          chart, so it is still read before anything is scrolled past. */}
       {gaps.length > 0 && (
         <div style={{ ...cardStyle, border: '1px solid var(--red-200)' }}>
           <div style={{ padding: '11px 14px', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--red-50)', borderBottom: '1px solid var(--red-100)' }}>
@@ -285,54 +339,13 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Pipeline. */}
-      <div style={cardStyle}>
-        <CardHead icon="hourglass" tone="warning" title="Pre-assessments waiting on someone" meta={`${stats.pending_pre_assessments ?? 0} open`} />
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 1, background: 'var(--divider)' }}>
-          {[
-            { label: 'Not yet started', n: stats.unassessed ?? 0, hint: 'Active children with no completed pre-assessment', fg: 'var(--red-700)' },
-            { label: 'In progress', n: stats.pending_pre_assessments ?? 0, hint: 'Started, waiting on interview or instrument titles', fg: 'var(--warning-700)' },
-            { label: 'In counseling', n: (census.by_case_status || {}).counseling ?? 0, hint: 'Pre-assessment closed; the case moved on', fg: 'var(--blue-700)' },
-          ].map((b) => (
-            <div key={b.label} style={{ background: 'var(--surface)', padding: '13px 14px', display: 'flex', flexDirection: 'column', gap: 5 }}>
-              <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 'var(--text-3xs)', letterSpacing: '0.08em', textTransform: 'uppercase', color: b.fg }}>{b.label}</span>
-              <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 26, lineHeight: 1, color: 'var(--text-strong)', fontVariantNumeric: 'tabular-nums' }}>{b.n}</span>
-              <span style={{ fontSize: 12, lineHeight: 1.45, color: 'var(--text-muted)' }}>{b.hint}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* The team. A psychologist has no business reading their colleagues'
-          throughput, so this is the one block they do not get. */}
-      {!isPsych && perPsych.length > 0 && (
-        <div style={cardStyle}>
-          <CardHead title="Clinical team this range" meta="completed sessions" />
-          <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {perPsych.map((p) => (
-              <div key={p.name} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: '50%', flex: 'none', background: 'var(--ink-50)', color: 'var(--text-body)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 11 }}>
-                  {initialsOf(p.name)}
-                </span>
-                <span style={{ width: 170, flex: 'none', fontWeight: 700, fontSize: 13, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{p.name}</span>
-                <span style={{ flex: 1, minWidth: 40, height: 8, borderRadius: 'var(--radius-pill)', background: 'var(--divider)', overflow: 'hidden' }}>
-                  <span style={{ display: 'block', height: '100%', borderRadius: 'var(--radius-pill)', background: 'var(--blue-600)', width: `${Math.round(((p.count ?? 0) / perPsychMax) * 100)}%` }} />
-                </span>
-                <span className="racco-mono" style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-strong)', width: 28, textAlign: 'right', flex: 'none' }}>{p.count ?? 0}</span>
-                <span style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)', width: 96, textAlign: 'right', flex: 'none' }}>
-                  {caseload[p.name] != null ? `${caseload[p.name]} active` : '—'}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* No third column at this width, so the rail's three cards come back in
-          here. They are the same components, not a second copy. */}
+      {/* No third column at this width, so the rail's cards come back in
+          here: its census figures up with the other numbers, the day and the
+          activity stream down here. The same components, not a second copy. */}
       {!layout.rightRailOn && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, alignItems: 'start' }}>
-          <RailCards />
+          <TodayCard />
+          <ActivityCard />
         </div>
       )}
     </div>

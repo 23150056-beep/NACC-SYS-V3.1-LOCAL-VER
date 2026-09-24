@@ -16,7 +16,7 @@ import { PURPOSE_LABEL, StatusChip, fmtDay, fmtTime, localDate } from './shared'
  * Nothing in either body changed.
  */
 
-export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminate, isAdmin = false, others = [], onEdit, onTerminate, onReopen, onClose }) {
+export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminate, canReopen = false, others = [], onEdit, onTerminate, onReopen, onClose }) {
   const toast = useToast();
   const navigate = useNavigate();
   useEffect(() => {
@@ -130,7 +130,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
     } finally { setBookingBusy(false); }
   };
   const location = [child.barangay, child.municipality, child.province].filter(Boolean).join(', ') || child.address || '—';
-  const showReopen = isAdmin && child.status === 'inactive';
+  const showReopen = canReopen && child.status === 'inactive';
   const hasRecommendationContent = child.recommendation || child.referral_source || child.education_level || child.current_placement;
   const fields = [
     ['Sex', child.gender || '—'],
