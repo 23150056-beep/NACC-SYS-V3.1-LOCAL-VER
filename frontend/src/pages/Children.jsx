@@ -96,7 +96,8 @@ export default function Children() {
   const others = usePresence(form?.id || sel?.id);
   // The old standalone Archive page folded in here: admin/staff viewing the
   // Archived filter get the termination-detail columns + reopen; psychologists
-  // keep the plain roster (they can't reopen, see decision 2026-07-18).
+  // keep the plain roster (they can't reopen, see decision 2026-07-18). Staff
+  // reopen too since 24 Sep 2026 - the server's rule, children/views.py.
   const showArchiveColumns = canManage && status === 'inactive';
 
   useEffect(() => { if (status !== 'inactive') setReasonFilter(''); }, [status]);
@@ -436,7 +437,7 @@ export default function Children() {
                         <td style={{ padding: '6px 12px' }}>
                           <div style={{ display: 'flex', gap: 6 }}>
                             <button title="View full record" aria-label={`View ${c.fullname}'s record`} onClick={(e) => { e.stopPropagation(); navigate(`/report/child/${c.id}`); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--blue-600)')}><Icon name="eye" size={15} /></button>
-                            {isAdmin && (
+                            {canManage && (
                               <button title="Reopen case" aria-label={`Reopen ${c.fullname}'s case`}
                                 onClick={(e) => { e.stopPropagation(); setReopening(c); }}
                                 {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--success-600)')}><Icon name="rotate-ccw" size={15} /></button>
@@ -504,8 +505,8 @@ export default function Children() {
         </div>
       </div>
 
-      {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} isAdmin={isAdmin} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => setReopening(sel)} onClose={() => setSel(null)} />}
-      {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} blocks={blocks} error={error} isPsych={isPsych} isAdmin={isAdmin} others={others} onSubmit={save} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
+      {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} canReopen={canManage} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => setReopening(sel)} onClose={() => setSel(null)} />}
+      {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} onSubmit={save} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
       {terminating && <TerminateModal child={terminating} onConfirm={terminate} onClose={() => setTerminating(null)} />}
       {reopening && (
         <ConfirmDialog
