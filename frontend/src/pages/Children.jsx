@@ -8,6 +8,7 @@ import {
   Input, PAGE, PageHeader, Segmented, Select, TD, TH, THEAD_ROW, TOOLBAR, TR,
 } from '../ui';
 import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { useLayout } from '../context/LayoutContext';
 import { TERMINATION_REASONS } from '../config/caseData';
 import { loadAll } from '../utils/load';
@@ -68,6 +69,7 @@ export default function Children() {
   const { user } = useAuth();
   const { refresh: refreshActivity } = useActivity();
   const toast = useToast();
+  const confirm = useConfirm();
   const navigate = useNavigate();
   const layout = useLayout();
   const canManage = ['Administrator', 'Staff'].includes(user?.role_name);
@@ -93,6 +95,7 @@ export default function Children() {
   const [reopening, setReopening] = useState(null);
   const [reopenBusy, setReopenBusy] = useState(false);
   const [error, setError] = useState('');
+  const [fieldErrors, setFieldErrors] = useState(null);
   const others = usePresence(form?.id || sel?.id);
   // The old standalone Archive page folded in here: admin/staff viewing the
   // Archived filter get the termination-detail columns + reopen; psychologists
@@ -224,13 +227,13 @@ export default function Children() {
   const draftKey = `nacc-child-draft:${user?.id ?? 'anon'}`;
 
   const openCreate = () => {
-    setError('');
+    setError(''); setFieldErrors(null);
     let draft = null;
     try { draft = JSON.parse(localStorage.getItem(draftKey) || 'null'); } catch { /* corrupt draft */ }
     const meaningful = draft && Object.entries(draft).some(([k, v]) => k !== 'assignee_sees_history' && v);
     setForm({ ...EMPTY, _draft: meaningful ? draft : null });
   };
-  const openEdit = (c) => { setError(''); setForm({ ...EMPTY, ...c, psychologist: c.psychologist || '', _origPsychologist: c.psychologist || '' }); };
+  const openEdit = (c) => { setError(''); setFieldErrors(null); setForm({ ...EMPTY, ...c, psychologist: c.psychologist || '', _origPsychologist: c.psychologist || '' }); };
 
   /* /children?openCreate=1 opens the intake form straight away — it is what the
    * dashboard's "Add Record" action links to. The parameter is cleared once
@@ -250,7 +253,24 @@ export default function Children() {
 
   const save = async (e) => {
     e.preventDefault();
+    const name = form.id ? form.fullname
+      : [form.first_name, form.middle_name, form.last_name].filter(Boolean).join(' ');
+    const reassigning = form.id && String(form.psychologist || '') !== String(form._origPsychologist || '');
+    const assignee = psychologists.find((p) => String(p.id) === String(form.psychologist))?.name;
+    const ok = await confirm({
+      description: form.id
+        ? `This saves your changes to ${name}'s record.`
+        : `This adds ${name} to Records. The child's name cannot be changed once the record is saved, so check the spelling.`,
+      confirmLabel: form.id ? 'Yes, save changes' : 'Yes, add the record',
+      details: form.id
+        ? [['Reassigned to', reassigning ? (assignee || 'Unassigned') : null]]
+        : [['Category', form.case_category], ['Case type', form.case_type],
+           ['Date of birth', form.birth_date], ['Psychologist', assignee || 'Unassigned'],
+           ['Case referral', form.referralFile?.name]],
+    });
+    if (!ok) return;
     setError('');
+    setFieldErrors(null);
     const payload = { ...form, expected_updated_at: form.updated_at };
     delete payload.age; delete payload.group; delete payload.ref;
     delete payload.psychologist_name;
@@ -262,8 +282,11 @@ export default function Children() {
     delete payload.referralFile;
     if (!payload.psychologist) payload.psychologist = null;
     if (!payload.birth_date) delete payload.birth_date;
-    if (!payload.date_of_admission) delete payload.date_of_admission;
-    if (!payload.date_of_placement_to_custodian) delete payload.date_of_placement_to_custodian;
+    // Sent as null, not left out: the form clears the date a case no longer
+    // asks for, and leaving it out of the request would keep it on the record.
+    for (const f of ['date_of_admission', 'date_of_placement_to_custodian', 'date_found']) {
+      if (!payload[f]) payload[f] = null;
+    }
     if (form.id) delete payload.fullname;
     try {
       let saved;
@@ -309,8 +332,15 @@ export default function Children() {
         toast.error('Someone updated this record while you were editing.');
         return;
       }
-      setError(JSON.stringify(err.response?.data || 'Save failed'));
-      toast.error('Could not save the record. Please try again.');
+      /* Field by field, beside the fields, rather than one line of JSON: the
+         form opens the step holding the first field named. */
+      const body = err.response?.data;
+      const perField = body && typeof body === 'object' && !Array.isArray(body) ? body : null;
+      setFieldErrors(perField);
+      setError(perField
+        ? (perField.detail || perField.non_field_errors?.join(' ') || 'Some answers need correcting — they are marked below.')
+        : 'Save failed. Please try again.');
+      toast.error('Could not save the record. Please check the marked fields.');
     }
   };
 
@@ -336,6 +366,12 @@ export default function Children() {
       toast.success(`${c.fullname}'s case is active again — previous records retained`);
       setReopening(null);
       setSel(null);
+      // Reopened from the Add Record duplicate warning: the old record is the
+      // one being kept, so the half-typed new one and its draft go.
+      if (c.fromForm) {
+        setForm(null);
+        try { localStorage.removeItem(draftKey); } catch { /* private browsing */ }
+      }
       load();
       refreshActivity();
     } catch (err) {
@@ -345,7 +381,10 @@ export default function Children() {
 
   // Duplicate-check warning shortcuts (Add Record form): reuse the existing
   // reopen() for archived matches, or just open the active match's drawer.
-  const onDupReopen = async (m) => { await reopen({ id: m.id, fullname: m.fullname }); setForm(null); };
+  // Through the same confirmation as every other reopen. It used to call
+  // reopen() with the match as an argument reopen() never read, so it reopened
+  // nothing and closed the form anyway.
+  const onDupReopen = (m) => setReopening({ id: m.id, fullname: m.fullname, fromForm: true });
   const onDupOpenExisting = (m) => { setForm(null); const c = rows.find((r) => r.id === m.id); if (c) setSel(c); };
 
   return (
@@ -506,7 +545,7 @@ export default function Children() {
       </div>
 
       {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} canReopen={canManage} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => setReopening(sel)} onClose={() => setSel(null)} />}
-      {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} onSubmit={save} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
+      {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} fieldErrors={fieldErrors} onSubmit={save} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
       {terminating && <TerminateModal child={terminating} onConfirm={terminate} onClose={() => setTerminating(null)} />}
       {reopening && (
         <ConfirmDialog

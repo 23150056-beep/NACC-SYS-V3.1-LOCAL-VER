@@ -17,6 +17,7 @@ from rest_framework.test import APIClient, APIRequestFactory
 
 from accounts.models import Role
 from assistant import tools
+from children import intake
 from children.models import Child
 from clinical.reports import first_session_wait
 from locations.models import Barangay, Municipality, Province
@@ -330,8 +331,10 @@ class SeededRecordsTest(TestCase):
         Barangay.objects.create(psgc_code="012812001", name="Barangay 1", municipality=town)
         call_command("seed_demo_data", children=6, stdout=StringIO())
 
+        # Whichever of the two dates the case records (children/intake.py): an
+        # admission, or a placement with a custodian.
         for child in Child.objects.all():
-            self.assertEqual(child.date_of_admission,
+            self.assertEqual(intake.intake_date(child),
                              timezone.localtime(child.created_at).date(), child.fullname)
         # Left at the moment the seeder ran, every seeded session predated its
         # record and this was zero.

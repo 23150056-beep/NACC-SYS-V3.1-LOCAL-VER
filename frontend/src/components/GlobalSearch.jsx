@@ -4,7 +4,7 @@ import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useLayout } from '../context/LayoutContext';
 import { useToast } from '../context/ToastContext';
-import { Icon } from '../ui';
+import { Icon, roleLabel } from '../ui';
 import { ageFrom, caseRef, initialsOf } from '../utils/child';
 import { loadAll } from '../utils/load';
 
@@ -100,7 +100,7 @@ export default function GlobalSearch({ open, onOpenChange }) {
       .slice(0, MAX_PER_GROUP)
       .map((u) => ({
         key: `u${u.id}`, name: u.fullname || u.email, initials: initialsOf(u.fullname || u.email),
-        meta: [u.role_name, (u.status || '').toLowerCase()].filter(Boolean).join(' · '),
+        meta: [roleLabel(u.role_name), (u.status || '').toLowerCase()].filter(Boolean).join(' · '),
         ref: '', to: '/users',
       }));
   }, [staff, term]);

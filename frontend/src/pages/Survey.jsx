@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import axios from 'axios';
+import { useConfirm } from '../context/ConfirmContext';
 
 // Public, token-gated child opinionnaire. No login, no app shell — opened by
 // scanning the QR code on a secondary device. Big, friendly controls.
@@ -17,6 +18,7 @@ export default function Survey() {
   const [survey, setSurvey] = useState(null);
   const [answers, setAnswers] = useState({});
   const [busy, setBusy] = useState(false);
+  const confirm = useConfirm();
 
   useEffect(() => {
     axios.get(`${baseURL}/opinionnaire/${token}/`)
@@ -27,7 +29,18 @@ export default function Survey() {
       });
   }, [token]);
 
+  /* A link can be answered once, so the last button asks first — in words for
+     a child rather than an office, and saying what was skipped, because a
+     skipped question is fine but should not be an accident. */
   const submit = async () => {
+    const skipped = survey.fields.length - answered;
+    if (!(await confirm({
+      title: 'Are you sure you’re finished?',
+      description: (skipped > 0
+        ? `You skipped ${skipped} question${skipped === 1 ? '' : 's'} — that’s okay. `
+        : '') + 'Once your answers are sent, they can’t be changed.',
+      confirmLabel: 'Yes, send my answers', cancelLabel: 'Not yet',
+    }))) return;
     setBusy(true);
     try {
       await axios.post(`${baseURL}/opinionnaire/${token}/submit/`, { answers });

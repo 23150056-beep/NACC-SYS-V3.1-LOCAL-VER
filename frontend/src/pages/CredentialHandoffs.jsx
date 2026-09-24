@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import api from '../api/client';
 import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { Avatar, Badge, Button, EmptyState, Icon, RoleBadge, TOOLBAR } from '../ui';
 
 // Admin-only list of everyone still on a temporary password (must_change_password),
@@ -11,6 +12,7 @@ import { Avatar, Badge, Button, EmptyState, Icon, RoleBadge, TOOLBAR } from '../
 // Rendered as a tab inside User Management (Users.jsx), not its own route.
 export default function CredentialHandoffs() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [users, setUsers] = useState([]);
   const [generated, setGenerated] = useState({}); // { userId: tempPassword }
   // Whether the server queued an email for each generated password. The
@@ -38,7 +40,24 @@ export default function CredentialHandoffs() {
     }
   };
 
+  /* A new temporary password replaces the one before it, so a slip already
+     printed or a password already read out stops working. Said before, not
+     discovered after. */
+  const generateOne = async (u) => {
+    if (!(await confirm({
+      description: generated[u.id]
+        ? `A new temporary password replaces the one just generated for ${u.fullname || u.email} — the old one stops working.`
+        : `This sets a new temporary password for ${u.fullname || u.email}. Any password handed over before stops working.`,
+      confirmLabel: 'Yes, generate it',
+    }))) return;
+    generate(u);
+  };
+
   const generateAll = async () => {
+    if (!(await confirm({
+      description: `This sets a new temporary password for all ${users.length} people waiting. Any password handed over before stops working.`,
+      confirmLabel: 'Yes, generate them all',
+    }))) return;
     setBusy(true);
     // Sequential on purpose: predictable order, no burst of parallel writes.
     for (const u of users) await generate(u);
@@ -115,7 +134,7 @@ export default function CredentialHandoffs() {
                       )}
                     </span>
                     <div style={{ display: 'flex', gap: 8, flex: 'none' }}>
-                      <Button variant="secondary" size="sm" onClick={() => generate(u)} iconLeft={<Icon name={generated[u.id] ? 'rotate-ccw' : 'key-round'} size={15} />}>
+                      <Button variant="secondary" size="sm" onClick={() => generateOne(u)} iconLeft={<Icon name={generated[u.id] ? 'rotate-ccw' : 'key-round'} size={15} />}>
                         {generated[u.id] ? 'Re-issue' : 'Generate'}
                       </Button>
                       {generated[u.id] && (

@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from accounts.display import display_name
 from accounts.models import Role
+from children import intake
 from children.models import Child
 
 User = get_user_model()
@@ -27,6 +28,10 @@ class ChildSerializer(serializers.ModelSerializer):
     # future edit before validate_case_category ever got a chance to apply
     # its change-only exemption.
     case_category = serializers.CharField(required=False, allow_blank=True)
+    # The same, for the two lists that retired values on 24 Sep 2026: birth
+    # status "Child", adoption types "SIBRA" and "ICA Relative".
+    birth_status = serializers.CharField(required=False, allow_blank=True)
+    type_of_adoption = serializers.CharField(required=False, allow_blank=True)
 
     termination = serializers.SerializerMethodField()
     terminations = serializers.SerializerMethodField()
@@ -39,7 +44,8 @@ class ChildSerializer(serializers.ModelSerializer):
     class Meta:
         model = Child
         fields = [
-            "id", "first_name", "middle_initial", "last_name", "fullname", "birth_date", "gender",
+            "id", "first_name", "middle_name", "last_name", "fullname", "birth_date", "date_found",
+            "gender", "house_number", "street", "landmark",
             "province", "municipality", "barangay", "address",
             "psgc_province", "psgc_municipality", "psgc_barangay",
             "case_type", "case_category", "surrendered_by", "status", "case_status", "assignee_sees_history",
@@ -145,6 +151,23 @@ class ChildSerializer(serializers.ModelSerializer):
                 "The child must be between 5 and 17 years old.")
         return value
 
+    def _current_or_unchanged(self, field, value, choices):
+        """A value from the current list, or the one the record already holds.
+        A record keeps a retired value until somebody changes it; nobody can
+        pick one again."""
+        if self.instance is not None and value == getattr(self.instance, field):
+            return value
+        if value and value not in {c[0] for c in choices}:
+            raise serializers.ValidationError(f'"{value}" is not a valid choice.')
+        return value
+
+    def validate_birth_status(self, value):
+        return self._current_or_unchanged("birth_status", value, Child.BIRTH_STATUS_CHOICES)
+
+    def validate_type_of_adoption(self, value):
+        return self._current_or_unchanged(
+            "type_of_adoption", value, Child.TYPE_OF_ADOPTION_CHOICES)
+
     def validate_case_category(self, value):
         # Task 13 lock ("edits stay partial-friendly") applies here too: the
         # frontend's edit form always resends the full object on PUT
@@ -180,7 +203,7 @@ class ChildSerializer(serializers.ModelSerializer):
             # fullname is read-only (DRF drops it from `attrs`), so an attempt to
             # PATCH it has to be caught from the raw request payload instead.
             raw = self.initial_data if hasattr(self, "initial_data") else {}
-            for f in ("first_name", "middle_initial", "last_name", "fullname"):
+            for f in ("first_name", "middle_name", "last_name", "fullname"):
                 if f in attrs:
                     new_val = attrs[f]
                 elif f in raw:
@@ -222,12 +245,80 @@ class ChildSerializer(serializers.ModelSerializer):
             # that path staying lenient (see children/tests/test_api.py
             # and activity/tests/test_activity.py).
             if not legacy_parts:
-                missing = {
-                    f: "This field is required."
-                    for f in ("first_name", "last_name", "birth_date", "gender", "case_type")
-                    if not str(attrs.get(f) or "").strip()
-                }
-                if missing:
-                    raise serializers.ValidationError(missing)
+                self._require(attrs, creating=True)
+        if self.instance is not None and not self._is_legacy_record():
+            self._require(attrs, creating=False)
+        self._check_case(attrs)
+        self._check_dates(attrs)
         return attrs
+
+    # --- The Add Record rules (children/intake.py) ---------------------------
+
+    def _after(self, attrs, field):
+        """What `field` will hold once this request is saved."""
+        if field in attrs:
+            return attrs[field]
+        return getattr(self.instance, field, None) if self.instance is not None else None
+
+    def _is_legacy_record(self):
+        # Created through the fullname-only door, which never asked for any of
+        # this. Holding it to the full intake on its next edit would lock it.
+        return not (self.instance.first_name or self.instance.last_name)
+
+    def _require(self, attrs, creating):
+        """Every question the case asks has an answer.
+
+        On create, all of them. On an edit, an answer cannot be taken away -
+        but a record from before the rule is not refused for the blanks it
+        already had, or nothing about it could be corrected. The questions the
+        case type asks are the exception: changing the case type (or the type
+        of adoption) asks them again, so they are answered again."""
+        blank = lambda v: not str(v or "").strip()  # noqa: E731
+        case_type = self._after(attrs, "case_type")
+        adoption = self._after(attrs, "type_of_adoption")
+        reasked = not creating and any(
+            f in attrs and attrs[f] != getattr(self.instance, f)
+            for f in ("case_type", "type_of_adoption"))
+        missing = {}
+        for f in intake.required_fields(case_type, adoption):
+            if not blank(self._after(attrs, f)):
+                continue
+            if (creating or not blank(getattr(self.instance, f))
+                    or (reasked and f in intake.DYNAMIC)):
+                missing[f] = "This field is required."
+        if missing:
+            raise serializers.ValidationError(missing)
+
+    def _check_case(self, attrs):
+        """The category has to be one this track offers - checked when either
+        of the two is being set, so a record from before the pairing rule is
+        not refused on an unrelated edit."""
+        if self.instance is not None and not any(
+                f in attrs and attrs[f] != getattr(self.instance, f)
+                for f in ("case_category", "case_type")):
+            return
+        case_type = self._after(attrs, "case_type")
+        category = self._after(attrs, "case_category")
+        offered = intake.CATEGORY_OPTIONS.get(case_type)
+        if offered and category in intake.ALL_CATEGORIES and category not in offered:
+            raise serializers.ValidationError(
+                {"case_category": f"{category} is not a category for {case_type} cases."})
+
+    def _check_dates(self, attrs):
+        """None of the case dates is in the future or before the child was
+        born. Checked only where the date is being set, like the birth date."""
+        today = timezone.localdate()
+        born = self._after(attrs, "birth_date")
+        for f, label in (("date_found", "The date found"),
+                         (intake.ADMISSION, "The date of admission"),
+                         (intake.PLACEMENT, "The date of placement")):
+            value = attrs.get(f)
+            if value is None or (self.instance is not None
+                                 and value == getattr(self.instance, f)):
+                continue
+            if value > today:
+                raise serializers.ValidationError({f: f"{label} cannot be in the future."})
+            if born and value < born:
+                raise serializers.ValidationError(
+                    {f: f"{label} cannot be before the date of birth."})
 

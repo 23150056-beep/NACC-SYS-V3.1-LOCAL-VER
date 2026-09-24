@@ -7,6 +7,7 @@ import {
   PAGE, PageHeader, Segmented, Select, TD, TH, THEAD_ROW, TR,
 } from '../ui';
 import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { loadAll } from '../utils/load';
 import { printBlankForm } from '../utils/printForm';
 import InstrumentFormDrawer, { CATEGORIES, EMPTY_INSTRUMENT } from '../components/InstrumentFormDrawer';
@@ -37,6 +38,7 @@ export default function Instruments() {
   // psychologists only manage their agency form templates from this page.
   const showCatalog = isAdmin;
   const toast = useToast();
+  const confirm = useConfirm();
   const [tab, setTab] = useState(isAdmin ? 'catalog' : 'forms');
   const [instruments, setInstruments] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -68,6 +70,11 @@ export default function Instruments() {
     if (isAdmin) payload.owner = payload.owner || null;
     else delete payload.owner;
     delete payload.owner_name; delete payload.updated_at;
+    if (!(await confirm({
+      description: form.id ? `This saves your changes to "${form.title.trim()}" in the catalogue.`
+        : `This adds "${form.title.trim()}" to the catalogue.`,
+      confirmLabel: 'Yes, save it',
+    }))) return;
     try {
       if (form.id) await api.put(`/instruments/${form.id}/`, payload);
       else await api.post('/instruments/', payload);
@@ -105,6 +112,12 @@ export default function Instruments() {
         options: f.field_type === 'choice' ? (f.options || []) : [],
       })),
     };
+    if (!(await confirm({
+      description: tpl.id ? `This saves your changes to the "${tpl.title.trim()}" form.`
+        : `This creates the "${tpl.title.trim()}" form, ready to be used with children.`,
+      confirmLabel: 'Yes, save the form',
+      details: [['Questions', String(payload.fields.length)]],
+    }))) return;
     try {
       if (tpl.id) await api.patch(`/form-templates/${tpl.id}/`, payload);
       else await api.post('/form-templates/', payload);

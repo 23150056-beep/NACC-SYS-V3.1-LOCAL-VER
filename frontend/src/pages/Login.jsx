@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { Button, FormField, Input, PasswordInput, Alert, Icon, Modal, ROLE_META } from '../ui';
+import { Button, FormField, Input, PasswordInput, Alert, Icon, Modal, ROLE_META, roleLabel } from '../ui';
 import AuthLayout, { AuthLink } from '../components/AuthLayout';
 import PasswordChangeGate from '../components/PasswordChangeGate';
 import GoogleSignInButton from '../components/GoogleSignInButton';
@@ -264,7 +264,7 @@ export default function Login() {
                     <Icon name={meta.icon} size={19} />
                   </span>
                   <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ display: 'block', fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 15, color: 'var(--text-strong)' }}>{roleName}</span>
+                    <span style={{ display: 'block', fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 15, color: 'var(--text-strong)' }}>{roleLabel(roleName)}</span>
                     <span style={{ display: 'block', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-muted)', marginTop: 2 }}>{meta.desc}</span>
                   </span>
                 </button>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import {
   Card, Button, Badge, Input, FormField, Avatar, RoleBadge, Icon,
   RoleAccessPanel, Skeleton, EmptyState, PAGE, hoverLift,
@@ -75,6 +76,7 @@ function Fact({ icon, label, children, mono = false }) {
 export default function MyProfile() {
   const { user } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
   const role = user?.role_name;
   const isPsych = role === 'Psychologist';
 
@@ -169,6 +171,10 @@ export default function MyProfile() {
 
   const askForCode = async (e) => {
     e.preventDefault();
+    if (!(await confirm({
+      description: `A six-digit code will be texted to ${phoneInput}. Once it is confirmed, reminders are sent to that number.`,
+      confirmLabel: 'Yes, send the code',
+    }))) return;
     setPhoneBusy(true); setPhoneError('');
     try {
       const { detail } = await requestPhoneCode(phoneInput);
@@ -196,6 +202,11 @@ export default function MyProfile() {
   };
 
   const dropPhone = async () => {
+    if (!(await confirm({
+      title: 'Remove your number?',
+      description: 'Text notifications stop until a number is added and confirmed again. Are you sure you want to proceed?',
+      confirmLabel: 'Remove the number', tone: 'warning',
+    }))) return;
     setPhoneBusy(true); setPhoneError('');
     try {
       setPhone(await removeMyPhone());
@@ -205,8 +216,18 @@ export default function MyProfile() {
     finally { setPhoneBusy(false); }
   };
 
-  const save = (e) => { e.preventDefault(); write(form, 'Links saved.'); };
-  const clear = () => write(EMPTY, 'Links removed.');
+  const save = async (e) => {
+    e.preventDefault();
+    if (!(await confirm({ description: 'This saves the links on your profile.', confirmLabel: 'Yes, save the links' }))) return;
+    write(form, 'Links saved.');
+  };
+  const clear = async () => {
+    if (!(await confirm({
+      title: 'Remove all your links?', tone: 'warning', confirmLabel: 'Remove them',
+      description: 'Every link on your profile is cleared. Are you sure you want to proceed?',
+    }))) return;
+    write(EMPTY, 'Links removed.');
+  };
 
   return (
     <div style={{ ...PAGE, maxWidth: 1080 }}>

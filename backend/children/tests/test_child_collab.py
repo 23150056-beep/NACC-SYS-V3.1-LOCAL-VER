@@ -4,6 +4,7 @@ from rest_framework import status
 from rest_framework.test import APITestCase
 from accounts.models import Role, User
 from children.models import Child, TerminationRecord
+from children.tests.payloads import complete
 
 
 def make_user(email, role_name, **kw):
@@ -94,18 +95,14 @@ class NameSplitTests(APITestCase):
         self.client.force_authenticate(self.staff)
 
     def test_create_composes_fullname(self):
-        r = self.client.post("/api/children/", {
-            "first_name": "Mika", "middle_initial": "R", "last_name": "Santos",
-            "birth_date": "2016-01-10", "gender": "Female", "case_type": "Foster Care",
-        }, format="json")
+        r = self.client.post("/api/children/", complete(
+            first_name="Mika", middle_name="R", last_name="Santos"), format="json")
         self.assertEqual(r.status_code, 201)
         self.assertEqual(r.data["fullname"], "Mika R. Santos")
 
     def test_name_parts_locked_after_create(self):
-        r = self.client.post("/api/children/", {
-            "first_name": "Ana", "last_name": "Cruz",
-            "birth_date": "2016-01-10", "gender": "Female", "case_type": "Foster Care",
-        }, format="json")
+        r = self.client.post("/api/children/", complete(
+            first_name="Ana", last_name="Cruz"), format="json")
         r2 = self.client.patch(f"/api/children/{r.data['id']}/",
                                {"last_name": "Reyes"}, format="json")
         self.assertEqual(r2.status_code, 400)
@@ -129,10 +126,13 @@ class NameSplitTests(APITestCase):
         self.assertEqual(r.status_code, 400)
 
     def _payload(self, **over):
-        base = {"first_name": "Leo", "last_name": "Diaz", "birth_date": "2016-01-10",
-                "gender": "Male", "case_type": "Foster Care"}
-        base.update(over)
-        return base
+        return complete(**{"first_name": "Leo", "last_name": "Diaz",
+                           "gender": "Male", **over})
+
+    def test_the_payload_is_otherwise_complete(self):
+        # So the two age tests below are refused for the age, not for a blank.
+        r = self.client.post("/api/children/", self._payload(), format="json")
+        self.assertEqual(r.status_code, 201, r.data)
 
     def test_age_below_5_rejected(self):
         r = self.client.post("/api/children/", self._payload(birth_date="2024-01-01"), format="json")
@@ -260,7 +260,7 @@ class IdentifyingInformationFieldsTests(APITestCase):
     Information" intake form: Place of Birth/Found, Birth Status, Legal
     Status, Date of Admission, Date of Placement to Custodian, Type of
     Adoption - plus the narrowed Category list (Surrendered/Abandoned/
-    Dependent/Neglected/Without Known Parents/Orphan) that replaced the
+    Dependent/Neglected/Without Known Parents/Orphaned) that replaced the
     prior 18-item NACC-SAMD-GF-000 list."""
 
     def setUp(self):
@@ -268,37 +268,37 @@ class IdentifyingInformationFieldsTests(APITestCase):
         self.client.force_authenticate(self.staff)
 
     def _payload(self, **over):
-        base = {"first_name": "Ivy", "last_name": "Fields", "birth_date": "2016-01-10",
-                "gender": "Female", "case_type": "Foster Care"}
-        base.update(over)
-        return base
+        return complete(**{"first_name": "Ivy", "last_name": "Fields", **over})
 
     def test_create_and_roundtrip_all_new_fields(self):
         r = self.client.post("/api/children/", self._payload(
+            case_type="Adoption",
             place_of_birth_or_found="Bauang, La Union",
             birth_status="Non-Marital",
             legal_status="With Issued CDCLAA",
-            date_of_admission="2026-01-15",
             date_of_placement_to_custodian="2026-02-01",
             type_of_adoption="Foster-Adopt",
             case_category="Without Known Parents",
         ), format="json")
-        self.assertEqual(r.status_code, 201)
+        self.assertEqual(r.status_code, 201, r.data)
         self.assertEqual(r.data["place_of_birth_or_found"], "Bauang, La Union")
         self.assertEqual(r.data["birth_status"], "Non-Marital")
         self.assertEqual(r.data["legal_status"], "With Issued CDCLAA")
-        self.assertEqual(r.data["date_of_admission"], "2026-01-15")
         self.assertEqual(r.data["date_of_placement_to_custodian"], "2026-02-01")
         self.assertEqual(r.data["type_of_adoption"], "Foster-Adopt")
         self.assertEqual(r.data["case_category"], "Without Known Parents")
 
-    def test_all_six_new_fields_are_optional(self):
-        r = self.client.post("/api/children/", self._payload(), format="json")
-        self.assertEqual(r.status_code, 201)
-        for f in ("place_of_birth_or_found", "birth_status", "legal_status",
-                  "date_of_admission", "date_of_placement_to_custodian", "type_of_adoption"):
+    def test_only_legal_status_is_optional_since_24_sep_2026(self):
+        # The six were optional until the form made every applicable question
+        # mandatory. Legal status stays optional: a child new to care may not
+        # have one yet. The date and type of adoption are asked per case
+        # type - see children/tests/test_intake.py.
+        r = self.client.post("/api/children/", self._payload(legal_status=""), format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        for f in ("place_of_birth_or_found", "birth_status"):
+            r = self.client.post("/api/children/", self._payload(**{f: ""}), format="json")
+            self.assertEqual(r.status_code, 400, f)
             self.assertIn(f, r.data)
-            self.assertIn(r.data[f], (None, ""))
 
     def test_category_rejects_a_removed_samd_value(self):
         r = self.client.post("/api/children/", self._payload(case_category="Trafficked"), format="json")
@@ -306,7 +306,7 @@ class IdentifyingInformationFieldsTests(APITestCase):
         self.assertIn("case_category", r.data)
 
     def test_category_accepts_all_six_new_values(self):
-        for value in ("Surrendered", "Abandoned", "Dependent", "Neglected", "Without Known Parents", "Orphan"):
+        for value in ("Surrendered", "Abandoned", "Dependent", "Neglected", "Without Known Parents", "Orphaned"):
             r = self.client.post("/api/children/", self._payload(
                 first_name="Ivy", last_name=f"Fields-{value}", case_category=value,
             ), format="json")

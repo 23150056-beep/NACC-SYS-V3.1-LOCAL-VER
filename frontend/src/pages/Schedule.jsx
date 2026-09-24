@@ -6,6 +6,7 @@ import 'react-big-calendar/lib/css/react-big-calendar.css';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { loadAll } from '../utils/load';
 import { exactDate } from '../utils/time';
 import {
@@ -174,6 +175,7 @@ const STATUS_COLOR = { scheduled: 'var(--blue-600)', completed: 'var(--success-6
 export default function Schedule() {
   const { user } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
   const role = user?.role_name || 'Staff';
   const isPsych = role === 'Psychologist';
   const canBook = ['Administrator', 'Staff', 'Psychologist'].includes(role);
@@ -363,6 +365,15 @@ export default function Schedule() {
       duration_minutes: booking.duration || 60,
       purpose: booking.purpose, notes: booking.notes || '',
     };
+    const who = children.find((c) => String(c.id) === String(booking.child))?.fullname;
+    if (!(await confirm({
+      description: booking.id
+        ? `This moves ${who || 'the child'}'s appointment to the new time.`
+        : `This books an appointment for ${who || 'the child'}.`,
+      confirmLabel: booking.id ? 'Yes, move it' : 'Yes, book it',
+      details: [['Child', who], ['Date', booking.date], ['Time', booking.time],
+        ['Purpose', PURPOSES.find((p) => p.v === booking.purpose)?.label]],
+    }))) return;
     try {
       // Moving one is the same form and the same rules, so it is the same
       // handler — only the verb differs. Cancel-and-rebook was the previous
@@ -438,6 +449,15 @@ export default function Schedule() {
     };
     // Owner is only set on create — editing never reassigns whose calendar a block belongs to.
     if (!isPsych && !blockForm.id) base.psychologist = blockForm.psychologist;
+    if (!(await confirm({
+      description: blockForm.id || blockForm.byDay
+        ? 'This saves the changed hours. Sessions already booked are kept as they are.'
+        : 'This adds the hours to the calendar, where they can be booked straight away.',
+      confirmLabel: 'Yes, save the hours',
+      details: [['Hours', `${blockForm.start_time}–${blockForm.end_time}`],
+        ['Sessions at a time', String(base.capacity)],
+        ['Date', blockForm.mode === 'date' ? blockForm.date : null]],
+    }))) return;
     try {
       if (blockForm.byDay) {
         // Editing a whole weekly pattern: the ticked days are the truth. Days
@@ -499,6 +519,12 @@ export default function Schedule() {
     e.preventDefault();
     setError('');
     if (!leaveForm.starts_on || !leaveForm.ends_on) { setError('Pick both dates.'); return; }
+    if (!(await confirm({
+      description: 'Nothing can be booked or moved onto these days once the leave is recorded. '
+        + 'Sessions already booked inside it are not cancelled.',
+      confirmLabel: 'Yes, record the leave',
+      details: [['From', leaveForm.starts_on], ['To', leaveForm.ends_on], ['Reason', leaveForm.reason]],
+    }))) return;
     try {
       await api.post('/unavailability/', {
         psychologist: leaveForm.psychologist || undefined,

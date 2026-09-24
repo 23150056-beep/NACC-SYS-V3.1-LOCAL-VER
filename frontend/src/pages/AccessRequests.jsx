@@ -5,7 +5,7 @@ import { useActivity } from '../context/ActivityContext';
 import { useToast } from '../context/ToastContext';
 import {
   Alert, Avatar, Button, ConfirmDialog, EmptyState, FormField, Icon, ROLE_ACCESS,
-  RoleAccessPanel, Select, Skeleton,
+  RoleAccessPanel, Select, Skeleton, roleLabel,
 } from '../ui';
 
 // People who asked for access and are waiting on a decision. Rendered as a
@@ -58,7 +58,7 @@ function ClaimChip({ role }) {
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 'var(--radius-pill)', border: '1px dashed var(--border-strong)', background: 'transparent', fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
       <Icon name="quote" size={11} style={{ opacity: 0.6 }} />
-      asks to be <strong style={{ color: 'var(--text-body)', fontWeight: 700 }}>{role}</strong>
+      asks to be <strong style={{ color: 'var(--text-body)', fontWeight: 700 }}>{roleLabel(role)}</strong>
     </span>
   );
 }
@@ -111,7 +111,7 @@ export default function AccessRequests({ onChange }) {
       if (kind === 'approve') {
         await api.post(`/users/${u.id}/approve/`, { role: grantRole });
         const granted = roles.find((r) => String(r.id) === String(grantRole))?.role_name;
-        toast.success(`${nameOf(u)} approved as ${granted}`);
+        toast.success(`${nameOf(u)} approved as ${roleLabel(granted)}`);
       } else {
         await api.post(`/users/${u.id}/decline/`);
         toast.success(`Request from ${nameOf(u)} declined`);
@@ -220,7 +220,7 @@ export default function AccessRequests({ onChange }) {
                       onChange={(e) => setPicked((p) => ({ ...p, [u.id]: e.target.value }))}
                     >
                       <option value="">— Select role —</option>
-                      {roles.map((r) => <option key={r.id} value={r.id}>{r.role_name}</option>)}
+                      {roles.map((r) => <option key={r.id} value={r.id}>{roleLabel(r.role_name)}</option>)}
                     </Select>
                   </div>
                   <div style={{ display: 'flex', gap: 8, flex: 'none' }}>
@@ -253,12 +253,12 @@ export default function AccessRequests({ onChange }) {
           <FormField
             label="Role to grant"
             hint={claimed
-              ? `They asked for ${claimed}. Set what is actually correct — this is your decision, not theirs.`
+              ? `They asked for ${roleLabel(claimed)}. Set what is actually correct — this is your decision, not theirs.`
               : 'They did not say what they do. Choose the role that matches their work.'}
           >
             <Select value={grantRole} onChange={(e) => setGrantRole(e.target.value)}>
               <option value="">— Select role —</option>
-              {roles.map((r) => <option key={r.id} value={r.id}>{r.role_name}</option>)}
+              {roles.map((r) => <option key={r.id} value={r.id}>{roleLabel(r.role_name)}</option>)}
             </Select>
           </FormField>
           {/* The same panel User Management shows when a role is corrected, so

@@ -4,9 +4,10 @@ import { useActivity } from '../context/ActivityContext';
 import {
   Alert, Avatar, Button, ConfirmDialog, Drawer, EmptyState, FilterPills, FormField, hoverLift,
   Icon, iconBtn, Input, Menu, Modal, PAGE, PageHeader, RoleAccessPanel, RoleBadge, Select,
-  Skeleton, Tabs, TOOLBAR,
+  Skeleton, Tabs, TOOLBAR, roleLabel,
 } from '../ui';
 import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import CredentialHandoffs from './CredentialHandoffs';
 import AccessRequests from './AccessRequests';
 import { exactDate, shortDate, timeAgo } from '../utils/time';
@@ -214,6 +215,7 @@ export default function Users() {
 
   const { refresh: refreshActivity } = useActivity();
   const toast = useToast();
+  const ask = useConfirm();
 
   // include_archived: deactivated accounts belong in the directory. Hiding
   // them made "this person is gone" indistinguishable from "this person was
@@ -289,7 +291,7 @@ export default function Users() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roleChange?.to]);
 
-  const save = (e) => {
+  const save = async (e) => {
     e.preventDefault();
     setError('');
     // Caught here as well as on the server so the answer is immediate. An
@@ -303,6 +305,17 @@ export default function Users() {
     // A role change alters what someone can reach in the system, so it does not
     // ride along silently with a corrected phone number.
     if (roleChange) { setConfirm({ kind: 'role' }); return; }
+    const ok = await ask(form.id ? {
+      description: `This saves your changes to ${nameOf(form)}'s account.`,
+      confirmLabel: 'Yes, save changes',
+    } : {
+      description: 'This creates the account and shows a temporary password once, to hand over. '
+        + 'They choose their own password at first sign-in.',
+      confirmLabel: 'Yes, create the account',
+      details: [['Name', [form.first_name, form.last_name].filter(Boolean).join(' ')],
+        ['Email', form.email], ['Role', roleLabel(roleName(form.role))]],
+    });
+    if (!ok) return;
     submitForm();
   };
 
@@ -316,9 +329,7 @@ export default function Users() {
       delete payload.google_linked; delete payload.last_login; delete payload.created_at;
       if (form.id) {
         await api.put(`/users/${form.id}/`, payload);
-        // Administrator never appears here — it cannot be reached by an edit —
-        // so the article is always "a".
-        toast.success(roleChange ? `${nameOf(form)} is now a ${roleChange.to}` : 'User updated');
+        toast.success(roleChange ? `${nameOf(form)}'s role is now ${roleLabel(roleChange.to)}` : 'User updated');
       } else {
         const { data } = await api.post('/users/', payload);
         toast.success('User added');
@@ -547,7 +558,7 @@ export default function Users() {
               <div style={{ width: 178 }}>
                 <Select size="sm" value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} aria-label="Filter by role">
                   <option value="">All roles</option>
-                  {roles.map((r) => <option key={r.id} value={r.id}>{r.role_name}</option>)}
+                  {roles.map((r) => <option key={r.id} value={r.id}>{roleLabel(r.role_name)}</option>)}
                 </Select>
               </div>
             </div>
@@ -633,7 +644,7 @@ export default function Users() {
                                 <button
                                   type="button"
                                   onClick={(e) => { e.stopPropagation(); openEdit(u); }}
-                                  aria-label={`${nameOf(u)} — ${u.role_name || 'no role'}, ${LIFECYCLE[state].label}. Open account.`}
+                                  aria-label={`${nameOf(u)} — ${roleLabel(u.role_name) || 'no role'}, ${LIFECYCLE[state].label}. Open account.`}
                                   style={{ all: 'unset', cursor: 'pointer', display: 'block', maxWidth: '100%', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
                                 >
                                   {nameOf(u)}
@@ -795,7 +806,7 @@ export default function Users() {
             {roleLock ? (
               <FormField label="Role" hint={roleLock}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 42, padding: '0 13px', borderRadius: 'var(--radius-md)', background: 'var(--ink-50)', border: '1px solid var(--border)', color: 'var(--text-strong)', fontWeight: 700, fontSize: 14 }}>
-                  {form.role_name || formRole || (form.requested_role_name ? `${form.requested_role_name} (claimed)` : '—')}
+                  {roleLabel(form.role_name || formRole) || (form.requested_role_name ? `${roleLabel(form.requested_role_name)} (claimed)` : '—')}
                   <Icon name="lock" size={13} style={{ color: 'var(--text-faint)', marginLeft: 'auto' }} />
                 </div>
               </FormField>
@@ -817,7 +828,7 @@ export default function Users() {
                     // someone here would skip the handover and leave two live
                     // administrators. The server refuses it either way.
                     .filter((r) => !form.id || r.role_name !== 'Administrator')
-                    .map((r) => <option key={r.id} value={r.id}>{r.role_name}</option>)}
+                    .map((r) => <option key={r.id} value={r.id}>{roleLabel(r.role_name)}</option>)}
                 </Select>
               </FormField>
             )}
@@ -867,9 +878,9 @@ export default function Users() {
         <ConfirmDialog
           onClose={() => setConfirm(null)} onConfirm={runConfirmed} busy={saving}
           tone="warning" icon={<Icon name="shield" size={19} />}
-          title={`Change ${nameOf(form)} to ${roleChange.to}?`}
+          title={`Change ${nameOf(form)} to ${roleLabel(roleChange.to)}?`}
           description="Their access changes as soon as you save."
-          confirmLabel={saving ? 'Saving…' : `Change to ${roleChange.to}`} cancelLabel="Cancel"
+          confirmLabel={saving ? 'Saving…' : `Change to ${roleLabel(roleChange.to)}`} cancelLabel="Cancel"
         >
           <RoleAccessPanel from={roleChange.from} to={roleChange.to} />
           {/* Records already entered under the old role stay where they are —

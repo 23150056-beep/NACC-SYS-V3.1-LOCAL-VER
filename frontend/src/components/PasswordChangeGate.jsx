@@ -2,6 +2,7 @@ import { useState } from 'react';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { Button, FormField, PasswordInput, Alert, Icon } from '../ui';
 
 // Full-screen "set a new password" card, styled like the Login page's card
@@ -14,6 +15,7 @@ import { Button, FormField, PasswordInput, Alert, Icon } from '../ui';
 export default function PasswordChangeGate({ prefillCurrent = '', title = 'Set a new password', subtitle, onDone }) {
   const { updateUser, logout } = useAuth();
   const toast = useToast();
+  const ask = useConfirm();
   const [current, setCurrent] = useState(prefillCurrent);
   const [next, setNext] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -25,6 +27,10 @@ export default function PasswordChangeGate({ prefillCurrent = '', title = 'Set a
     setError('');
     if (next.length < 8) { setError('New password must be at least 8 characters.'); return; }
     if (next !== confirm) { setError('Passwords do not match.'); return; }
+    if (!(await ask({
+      description: 'This sets your new password. You then sign in again with it.',
+      confirmLabel: 'Yes, set it',
+    }))) return;
     setBusy(true);
     try {
       const { data } = await api.post('/auth/change-password/', { current_password: current, new_password: next });

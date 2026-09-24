@@ -3,9 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import { useToast } from '../../context/ToastContext';
 import {
-  Alert, Avatar, Badge, Button, ConfirmDialog, FormField, Icon, iconBtn, hoverLift, Select,
+  Alert, Avatar, Badge, Button, ConfirmDialog, FormField, Icon, iconBtn, hoverLift, Select, roleLabel,
 } from '../../ui';
-import { TERMINATION_REASONS } from '../../config/caseData';
+import { ADMISSION, CASE_TYPE_FIELDS, PLACEMENT, TERMINATION_REASONS, dateFieldFor } from '../../config/caseData';
 import { PURPOSE_LABEL, StatusChip, fmtDay, fmtTime, localDate } from './shared';
 
 /* The record drawer, and the terminate confirmation it opens.
@@ -129,21 +129,33 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
       toast.error(d?.start || d?.psychologist || d?.detail || 'Could not book this slot.');
     } finally { setBookingBusy(false); }
   };
-  const location = [child.barangay, child.municipality, child.province].filter(Boolean).join(', ') || child.address || '—';
+  const street = [child.house_number, child.street].filter(Boolean).join(' ');
+  const location = [street, child.barangay, child.municipality, child.province].filter(Boolean).join(', ') || child.address || '—';
+  // The date the case records. An older record may hold the other one too,
+  // from before the form asked for just one; that is shown rather than hidden.
+  const dated = dateFieldFor(child.case_type, child.type_of_adoption);
+  const asked = (f) => (CASE_TYPE_FIELDS[child.case_type] || []).includes(f);
+  const dateRows = [
+    [ADMISSION, 'Date of Admission to the Agency'],
+    [PLACEMENT, 'Date of Placement to Custodian'],
+  ].filter(([f]) => f === dated || child[f] || (!dated && f === ADMISSION))
+    .map(([f, label]) => [label, child[f] || '—']);
   const showReopen = canReopen && child.status === 'inactive';
   const hasRecommendationContent = child.recommendation || child.referral_source || child.education_level || child.current_placement;
   const fields = [
+    ['Category', child.case_category || '—'],
+    ['Middle Name', child.middle_name || '—'],
     ['Sex', child.gender || '—'],
+    ...(child.date_found ? [['Date Found', child.date_found]] : []),
     ['Place of Birth or Place Found', child.place_of_birth_or_found || '—'],
     ['Birth Status', child.birth_status || '—'],
-    ['Category', child.case_category || '—'],
     ['Legal Status', child.legal_status || '—'],
     ['Assigned Psychologist', child.psychologist_name || '—'],
-    ['Previous Custodian', child.surrendered_by || '—'],
+    ...(asked('surrendered_by') || child.surrendered_by ? [['Previous Custodian', child.surrendered_by || '—']] : []),
     ['Address', location],
-    ['Date of Admission to the Agency', child.date_of_admission || '—'],
-    ['Date of Placement to Custodian', child.date_of_placement_to_custodian || '—'],
-    ['Type of Adoption', child.type_of_adoption || '—'],
+    ...(child.landmark ? [['Landmark', child.landmark]] : []),
+    ...dateRows,
+    ...(asked('type_of_adoption') || child.type_of_adoption ? [['Type of Adoption', child.type_of_adoption || '—']] : []),
     ['Pre-Assessment', child.pre_assessment_status || '—'],
   ];
   return (
@@ -168,7 +180,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
         {others.length > 0 && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '8px 24px', background: 'var(--blue-50)', borderBottom: '1px solid var(--blue-100)' }}>
             <Icon name="users" size={14} style={{ color: 'var(--blue-600)' }} />
-            {others.map((o, i) => <Badge key={i} tone="brand" size="sm" dot>{o.name} ({o.role}) is here</Badge>)}
+            {others.map((o, i) => <Badge key={i} tone="brand" size="sm" dot>{o.name} ({roleLabel(o.role)}) is here</Badge>)}
           </div>
         )}
         <div className="racco-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 24px' }}>

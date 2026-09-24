@@ -2,6 +2,20 @@ from django.db import models
 from django.utils import timezone
 
 
+def middle_initial_of(middle_name):
+    """The middle name as it appears in a child's display name: "Dela Cruz"
+    gives "D.". A value already written as an initial - "R", "DC." - is what
+    every record from before 24 Sep 2026 holds, and is kept as it was written,
+    so no existing name changes shape the next time its record is saved."""
+    middle = (middle_name or "").strip()
+    if not middle:
+        return ""
+    bare = middle.replace(".", "").replace(" ", "")
+    if len(bare) <= 3 and not any(ch.islower() for ch in bare):
+        return f"{middle.rstrip('.')}."
+    return f"{middle[0].upper()}."
+
+
 class Child(models.Model):
     ACTIVE = "active"
     INACTIVE = "inactive"
@@ -43,7 +57,7 @@ class Child(models.Model):
         ("Dependent", "Dependent"),
         ("Neglected", "Neglected"),
         ("Without Known Parents", "Without Known Parents"),
-        ("Orphan", "Orphan"),
+        ("Orphaned", "Orphaned"),
     ]
 
     # Who surrendered the child to NACC / RACCO I.
@@ -54,25 +68,27 @@ class Child(models.Model):
     ]
 
     # New fields below match the agency's official "I. Identifying
-    # Information" intake form (2026-07).
+    # Information" intake form (2026-07). "N/A" became "Unknown" and "Child"
+    # was retired on 24 Sep 2026; a record still holding "Child" keeps it
+    # (see ChildSerializer._current_or_unchanged).
     BIRTH_STATUS_CHOICES = [
         ("Marital", "Marital"),
         ("Non-Marital", "Non-Marital"),
-        ("Child", "Child"),
-        ("N/A", "N/A"),
+        ("Unknown", "Unknown"),
     ]
     LEGAL_STATUS_CHOICES = [
         ("With Issued CDCLAA", "With Issued CDCLAA"),
         ("With IVC", "With IVC"),
         ("Judicially Declared Abandoned", "Judicially Declared Abandoned"),
     ]
+    # SIBRA and ICA Relative were retired on 24 Sep 2026, the same way as
+    # birth status "Child": kept on records that hold them, no longer offered.
     TYPE_OF_ADOPTION_CHOICES = [
         ("Regular", "Regular"),
         ("Domestic Relative", "Domestic Relative"),
+        ("Relative (Without 2-yr custody)", "Relative (Without 2-yr custody)"),
         ("Step-parent", "Step-parent"),
         ("Adult", "Adult"),
-        ("SIBRA", "SIBRA"),
-        ("ICA Relative", "ICA Relative"),
         ("IP", "IP"),
         ("Foster-Adopt", "Foster-Adopt"),
     ]
@@ -89,11 +105,20 @@ class Child(models.Model):
     # Name parts (adviser): fullname stays as the composed display column so
     # every existing consumer keeps working.
     first_name = models.CharField(max_length=100, blank=True)
-    middle_initial = models.CharField(max_length=5, blank=True)
+    # The whole middle name since 24 Sep 2026 - it was a middle initial, and
+    # records from before still hold just the initial.
+    middle_name = models.CharField(max_length=100, blank=True)
     last_name = models.CharField(max_length=100, blank=True)
     fullname = models.CharField(max_length=150)
     birth_date = models.DateField(null=True, blank=True)
+    # For a foundling, the day the child was found. The birth date beside it
+    # is then an estimate, and this is the date that is actually known.
+    date_found = models.DateField(null=True, blank=True)
     gender = models.CharField(max_length=10, blank=True)
+    # The street address, in front of the three PSGC levels below.
+    house_number = models.CharField(max_length=50, blank=True)
+    street = models.CharField(max_length=150, blank=True)
+    landmark = models.CharField(max_length=200, blank=True)
     # Structured location pickers (Province / Municipality-City / Barangay).
     province = models.CharField(max_length=100, blank=True)
     municipality = models.CharField(max_length=100, blank=True)
@@ -167,7 +192,7 @@ class Child(models.Model):
 
     def save(self, *args, **kwargs):
         if self.first_name or self.last_name:
-            mi = f"{self.middle_initial.rstrip('.')}." if self.middle_initial else ""
+            mi = middle_initial_of(self.middle_name)
             self.fullname = " ".join(p for p in (self.first_name, mi, self.last_name) if p)
         super().save(*args, **kwargs)
 

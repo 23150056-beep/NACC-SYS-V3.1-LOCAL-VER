@@ -3,6 +3,7 @@ import {
   Alert, Badge, Button, Card, FormField, Icon, Input, Note, PAGE, PageHeader, Switch, TD, TH, THEAD_ROW, TR,
 } from '../ui';
 import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import {
   getAssistantSettings, saveAssistantSettings, getAssistantMetrics, checkAssistant,
   getUnansweredQuestions,
@@ -32,6 +33,7 @@ const WHY_LABELS = {
 
 export default function Settings() {
   const toast = useToast();
+  const confirm = useConfirm();
   const [agency] = useState('St. Joseph Orphanage');
   const [sync, setSync] = useState(true);
   const [cfg, setCfg] = useState(null);
@@ -60,6 +62,19 @@ export default function Settings() {
   }, []);
 
   const save = async (patch) => {
+    // Agency-wide: every account feels it the moment it saves.
+    const ok = await confirm('enabled' in patch ? {
+      description: patch.enabled
+        ? 'This turns the assistant on for everyone in the agency.'
+        : 'This turns the assistant off for everyone in the agency — briefs, summaries, remark polishing and the chat panel stop until it is turned on again.',
+      confirmLabel: patch.enabled ? 'Yes, turn it on' : 'Yes, turn it off',
+      tone: patch.enabled ? 'brand' : 'warning',
+    } : {
+      description: 'This changes the model runtime the assistant uses, for everyone in the agency.',
+      confirmLabel: 'Yes, save the runtime settings',
+      details: [['Runtime URL', patch.ollama_url], ['Model', patch.model_name]],
+    });
+    if (!ok) return null;
     const prev = cfg;
     const next = { ...cfg, ...patch };
     setCfg(next);
@@ -109,6 +124,10 @@ export default function Settings() {
               <Button variant="secondary" disabled={mailTesting}
                       iconLeft={<Icon name="mail" size={16} />}
                       onClick={async () => {
+                        if (!(await confirm({
+                          description: 'This sends a real test email to your own address.',
+                          confirmLabel: 'Yes, send it',
+                        }))) return;
                         setMailTesting(true);
                         setMailResult(null);
                         try {
@@ -182,6 +201,10 @@ export default function Settings() {
               <Button variant="secondary" disabled={smsTesting || smsChecking}
                       iconLeft={<Icon name="message-square" size={16} />}
                       onClick={async () => {
+                        if (!(await confirm({
+                          description: 'This sends a real text message to your own confirmed number, through the SMS provider.',
+                          confirmLabel: 'Yes, send it',
+                        }))) return;
                         setSmsTesting(true);
                         setSmsResult(null);
                         try {

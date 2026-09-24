@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Button, Input, PasswordInput, FormField, Alert, Icon, ROLE_META } from '../ui';
+import { Button, Input, PasswordInput, FormField, Alert, Icon, ROLE_META, roleLabel } from '../ui';
 import AuthLayout, { AuthLink } from '../components/AuthLayout';
 import GoogleSignInButton from '../components/GoogleSignInButton';
 import { useAuth } from '../context/AuthContext';
+import { useConfirm } from '../context/ConfirmContext';
 import api from '../api/client';
 
 /* Requesting access, which is not the same as getting it.
@@ -49,6 +50,7 @@ function strengthOf(pw) {
 
 export default function Signup() {
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const { loginWithGoogle } = useAuth();
   const [form, setForm] = useState({
     first_name: '', last_name: '', email: '', password: '',
@@ -87,6 +89,12 @@ export default function Signup() {
   const submit = async (e) => {
     e.preventDefault();
     if (!complete || busy) return;
+    if (!(await confirm({
+      description: 'This sends your request to an administrator, who decides whether to open an account and what it can reach.',
+      confirmLabel: 'Yes, send the request',
+      details: [['Name', `${form.first_name} ${form.last_name}`.trim()], ['Email', form.email.trim()],
+        ['Role asked for', role ? roleLabel(role) : 'Not stated']],
+    }))) return;
     setBusy(true);
     setError('');
     setFieldErrors({});
@@ -278,7 +286,7 @@ export default function Signup() {
                   </span>
                   <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 14,
                                  color: 'var(--text-strong)', minWidth: 0 }}>
-                    {name}
+                    {roleLabel(name)}
                   </span>
                 </button>
               );
