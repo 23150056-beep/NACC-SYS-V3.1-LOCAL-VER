@@ -342,7 +342,8 @@ class Command(BaseCommand):
             # save is a demo of something that cannot happen. The draws from
             # `rng` stay in the order they always were, so a seed still gives
             # the caseload it gave before; anything new comes from `extra`.
-            born = today - timedelta(days=rng.randint(5, 17) * 365)
+            age = rng.randint(5, 17)
+            born = today - timedelta(days=age * 365)
             gender = rng.choice(["Male", "Female"])
             category = rng.choice(CATEGORIES)
             if category not in intake_rules.CATEGORY_OPTIONS[case_type]:
@@ -365,6 +366,10 @@ class Command(BaseCommand):
                 case_type=case_type, case_category=category,
                 surrendered_by=surrendered_by, type_of_adoption=adoption,
                 birth_status=birth_status,
+                # Kindergarten at five, then a grade a year - the way a case
+                # worker would write it, and never blank now that it is asked.
+                education_level="Kindergarten" if age < 6 else f"Grade {min(age - 5, 12)}",
+                referral_source=extra.choice([c for c, _ in Child.REFERRAL_SOURCE_CHOICES]),
                 date_of_admission=intake if dated == intake_rules.ADMISSION else None,
                 date_of_placement_to_custodian=intake if dated == intake_rules.PLACEMENT else None,
                 assigned_psychologist=psych,

@@ -537,12 +537,16 @@ def _resolve_appointments(request, args):
 
     appts, own = _scope_appointments(request, Appointment.objects.filter(
         status__in=statuses, start__date__gte=start, start__date__lt=end))
-    appts = appts.select_related("child", "psychologist").order_by("start")
+    from scheduling import visibility
+    appts = (appts.select_related("child", "psychologist")
+             .prefetch_related(visibility.referrals_prefetch()).order_by("start"))
 
     total = appts.count()
     return {"kind": "appointments", "when": period,
             "scope": "own" if own else "agency", "total": total, "items": [
-                {"child": a.child.fullname,
+                # The calendar's rule: a social worker hears the name only of
+                # a child they referred (scheduling/visibility.py).
+                {"child": visibility.label(request.user, a.child),
                  "psychologist": display_name(a.psychologist),
                  "when": timezone.localtime(a.start).strftime("%a %d %b, %H:%M"),
                  "purpose": a.get_purpose_display(),

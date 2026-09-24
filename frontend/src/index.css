@@ -949,6 +949,17 @@ input::-ms-clear {
   }
 }
 
+/* The child record prints as its psychological report
+   (components/PsychReportPrint.jsx): everything else on that page stays on
+   screen. */
+@media print {
+  .racco-psych-print-root > :not(.racco-print-only) {
+    display: none !important;
+  }
+  .racco-psych-print-root, main { background: #fff !important; }
+  @page { size: A4; margin: 16mm 16mm 18mm; }
+}
+
 /* Centered case-modal two-column body; collapses on small screens. */
 .racco-case-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 24px; align-items: start; }
 @media (max-width: 760px) { .racco-case-grid { grid-template-columns: 1fr; } }

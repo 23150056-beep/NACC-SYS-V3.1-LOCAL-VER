@@ -74,6 +74,13 @@ class Child(models.Model):
         ("With IVC", "With IVC"),
         ("Judicially Declared Abandoned", "Judicially Declared Abandoned"),
     ]
+    # Who referred the child to the agency (owner's list, 24 Sep 2026).
+    REFERRAL_SOURCE_CHOICES = [
+        ("RACCO", "RACCO"),
+        ("LGU", "LGU"),
+        ("CCA", "CCA"),
+        ("RCF", "RCF"),
+    ]
     # SIBRA and ICA Relative were retired on 24 Sep 2026, the same way as
     # birth status "Child": kept on records that hold them, no longer offered.
     TYPE_OF_ADOPTION_CHOICES = [
@@ -148,9 +155,16 @@ class Child(models.Model):
         max_length=20, choices=CASE_STATUS_CHOICES, default=STAGE_PRE_ASSESSMENT)
     # V2 profiling fields (exact list pending confirmation with the psychologist).
     photo = models.ImageField(upload_to="children/photos/", null=True, blank=True)
-    referral_source = models.CharField(max_length=150, blank=True)
+    # Picked from the four since 24 Sep 2026; typed before that, and a record
+    # keeps what was typed until somebody changes it.
+    referral_source = models.CharField(
+        max_length=150, blank=True, choices=REFERRAL_SOURCE_CHOICES)
     referral_reason = models.TextField(blank=True)
+    # "Educational Placement" - asked on Child's Profile, and required there,
+    # since 24 Sep 2026. "Not in school" is an answer.
     education_level = models.CharField(max_length=100, blank=True)
+    # "Current Whereabouts". Taken off the form and every screen on 24 Sep
+    # 2026 at the owner's request; what was recorded is kept, not deleted.
     current_placement = models.CharField(max_length=150, blank=True)
     medical_notes = models.TextField(blank=True)
     # Free-text recommendations + fields not part of the agency's intake

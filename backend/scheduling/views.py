@@ -14,7 +14,7 @@ from accounts.scoping import role_of as _role
 from activity.models import ActivityLog
 from activity.services import log_activity
 from children.models import Child
-from scheduling import booking
+from scheduling import booking, visibility
 from scheduling.availability import free_windows
 from scheduling.models import AvailabilityBlock, Appointment, Unavailability
 from scheduling.serializers import (
@@ -253,7 +253,8 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_queryset(self):
-        qs = Appointment.objects.select_related("child", "psychologist", "booked_by")
+        qs = (Appointment.objects.select_related("child", "psychologist", "booked_by")
+              .prefetch_related(visibility.referrals_prefetch()))
         role = _role(self.request)
         if role == Role.PSYCHOLOGIST:
             qs = qs.filter(psychologist=self.request.user)
@@ -351,7 +352,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         log_activity(request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type="Appointment", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.psychologist)
-        return Response(AppointmentSerializer(obj).data)
+        return Response(AppointmentSerializer(obj, context={"request": request}).data)
 
     @action(detail=True, methods=["post"])
     def complete(self, request, pk=None):

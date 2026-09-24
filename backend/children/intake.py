@@ -83,7 +83,7 @@ def intake_date(child):
 ALWAYS_REQUIRED = [
     "case_category", "case_type",
     "first_name", "last_name", "birth_date", "gender",
-    "place_of_birth_or_found", "birth_status",
+    "place_of_birth_or_found", "birth_status", "education_level",
     "house_number", "street", "barangay", "municipality", "province",
 ]
 

@@ -40,7 +40,7 @@ from clinical.serializers import (
 )
 from clinical.self_report_detection import detect_concerns
 from clinical.self_report_model_check import start_model_check
-from clinical.services import extract_text
+from clinical.services import ensure_text, extract_text
 
 logger = logging.getLogger(__name__)
 
@@ -429,6 +429,17 @@ class PsychologicalReportViewSet(_ChildScopedClinicalViewSet):
     @action(detail=True, methods=["get"])
     def download(self, request, pk=None):
         return _serve_attachment(self.get_object())
+
+    @action(detail=True, methods=["get"])
+    def text(self, request, pk=None):
+        """The report's words, for reading it on screen without downloading
+        the file (24 Sep 2026). Same object, same scope as `download`: whoever
+        may fetch the file may read its text, nobody else. A Word 97-2003 file
+        cannot be read and says so; the screen then offers the download."""
+        obj = self.get_object()
+        body = ensure_text(obj)
+        return Response({"filename": obj.original_filename, "text": body,
+                         "readable": bool(body.strip())})
 
 
 class CaseReferralViewSet(viewsets.ModelViewSet):

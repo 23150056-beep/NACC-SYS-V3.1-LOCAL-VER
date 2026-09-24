@@ -557,6 +557,19 @@ none of the real ones has been seen.
   to a model whose window is a few thousand tokens. 8,000 characters is
   arithmetic, not a measurement - `ai_eval --feature summary` measures it,
   fitted against whole, on the machine that runs the model.
+- **Reports are read on screen too** (24 Sep 2026, staff asked): a PDF in a
+  sandboxed frame - scripts off, typed as a PDF whatever came back, as for
+  consent scans - and a Word file as its text, headings kept, through
+  `/report-files/<id>/text/`. Same object and queryset as the download, so it
+  shows nobody anything the Download button would not.
+- **Print on a child's record prints a psychological report**
+  (`components/PsychReportPrint.jsx`), not the screen: identifying
+  information, reason for referral, background, procedures, observations,
+  results, summary, recommendations, signature block. It is a STANDARD layout
+  until the agency's template is seen, filled only from what the reader could
+  already see; remarks and self-report flags are left out, and anything not
+  recorded prints as lines to complete by hand. index.css hides every
+  `<header>` when printing, which is why it uses none.
 - **Demo reports come in three layouts** (`clinical/demo_reports.py`), turned
   over within each psychologist's children - turned over across the list they
   fell in step with the seeder's round-robin and each psychologist saw one.
@@ -607,6 +620,11 @@ middle name, a date found, and every question that applies made mandatory.
   `surrendered_by` lost its three placeholder choices and widened to 150
   (children 0022). Still required where the case type asks it; old values
   such as "Relatives" are ordinary text now and were left alone.
+- **Educational Placement moved to Child's Profile and is required** there
+  ("Not in school" is an answer); **Referral Source is a pick** from RACCO /
+  LGU / CCA / RCF (children 0023), with typed text on older records kept by
+  the same change-only rule; **Current Whereabouts left the form and every
+  screen** (owner, 24 Sep 2026) - the column and what it holds are kept.
 - **A rename cannot ride along with a deploy the old release survives.** On
   24 Sep the demo API's first deploy of 0020 failed on Render's side after the
   web had gone live; had the migration run first, the old API - still serving
@@ -614,6 +632,27 @@ middle name, a date found, and every question that applies made mandatory.
   `middle_initial`. Replayed on PostgreSQL 16 it does exactly that. A manual
   redeploy of the same commit went through in two minutes. Prefer additive
   migrations (add, copy, drop later); widening a column, as 0022 does, is safe.
+
+## Names on the schedule
+
+Owner's decision, 24 Sep 2026, in `scheduling/visibility.py`: on the calendar
+a social worker sees the name of a child **they referred** - whose latest case
+referral they filed - and every other appointment as **"C-0042 · Ref. E.
+Pascua"**. Administrators and psychologists see names.
+
+- **The case reference is not decoration.** The literal request was "only the
+  referring staff's name"; one worker's fifteen referrals would then be fifteen
+  identical chips, and cancelling one would be a guess.
+- **Applied where data leaves the server**, not in the screen: the
+  appointments API (`child_name` is null, `name_hidden` true), the Dashboard's
+  "Today" strip, the assistant's schedule answers, and the booking refusal that
+  used to name the other child in the slot. A name the screen hides is still
+  in the response.
+- **Records and the booking form keep names.** Staff enter and book children
+  there; this is how a schedule is displayed, not what staff may know.
+- The latest referral decides, so replacing one moves the name to whoever
+  filed the new one. A child with no referral on file reads "no referral on
+  file". `test_the_rule_costs_no_query_per_row` holds the prefetch.
 
 ## Confirmations
 

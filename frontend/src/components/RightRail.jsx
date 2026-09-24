@@ -5,7 +5,7 @@ import { useCensus } from '../context/CensusContext';
 import { useActivity } from '../context/ActivityContext';
 import { Icon } from '../ui';
 import { ACTION_META, eventDestination, eventText } from '../utils/activity';
-import { PURPOSE_LABEL } from '../utils/child';
+import { PURPOSE_LABEL, scheduleName } from '../utils/child';
 import { timeAgo } from '../utils/time';
 
 /* Ambient context: the numbers, the day and the stream, in a third column.
@@ -133,7 +133,7 @@ export function TodayCard() {
           >
             <span className="racco-mono" style={{ width: 44, flex: 'none', fontWeight: 600, fontSize: 12, color: t.time, paddingTop: 1 }}>{a.time}</span>
             <span style={{ flex: 1, minWidth: 0, borderLeft: `2px solid ${t.tone}`, paddingLeft: 10 }}>
-              <span style={{ display: 'block', fontWeight: 700, fontSize: 12.5, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{a.child_name}</span>
+              <span style={{ display: 'block', fontWeight: 700, fontSize: 12.5, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{scheduleName(a)}</span>
               <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {PURPOSE_LABEL[a.purpose] || a.purpose}{!isPsych && a.psychologist ? ` · ${a.psychologist}` : ''}
               </span>

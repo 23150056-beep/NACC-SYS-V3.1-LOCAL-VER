@@ -8,6 +8,7 @@ import {
   Avatar, Badge, Button, EmptyState, Icon, iconBtn, IconChip, Input, Note, PAGE, PageHeader, Tabs,
 } from '../ui';
 import { useOpenFromLink } from '../utils/links';
+import ReportViewer from '../components/ReportViewer';
 import { reportTypeLabel } from '../config/caseData';
 import ReportCheckNote from '../components/ReportCheckNote';
 import UploadDrawer from '../components/UploadDrawer';
@@ -25,6 +26,7 @@ export default function Report() {
   const [tab, setTab] = useState('results');
   const [entries, setEntries] = useState([]);
   const [files, setFiles] = useState([]);
+  const [viewing, setViewing] = useState(null); // the report being read on screen
   const [caseReferrals, setCaseReferrals] = useState([]);
   const [children, setChildren] = useState([]);
   const [q, setQ] = useState('');
@@ -191,6 +193,12 @@ export default function Report() {
               <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-muted)', width: 120, flex: 'none' }}>{f.coverage || '—'}</span>
               <span className="racco-mono" style={{ fontWeight: 600, fontSize: 12, color: 'var(--text-body)', width: 86, textAlign: 'right', flex: 'none' }}>{(f.created_at || '').slice(0, 10)}</span>
               <button
+                type="button" onClick={() => setViewing(f)} title={`Read ${f.original_filename}`} aria-label={`Read ${f.original_filename}`}
+                style={iconBtn('var(--text-body)')} className="racco-no-print"
+              >
+                <Icon name="eye" size={16} />
+              </button>
+              <button
                 type="button" onClick={() => download(f)} title={`Download ${f.original_filename}`} aria-label={`Download ${f.original_filename}`}
                 style={iconBtn('var(--text-body)')} className="racco-no-print"
               >
@@ -256,6 +264,7 @@ export default function Report() {
           onClose={() => setUpload(null)} onUploaded={load}
         />
       )}
+      {viewing && <ReportViewer report={viewing} onClose={() => setViewing(null)} onDownload={download} />}
     </div>
   );
 }

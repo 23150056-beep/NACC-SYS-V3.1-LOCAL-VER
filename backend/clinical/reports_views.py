@@ -354,7 +354,9 @@ class DashboardView(generics.GenericAPIView):
         appts_today = (Appointment.objects
                        .filter(start__date=tz.localdate())
                        .exclude(status=Appointment.CANCELLED)
-                       .select_related("child", "psychologist").order_by("start"))
+                       .select_related("child", "psychologist")
+                       .prefetch_related("child__case_referrals__uploaded_by")
+                       .order_by("start"))
         pending = PreAssessment.objects.exclude(status=PreAssessment.COMPLETED)
         blocks = AvailabilityBlock.objects.filter(active=True).select_related("psychologist")
         scoped_children = scope_to_visible(scoped_children, request, path=None)
@@ -420,10 +422,13 @@ class DashboardView(generics.GenericAPIView):
             days = (tz.localdate() - c.birth_date).days
             return max(0, days // 365)
 
+        # The same rule as the calendar (scheduling/visibility.py): a social
+        # worker sees the name only of a child they referred.
+        from scheduling import visibility
         schedule_strip = [{
             "id": a.id,
             "child_id": a.child_id,
-            "child_name": a.child.fullname,
+            **visibility.who(request.user, a.child),
             "age": age(a.child),
             "time": tz.localtime(a.start).strftime("%H:%M"),
             "purpose": a.purpose,

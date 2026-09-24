@@ -32,6 +32,8 @@ class ChildSerializer(serializers.ModelSerializer):
     # status "Child", adoption types "SIBRA" and "ICA Relative".
     birth_status = serializers.CharField(required=False, allow_blank=True)
     type_of_adoption = serializers.CharField(required=False, allow_blank=True)
+    # And for Referral Source, which was free text until it became a list.
+    referral_source = serializers.CharField(required=False, allow_blank=True, max_length=150)
 
     termination = serializers.SerializerMethodField()
     terminations = serializers.SerializerMethodField()
@@ -167,6 +169,10 @@ class ChildSerializer(serializers.ModelSerializer):
     def validate_type_of_adoption(self, value):
         return self._current_or_unchanged(
             "type_of_adoption", value, Child.TYPE_OF_ADOPTION_CHOICES)
+
+    def validate_referral_source(self, value):
+        return self._current_or_unchanged(
+            "referral_source", value, Child.REFERRAL_SOURCE_CHOICES)
 
     def validate_case_category(self, value):
         # Task 13 lock ("edits stay partial-friendly") applies here too: the

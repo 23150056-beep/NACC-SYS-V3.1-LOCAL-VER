@@ -473,6 +473,7 @@ export default function AssistantPanel() {
       <button
         type="button"
         onClick={openAssistant}
+        className="racco-no-print"
         aria-label="Open the assistant"
         title="Ask the assistant"
         style={{
@@ -504,6 +505,7 @@ export default function AssistantPanel() {
 
   return (
     <div
+      className="racco-no-print"
       style={{
         position: 'fixed', right: 20, bottom: 20, zIndex: 60,
         width: 'min(386px, calc(100vw - 32px))',

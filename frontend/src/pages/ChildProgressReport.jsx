@@ -14,6 +14,8 @@ import { loadAll } from '../utils/load';
 import { polishRemark, sendFeedback, getLatestBrief, generateBrief, summarizeDocument, confirmSummary } from '../api/assistant';
 import ReportCheckNote from '../components/ReportCheckNote';
 import UploadDrawer from '../components/UploadDrawer';
+import PsychReportPrint from '../components/PsychReportPrint';
+import ReportViewer from '../components/ReportViewer';
 
 // "In her own words" reads better than a label, but gender is blank=True on
 // the model and must never render as an empty string.
@@ -78,6 +80,7 @@ export default function ChildProgressReport() {
   // Filing a report or a referral from the record itself, rather than sending
   // the psychologist off to Results & Reports and leaving them there.
   const [upload, setUpload] = useState(null); // 'report' | 'case_referral'
+  const [viewing, setViewing] = useState(null); // the report being read on screen
   const isStaffOrAdmin = ['Administrator', 'Staff'].includes(user?.role_name);
   // Mirrors INSTRUMENT_MANAGER_ROLES on the server (accounts/permissions.py).
   const canReadTemplates = ['Administrator', 'Psychologist'].includes(user?.role_name);
@@ -161,11 +164,10 @@ export default function ChildProgressReport() {
     { k: 'Case type', v: child.case_type },
     { k: 'Category', v: child.case_category },
     { k: 'Legal status', v: child.legal_status },
-    { k: 'Current placement', v: child.current_placement },
     { k: 'Address', v: [[child.house_number, child.street].filter(Boolean).join(' '), child.barangay, child.municipality, child.province].filter(Boolean).join(', ') },
     { k: 'Assigned psychologist', v: child.psychologist_name },
     { k: caseDate(child)[0], v: caseDate(child)[1] },
-    { k: 'Education level', v: child.education_level },
+    { k: 'Educational placement', v: child.education_level },
   ];
 
   const advance = async (next) => {
@@ -343,7 +345,10 @@ export default function ChildProgressReport() {
 
 
   return (
-    <div style={PAGE} className="racco-print-area">
+    <div style={PAGE} className="racco-print-area racco-psych-print-root">
+      {/* What Print puts on paper: the psychological report, not this screen
+          (index.css hides the page's other children when printing). */}
+      <PsychReportPrint data={data} />
       {/* Hero. Back out to Records, who this child is, and the three things
           you came here to do — above the tab strip, so they stay put whichever
           section you are reading. */}
@@ -396,7 +401,7 @@ export default function ChildProgressReport() {
             <Button variant="secondary" onClick={() => openBrief()} disabled={briefBusy} iconLeft={<Icon name="sparkles" size={17} />}>
               {briefBusy ? 'Preparing…' : 'Pre-session brief'}
             </Button>
-            <Button variant="secondary" onClick={() => window.print()} iconLeft={<Icon name="printer" size={17} />}>Print</Button>
+            <Button variant="secondary" onClick={() => window.print()} title="Print this child's psychological report" iconLeft={<Icon name="printer" size={17} />}>Print</Button>
             {/* Booking a session is the thing you most often want next while
                 reading a child's record, and it used to mean leaving for the
                 Calendar and picking the same child out of a list again. The
@@ -695,6 +700,7 @@ export default function ChildProgressReport() {
                     {f.ai_summary_confirmed ? 'Confirmed' : 'Draft (unconfirmed)'}
                   </Badge>
                 )}
+                <Button variant="ghost" onClick={() => setViewing(f)} iconLeft={<Icon name="eye" size={15} />} className="racco-no-print">View</Button>
                 <Button variant="ghost" onClick={() => download(f)} iconLeft={<Icon name="download" size={15} />} className="racco-no-print">Download</Button>
               </div>
             ))}
@@ -1015,6 +1021,7 @@ export default function ChildProgressReport() {
       {upload && (
         <UploadDrawer kind={upload} child={child} onClose={() => setUpload(null)} onUploaded={load} />
       )}
+      {viewing && <ReportViewer report={viewing} onClose={() => setViewing(null)} onDownload={download} />}
 
       {/* Document summary modal */}
       {summary && (
