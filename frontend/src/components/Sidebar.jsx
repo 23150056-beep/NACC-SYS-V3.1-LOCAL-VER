@@ -3,7 +3,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLayout } from '../context/LayoutContext';
 import { useCensus } from '../context/CensusContext';
-import { Icon, ROLE_META } from '../ui';
+import { Icon, ROLE_META, roleLabel } from '../ui';
 import { railIsActive, railRowsFor, screenIdFor } from '../config/nav';
 import { initialsOf, PURPOSE_LABEL } from '../utils/child';
 
@@ -99,7 +99,7 @@ export default function Sidebar() {
           <span style={{ minWidth: 0 }}>
             <span style={{ display: 'block', fontWeight: 800, fontSize: 13.5, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 700, fontSize: 10.5, color: 'var(--text-muted)' }}>
-              <span style={{ width: 6, height: 6, borderRadius: '50%', background: roleDot }} />{role}
+              <span style={{ width: 6, height: 6, borderRadius: '50%', background: roleDot }} />{roleLabel(role)}
             </span>
           </span>
         </div>

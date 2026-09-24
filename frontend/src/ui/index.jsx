@@ -23,10 +23,20 @@ export function Icon({ name, size = 20, strokeWidth = 2, style = {}, ...rest }) 
  * the same colour on the same screen; red is now reserved for genuine alerts
  * and identity reads as a neutral chip with a coloured dot beside it. */
 export const ROLE_META = {
-  Administrator: { color: 'var(--blue-600)', soft: 'var(--blue-50)', tone: 'brand', icon: 'shield', desc: 'Full system access — users, records, clinical oversight, compliance.' },
-  Psychologist: { color: 'var(--blue-400)', soft: 'var(--blue-50)', tone: 'brand', icon: 'heart-handshake', desc: 'Assessment tools, clinical questionnaires & psychologist reporting.' },
-  Staff: { color: 'var(--amber-500)', soft: 'var(--amber-50)', tone: 'amber', icon: 'folder-heart', desc: 'Child & guardian records, plus read-only counseling results.' },
+  Administrator: { label: 'ISA (Administrator)', color: 'var(--blue-600)', soft: 'var(--blue-50)', tone: 'brand', icon: 'shield', desc: 'Full system access — users, records, clinical oversight, compliance.' },
+  Psychologist: { label: 'Psychologist', color: 'var(--blue-400)', soft: 'var(--blue-50)', tone: 'brand', icon: 'heart-handshake', desc: 'Assessment tools, clinical questionnaires & psychologist reporting.' },
+  Staff: { label: 'SW (Staff)', color: 'var(--amber-500)', soft: 'var(--amber-50)', tone: 'amber', icon: 'folder-heart', desc: 'Child & guardian records, plus read-only counseling results.' },
 };
+
+/* What the agency calls each role. The stored name stays "Administrator" /
+ * "Staff" - every permission check, route guard and API answer compares
+ * against it - so only the words on screen change. Anything that shows a role
+ * to a person goes through here; anything that decides something does not. */
+export function roleLabel(name) {
+  if (!name) return name;
+  const key = Object.keys(ROLE_META).find((k) => k.toLowerCase() === String(name).toLowerCase());
+  return key ? ROLE_META[key].label : name;
+}
 
 /* What a role actually opens up, in the words of the people who use it. Lives
  * here rather than on one page because two screens hand out roles — the access
@@ -462,7 +472,7 @@ export function RoleBadge({ role = 'Staff', size = 'md', solid = false, style = 
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: s.pad, background: solid ? 'var(--ink-600)' : 'var(--ink-50)', color: solid ? '#fff' : 'var(--text-body)', border: `1px solid ${solid ? 'transparent' : 'var(--border)'}`, borderRadius: 'var(--radius-pill)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: s.fs, lineHeight: 1, whiteSpace: 'nowrap', ...style }}>
       <span style={{ width: s.dot, height: s.dot, borderRadius: '50%', background: r.color, flex: 'none' }} />
-      {role}
+      {roleLabel(role)}
     </span>
   );
 }

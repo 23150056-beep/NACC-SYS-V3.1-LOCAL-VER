@@ -5,6 +5,7 @@ import { AssistantProvider } from './context/AssistantContext';
 import { ToastProvider } from './context/ToastContext';
 import { LayoutProvider, useLayout } from './context/LayoutContext';
 import { CensusProvider } from './context/CensusContext';
+import { ConfirmProvider } from './context/ConfirmContext';
 import { INSTRUMENT_MANAGER_ROLES } from './config/roles';
 import ProtectedRoute from './components/ProtectedRoute';
 import Sidebar from './components/Sidebar';
@@ -65,6 +66,7 @@ export default function App() {
       <ToastProvider>
       <ActivityProvider>
       <AssistantProvider>
+      <ConfirmProvider>
         <BrowserRouter>
           {/* Both providers sit ABOVE the routes: the census feeds the right
               rail and the Dashboard from one request, and remounting it per
@@ -99,6 +101,7 @@ export default function App() {
           </CensusProvider>
           </LayoutProvider>
         </BrowserRouter>
+      </ConfirmProvider>
       </AssistantProvider>
       </ActivityProvider>
       </ToastProvider>

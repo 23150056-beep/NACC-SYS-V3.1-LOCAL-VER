@@ -5,10 +5,11 @@ import api from '../api/client';
 import { ageFrom, caseRef } from '../utils/child';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import {
   Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, Modal, PAGE, Select, Tabs,
 } from '../ui';
-import { PA_STATUS_TONES, reportTypeLabel } from '../config/caseData';
+import { PA_STATUS_TONES, caseDate, reportTypeLabel } from '../config/caseData';
 import { loadAll } from '../utils/load';
 import { polishRemark, sendFeedback, getLatestBrief, generateBrief, summarizeDocument, confirmSummary } from '../api/assistant';
 import ReportCheckNote from '../components/ReportCheckNote';
@@ -37,6 +38,7 @@ export default function ChildProgressReport() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const toast = useToast();
+  const confirm = useConfirm();
   const isPsych = user?.role_name === 'Psychologist';
   const [data, setData] = useState(null);
   // Which section of the chart is showing. Every panel stays mounted — see
@@ -93,6 +95,11 @@ export default function ChildProgressReport() {
   };
 
   const acknowledgeFlag = async (flagId) => {
+    // It leaves the list of flags waiting for someone, so it is asked.
+    if (!(await confirm({
+      description: 'This marks the flag as read by you. It stays on the record, but no longer waits for anyone.',
+      confirmLabel: 'Yes, mark it read',
+    }))) return;
     setAckBusy(flagId);
     try {
       await api.post(`/self-report-flags/${flagId}/acknowledge/`, {});
@@ -155,9 +162,9 @@ export default function ChildProgressReport() {
     { k: 'Category', v: child.case_category },
     { k: 'Legal status', v: child.legal_status },
     { k: 'Current placement', v: child.current_placement },
-    { k: 'Address', v: [child.barangay, child.municipality, child.province].filter(Boolean).join(', ') },
+    { k: 'Address', v: [[child.house_number, child.street].filter(Boolean).join(' '), child.barangay, child.municipality, child.province].filter(Boolean).join(', ') },
     { k: 'Assigned psychologist', v: child.psychologist_name },
-    { k: 'Date of admission', v: child.date_of_admission },
+    { k: caseDate(child)[0], v: caseDate(child)[1] },
     { k: 'Education level', v: child.education_level },
   ];
 
@@ -187,6 +194,11 @@ export default function ChildProgressReport() {
   const createInvite = async () => {
     const tpl = surveyTemplates[0];
     if (!tpl) { toast.error('Create a Self-Report (Government Form) template under Pre-Assessment Instruments first.'); return; }
+    if (!(await confirm({
+      description: `This creates a QR survey link for ${child.fullname}. Anyone holding the link can answer it until it is used.`,
+      confirmLabel: 'Yes, create the link',
+      details: [['Form', tpl.title]],
+    }))) return;
     try {
       const { data: inv } = await api.post('/opinionnaire-invites/', { child: Number(id), template: tpl.id });
       setQr({ token: inv.token, url: `${window.location.origin}/survey/${inv.token}`, title: tpl.title });
@@ -258,6 +270,10 @@ export default function ChildProgressReport() {
   };
 
   const saveSummary = async () => {
+    if (!(await confirm({
+      description: 'This saves the summary, as you have left it, beside the document for everyone who can read it.',
+      confirmLabel: 'Yes, save the summary',
+    }))) return;
     try {
       await confirmSummary(summary.kind, summary.id, summary.text);
       setSummary(null); load(); toast.success('Summary confirmed');
@@ -269,6 +285,10 @@ export default function ChildProgressReport() {
   const addRemark = async () => {
     if (!remarkText.trim()) return;
     const saved = remarkText.trim();
+    if (!(await confirm({
+      description: `This adds the remark to ${child.fullname}'s record, under your name and today's date.`,
+      confirmLabel: 'Yes, add the remark',
+    }))) return;
     try {
       await api.post('/remarks/', { child: Number(id), text: saved });
       if (polishJob) {
@@ -283,6 +303,11 @@ export default function ChildProgressReport() {
   };
 
   const saveResult = async () => {
+    if (!(await confirm({
+      description: `This saves the result entry on ${child.fullname}'s record.`,
+      confirmLabel: 'Yes, save the entry',
+      details: [['Classification', result.classification]],
+    }))) return;
     try {
       await api.post('/result-entries/', {
         child: Number(id), instrument: result.instrument || null,
@@ -294,6 +319,12 @@ export default function ChildProgressReport() {
   };
 
   const savePlan = async () => {
+    if (!(await confirm({
+      description: plan.id ? `This saves your changes to ${child.fullname}'s treatment plan.`
+        : `This starts a treatment plan for ${child.fullname}.`,
+      confirmLabel: 'Yes, save the plan',
+      details: [['Review date', plan.review_date]],
+    }))) return;
     try {
       if (plan.id) await api.patch(`/treatment-plans/${plan.id}/`, { objectives: plan.objectives, interventions: plan.interventions, status: plan.status, review_date: plan.review_date || null });
       else await api.post('/treatment-plans/', { child: Number(id), objectives: plan.objectives, interventions: plan.interventions, review_date: plan.review_date || null });
@@ -385,7 +416,12 @@ export default function ChildProgressReport() {
             )}
             {canAdvance && child.status === 'active' && (child.case_status === 'pre_assessment'
               ? <Button variant="primary" onClick={() => setConfirmMove({ next: 'counseling', childName: child.fullname })} iconLeft={<Icon name="chevron-right" size={16} />}>Move to Counseling</Button>
-              : <Button variant="secondary" onClick={() => advance('pre_assessment')} iconLeft={<Icon name="arrow-left" size={16} />}>Back to Pre-Assessment</Button>)}
+              : <Button variant="secondary" onClick={async () => {
+                  if (await confirm({
+                    description: `This moves ${child.fullname}'s case back to Pre-Assessment.`,
+                    confirmLabel: 'Yes, move it back', tone: 'warning',
+                  })) advance('pre_assessment');
+                }} iconLeft={<Icon name="arrow-left" size={16} />}>Back to Pre-Assessment</Button>)}
           </div>
         </div>
 

@@ -4,7 +4,7 @@ import {
   askAssistant, getAssistantCapabilities, runFollowup, sendFeedback,
 } from '../api/assistant';
 import { useAssistant } from '../context/AssistantContext';
-import { Icon } from '../ui';
+import { Icon, roleLabel } from '../ui';
 
 /* The chatbot, docked on every protected screen.
  *
@@ -224,7 +224,7 @@ function Answer({ result }) {
           fontWeight: 700, color: 'var(--text-strong)', lineHeight: 1.1,
         }}>{result.count}</span>
         <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-          {result.role === 'anyone' ? 'active accounts' : `active ${result.role}s`}
+          {result.role === 'anyone' ? 'active accounts' : `active ${roleLabel(result.role)} accounts`}
         </span>
       </div>
     );

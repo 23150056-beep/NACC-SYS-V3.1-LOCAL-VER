@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { useActivity } from '../context/ActivityContext';
 import { useLayout } from '../context/LayoutContext';
 import { useCensus } from '../context/CensusContext';
 import api from '../api/client';
 import {
-  Alert, Button, FormField, Icon, PasswordInput, ConfirmDialog, RoleAccessPanel, ROLE_META,
+  Alert, Button, FormField, Icon, PasswordInput, ConfirmDialog, RoleAccessPanel, ROLE_META, roleLabel,
 } from '../ui';
 import { screenIdFor, screensFor, tabIsActive, topTabsFor } from '../config/nav';
 import { ACTION_META, eventDestination, eventText } from '../utils/activity';
@@ -123,6 +124,7 @@ export default function AppHeader() {
   const navigate = useNavigate();
   const location = useLocation();
   const toast = useToast();
+  const confirm = useConfirm();
   const layout = useLayout();
   const { pendingAccess } = useCensus();
   const { events, unreadCount, markSeen } = useActivity();
@@ -181,6 +183,11 @@ export default function AppHeader() {
     setPwError('');
     if (pw.new_password.length < 8) { setPwError('New password must be at least 8 characters.'); return; }
     if (pw.new_password !== pw.confirm) { setPwError('Passwords do not match.'); return; }
+    if (!(await confirm({
+      description: 'Your password changes now. Every session signed in with the old one ends, '
+        + 'this one included, and you sign in again with the new password.',
+      confirmLabel: 'Yes, change it',
+    }))) return;
     setPwBusy(true);
     try {
       const { data } = await api.post('/auth/change-password/', {
@@ -391,7 +398,7 @@ export default function AppHeader() {
               <>
                 <span style={{ lineHeight: 1.1, textAlign: 'left' }}>
                   <span style={{ display: 'block', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12.5, color: 'var(--chrome-ink)', whiteSpace: 'nowrap' }}>{firstName}</span>
-                  <span style={{ display: 'block', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 9.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--chrome-ink-soft)' }}>{role}</span>
+                  <span style={{ display: 'block', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 9.5, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--chrome-ink-soft)' }}>{roleLabel(role)}</span>
                 </span>
                 <Icon name="chevron-down" size={17} style={{ color: 'var(--chrome-ink-soft)' }} />
               </>
@@ -405,7 +412,7 @@ export default function AppHeader() {
               <span style={{ flex: 1, minWidth: 0 }}>
                 <span style={{ display: 'block', fontWeight: 800, fontSize: 14, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{name}</span>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)' }}>
-                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: roleDot }} />{role}
+                  <span style={{ width: 7, height: 7, borderRadius: '50%', background: roleDot }} />{roleLabel(role)}
                 </span>
               </span>
             </div>

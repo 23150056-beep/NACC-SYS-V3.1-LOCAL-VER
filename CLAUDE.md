@@ -562,6 +562,67 @@ none of the real ones has been seen.
   fell in step with the seeder's round-robin and each psychologist saw one.
   Exactly one carries another child's name, for the check to find.
 
+## The record form (Add Record)
+
+Rebuilt 24 Sep 2026 at the owner's request: Identity and Case merged into one
+"Child's Profile" step with the Category first, a street address, the whole
+middle name, a date found, and every question that applies made mandatory.
+
+- **The rules live in `children/intake.py`**, the browser's copy in
+  `config/caseData.js`, and `children/tests/test_intake.py` pins the two
+  together. Change one and not the other and that test fails, which is the
+  point: a form that lets something through the server refuses is a dead end.
+- **One date, never both.** A Regular adoption, Residential Care and
+  Independent Living record the Date of Admission; every other adoption type,
+  Foster Care, Kinship Care and Family Tracing record the Date of Placement to
+  Custodian. An adoption shows neither until its type is picked. Changing the
+  case type or the adoption type clears the date no longer asked, and the save
+  sends it as `null` - Records used to leave an empty date OUT of the request,
+  which kept the old value on the record.
+- **Category first means the pairing filters both ways**: a category narrows
+  the case types and a case type narrows the categories. The server refuses a
+  pair the lists do not offer, but only when one of the two is being set.
+- **Mandatory on create; on an edit, an answer cannot be taken away.** A record
+  from before the rule keeps its blanks through an unrelated edit (the form
+  names them as "Still blank"), except that changing the case type or adoption
+  type asks that type's questions again. The fullname-only create path the
+  older tests use stays exempt, as it always was.
+- **Deliberately optional**: middle name (a foundling or a non-marital child
+  may have none), legal status (none issued yet), landmark, date found. Asking
+  for something that does not exist gets "N/A" typed into it.
+- **`middle_initial` was renamed `middle_name`** (children 0020), not dropped:
+  the initials already recorded are kept. The display name still uses an
+  initial (`middle_initial_of`), and a value already written as one ("DC") is
+  kept as written so no existing name changes shape on its next save.
+- **Renamed values were migrated** (children 0021): Orphan -> Orphaned, N/A ->
+  Unknown, and the demo seeder's misspelt "Stepparent" -> "Step-parent".
+  **Retired values were not**: birth status "Child", SIBRA, ICA Relative, and
+  the seeder's "Domestic"/"Relative" stay on the records that hold them, shown
+  as "(no longer offered)". The serializer accepts them unchanged and refuses
+  them as a new pick - the same change-only rule as the old categories.
+  `import_demo_data` upgrades an older fixture the same way before loading it.
+- "Street Number" is the owner's wording; its hint allows a purok or sitio,
+  because most addresses in the region have no street.
+
+## Confirmations
+
+- **Every save asks "Are you sure you want to proceed?"** through one hook,
+  `useConfirm()` in `context/ConfirmContext.jsx`. Use it for any new write
+  rather than another ConfirmDialog and `open` flag. Destructive actions keep
+  their own dialogs, which ask for a reason or a typed name.
+- It resolves `true` outside its provider on purpose - a save that silently
+  never happens is worse than one that happens unasked. The provider wraps the
+  router in `App.jsx`, so every screen, sign-up and the child survey are inside.
+- The record form also asks before closing with unsaved input; a new record's
+  draft is flushed and kept, an edit's changes are discarded only on "Discard".
+
+## Role names on screen
+
+Administrator shows as **"ISA (Administrator)"** and Staff as **"SW (Staff)"**
+(24 Sep 2026), through `roleLabel()` in `ui/index.jsx`. Display only: the
+stored `role_name`, every permission check and every API answer still say
+"Administrator" and "Staff". Never compare anything against the label.
+
 ## The demo deployment
 
 Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in

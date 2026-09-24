@@ -19,6 +19,8 @@ run against a hosted database — so without this, a deployed demo had no
 supported way to become bookable at all.
 """
 import json
+import os
+import tempfile
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
@@ -29,6 +31,34 @@ from accounts.models import Role
 from children.models import Child
 from clinical import demo_referrals, demo_reports
 from scheduling import demo_schedule
+
+
+# A fixture is a file somebody exported on a given day, and it keeps that
+# day's field names. These are the changes a child row has been through since;
+# the migrations apply the same ones to a database (children 0020 and 0021).
+_RENAMED_FIELDS = {"middle_initial": "middle_name"}
+_RENAMED_VALUES = {"case_category": {"Orphan": "Orphaned"},
+                   "birth_status": {"N/A": "Unknown"},
+                   "type_of_adoption": {"Stepparent": "Step-parent"}}
+
+
+def upgrade_rows(rows):
+    """Bring child rows exported before 24 Sep 2026 up to today's model.
+    Returns True if anything changed."""
+    changed = False
+    for row in rows:
+        if row.get("model") != "children.child":
+            continue
+        fields = row.get("fields", {})
+        for old, new in _RENAMED_FIELDS.items():
+            if old in fields:
+                fields[new] = fields.pop(old)
+                changed = True
+        for field, renames in _RENAMED_VALUES.items():
+            if fields.get(field) in renames:
+                fields[field] = renames[fields[field]]
+                changed = True
+    return changed
 
 
 class Command(BaseCommand):
@@ -69,7 +99,19 @@ class Command(BaseCommand):
         with open(options["fixture"], encoding="utf-8") as handle:
             rows = json.load(handle)
         self.stdout.write(f"  fixture holds {len(rows)} rows")
-        call_command("loaddata", options["fixture"], verbosity=0)
+        if upgrade_rows(rows):
+            # An older export: load the upgraded copy, never the file as given,
+            # which names a field the model no longer has.
+            fd, upgraded = tempfile.mkstemp(suffix=".json")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump(rows, handle)
+                call_command("loaddata", upgraded, verbosity=0)
+            finally:
+                os.remove(upgraded)
+            self.stdout.write("  fixture predates 24 Sep 2026; child rows upgraded")
+        else:
+            call_command("loaddata", options["fixture"], verbosity=0)
 
         # Round-robin across whoever is really here. The fixture's assignee ids
         # are local and meaningless on this database.

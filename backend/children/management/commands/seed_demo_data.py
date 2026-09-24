@@ -37,6 +37,7 @@ from django.utils import timezone
 
 from accounts.models import Role, User
 from config.demo_guard import refuse_if_not_local
+from children import intake as intake_rules
 from children.models import Child
 from clinical.models import (
     AgencyFormTemplate, ConsentRecord, InstrumentCatalog, OpinionnaireInvite,
@@ -67,7 +68,11 @@ LAST_NAMES = [
 CASE_TYPES = ["Adoption", "Foster Care", "Kinship Care", "Residential Care",
               "Family Tracing & Reunification", "Independent Living"]
 CATEGORIES = ["Surrendered", "Abandoned", "Dependent", "Neglected",
-              "Without Known Parents", "Orphan"]
+              "Without Known Parents", "Orphaned"]
+# Street addresses as a field office writes them: a numbered street in town,
+# a purok where there is no street.
+STREETS = ["Rizal St.", "Mabini St.", "Bonifacio St.", "Quezon Ave.", "Luna St.",
+           "Burgos St.", "Purok 3", "Purok 5", "Sitio Centro"]
 
 # Clinical shorthand, the way a busy psychologist actually writes it — short,
 # abbreviated, and switching language mid-sentence.
@@ -313,6 +318,9 @@ class Command(BaseCommand):
         # exactly where the main one put it: the same seed still gives the same
         # names, cohorts and histories as before this existed.
         pace = random.Random(options["seed"] + 1)
+        # And one more for the fields the Add Record form asks for since
+        # 24 Sep 2026, for the same reason.
+        extra = random.Random(options["seed"] + 2)
 
         for i in range(n):
             # 55% steady, 25% declining, 20% divergent — enough of each to see,
@@ -329,22 +337,36 @@ class Command(BaseCommand):
             psych = psychologists[i % len(psychologists)]
             intake = today - timedelta(days=rng.randint(30, months * 30))
 
+            # Everything below satisfies the rules the endpoint enforces
+            # (children/intake.py) - a seeded record the form would refuse to
+            # save is a demo of something that cannot happen. The draws from
+            # `rng` stay in the order they always were, so a seed still gives
+            # the caseload it gave before; anything new comes from `extra`.
+            born = today - timedelta(days=rng.randint(5, 17) * 365)
+            gender = rng.choice(["Male", "Female"])
+            category = rng.choice(CATEGORIES)
+            if category not in intake_rules.CATEGORY_OPTIONS[case_type]:
+                category = extra.choice(intake_rules.CATEGORY_OPTIONS[case_type])
+            surrendered_by = (rng.choice(["Social Worker", "Police", "Relatives"])
+                              if "surrendered_by" in intake_rules.CASE_TYPE_FIELDS[case_type]
+                              else "")
+            adoption = (rng.choice(["Regular", "Domestic Relative", "Step-parent"])
+                        if case_type == "Adoption" else "")
+            birth_status = rng.choice(["Marital", "Non-Marital", "Unknown"])
+            dated = intake_rules.date_field_for(case_type, adoption)
             child = Child.objects.create(
                 first_name=first, last_name=last, fullname=f"{first} {last}",
-                birth_date=today - timedelta(days=rng.randint(5, 17) * 365),
-                gender=rng.choice(["Male", "Female"]),
+                birth_date=born, gender=gender,
+                house_number=str(extra.randint(1, 250)), street=extra.choice(STREETS),
                 province=province.name, municipality=muni.name, barangay=brgy.name,
                 psgc_province=province.psgc_code, psgc_municipality=muni.psgc_code,
                 psgc_barangay=brgy.psgc_code,
-                case_type=case_type,
-                case_category=rng.choice(CATEGORIES),
-                surrendered_by=(rng.choice(["Social Worker", "Police", "Relatives"])
-                                if case_type in ("Adoption", "Foster Care", "Kinship Care",
-                                                 "Family Tracing & Reunification") else ""),
-                type_of_adoption=(rng.choice(["Domestic", "Relative", "Stepparent"])
-                                  if case_type == "Adoption" else ""),
-                birth_status=rng.choice(["Marital", "Non-Marital", "N/A"]),
-                date_of_admission=intake,
+                place_of_birth_or_found=f"{muni.name}, {province.name}",
+                case_type=case_type, case_category=category,
+                surrendered_by=surrendered_by, type_of_adoption=adoption,
+                birth_status=birth_status,
+                date_of_admission=intake if dated == intake_rules.ADMISSION else None,
+                date_of_placement_to_custodian=intake if dated == intake_rules.PLACEMENT else None,
                 assigned_psychologist=psych,
                 case_status=rng.choice(["pre_assessment", "counseling"]),
             )

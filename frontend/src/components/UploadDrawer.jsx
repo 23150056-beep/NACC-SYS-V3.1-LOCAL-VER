@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import api from '../api/client';
 import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { REPORT_TYPES } from '../config/caseData';
 import { Alert, Button, Drawer, FileUpload, FormField, Icon, Input, Select } from '../ui';
 
@@ -14,6 +15,7 @@ import { Alert, Button, Drawer, FileUpload, FormField, Icon, Input, Select } fro
  */
 export default function UploadDrawer({ kind, child = null, childOptions = [], initialChild = '', onClose, onUploaded }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const referral = kind === 'case_referral';
   const [form, setForm] = useState({
     child: child ? String(child.id) : String(initialChild || ''),
@@ -50,6 +52,18 @@ export default function UploadDrawer({ kind, child = null, childOptions = [], in
         return;
       }
     }
+    // Named, because a filed record stays with the child it was filed for:
+    // filing it under the wrong child cannot be undone by an edit.
+    const childName = child?.fullname
+      || childOptions.find((c) => String(c.id) === String(form.child))?.fullname;
+    const ok = await confirm({
+      description: `This files the ${referral ? 'case referral' : 'report'} on ${childName}'s record. `
+        + 'Once filed it stays with that child — a file put on the wrong child is filed again on the right one.',
+      confirmLabel: referral ? 'Yes, upload the referral' : 'Yes, file the report',
+      details: [['Child', childName], ['File', form.fileObj.name],
+        ['Report type', referral ? null : REPORT_TYPES.find((t) => t.v === form.report_type)?.label]],
+    });
+    if (!ok) return;
     const fd = new FormData();
     fd.append('child', form.child);
     fd.append('file', form.fileObj);

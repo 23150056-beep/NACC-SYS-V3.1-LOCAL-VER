@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useToast } from '../context/ToastContext';
+import { useConfirm } from '../context/ConfirmContext';
 import { useAuth } from '../context/AuthContext';
 import { caseRef } from '../utils/child';
 import { Card, Button, Badge, Input, Select, FormField, FileUpload, Alert, EmptyState, Avatar, Icon, iconBtn, hoverLift, PAGE } from '../ui';
@@ -30,6 +31,7 @@ function FormBody({ body }) {
 
 export default function PreAssessment() {
   const toast = useToast();
+  const confirm = useConfirm();
   const navigate = useNavigate();
   const { user } = useAuth();
   const [step, setStep] = useState(0);
@@ -76,6 +78,16 @@ export default function PreAssessment() {
 
   const start = async (c) => {
     setError('');
+    // Resuming a pre-assessment already under way asks nothing; anything else
+    // creates one (a re-assessment, for a child who has answered before), so
+    // that is asked.
+    const again = ['Answered', 'Completed'].includes(c.pre_assessment_status);
+    if (c.pre_assessment_status !== 'In Progress' && !(await confirm({
+      description: again
+        ? `This starts a new pre-assessment for ${c.fullname}. The earlier one is kept on the record.`
+        : `This starts a pre-assessment for ${c.fullname}.`,
+      confirmLabel: 'Yes, start it',
+    }))) return;
     try {
       const { data } = await api.post('/pre-assessments/', { child: c.id });
       setChild(c); setPa(data);
@@ -97,6 +109,10 @@ export default function PreAssessment() {
 
   const linkConsent = async (consentId) => {
     setError('');
+    if (!(await confirm({
+      description: `This attaches the signed consent to ${child.fullname}'s pre-assessment and moves on to the interview.`,
+      confirmLabel: 'Yes, use this consent',
+    }))) return;
     try { await patchPa({ consent: consentId }); advanceTo(2); }
     catch (err) { setError(JSON.stringify(err.response?.data || 'Could not link consent.')); }
   };
@@ -104,6 +120,10 @@ export default function PreAssessment() {
   const saveInstruments = async () => {
     setError('');
     if (selectedInstruments.length === 0) { setError('Select at least one instrument title.'); return; }
+    if (!(await confirm({
+      description: `This records ${selectedInstruments.length} instrument${selectedInstruments.length === 1 ? '' : 's'} as used in ${child.fullname}'s pre-assessment.`,
+      confirmLabel: 'Yes, save them',
+    }))) return;
     try { await patchPa({ instruments: selectedInstruments }); advanceTo(4); }
     catch (err) { setError(JSON.stringify(err.response?.data || 'Could not save instruments.')); }
   };
@@ -117,6 +137,11 @@ export default function PreAssessment() {
   const saveInstrument = async () => {
     setInstError('');
     if (!instForm.title.trim()) { setInstError('Title is required.'); return; }
+    if (!(await confirm({
+      description: instForm.id ? `This saves your changes to "${instForm.title.trim()}" in the instrument catalogue.`
+        : `This adds "${instForm.title.trim()}" to the instrument catalogue.`,
+      confirmLabel: 'Yes, save it',
+    }))) return;
     const payload = { ...instForm };
     delete payload.owner; delete payload.owner_name; delete payload.updated_at;
     try {
@@ -129,6 +154,10 @@ export default function PreAssessment() {
 
   const complete = async () => {
     setError('');
+    if (!(await confirm({
+      description: `This completes ${child.fullname}'s pre-assessment. Its answers are then part of the record.`,
+      confirmLabel: 'Yes, complete it',
+    }))) return;
     try {
       if (notes.trim()) await patchPa({ notes: notes.trim() });
       const { data } = await api.post(`/pre-assessments/${pa.id}/complete/`);
@@ -386,6 +415,7 @@ export default function PreAssessment() {
 
 function ConsentStep({ child, consents, templates, onLinked, onRefresh, setError }) {
   const toast = useToast();
+  const confirm = useConfirm();
   const [form, setForm] = useState({ template: '', signer_name: '', signer_relationship: '', fileObj: null });
   const [preview, setPreview] = useState(null); // { url, type, title }
   const [busy, setBusy] = useState(false);
@@ -398,6 +428,14 @@ function ConsentStep({ child, consents, templates, onLinked, onRefresh, setError
   const recordNew = async () => {
     setError('');
     if (!form.signer_name.trim()) { setError('Enter who accomplished the consent form.'); return; }
+    if (!(await confirm({
+      description: form.fileObj
+        ? `This records a signed consent for ${child.fullname}, with the scanned form attached.`
+        : `This records the consent for ${child.fullname} as Pending — no signed scan is attached yet.`,
+      confirmLabel: 'Yes, record it',
+      details: [['Signed by', form.signer_name.trim()], ['Relationship', form.signer_relationship],
+        ['Scan', form.fileObj?.name]],
+    }))) return;
     setBusy(true);
     try {
       const fd = new FormData();
@@ -544,6 +582,7 @@ function ConsentStep({ child, consents, templates, onLinked, onRefresh, setError
 const RESPONDENT_OPTIONS = ['Custodian/PAP', 'Child', 'Guardian', 'Other…'];
 
 function InterviewStep({ child, templates, onDone, setError }) {
+  const confirm = useConfirm();
   const [templateId, setTemplateId] = useState('');
   const [answers, setAnswers] = useState({});
   const [respondent, setRespondent] = useState('');
@@ -567,8 +606,15 @@ function InterviewStep({ child, templates, onDone, setError }) {
 
   const resetForm = () => { setTemplateId(''); setAnswers({}); setRespondent(''); setRespondentOther(''); };
 
+  const askToSave = () => confirm({
+    description: `This saves the interview to ${child.fullname}'s record.`,
+    confirmLabel: 'Yes, save the interview',
+    details: [['Form', tpl?.title], ['Respondent', respondentValue]],
+  });
+
   const saveAndAnother = async () => {
     setError('');
+    if (!(await askToSave())) return;
     setSaving(true);
     try { await saveRecord(); resetForm(); }
     catch (err) { setError(JSON.stringify(err.response?.data || 'Could not save the interview.')); }
@@ -577,6 +623,7 @@ function InterviewStep({ child, templates, onDone, setError }) {
 
   const saveAndContinue = async () => {
     setError('');
+    if (!(await askToSave())) return;
     setSaving(true);
     try {
       const data = await saveRecord();
@@ -656,12 +703,18 @@ function InterviewStep({ child, templates, onDone, setError }) {
 }
 
 function ProblemsStep({ child, problems, setProblems, setError, onNext }) {
+  const confirm = useConfirm();
   const [desc, setDesc] = useState('');
   const [cat, setCat] = useState('');
 
   const add = async () => {
     if (!desc.trim()) return;
     setError('');
+    if (!(await confirm({
+      description: `This logs the problem on ${child.fullname}'s record.`,
+      confirmLabel: 'Yes, log it',
+      details: [['Problem', desc.trim()], ['Category', cat.trim()]],
+    }))) return;
     try {
       const { data } = await api.post('/problems/', { child: child.id, description: desc.trim(), category: cat.trim() });
       setProblems([...problems, data]);

@@ -28,6 +28,7 @@ from django.core.files.base import ContentFile
 from django.utils import timezone
 
 from accounts.display import display_name
+from children import intake
 from clinical.demo_docx import build_docx
 from clinical.models import PsychologicalReport
 from clinical.report_check import check_for, name_parts
@@ -125,7 +126,11 @@ def build_blocks(child, title, today, long_notes=False, leftover=None, seed=0):
     first = name_parts(child)[0] or child.fullname
     born = child.birth_date
     age = age_on(born, today)
-    admitted = child.date_of_admission
+    # Whichever date the case records: an admission, or a placement with a
+    # custodian (children/intake.py).
+    dated = intake.intake_date_field(child)
+    admitted = getattr(child, dated)
+    date_label = "Date of placement" if dated == intake.PLACEMENT else "Date of admission"
     case_type = child.case_type or "child welfare"
     blocks = [
         ("title", title),
@@ -138,7 +143,7 @@ def build_blocks(child, title, today, long_notes=False, leftover=None, seed=0):
             ("Age", str(age) if age is not None else "Not recorded"),
             ("Sex", child.gender or "Not recorded"),
             ("Case type", case_type),
-            ("Date of admission",
+            (date_label,
              f"{admitted:%B} {admitted.day}, {admitted.year}" if admitted else "Not recorded"),
             ("Psychologist", display_name(child.assigned_psychologist) or "Not assigned"),
         ]),

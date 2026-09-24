@@ -21,14 +21,15 @@ export const CASE_TYPES = [
 
 // "Category" per the agency's official "I. Identifying Information" intake
 // form (2026-07 revision) — replaces the earlier, broader NACC-SAMD-GF-000
-// 18-item Service-Users list. Must match backend Child.CASE_CATEGORY_CHOICES.
+// 18-item Service-Users list. Must match backend Child.CASE_CATEGORY_CHOICES;
+// backend/children/tests/test_intake.py compares the two.
 export const CASE_CATEGORIES = [
   'Surrendered',
   'Abandoned',
   'Dependent',
   'Neglected',
   'Without Known Parents',
-  'Orphan',
+  'Orphaned',
 ];
 
 // Not every category applies to every track. A child being reunified with
@@ -40,9 +41,19 @@ export const CASE_CATEGORY_OPTIONS = {
   'Foster Care': CASE_CATEGORIES,
   'Kinship Care': CASE_CATEGORIES,
   'Residential Care': CASE_CATEGORIES,
-  'Family Tracing & Reunification': ['Dependent', 'Neglected', 'Without Known Parents', 'Orphan'],
-  'Independent Living': ['Dependent', 'Neglected', 'Without Known Parents', 'Orphan'],
+  'Family Tracing & Reunification': ['Dependent', 'Neglected', 'Without Known Parents', 'Orphaned'],
+  'Independent Living': ['Dependent', 'Neglected', 'Without Known Parents', 'Orphaned'],
 };
+
+/* The Category comes first on the form, so the pairing runs both ways: a
+ * category picked first narrows the case types to the ones that offer it. A
+ * category no longer on the list (a retired value on an old record) narrows
+ * nothing. */
+export const caseTypesFor = (category) => (
+  CASE_CATEGORIES.includes(category)
+    ? CASE_TYPES.filter((t) => CASE_CATEGORY_OPTIONS[t].includes(category))
+    : CASE_TYPES
+);
 
 /* Which of the optional case fields each track actually asks for.
  *
@@ -56,16 +67,64 @@ export const CASE_CATEGORY_OPTIONS = {
  * Whether Residential Care should also record a Previous Custodian is a
  * question for RACCO I, not one to settle by reading old code. */
 export const CASE_TYPE_FIELDS = {
-  Adoption: ['surrendered_by', 'date_of_placement_to_custodian', 'type_of_adoption'],
-  'Foster Care': ['surrendered_by', 'date_of_placement_to_custodian'],
-  'Kinship Care': ['surrendered_by', 'date_of_placement_to_custodian'],
-  'Family Tracing & Reunification': ['surrendered_by', 'date_of_placement_to_custodian'],
+  Adoption: ['surrendered_by', 'type_of_adoption'],
+  'Foster Care': ['surrendered_by'],
+  'Kinship Care': ['surrendered_by'],
+  'Family Tracing & Reunification': ['surrendered_by'],
   'Residential Care': [],
   'Independent Living': [],
 };
 
-// New fields from the same official intake form.
-export const BIRTH_STATUSES = ['Marital', 'Non-Marital', 'Child', 'N/A'];
+/* Which date the case records — never both. A child the agency took in is
+ * dated from the admission; a child placed with a custodian, from the
+ * placement. Within Adoption only a Regular adoption is an admission, so the
+ * date waits for the Type of Adoption. Mirrors date_field_for in
+ * backend/children/intake.py. */
+export const ADMISSION = 'date_of_admission';
+export const PLACEMENT = 'date_of_placement_to_custodian';
+export const dateFieldFor = (caseType, typeOfAdoption) => {
+  if (caseType === 'Adoption') {
+    if (!typeOfAdoption) return null;
+    return typeOfAdoption === 'Regular' ? ADMISSION : PLACEMENT;
+  }
+  if (['Foster Care', 'Kinship Care', 'Family Tracing & Reunification'].includes(caseType)) return PLACEMENT;
+  if (['Residential Care', 'Independent Living'].includes(caseType)) return ADMISSION;
+  return null;
+};
+
+/* The date a case started, as [label, value]: the one the case records, or on
+ * an older record whichever of the two it holds. Mirrors intake_date in
+ * backend/children/intake.py. */
+export const caseDate = (child) => {
+  const rule = dateFieldFor(child.case_type, child.type_of_adoption);
+  let field = rule;
+  if (!rule || !child[rule]) {
+    if (child[ADMISSION]) field = ADMISSION;
+    else if (child[PLACEMENT]) field = PLACEMENT;
+  }
+  field = field || ADMISSION;
+  return [field === PLACEMENT ? 'Date of placement' : 'Date of admission', child[field] || null];
+};
+
+/* What the Add Record form will not save without (since 24 Sep 2026). Middle
+ * name, legal status, landmark and date found are left out on purpose: a
+ * foundling may have no middle name, a child new to care may have no legal
+ * status yet, and most addresses have no landmark. Mirrors required_fields in
+ * backend/children/intake.py, which refuses the same blanks. */
+export const ALWAYS_REQUIRED = [
+  'case_category', 'case_type',
+  'first_name', 'last_name', 'birth_date', 'gender',
+  'place_of_birth_or_found', 'birth_status',
+  'house_number', 'street', 'barangay', 'municipality', 'province',
+];
+export const requiredFields = (caseType, typeOfAdoption) => {
+  const date = dateFieldFor(caseType, typeOfAdoption);
+  return [...ALWAYS_REQUIRED, ...(CASE_TYPE_FIELDS[caseType] || []), ...(date ? [date] : [])];
+};
+
+// New fields from the same official intake form. "N/A" became "Unknown" and
+// "Child" was retired on 24 Sep 2026.
+export const BIRTH_STATUSES = ['Marital', 'Non-Marital', 'Unknown'];
 
 export const LEGAL_STATUSES = [
   'With Issued CDCLAA',
@@ -73,13 +132,14 @@ export const LEGAL_STATUSES = [
   'Judicially Declared Abandoned',
 ];
 
+// SIBRA and ICA Relative were retired on 24 Sep 2026. A record that holds one
+// keeps it, and the form still shows it on that record.
 export const TYPES_OF_ADOPTION = [
   'Regular',
   'Domestic Relative',
+  'Relative (Without 2-yr custody)',
   'Step-parent',
   'Adult',
-  'SIBRA',
-  'ICA Relative',
   'IP',
   'Foster-Adopt',
 ];
