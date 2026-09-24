@@ -10,7 +10,7 @@ from rest_framework.response import Response
 
 from accounts.display import display_name
 from accounts.models import Role
-from accounts.scoping import role_of as _role
+from accounts.scoping import role_of as _role, scope_to_visible
 from activity.models import ActivityLog
 from activity.services import log_activity
 from children.models import Child
@@ -103,7 +103,13 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
         child = None
         child_id = request.query_params.get("child")
         if child_id and str(child_id).isdigit():
-            child = Child.objects.filter(pk=child_id).first()
+            # Only a child the asker can see - the refusal reasons speak about
+            # the child ("no case referral on file"), and nobody books one
+            # they cannot see anyway (_require_own_child).
+            child = scope_to_visible(Child.objects.filter(pk=child_id), request,
+                                     path=None).first()
+            if child is None:
+                return Response({"detail": "Not found."}, status=404)
         try:
             duration = int(request.query_params.get("duration") or 60)
         except ValueError:
@@ -138,13 +144,12 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
             child = Child.objects.get(pk=child_id)
         except (Child.DoesNotExist, ValueError, TypeError):
             return Response({"detail": "Unknown child."}, status=400)
-        # Admin/Staff may query any child, unrestricted. A psychologist may
-        # only query a child assigned to them - matching ChildViewSet's
-        # get_queryset() scoping. Access outside that scope 404s rather than
-        # 403ing, the same "hidden, not disclosed" convention used elsewhere
-        # for a psychologist's access to a child outside their assignment.
-        if (_role(request) == Role.PSYCHOLOGIST
-                and child.assigned_psychologist_id != request.user.id):
+        # Only a child the asker may see - the Records rule
+        # (accounts/scoping.py): an administrator any, a psychologist their
+        # assigned children, a social worker their own records. Outside it
+        # 404s rather than 403ing, the "hidden, not disclosed" convention.
+        if not scope_to_visible(Child.objects.filter(pk=child.pk), request,
+                                path=None).exists():
             return Response({"detail": "Not found."}, status=404)
         psych = child.assigned_psychologist
         if psych is None:
@@ -253,8 +258,8 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_queryset(self):
-        qs = (Appointment.objects.select_related("child", "psychologist", "booked_by")
-              .prefetch_related(visibility.referrals_prefetch()))
+        qs = Appointment.objects.select_related(
+            "child", "child__social_worker", "psychologist", "booked_by")
         role = _role(self.request)
         if role == Role.PSYCHOLOGIST:
             qs = qs.filter(psychologist=self.request.user)
@@ -268,6 +273,18 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         if child and str(child).isdigit():
             qs = qs.filter(child_id=child)
         return qs
+
+    def _require_own_child(self, child, doing):
+        """Nobody books, moves or cancels a session for a child they cannot
+        see - the Records rule (accounts/scoping.py). Staff see every session
+        on the calendar, other workers' children as case references, but
+        since 24 Sep 2026 act only on their own records."""
+        if child is None:
+            return
+        if not scope_to_visible(Child.objects.filter(pk=child.pk), self.request,
+                                path=None).exists():
+            raise PermissionDenied(
+                f"You can only {doing} sessions for children in your own records.")
 
     def _validate_booking(self, psychologist, child, start, duration_minutes,
                           exclude_id=None):
@@ -294,6 +311,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             psychologist = serializer.validated_data.get("psychologist")
             if psychologist is None:
                 raise ValidationError({"psychologist": "Select the psychologist."})
+        self._require_own_child(serializer.validated_data.get("child"), "book")
         self._validate_booking(psychologist,
                                serializer.validated_data.get("child"),
                                serializer.validated_data["start"],
@@ -311,6 +329,13 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         """
         instance = serializer.instance
         data = serializer.validated_data
+        # A social worker changes only their own children's sessions. A
+        # psychologist's own calendar is theirs to edit even for a child since
+        # reassigned; the child a session is moved TO is checked for everyone.
+        if _role(self.request) == Role.STAFF:
+            self._require_own_child(instance.child, "change")
+        if "child" in data and data["child"] != instance.child:
+            self._require_own_child(data["child"], "change")
         psychologist = data.get("psychologist") or instance.psychologist
         if _role(self.request) == Role.PSYCHOLOGIST:
             psychologist = instance.psychologist
@@ -334,6 +359,8 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         if not allowed:
             return Response({"detail": "You cannot update this appointment."},
                             status=status.HTTP_403_FORBIDDEN)
+        if role == Role.STAFF:
+            self._require_own_child(obj.child, "cancel")
         # Cancelling stays available at any time - a session called off on the
         # day, or a no-show written up late, are both normal. Recording an
         # OUTCOME is different: it is a claim about something that happened.

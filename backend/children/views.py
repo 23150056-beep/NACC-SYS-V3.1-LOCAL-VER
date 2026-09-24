@@ -54,7 +54,13 @@ class ChildViewSet(viewsets.ModelViewSet):
         return super().get_permissions()
 
     def perform_create(self, serializer):
-        obj = serializer.save()
+        # A record a social worker adds is theirs (accounts/scoping.py), and
+        # nothing they send can make it someone else's. An administrator may
+        # name a social worker, or leave it for later.
+        if role_of(self.request) == Role.STAFF:
+            obj = serializer.save(social_worker=self.request.user)
+        else:
+            obj = serializer.save()
         self._log(obj, ActivityLog.CREATED)
         if getattr(obj, "assigned_psychologist", None) is not None:
             send_assignment_notification(obj)
@@ -92,7 +98,7 @@ class ChildViewSet(viewsets.ModelViewSet):
         # psychologist_name is rendered on every row, so without this the list
         # costs an extra query per child: 47 for 40 children, against 7 with
         # it. The guardian join went with guardian_name — nothing reads it.
-        qs = qs.select_related("assigned_psychologist")
+        qs = qs.select_related("assigned_psychologist", "social_worker")
         return scope_to_visible(qs, self.request, path=None)
 
     def update(self, request, *args, **kwargs):
@@ -221,7 +227,14 @@ class ChildViewSet(viewsets.ModelViewSet):
     def check_duplicate(self, request):
         """Intake helper: does a record (active OR archived) already exist for
         this child? Staff/Admin only — powers the 'reopen instead of
-        duplicating' warning on the Add Record form."""
+        duplicating' warning on the Add Record form.
+
+        It searches every record, not only the caller's: a child held by
+        another social worker must not get a second record. Such a match says
+        that it exists and who holds it - the owner's decision, 24 Sep 2026 -
+        and nothing from the record itself: no id to open, no birth date, no
+        psychologist. The searcher typed the name; the holder is who to ask.
+        """
         role = role_of(request)
         if role not in (Role.ADMINISTRATOR, Role.STAFF):
             return Response({"detail": "Staff or administrators only."},
@@ -241,10 +254,18 @@ class ChildViewSet(viewsets.ModelViewSet):
         # without the join that is an extra query per match - on an endpoint the
         # intake form calls while somebody is still typing a name.
         matches = (Child.objects.filter(q)
-                   .select_related("assigned_psychologist")
+                   .select_related("assigned_psychologist", "social_worker")
                    .order_by("-updated_at")[:5])
-        return Response({"matches": [{
-            "id": c.id, "fullname": c.fullname, "status": c.status,
-            "birth_date": c.birth_date,
-            "psychologist_name": display_name(c.assigned_psychologist) or None,
-        } for c in matches]})
+        mine = set(scope_to_visible(Child.objects.filter(pk__in=[c.pk for c in matches]),
+                                    request, path=None).values_list("pk", flat=True))
+
+        def row(c):
+            if c.pk in mine:
+                return {"id": c.id, "fullname": c.fullname, "status": c.status,
+                        "birth_date": c.birth_date,
+                        "psychologist_name": display_name(c.assigned_psychologist) or None,
+                        "social_worker_name": display_name(c.social_worker) or None,
+                        "yours": True}
+            return {"yours": False,
+                    "held_by": display_name(c.social_worker) or None}
+        return Response({"matches": [row(c) for c in matches]})

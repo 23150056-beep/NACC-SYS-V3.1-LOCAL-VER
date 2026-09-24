@@ -178,7 +178,7 @@ class UploadTest(TestCase):
         self.staff = get_user_model().objects.create_user(
             email="s@racco1.gov.ph", username="s", password="pass1234",
             role=Role.objects.create(role_name=Role.STAFF))
-        self.child = Child.objects.create(fullname="Maria Santos", first_name="Maria",
+        self.child = Child.objects.create(social_worker=self.staff, fullname="Maria Santos", first_name="Maria",
                                           last_name="Santos", assigned_psychologist=self.psy)
 
     def tearDown(self):

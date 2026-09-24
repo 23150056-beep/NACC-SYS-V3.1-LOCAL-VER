@@ -143,7 +143,8 @@ class MiddleNameTest(TestCase):
 
 class _Staff(APITestCase):
     def setUp(self):
-        self.client.force_authenticate(make_user("intake@t.ph", Role.STAFF))
+        self.staff = make_user("intake@t.ph", Role.STAFF)
+        self.client.force_authenticate(self.staff)
 
     def post(self, **over):
         return self.client.post("/api/children/", complete(**over), format="json")
@@ -231,7 +232,7 @@ class CreatingARecordTest(_Staff):
         self.assertEqual(201, r.status_code, "Referral Source stays optional")
 
     def test_a_typed_referral_source_on_record_survives_an_edit(self):
-        old = Child.objects.create(
+        old = Child.objects.create(social_worker=self.staff, 
             first_name="Old", last_name="Referral", birth_date=date(2015, 5, 5),
             gender="Male", case_type="Residential Care", case_category="Dependent",
             referral_source="MSWDO San Fernando", current_placement="Bahay Kalinga")
@@ -301,7 +302,7 @@ class EditingARecordTest(_Staff):
 
     def test_a_record_from_before_the_rule_can_still_be_edited(self):
         """The blanks it already had are not held against an unrelated edit."""
-        old = Child.objects.create(
+        old = Child.objects.create(social_worker=self.staff, 
             first_name="Old", last_name="Record", birth_date=date(2015, 5, 5),
             gender="Male", case_type="Foster Care", case_category="Dependent")
         r = self.client.put(f"/api/children/{old.id}/", {
@@ -312,7 +313,7 @@ class EditingARecordTest(_Staff):
         self.assertEqual(200, r.status_code, r.data)
 
     def test_a_retired_value_on_record_survives_an_unrelated_edit(self):
-        old = Child.objects.create(
+        old = Child.objects.create(social_worker=self.staff, 
             first_name="Old", last_name="Adoption", birth_date=date(2015, 5, 5),
             gender="Male", case_type="Adoption", case_category="Surrendered",
             birth_status="Child", type_of_adoption="SIBRA")

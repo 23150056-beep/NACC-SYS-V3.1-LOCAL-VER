@@ -60,12 +60,12 @@ export const PURPOSE_LABEL = {
 
 /* How a schedule names a child (owner's decision, 24 Sep 2026).
  *
- * The server leaves `child_name` out for a social worker unless they referred
- * the child themselves (backend scheduling/visibility.py), and sends the case
- * reference and the referrer instead. This turns either shape into the words
- * on a chip: the name when there is one, otherwise "C-0042 · Ref. E. Pascua".
- * The reference is what keeps one worker's many referrals from reading as a
- * row of identical chips.
+ * The server leaves `child_name` out for a social worker unless the child is
+ * in their own records (backend scheduling/visibility.py), and sends the case
+ * reference and the social worker whose record it is instead. This turns
+ * either shape into the words on a chip: the name when there is one,
+ * otherwise "C-0042 · Ref. E. Pascua". The reference is what keeps one
+ * worker's many children from reading as a row of identical chips.
  */
 export function shortName(full = '') {
   const parts = String(full).trim().split(/\s+/).filter(Boolean);
@@ -79,6 +79,7 @@ export function shortName(full = '') {
 export function scheduleName(a) {
   if (a.child_name) return a.child_name;
   const ref = a.case_ref || (a.child ? caseRef(a.child) : 'A child');
-  if (a.referred_by_name) return `${ref} · Ref. ${shortName(a.referred_by_name)}`;
-  return a.has_referral ? `${ref} · referrer unknown` : `${ref} · no referral on file`;
+  // referred_by_name is the social worker whose record the child is
+  // (scheduling/visibility.py); none yet means only the ISA holds it.
+  return a.referred_by_name ? `${ref} · Ref. ${shortName(a.referred_by_name)}` : `${ref} · no social worker yet`;
 }

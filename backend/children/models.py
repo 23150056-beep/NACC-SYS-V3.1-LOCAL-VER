@@ -100,6 +100,15 @@ class Child(models.Model):
         "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="assigned_children",
     )
+    # The social worker whose record this is (owner's decision, 24 Sep 2026):
+    # each SW keeps their own records, and a staff account sees only the
+    # children it holds here - accounts/scoping.py. Set to whoever adds the
+    # record; only an administrator moves it to someone else. Null means no
+    # social worker yet, which only an administrator sees.
+    social_worker = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="social_work_records",
+    )
     # Set at (re)assignment: does the current assignee see the child's prior assessments.
     assignee_sees_history = models.BooleanField(default=True)
     # Name parts (adviser): fullname stays as the composed display column so

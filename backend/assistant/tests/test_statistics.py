@@ -87,8 +87,10 @@ class ScopeTest(StatisticsBase):
     def test_a_psychologist_counts_their_own_caseload(self):
         self.assertEqual(2, self.stats(self.psy)["total"])
 
-    def test_administrators_and_staff_count_the_agency(self):
+    def test_administrators_count_the_agency_and_a_social_worker_their_own(self):
         self.assertEqual(4, self.stats(self.admin)["total"])
+        self.assertEqual(0, self.stats(self.staff)["total"])
+        Child.objects.update(social_worker=self.staff)
         self.assertEqual(4, self.stats(self.staff)["total"])
 
     def test_status_is_the_old_count_tools_status(self):

@@ -38,6 +38,7 @@ from django.utils import timezone
 from accounts.models import Role, User
 from config.demo_guard import refuse_if_not_local
 from children import intake as intake_rules
+from children import demo_owners
 from children.models import Child
 from clinical.models import (
     AgencyFormTemplate, ConsentRecord, InstrumentCatalog, OpinionnaireInvite,
@@ -219,8 +220,11 @@ class Command(BaseCommand):
         # Booking requires a case referral on file, so a caseload without one
         # is a caseload the calendar refuses in full - correctly, and for a
         # reason that is about the fixture rather than the feature.
+        # Each social worker sees only their own records, so a child with none
+        # is one no staff account can see (children/demo_owners.py).
+        demo_owners.assign_social_workers(list(Child.objects.order_by("pk")))
         referrals = demo_referrals.install_referrals(
-            list(Child.objects.filter(status=Child.ACTIVE)),
+            list(Child.objects.filter(status=Child.ACTIVE).select_related("social_worker")),
             uploaded_by=User.objects.filter(role__role_name=Role.STAFF).first())
 
         # Reports are files too, in three layouts on purpose: the report
@@ -256,6 +260,9 @@ class Command(BaseCommand):
             ("Rogelio", "Tolentino", "r.tolentino@racco1.gov.ph", psych_role),
             ("Anabelle", "Suguitan", "a.suguitan@racco1.gov.ph", psych_role),
             ("Editha", "Pascua", "e.pascua@racco1.gov.ph", staff_role),
+            # A second social worker, so the demo shows two sets of records
+            # rather than one worker holding everything (24 Sep 2026).
+            ("Rosa", "Santos", "r.santos@racco1.gov.ph", staff_role),
         ]
         made = []
         for first, last, email, role in people:

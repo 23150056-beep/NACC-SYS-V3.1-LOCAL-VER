@@ -20,7 +20,7 @@ class PreAssessmentFlowTest(APITestCase):
             email="o@racco1.gov.ph", username="o", password="pass1234", role=self.psy_role)
         self.staff = User.objects.create_user(
             email="s@racco1.gov.ph", username="s", password="pass1234", role=self.staff_role)
-        self.child = Child.objects.create(
+        self.child = Child.objects.create(social_worker=self.staff, 
             fullname="Ana", case_type="Foster Care", assigned_psychologist=self.psy)
         self.tool = InstrumentCatalog.objects.create(title="CBCL", owner=self.psy)
 

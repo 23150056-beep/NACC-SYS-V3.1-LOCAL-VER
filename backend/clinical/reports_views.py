@@ -31,13 +31,15 @@ class ChildReportView(generics.GenericAPIView):
     permission_classes = [CanViewResults]
 
     def get(self, request, child_id):
+        # The shared rule (accounts/scoping.py), not a psychologist check of
+        # its own: this checked only psychologists, which was the whole rule
+        # while staff saw every child and was a side door once they did not.
         try:
-            child = Child.objects.prefetch_related("pre_assessments__instruments").get(pk=child_id)
+            child = (scope_to_visible(Child.objects.all(), request, path=None)
+                     .prefetch_related("pre_assessments__instruments").get(pk=child_id))
         except Child.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
         role = _role(request)
-        if role == Role.PSYCHOLOGIST and child.assigned_psychologist_id != request.user.id:
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
         pas = child.pre_assessments.all().select_related("consent", "interview", "psychologist")
         results = child.result_entries.select_related("instrument", "entered_by")
@@ -354,8 +356,7 @@ class DashboardView(generics.GenericAPIView):
         appts_today = (Appointment.objects
                        .filter(start__date=tz.localdate())
                        .exclude(status=Appointment.CANCELLED)
-                       .select_related("child", "psychologist")
-                       .prefetch_related("child__case_referrals__uploaded_by")
+                       .select_related("child", "child__social_worker", "psychologist")
                        .order_by("start"))
         pending = PreAssessment.objects.exclude(status=PreAssessment.COMPLETED)
         blocks = AvailabilityBlock.objects.filter(active=True).select_related("psychologist")
@@ -367,6 +368,11 @@ class DashboardView(generics.GenericAPIView):
         if role == Role.PSYCHOLOGIST:
             appts_today = appts_today.filter(psychologist=request.user)
             blocks = blocks.filter(psychologist=request.user)
+        elif role == Role.STAFF:
+            # The Dashboard is a social worker's own caseload (owner's
+            # decision, 24 Sep 2026); the Calendar is where the agency's
+            # sessions are, with other workers' children as case references.
+            appts_today = appts_today.filter(child__social_worker=request.user)
         pas = list(pas.order_by("date", "id"))
 
         # Fetched once and kept. This is the endpoint CensusContext calls on
@@ -422,8 +428,8 @@ class DashboardView(generics.GenericAPIView):
             days = (tz.localdate() - c.birth_date).days
             return max(0, days // 365)
 
-        # The same rule as the calendar (scheduling/visibility.py): a social
-        # worker sees the name only of a child they referred.
+        # The same rule as the calendar (scheduling/visibility.py). Staff see
+        # only their own children here, so it names every one of them.
         from scheduling import visibility
         schedule_strip = [{
             "id": a.id,

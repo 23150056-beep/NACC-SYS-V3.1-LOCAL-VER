@@ -124,9 +124,12 @@ class ChatbotSessionsTest(AttendanceBase):
         self.assertEqual(4, out["total"])
         self.assertTrue(out["note"].startswith("No-show rate 33% — 1 of the 3 sessions"))
 
-    def test_staff_and_administrators_count_the_agency(self):
-        for user in (self.admin, self.staff):
-            self.assertEqual(6, self.stats(user)["total"])
+    def test_administrators_count_the_agency_and_a_social_worker_their_own(self):
+        # Since 24 Sep 2026 a SW's records are their own (accounts/scoping.py).
+        self.assertEqual(6, self.stats(self.admin)["total"])
+        self.assertEqual(0, self.stats(self.staff)["total"])
+        Child.objects.update(social_worker=self.staff)
+        self.assertEqual(6, self.stats(self.staff)["total"])
 
     def test_by_status_in_a_period(self):
         out = self.stats(self.admin, by="status", period="last_month")

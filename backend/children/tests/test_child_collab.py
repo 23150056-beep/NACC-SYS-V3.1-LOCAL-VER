@@ -19,7 +19,7 @@ class PsychologistEditTests(APITestCase):
         self.staff = make_user("s@t.ph", Role.STAFF)
         self.psych = make_user("p@t.ph", Role.PSYCHOLOGIST)
         self.other_psych = make_user("p2@t.ph", Role.PSYCHOLOGIST)
-        self.child = Child.objects.create(fullname="Mika Santos",
+        self.child = Child.objects.create(social_worker=self.staff, fullname="Mika Santos",
                                           assigned_psychologist=self.psych)
 
     def patch(self, user, child, data):
@@ -60,7 +60,7 @@ class ConcurrencyPresenceTests(APITestCase):
     def setUp(self):
         self.staff = make_user("s2@t.ph", Role.STAFF)
         self.psych = make_user("p3@t.ph", Role.PSYCHOLOGIST)
-        self.child = Child.objects.create(fullname="Ana Cruz",
+        self.child = Child.objects.create(social_worker=self.staff, fullname="Ana Cruz",
                                           assigned_psychologist=self.psych)
 
     def test_stale_write_conflicts(self):
@@ -146,7 +146,7 @@ class NameSplitTests(APITestCase):
         # A deliberate edit that changes birth_date to something outside
         # 5-17 must still be range-checked - only an UNCHANGED birth_date
         # is allowed to skip re-validation on update.
-        child = Child.objects.create(
+        child = Child.objects.create(social_worker=self.staff, 
             fullname="Grown Kid", first_name="Grown", last_name="Kid",
             birth_date="2016-01-10", gender="Male", case_type="Foster Care")
         r = self.client.patch(f"/api/children/{child.id}/",
@@ -159,7 +159,7 @@ class NameSplitTests(APITestCase):
         # A legacy/long-running case whose age has since drifted outside
         # 5-17 must remain editable via the edit form's full-object PUT,
         # which always resends the existing birth_date unchanged.
-        child = Child.objects.create(
+        child = Child.objects.create(social_worker=self.staff, 
             fullname="Legacy Adult", first_name="Legacy", last_name="Adult",
             birth_date="2000-01-01", gender="Male", case_type="Foster Care")
         r = self.client.put(f"/api/children/{child.id}/", {
@@ -201,7 +201,7 @@ class DuplicateCheckTests(APITestCase):
     def setUp(self):
         self.staff = make_user("dc@t.ph", Role.STAFF)
         self.psych = make_user("dp@t.ph", Role.PSYCHOLOGIST)
-        self.archived = Child.objects.create(
+        self.archived = Child.objects.create(social_worker=self.staff, 
             fullname="Mika R. Santos", first_name="Mika", last_name="Santos",
             birth_date="2016-01-10", status=Child.INACTIVE)
 
@@ -235,7 +235,7 @@ class TerminationPrefetchTests(APITestCase):
         self.client.force_authenticate(self.staff)
 
     def _make_terminated_child(self, n):
-        child = Child.objects.create(fullname=f"Term Kid {n}", status=Child.INACTIVE)
+        child = Child.objects.create(social_worker=self.staff, fullname=f"Term Kid {n}", status=Child.INACTIVE)
         TerminationRecord.objects.create(
             child=child, reason_category="Services completed", note="done")
         return child
@@ -317,7 +317,7 @@ class IdentifyingInformationFieldsTests(APITestCase):
         # old NACC-SAMD-GF-000 "Trafficked" option) must still round-trip
         # correctly on read/unrelated-edit - only NEW writes of a removed
         # value are rejected, existing data is not silently dropped.
-        child = Child.objects.create(
+        child = Child.objects.create(social_worker=self.staff, 
             fullname="Legacy Kid", first_name="Legacy", last_name="Kid",
             birth_date="2016-01-10", gender="Female", case_type="Foster Care",
             case_category="Trafficked")
@@ -336,7 +336,7 @@ class IdentifyingInformationFieldsTests(APITestCase):
         # change-only exemption, this would 400 on a field nobody is
         # touching, permanently blocking any edit to a record that
         # predates the narrowed Category list.
-        child = Child.objects.create(
+        child = Child.objects.create(social_worker=self.staff, 
             fullname="Legacy Kid", first_name="Legacy", last_name="Kid",
             birth_date="2016-01-10", gender="Female", case_type="Foster Care",
             case_category="Trafficked")
@@ -354,7 +354,7 @@ class IdentifyingInformationFieldsTests(APITestCase):
     def test_edit_form_full_put_changing_away_from_legacy_category_still_validates(self):
         # A deliberate change AWAY from a legacy value must still be
         # checked against the current (narrowed) choice list.
-        child = Child.objects.create(
+        child = Child.objects.create(social_worker=self.staff, 
             fullname="Legacy Kid2", first_name="Legacy", last_name="Kid2",
             birth_date="2016-01-10", gender="Female", case_type="Foster Care",
             case_category="Trafficked")

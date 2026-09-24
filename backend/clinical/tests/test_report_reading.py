@@ -32,7 +32,7 @@ class ReadingAReportTest(TestCase):
         self.staff = make("sw@t.ph", Role.STAFF)
         self.psy = make("psy@t.ph", Role.PSYCHOLOGIST)
         self.other_psy = make("psy2@t.ph", Role.PSYCHOLOGIST)
-        self.child = Child.objects.create(fullname="Ana Cruz", assigned_psychologist=self.psy)
+        self.child = Child.objects.create(social_worker=self.staff, fullname="Ana Cruz", assigned_psychologist=self.psy)
         self.report = PsychologicalReport(child=self.child, author=self.psy,
                                           original_filename="progress.docx")
         self.report.file.save("progress.docx", ContentFile(build_docx([

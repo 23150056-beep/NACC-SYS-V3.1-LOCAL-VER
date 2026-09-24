@@ -1224,8 +1224,7 @@ export default function Schedule() {
                 <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{new Date(sel.start).toLocaleString()} · {sel.duration_minutes} min</div>
                 <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
                   {sel.child_name ? `${sel.case_ref} · ` : ''}
-                  {sel.referred_by_name ? `Referred by ${sel.referred_by_name}`
-                    : sel.has_referral ? 'Referrer unknown' : 'No case referral on file'}
+                  {sel.referred_by_name ? `Referred by ${sel.referred_by_name}` : 'No social worker yet'}
                 </div>
               </div>
               <Badge tone={STATUS_TONE[sel.status]} dot>{sel.status.replace('_', '-')}</Badge>
@@ -1254,13 +1253,23 @@ export default function Schedule() {
                       No-show
                     </Button>
                   )}
-                  {canBook && (
+                  {/* Another social worker's child: seen, not handled - the
+                      server refuses a move or a cancel from anyone but the
+                      child's own SW or the ISA (scheduling/views.py). */}
+                  {canBook && !sel.name_hidden && (
                     <Button variant="secondary" onClick={() => openReschedule(sel)}
                       iconLeft={<Icon name="calendar" size={15} />}>
                       Reschedule
                     </Button>
                   )}
-                  <Button variant="danger" onClick={() => setConfirmStatus({ appointment: sel, action: 'cancel' })} iconLeft={<Icon name="x" size={15} />}>Cancel</Button>
+                  {!sel.name_hidden && (
+                    <Button variant="danger" onClick={() => setConfirmStatus({ appointment: sel, action: 'cancel' })} iconLeft={<Icon name="x" size={15} />}>Cancel</Button>
+                  )}
+                  {sel.name_hidden && (
+                    <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                      Another social worker&apos;s child. Only they or the ISA can move or cancel this session.
+                    </span>
+                  )}
                 </div>
               );
             })()}

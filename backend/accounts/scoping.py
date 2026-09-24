@@ -7,9 +7,12 @@ between one psychologist and another psychologist's case notes, and eleven
 hand-maintained copies is eleven chances for the twelfth call site to be
 written slightly differently, or to forget.
 
-The rule itself is unchanged and deliberately narrow:
+The rule is deliberately narrow:
 
-* Administrators and Staff see every child.
+* Administrators see every child.
+* A social worker (Staff) sees only the records they hold - `social_worker`,
+  set to whoever added the record (owner's decision, 24 Sep 2026: each SW has
+  their own records, not one shared list). Until then staff saw every child.
 * A Psychologist sees only the children assigned to them.
 
 `children` is imported inside the functions rather than at module scope: the
@@ -60,11 +63,19 @@ def scope_to_visible(qs, request, path="child"):
     `path` is the lookup from the queryset's model to Child — "child" for a
     remark or a consent, and None for a queryset of children themselves.
 
-    Returns the queryset untouched for Administrators and Staff, which is why
-    this is safe to apply unconditionally at every call site: the caller no
-    longer has to remember to write the role check as well.
+    Returns the queryset untouched for Administrators, which is why this is
+    safe to apply unconditionally at every call site: the caller no longer has
+    to remember to write the role check as well. Anyone else - a role this
+    does not know, or none - sees nothing.
     """
-    if role_of(request) != Role.PSYCHOLOGIST:
+    role = role_of(request)
+    if role == Role.ADMINISTRATOR:
         return qs
-    field = "assigned_psychologist" if path is None else f"{path}__assigned_psychologist"
+    if role == Role.PSYCHOLOGIST:
+        owner = "assigned_psychologist"
+    elif role == Role.STAFF:
+        owner = "social_worker"
+    else:
+        return qs.none()
+    field = owner if path is None else f"{path}__{owner}"
     return qs.filter(**{field: request.user})

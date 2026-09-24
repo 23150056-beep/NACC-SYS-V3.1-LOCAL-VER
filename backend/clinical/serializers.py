@@ -194,10 +194,12 @@ class PsychologicalReportSerializer(serializers.ModelSerializer):
             request = self.context.get("request")
             if request is None:
                 ids = set()
-            elif role_of(request) == Role.PSYCHOLOGIST:
-                ids = set(visible_children(request).values_list("id", flat=True))
-            else:
+            elif role_of(request) == Role.ADMINISTRATOR:
                 ids = None
+            else:
+                # Psychologists and, since 24 Sep 2026, social workers see only
+                # some children - a finding naming any other stays hidden.
+                ids = set(visible_children(request).values_list("id", flat=True))
             self.context["_visible_child_ids"] = ids
         return self.context["_visible_child_ids"]
 

@@ -11,7 +11,7 @@ class ReopenTests(APITestCase):
         self.admin = make_user("ra@t.ph", Role.ADMINISTRATOR)
         self.staff = make_user("rs@t.ph", Role.STAFF)
         self.psych = make_user("rp@t.ph", Role.PSYCHOLOGIST)
-        self.child = Child.objects.create(
+        self.child = Child.objects.create(social_worker=self.staff, 
             fullname="Back Again", status=Child.INACTIVE,
             case_status=Child.STAGE_TERMINATED, assigned_psychologist=self.psych)
         TerminationRecord.objects.create(
@@ -66,7 +66,7 @@ class ReopenTests(APITestCase):
     def test_staff_still_cannot_terminate(self):
         # Only reopening moved. Ending a case stays with the assigned
         # psychologist or an administrator.
-        active = Child.objects.create(fullname="Still Here", assigned_psychologist=self.psych)
+        active = Child.objects.create(social_worker=self.staff, fullname="Still Here", assigned_psychologist=self.psych)
         self.client.force_authenticate(self.staff)
         r = self.client.post(f"/api/children/{active.id}/terminate/",
                              {"reason_category": "Services completed", "note": "x"})

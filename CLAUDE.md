@@ -641,28 +641,65 @@ middle name, a date found, and every question that applies made mandatory.
   redeploy of the same commit went through in two minutes. Prefer additive
   migrations (add, copy, drop later); widening a column, as 0022 does, is safe.
 
+## Each social worker's own records
+
+Owner's decision, 24 Sep 2026: **each SW keeps their own records**, not one
+shared list. `Child.social_worker` says whose a record is, and
+`accounts/scoping.py` - the one rule nearly every endpoint already used - now
+narrows Staff to it. Administrators (the ISA) see everything; psychologists
+are unchanged (their assigned children).
+
+- **A new record is its creator's** (`ChildViewSet.perform_create`), whatever
+  the request says. **Only the ISA moves one** - the record form's Social
+  Worker field, shown to the ISA only; a SW sending a different one gets 400,
+  sending the same one is fine because the edit form resends everything. It
+  must be a Staff account.
+- **Existing records were backfilled** (children 0025): the uploader of the
+  latest case referral if a SW, else whoever the activity log says created
+  it if a SW, else nobody - and nobody means only the ISA sees it until it is
+  assigned (Records' "No social worker yet" filter). An administrator's
+  upload is never read as ownership. On the hosted demo every seeded referral
+  was filed by one staff account, so that account received every demo child.
+- **The doors that skipped the rule, now closed**, each with a test in
+  `children/tests/test_own_records.py`: the child report page (checked
+  psychologists only), the duplicate check, case-referral upload, survey
+  invites, the two slot endpoints, booking/moving/cancelling a session, the
+  activity feed, and report-check findings naming a child. A child-related
+  query that is not built on `scope_to_visible` is the bug.
+- **The duplicate check still searches every record** - a second record for
+  the same child is the worse failure - but another SW's match says only that
+  it exists and who holds it ("held by R. Santos - ask the ISA"): no id, no
+  birth date, nothing from the record.
+- **Dashboard is their own; Agency Summary stays agency-wide** (the owner's
+  choice): the Summary holds counts with no names and mirrors the agency's own
+  report form. The assistant answers a SW about their own records.
+- **The calendar still shows every session**, other SWs' children as "C-0042 ·
+  Ref. E. Pascua" (`scheduling/visibility.py`): booking needs the
+  psychologist's real day. A SW acts only on their own children's sessions;
+  the server refuses the rest and the screen offers no buttons for them.
+- `seed_demo_data` has a second SW (Rosa Santos) and `demo_owners.py` shares
+  seeded children round-robin across the staff accounts present; the
+  referral is filed by the child's own SW. A caseload with no SW is one no
+  staff account can see.
+- **Archiving a SW does not move their records.** The ISA transfers them; the
+  Social Worker field lists an inactive holder as "(inactive)".
+
 ## Names on the schedule
 
 Owner's decision, 24 Sep 2026, in `scheduling/visibility.py`: on the calendar
-a social worker sees the name of a child **they referred** - whose latest case
-referral they filed - and every other appointment as **"C-0042 · Ref. E.
-Pascua"**. Administrators and psychologists see names.
+a social worker sees the name of a child **in their own records** and every
+other appointment as **"C-0042 · Ref. E. Pascua"** - the record's SW.
+Administrators and psychologists see names. (It first followed whoever filed
+the child's latest referral; the backfill made the two agree on the day it
+switched to the record.)
 
 - **The case reference is not decoration.** The literal request was "only the
-  referring staff's name"; one worker's fifteen referrals would then be fifteen
+  referring staff's name"; one worker's fifteen children would then be fifteen
   identical chips, and cancelling one would be a guess.
 - **Applied where data leaves the server**, not in the screen: the
-  appointments API (`child_name` is null, `name_hidden` true), the Dashboard's
-  "Today" strip, the assistant's schedule answers, and the booking refusal that
-  used to name the other child in the slot. A name the screen hides is still
-  in the response.
-- **Records and the booking form keep names.** Staff enter and book children
-  there; this is how a schedule is displayed, not what staff may know.
-- The latest referral decides, so replacing one moves the name to whoever
-  filed the new one. A child with no referral on file reads "no referral on
-  file"; a referral whose uploader's row is gone reads "referrer unknown"
-  (`has_referral`), not "none". `test_the_rule_costs_no_query_per_row` holds
-  the prefetch.
+  appointments API (`child_name` is null, `name_hidden` true), the assistant's
+  schedule answers, and the booking refusal that used to name the other child
+  in the slot. A name the screen hides is still in the response.
 - **Every screen that shows a schedule row goes through `scheduleName()`**
   (`utils/child.js`): the calendar, the Today card, the left rail's "Needs you
   today". The rail read `child_name` directly and showed staff a blank row for

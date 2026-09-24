@@ -11,7 +11,8 @@ class NextSlotsTests(APITestCase):
     def setUp(self):
         self.staff = make_user("sl@t.ph", Role.STAFF)
         self.psych = make_user("pl@t.ph", Role.PSYCHOLOGIST)
-        self.child = Child.objects.create(fullname="Slot Kid", assigned_psychologist=self.psych)
+        self.child = Child.objects.create(fullname="Slot Kid", assigned_psychologist=self.psych,
+                                          social_worker=self.staff)
         self.tomorrow = timezone.localdate() + datetime.timedelta(days=1)
         self.block = AvailabilityBlock.objects.create(
             psychologist=self.psych, weekday=self.tomorrow.weekday(),
@@ -25,7 +26,7 @@ class NextSlotsTests(APITestCase):
         self.assertEqual(r.data["slots"][0]["remaining"], 2)
 
     def test_unassigned_child_400(self):
-        solo = Child.objects.create(fullname="No Psych")
+        solo = Child.objects.create(fullname="No Psych", social_worker=self.staff)
         r = self.client.get(f"/api/availability/next-slots/?child={solo.id}")
         self.assertEqual(r.status_code, 400)
 

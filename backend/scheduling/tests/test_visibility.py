@@ -1,10 +1,11 @@
 """Whose name a schedule shows (scheduling/visibility.py, 24 Sep 2026).
 
-A social worker sees the name of a child they referred - the one whose latest
-case referral they filed - and "C-0042 · Ref. E. Pascua" for everyone else's.
+A social worker sees the name of a child in their own records - the one they
+hold as `social_worker` - and "C-0042 · Ref. E. Pascua" for everyone else's.
 Administrators and psychologists see names. Held where the data leaves the
-server: the appointments API, the Dashboard's "Today" strip, the assistant's
-schedule answers and the booking refusal.
+server: the appointments API, the assistant's schedule answers and the
+booking refusal. The Dashboard strip and the assistant answer a social worker
+about their own children only, so they name every one.
 """
 from datetime import datetime, time, timedelta
 
@@ -20,8 +21,8 @@ from accounts.models import Role
 from assistant import tools
 from children.models import Child
 from clinical.models import CaseReferral
-from scheduling import booking
-from scheduling.models import Appointment
+from scheduling import booking, visibility
+from scheduling.models import Appointment, AvailabilityBlock
 
 User = get_user_model()
 
@@ -40,14 +41,14 @@ class ScheduleNamesTest(TestCase):
         self.psy = make("psy@t.ph", "Marivic", "Bulan", Role.PSYCHOLOGIST)
 
         self.ana = Child.objects.create(first_name="Ana", last_name="Cruz",
-                                        assigned_psychologist=self.psy)
+                                        assigned_psychologist=self.psy, social_worker=self.editha)
         self.ben = Child.objects.create(first_name="Ben", last_name="Lim",
-                                        assigned_psychologist=self.psy)
+                                        assigned_psychologist=self.psy, social_worker=self.rosa)
+        # Cara has no social worker yet: only the ISA holds her record.
         self.cara = Child.objects.create(first_name="Cara", last_name="Diaz",
                                          assigned_psychologist=self.psy)
-        self._refer(self.ana, self.editha)
-        self._refer(self.ben, self.rosa)
-        # Cara was booked before referrals were required: none on file.
+        for child in (self.ana, self.ben, self.cara):
+            self._refer(child, child.social_worker)
         tomorrow = timezone.localdate() + timedelta(days=1)
         for hour, child in ((9, self.ana), (10, self.ben), (11, self.cara)):
             Appointment.objects.create(
@@ -59,13 +60,15 @@ class ScheduleNamesTest(TestCase):
         ref.file.save("referral.pdf", ContentFile(b"%PDF-1.4"), save=True)
         return ref
 
-    def _rows(self, user):
+    def _client(self, user):
         client = APIClient()
         client.force_authenticate(user)
-        rows = client.get("/api/appointments/").data
-        return {r["child"]: r for r in rows}
+        return client
 
-    def test_a_social_worker_sees_only_the_children_they_referred(self):
+    def _rows(self, user):
+        return {r["child"]: r for r in self._client(user).get("/api/appointments/").data}
+
+    def test_a_social_worker_sees_names_only_for_their_own_records(self):
         rows = self._rows(self.editha)
         self.assertEqual("Ana Cruz", rows[self.ana.id]["child_name"])
         self.assertFalse(rows[self.ana.id]["name_hidden"])
@@ -77,11 +80,19 @@ class ScheduleNamesTest(TestCase):
         self.assertIsNone(rows[self.cara.id]["referred_by_name"])
 
     def test_the_name_is_not_anywhere_in_the_response(self):
-        client = APIClient()
-        client.force_authenticate(self.editha)
-        body = client.get("/api/appointments/").content.decode()
+        body = self._client(self.editha).get("/api/appointments/").content.decode()
         self.assertNotIn("Ben Lim", body)
         self.assertNotIn("Cara Diaz", body)
+
+    def test_another_workers_session_carries_no_notes(self):
+        # Free text is the name by another route: "bring Ben's school records".
+        Appointment.objects.filter(child=self.ben).update(notes="Bring Ben Lim's school records")
+        Appointment.objects.filter(child=self.ana).update(notes="Ana prefers mornings")
+        rows = self._rows(self.editha)
+        self.assertEqual("", rows[self.ben.id]["notes"])
+        self.assertEqual("Ana prefers mornings", rows[self.ana.id]["notes"])
+        self.assertEqual("Bring Ben Lim's school records", self._rows(self.rosa)[self.ben.id]["notes"])
+        self.assertNotIn("Ben", self._client(self.editha).get("/api/appointments/").content.decode())
 
     def test_each_social_worker_sees_their_own(self):
         rows = self._rows(self.rosa)
@@ -96,64 +107,56 @@ class ScheduleNamesTest(TestCase):
                              {r["child_name"] for r in rows.values()}, user.email)
             self.assertFalse(any(r["name_hidden"] for r in rows.values()))
 
-    def test_the_latest_referral_decides(self):
-        # Replacing a referral files a new one; whoever filed that is the referrer.
-        later = self._refer(self.ana, self.rosa)
+    def test_the_record_decides_not_the_referral(self):
+        # A later referral filed by somebody else does not move the name: the
+        # record is still Editha's until the ISA moves it.
+        later = self._refer(self.ana, self.admin)
         CaseReferral.objects.filter(pk=later.pk).update(
             created_at=timezone.now() + timedelta(minutes=5))
+        self.assertEqual("Ana Cruz", self._rows(self.editha)[self.ana.id]["child_name"])
+        Child.objects.filter(pk=self.ana.pk).update(social_worker=self.rosa)
         self.assertIsNone(self._rows(self.editha)[self.ana.id]["child_name"])
         self.assertEqual("Ana Cruz", self._rows(self.rosa)[self.ana.id]["child_name"])
 
-    def test_a_referral_whose_uploader_is_gone_is_still_a_referral(self):
-        # uploaded_by is SET_NULL. Reading that as "no referral on file" would
-        # tell a social worker a booked child has no referral when it has one.
-        CaseReferral.objects.filter(child=self.ben).update(uploaded_by=None)
-        ben = self._rows(self.editha)[self.ben.id]
-        self.assertIsNone(ben["child_name"])
-        self.assertIsNone(ben["referred_by_name"])
-        self.assertTrue(ben["has_referral"])
-        self.assertFalse(self._rows(self.editha)[self.cara.id]["has_referral"])
-        req = APIRequestFactory().get("/api/assistant/ask/")
-        req.user = self.editha
-        said = {item["child"] for item in tools.REGISTRY["list_my_appointments"]["resolve"](
-            req, {"when": "tomorrow"})["items"]}
-        self.assertIn(f"C-{self.ben.id:04d} (referrer unknown)", said)
-
     def test_a_booking_answers_the_same_way(self):
-        client = APIClient()
-        client.force_authenticate(self.editha)
         day = timezone.localdate() + timedelta(days=2)
-        from scheduling.models import AvailabilityBlock
         AvailabilityBlock.objects.create(psychologist=self.psy, weekday=day.weekday(),
                                          start_time=time(8), end_time=time(17), capacity=3)
-        r = client.post("/api/appointments/", {
-            "child": self.ben.id, "psychologist": self.psy.id,
-            "start": f"{day.isoformat()}T09:00:00", "duration_minutes": 60,
-            "purpose": "session"}, format="json")
+        payload = {"child": self.ben.id, "psychologist": self.psy.id,
+                   "start": f"{day.isoformat()}T09:00:00", "duration_minutes": 60,
+                   "purpose": "session"}
+        r = self._client(self.admin).post("/api/appointments/", payload, format="json")
         self.assertEqual(201, r.status_code, r.data)
-        self.assertIsNone(r.data["child_name"])
-        self.assertEqual(f"C-{self.ben.id:04d}", r.data["case_ref"])
+        self.assertEqual("Ben Lim", r.data["child_name"])
+        mine = self._client(self.editha).post(
+            "/api/appointments/", {**payload, "child": self.ana.id,
+                                   "start": f"{day.isoformat()}T11:00:00"}, format="json")
+        self.assertEqual(201, mine.status_code, mine.data)
+        self.assertEqual("Ana Cruz", mine.data["child_name"])
 
-    def test_the_today_strip_follows_the_rule(self):
+    def test_the_today_strip_is_a_social_workers_own_children(self):
         today = timezone.localdate()
         Appointment.objects.update(start=timezone.make_aware(datetime.combine(today, time(23, 30))))
-        client = APIClient()
-        client.force_authenticate(self.editha)
         strip = {s["child_id"]: s for s in
-                 client.get("/api/reports/dashboard/").data["today_schedule"]}
+                 self._client(self.editha).get("/api/reports/dashboard/").data["today_schedule"]}
+        self.assertEqual({self.ana.id}, set(strip))
         self.assertEqual("Ana Cruz", strip[self.ana.id]["child_name"])
-        self.assertIsNone(strip[self.ben.id]["child_name"])
-        self.assertEqual("Rosa Santos", strip[self.ben.id]["referred_by_name"])
+        admin_strip = self._client(self.admin).get("/api/reports/dashboard/").data["today_schedule"]
+        self.assertEqual(3, len(admin_strip))
 
-    def test_the_assistant_follows_the_rule(self):
+    def test_the_assistant_answers_about_their_own_children(self):
         req = APIRequestFactory().get("/api/assistant/ask/")
         req.user = self.editha
         out = tools.REGISTRY["list_my_appointments"]["resolve"](req, {"when": "tomorrow"})
-        said = {item["child"] for item in out["items"]}
-        self.assertIn("Ana Cruz", said)
-        self.assertIn(f"C-{self.ben.id:04d} (referred by Rosa Santos)", said)
-        self.assertIn(f"C-{self.cara.id:04d} (no referral on file)", said)
-        self.assertFalse(any("Ben Lim" in s or "Cara Diaz" in s for s in said))
+        self.assertEqual(["Ana Cruz"], [item["child"] for item in out["items"]])
+        self.assertEqual(1, out["total"])
+
+    def test_the_one_line_label(self):
+        self.assertEqual("Ana Cruz", visibility.label(self.editha, self.ana))
+        self.assertEqual(f"C-{self.ben.id:04d} (referred by Rosa Santos)",
+                         visibility.label(self.editha, self.ben))
+        self.assertEqual(f"C-{self.cara.id:04d} (no social worker yet)",
+                         visibility.label(self.editha, self.cara))
 
     def test_a_refused_booking_does_not_name_the_other_child(self):
         taken = Appointment.objects.get(child=self.ben)
@@ -165,14 +168,13 @@ class ScheduleNamesTest(TestCase):
         self.assertNotIn("Ben Lim", message)
 
     def test_the_rule_costs_no_query_per_row(self):
-        client = APIClient()
-        client.force_authenticate(self.editha)
+        client = self._client(self.editha)
         with CaptureQueriesContext(connection) as few:
             client.get("/api/appointments/")
         for i in range(6):
             child = Child.objects.create(first_name=f"K{i}", last_name="Extra",
-                                         assigned_psychologist=self.psy)
-            self._refer(child, self.rosa)
+                                         assigned_psychologist=self.psy,
+                                         social_worker=self.rosa if i % 2 else self.editha)
             Appointment.objects.create(child=child, psychologist=self.psy,
                                        start=timezone.now() + timedelta(days=3, hours=i))
         with CaptureQueriesContext(connection) as many:

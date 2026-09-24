@@ -114,14 +114,18 @@ class AppointmentsResolverTest(ResolverTestBase):
                          {a["child"] for a in out["items"]})
         self.assertEqual(2, out["total"])
 
-    def test_staff_see_the_agency_schedule(self):
-        # Staff are the ones who book. An empty calendar is the least useful
-        # answer the assistant could give them.
+    def test_a_social_worker_hears_their_own_childrens_sessions(self):
+        # Since 24 Sep 2026 each SW keeps their own records: the schedule
+        # answer is their children's, as on their Dashboard. The Calendar is
+        # where the agency's sessions are.
         self._appt(self.mine, self.psy)
         self._appt(self.theirs, self.other)
-        out = self._resolve(self._staff(), "list_my_appointments", {"when": "today"})
-        self.assertEqual("agency", out["scope"])
-        self.assertEqual(2, out["total"])
+        staff = self._staff()
+        Child.objects.filter(pk=self.mine.pk).update(social_worker=staff)
+        out = self._resolve(staff, "list_my_appointments", {"when": "today"})
+        self.assertEqual("own", out["scope"])
+        self.assertEqual(1, out["total"])
+        self.assertEqual(self.mine.fullname, out["items"][0]["child"])
 
     def test_agency_rows_say_whose_session_it_is(self):
         # Across the agency the child's name alone does not say who is seeing

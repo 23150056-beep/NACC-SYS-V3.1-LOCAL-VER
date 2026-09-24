@@ -38,7 +38,11 @@ def give_referral(child, uploaded_by=None):
 
 
 def child_with_referral(name, psychologist=None):
-    child = Child.objects.create(fullname=name, assigned_psychologist=psychologist)
+    # The fixture's social worker holds every child it books (24 Sep 2026:
+    # each SW keeps their own records, and books only for them).
+    child = Child.objects.create(
+        fullname=name, assigned_psychologist=psychologist,
+        social_worker=User.objects.filter(role__role_name=Role.STAFF).order_by("pk").first())
     give_referral(child)
     return child
 
@@ -57,7 +61,8 @@ class SchedulingBase(APITestCase):
         self.staff = User.objects.create_user(
             email="s@racco1.gov.ph", username="s", password="pass1234", role=self.staff_role)
         self.child = Child.objects.create(
-            fullname="Ana", case_type="Foster Care", assigned_psychologist=self.psy)
+            fullname="Ana", case_type="Foster Care", assigned_psychologist=self.psy,
+            social_worker=self.staff)
         give_referral(self.child, self.staff)
         # Wednesday 9:00-12:00, capacity 2
         self.block = AvailabilityBlock.objects.create(

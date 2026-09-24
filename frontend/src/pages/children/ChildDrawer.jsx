@@ -152,6 +152,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
     ['Legal Status', child.legal_status || '—'],
     ['Educational Placement', child.education_level || '—'],
     ['Assigned Psychologist', child.psychologist_name || '—'],
+    ['Social Worker', child.social_worker_name || 'No social worker yet'],
     ...(asked('surrendered_by') || child.surrendered_by ? [['Previous Custodian', child.surrendered_by || '—']] : []),
     ['Address', location],
     ...(child.landmark ? [['Landmark', child.landmark]] : []),

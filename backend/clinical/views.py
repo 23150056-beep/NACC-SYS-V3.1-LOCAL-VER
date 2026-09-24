@@ -467,6 +467,14 @@ class CaseReferralViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         self._assert_can_write()
+        # A social worker files referrals for their own records only - the
+        # referral is what unlocks a child's calendar, and a record they
+        # cannot open is not theirs to unlock (accounts/scoping.py).
+        from children.models import Child
+        child = serializer.validated_data["child"]
+        if not scope_to_visible(Child.objects.filter(pk=child.pk), self.request,
+                                path=None).exists():
+            raise PermissionDenied("You can only file a referral for a child in your own records.")
         upload = serializer.validated_data["file"]
         extracted = extract_text(upload)
         obj = serializer.save(uploaded_by=self.request.user,
@@ -534,7 +542,10 @@ class OpinionnaireInviteViewSet(viewsets.ModelViewSet):
 
     def _assert_can_write(self, child):
         role = _role(self.request)
-        if role in (Role.ADMINISTRATOR, Role.STAFF):
+        if role == Role.ADMINISTRATOR:
+            return
+        # A social worker, for their own records (accounts/scoping.py).
+        if role == Role.STAFF and child.social_worker_id == self.request.user.id:
             return
         if role == Role.PSYCHOLOGIST and child.assigned_psychologist_id == self.request.user.id:
             return
