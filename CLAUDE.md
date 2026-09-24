@@ -603,6 +603,17 @@ middle name, a date found, and every question that applies made mandatory.
   `import_demo_data` upgrades an older fixture the same way before loading it.
 - "Street Number" is the owner's wording; its hint allows a purok or sitio,
   because most addresses in the region have no street.
+- **Previous Custodian is typed, not picked** (staff's request, 24 Sep 2026):
+  `surrendered_by` lost its three placeholder choices and widened to 150
+  (children 0022). Still required where the case type asks it; old values
+  such as "Relatives" are ordinary text now and were left alone.
+- **A rename cannot ride along with a deploy the old release survives.** On
+  24 Sep the demo API's first deploy of 0020 failed on Render's side after the
+  web had gone live; had the migration run first, the old API - still serving
+  - would have answered 500 on every child query, because it asks for
+  `middle_initial`. Replayed on PostgreSQL 16 it does exactly that. A manual
+  redeploy of the same commit went through in two minutes. Prefer additive
+  migrations (add, copy, drop later); widening a column, as 0022 does, is safe.
 
 ## Confirmations
 

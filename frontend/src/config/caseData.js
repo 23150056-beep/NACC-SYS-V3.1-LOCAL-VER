@@ -1,9 +1,9 @@
 // Company-approved reference lists for child records.
 //
 // Case types and case categories are now sourced from the official
-// NACC-SAMD-GF-000 (June 2025) certification tool. SURRENDERED_BY and the
-// location lists below are STILL PLACEHOLDER VALUES pending confirmation
-// from NACC / RACCO I.
+// NACC-SAMD-GF-000 (June 2025) certification tool. The location lists below
+// are STILL PLACEHOLDER VALUES pending confirmation from NACC / RACCO I. The
+// Previous Custodian is typed in, not picked (staff's request, 24 Sep 2026).
 // V2: "Adoption" included per the psychologist interview ("active/adoption,
 // active/foster care"); final list pending RACCO I confirmation. This
 // placement-track list is now corroborated by NACC-SAMD-GF-000 KRA III
@@ -172,14 +172,6 @@ export const TERMINATION_REASONS = [
   'Aged out of program',
   'Services completed',
   'Other',
-];
-
-// Adviser: record who surrendered the child to NACC/RACCO I.
-// PLACEHOLDER — pending confirmation from NACC / RACCO I.
-export const SURRENDERED_BY = [
-  'Social Worker',
-  'Police',
-  'Relatives',
 ];
 
 // Province → Municipality/City → Barangay pickers.
