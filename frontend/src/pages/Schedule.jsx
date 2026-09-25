@@ -9,6 +9,7 @@ import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { loadAll } from '../utils/load';
 import { exactDate } from '../utils/time';
+import { scheduleName } from '../utils/child';
 import {
   Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, hoverLift, Icon, iconBtn, Input, PAGE, PageHeader, Select,
 } from '../ui';
@@ -296,7 +297,9 @@ export default function Schedule() {
     const start = new Date(a.start);
     return {
       id: a.id,
-      title: `${a.child_name} · ${PURPOSES.find((p) => p.v === a.purpose)?.label || a.purpose}`,
+      // A social worker sees names only for children they referred; others
+      // read "C-0042 · Ref. E. Pascua" (utils/child.js scheduleName).
+      title: `${scheduleName(a)} · ${PURPOSES.find((p) => p.v === a.purpose)?.label || a.purpose}`,
       start,
       end: new Date(start.getTime() + (a.duration_minutes || 60) * 60000),
       resource: a,
@@ -365,7 +368,8 @@ export default function Schedule() {
       duration_minutes: booking.duration || 60,
       purpose: booking.purpose, notes: booking.notes || '',
     };
-    const who = children.find((c) => String(c.id) === String(booking.child))?.fullname;
+    const who = booking.id ? booking.label
+      : children.find((c) => String(c.id) === String(booking.child))?.fullname;
     if (!(await confirm({
       description: booking.id
         ? `This moves ${who || 'the child'}'s appointment to the new time.`
@@ -400,6 +404,9 @@ export default function Schedule() {
     const pad = (n) => String(n).padStart(2, '0');
     setBooking({
       id: appt.id,
+      // Moving keeps the child, so it is shown the way the calendar shows it
+      // rather than as a pick from the named list.
+      label: scheduleName(appt),
       child: String(appt.child),
       psychologist: String(appt.psychologist),
       date: `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`,
@@ -932,7 +939,7 @@ export default function Schedule() {
                 the reader is about to lose sight of, and on a week view there
                 may be several sessions with the same child. */}
             <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--ink-50)', border: '1px solid var(--border)' }}>
-              <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{a.child_name}</div>
+              <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{scheduleName(a)}</div>
               <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
                 {exactDate(a.start)} · {a.duration_minutes} min
                 {a.psychologist_name ? ` · ${a.psychologist_name}` : ''}
@@ -984,6 +991,14 @@ export default function Schedule() {
             </div>
             <div className="racco-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
               {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{String(error)}</Alert>}
+              {booking.id ? (
+                <FormField label="Child">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 13px', borderRadius: 'var(--radius-md)', background: 'var(--ink-50)', border: '1px solid var(--border)', color: 'var(--text-strong)', fontWeight: 700, fontSize: 14 }}>
+                    {booking.label}
+                    <Icon name="lock" size={13} style={{ color: 'var(--text-faint)', marginLeft: 'auto' }} />
+                  </div>
+                </FormField>
+              ) : (
               <FormField label="Child" required>
                 <Select value={booking.child} onChange={(e) => {
                   const childId = e.target.value;
@@ -994,6 +1009,7 @@ export default function Schedule() {
                   {children.map((c) => <option key={c.id} value={c.id}>{c.fullname}</option>)}
                 </Select>
               </FormField>
+              )}
               {!isPsych && (
                 <FormField label="Psychologist" required hint="Bookings must fall inside their availability.">
                   <Select value={booking.psychologist} onChange={(e) => setBooking({ ...booking, psychologist: e.target.value })}>
@@ -1204,8 +1220,12 @@ export default function Schedule() {
           <div onClick={(e) => e.stopPropagation()} style={{ width: 420, maxWidth: '92%', background: 'var(--surface)', borderRadius: 'var(--radius-xl)', boxShadow: 'var(--shadow-xl)', padding: 22, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
               <div>
-                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>{sel.child_name}</div>
+                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>{sel.child_name || `Case ${sel.case_ref}`}</div>
                 <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{new Date(sel.start).toLocaleString()} · {sel.duration_minutes} min</div>
+                <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                  {sel.child_name ? `${sel.case_ref} · ` : ''}
+                  {sel.referred_by_name ? `Referred by ${sel.referred_by_name}` : 'No social worker yet'}
+                </div>
               </div>
               <Badge tone={STATUS_TONE[sel.status]} dot>{sel.status.replace('_', '-')}</Badge>
             </div>
@@ -1233,13 +1253,23 @@ export default function Schedule() {
                       No-show
                     </Button>
                   )}
-                  {canBook && (
+                  {/* Another social worker's child: seen, not handled - the
+                      server refuses a move or a cancel from anyone but the
+                      child's own SW or the ISA (scheduling/views.py). */}
+                  {canBook && !sel.name_hidden && (
                     <Button variant="secondary" onClick={() => openReschedule(sel)}
                       iconLeft={<Icon name="calendar" size={15} />}>
                       Reschedule
                     </Button>
                   )}
-                  <Button variant="danger" onClick={() => setConfirmStatus({ appointment: sel, action: 'cancel' })} iconLeft={<Icon name="x" size={15} />}>Cancel</Button>
+                  {!sel.name_hidden && (
+                    <Button variant="danger" onClick={() => setConfirmStatus({ appointment: sel, action: 'cancel' })} iconLeft={<Icon name="x" size={15} />}>Cancel</Button>
+                  )}
+                  {sel.name_hidden && (
+                    <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                      Another social worker&apos;s child. Only they or the ISA can move or cancel this session.
+                    </span>
+                  )}
                 </div>
               );
             })()}

@@ -65,7 +65,7 @@ class ChildApiTest(APITestCase):
 
     def test_update_child_with_valid_case_category_persists_and_returns_it(self):
         self._auth("staff@racco1.gov.ph", "staff1234")
-        child = Child.objects.create(fullname="Lena Santos")
+        child = Child.objects.create(social_worker=self.staff, fullname="Lena Santos")
         resp = self.client.put(f"/api/children/{child.id}/", {
             "fullname": "Lena Santos", "case_category": "Neglected"})
         self.assertEqual(resp.status_code, 200)

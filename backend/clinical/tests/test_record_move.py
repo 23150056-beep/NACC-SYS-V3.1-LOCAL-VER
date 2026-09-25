@@ -157,6 +157,8 @@ class CaseReferralUpdateTest(_Caseloads):
         self.staff = get_user_model().objects.create_user(
             email="s@racco1.gov.ph", username="s", password="pass1234",
             role=Role.objects.create(role_name=Role.STAFF))
+        # The child is in this social worker's records (24 Sep 2026).
+        Child.objects.filter(pk=self.mine.pk).update(social_worker=self.staff)
         self.referral = CaseReferral(child=self.mine, uploaded_by=self.staff,
                                      original_filename="referral.pdf",
                                      extracted_text="Referred by the DSWD field office.",

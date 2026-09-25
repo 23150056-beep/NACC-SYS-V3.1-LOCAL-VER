@@ -16,9 +16,11 @@ Two changes, and the first is what makes the second possible:
   staff member. That is the one place the data model actually knows which
   staff member a piece of work belongs to.
 
-Notifications about children stay collective on purpose. Staff work a shared
-caseload with no per-child owner in the model, so inventing one to make an
-inbox tidier would be inventing a fact about who is responsible.
+Notifications about children stayed collective while staff worked a shared
+caseload with no per-child owner in the model. Since 24 Sep 2026 each social
+worker keeps their own records (`Child.social_worker`), so the record stream a
+staff member sees is their own records' - the owner decided the fact the model
+was missing.
 """
 from django.contrib.auth import get_user_model
 from rest_framework.test import APITestCase
@@ -43,18 +45,22 @@ class StaffSeeWhatIsAddressedToThemTest(APITestCase):
         self.psy = User.objects.create_user(
             email="p@racco1.gov.ph", username="p", password="pass1234",
             role=Role.objects.create(role_name=Role.PSYCHOLOGIST))
-        self.child = Child.objects.create(fullname="Ana", assigned_psychologist=self.psy)
+        self.child = Child.objects.create(fullname="Ana", assigned_psychologist=self.psy,
+                                          social_worker=self.staff)
         self.client.force_authenticate(self.staff)
 
     def _labels(self):
         return [row["entity_label"] for row in self.client.get("/api/activity/").data]
 
-    def test_the_shared_record_stream_is_still_there(self):
-        # A superset, not a replacement: staff coordinate a shared caseload and
-        # losing the office-wide view to gain an inbox would be a bad trade.
-        log_activity(self.psy, ActivityLog.UPDATED, ActivityLog.RECORD,
-                     entity_type="Child", entity_label="Ana", entity_id=self.child.id)
+    def test_the_record_stream_is_their_own_records(self):
+        # A superset of the inbox, over their own records - not the office's.
+        colleagues = Child.objects.create(fullname="Ben", assigned_psychologist=self.psy,
+                                          social_worker=self.other_staff)
+        for child in (self.child, colleagues):
+            log_activity(self.psy, ActivityLog.UPDATED, ActivityLog.RECORD,
+                         entity_type="Child", entity_label=child.fullname, entity_id=child.id)
         self.assertIn("Ana", self._labels())
+        self.assertNotIn("Ben", self._labels())
 
     def test_something_addressed_to_them_arrives(self):
         log_activity(self.psy, ActivityLog.UPDATED, ActivityLog.RECORD,

@@ -6,7 +6,7 @@ import {
 import { PROCEED, useConfirm } from '../../context/ConfirmContext';
 import {
   ADMISSION, BIRTH_STATUSES, CASE_CATEGORIES, CASE_CATEGORY_OPTIONS, CASE_TYPES, CASE_TYPE_FIELDS,
-  LEGAL_STATUSES, PLACEMENT, TYPES_OF_ADOPTION, caseTypesFor, dateFieldFor,
+  LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, TYPES_OF_ADOPTION, caseTypesFor, dateFieldFor,
   requiredFields,
 } from '../../config/caseData';
 
@@ -52,9 +52,10 @@ const FIELD_INFO = {
   barangay: [2, 'barangay'], municipality: [2, 'municipality'], province: [2, 'province'],
   psgc_barangay: [2, 'barangay'], psgc_municipality: [2, 'municipality'], psgc_province: [2, 'province'],
   referral_source: [3, 'referral source'], referral_reason: [3, 'referral reason'],
-  education_level: [3, 'educational placement'], current_placement: [3, 'current whereabouts'],
+  education_level: [1, 'educational placement'],
   medical_notes: [3, 'medical notes'], recommendation: [3, 'recommendation'],
   psychologist: [4, 'psychologist'],
+  social_worker: [4, 'social worker'],
 };
 const NAME_FIELDS = ['first_name', 'middle_name', 'last_name'];
 
@@ -73,7 +74,7 @@ const snapshot = (f) => JSON.stringify(Object.keys(f).sort()
   .map((k) => [k, k === 'referralFile' ? Boolean(f[k]) : f[k]]));
 
 
-export default function ChildForm({ form, setForm, draftKey, psychologists, blocks = [], error, fieldErrors = null, isPsych = false, canReopen = false, others = [], onSubmit, onClose, onReopen, onOpenExisting }) {
+export default function ChildForm({ form, setForm, draftKey, psychologists, socialWorkers = null, blocks = [], error, fieldErrors = null, isPsych = false, canReopen = false, others = [], onSubmit, onClose, onReopen, onOpenExisting }) {
   const [step, setStep] = useState(1);
   // Reopening the form for a different record starts at the beginning again.
   useEffect(() => { setStep(1); }, [form.id]);
@@ -375,7 +376,16 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, bloc
               {!isEdit && dupes.length > 0 && (
                 <Alert tone="warning" icon={<Icon name="alert-triangle" size={18} />} title="A similar record already exists" style={{ gridColumn: '1 / -1' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
-                    {dupes.map((m) => (
+                    {dupes.map((m, i) => (m.yours === false ? (
+                      /* Another social worker's record: that it exists and who
+                         holds it, nothing from the record (owner's decision,
+                         24 Sep 2026 - children/views.py check_duplicate). */
+                      <div key={`held-${i}`} style={{ fontSize: 13 }}>
+                        A record for this child is already held by{' '}
+                        <strong>{m.held_by || 'no social worker yet'}</strong>.
+                        Ask the ISA (Administrator) to transfer it to you instead of adding a second record.
+                      </div>
+                    ) : (
                       <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                         <strong style={{ fontSize: 13 }}>{m.fullname}</strong>
                         <Badge tone={m.status === 'inactive' ? 'neutral' : 'success'} size="sm" dot>
@@ -388,7 +398,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, bloc
                               : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Ask staff or an administrator to reopen this archived record instead of creating a new one.</span>)
                           : <Button variant="secondary" onClick={() => onOpenExisting(m)} iconLeft={<Icon name="eye" size={14} />}>Open existing record</Button>}
                       </div>
-                    ))}
+                    )))}
                   </div>
                 </Alert>
               )}
@@ -418,6 +428,13 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, bloc
                   <option value="">— Select —</option>
                   {withRetired(LEGAL_STATUSES, form.legal_status).map((v) => <option key={v} value={v}>{optionLabel(LEGAL_STATUSES, v)}</option>)}
                 </Select>
+              </FormField>
+              {/* Moved here from Recommendation (24 Sep 2026): every child has
+                  an answer, even if the answer is that they are not in school. */}
+              <FormField label="Educational Placement" required error={fieldError('education_level')}
+                hint="The grade level, or “Not in school”.">
+                <Input value={form.education_level || ''} maxLength={100} placeholder="e.g. Grade 4"
+                  onChange={(e) => setForm({ ...form, education_level: e.target.value })} />
               </FormField>
               {asksFor('surrendered_by') && (
                 /* Typed, not picked: staff record who actually had the child
@@ -516,14 +533,14 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, bloc
             <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 4 }}>Recommendation</div>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 10 }}>Details beyond the agency&apos;s intake interview.</div>
             <div className="racco-case-grid">
-              <FormField label="Referral Source" hint="Agency, LGU, or person who referred the child.">
-                <Input value={form.referral_source || ''} onChange={(e) => setForm({ ...form, referral_source: e.target.value })} />
-              </FormField>
-              <FormField label="Educational Placement">
-                <Input value={form.education_level || ''} onChange={(e) => setForm({ ...form, education_level: e.target.value })} placeholder="e.g. Grade 4" />
-              </FormField>
-              <FormField label="Current Whereabouts">
-                <Input value={form.current_placement || ''} onChange={(e) => setForm({ ...form, current_placement: e.target.value })} placeholder="e.g. Foster family, residential facility" />
+              {/* A pick since 24 Sep 2026. Current Whereabouts, which sat
+                  beside it, was taken off the form the same day. */}
+              <FormField label="Referral Source" error={fieldError('referral_source')}
+                hint="RACCO · LGU (local government unit) · CCA (child caring agency) · RCF (residential care facility)">
+                <Select value={form.referral_source || ''} onChange={(e) => setForm({ ...form, referral_source: e.target.value })}>
+                  <option value="">— Select —</option>
+                  {withRetired(REFERRAL_SOURCES, form.referral_source).map((v) => <option key={v} value={v}>{optionLabel(REFERRAL_SOURCES, v)}</option>)}
+                </Select>
               </FormField>
               <FormField label="Referral Reason" style={{ gridColumn: '1 / -1' }}>
                 <textarea value={form.referral_reason || ''} onChange={(e) => setForm({ ...form, referral_reason: e.target.value })} rows={3} style={textarea} />
@@ -552,11 +569,14 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, bloc
             {!isPsych && (
               <FormField
                 label="Case referral"
+                /* The control is inside a wrapper, so FormField's own id
+                   injection would label the wrapper: point at the input. */
+                htmlFor="case-referral-file"
                 hint={form.id
                   ? 'Already on file? Add or replace it from the child’s record.'
                   : 'PDF or Word. The social worker’s referral — sessions cannot be booked without one, though the record saves either way.'}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div id="case-referral-row" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                   <input
                     id="case-referral-file"
                     type="file"
@@ -583,6 +603,19 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, bloc
               </FormField>
             ) : (
               <>
+                {socialWorkers && (
+                  /* The ISA only: whose record this is. A SW's new record is
+                     theirs, and only the ISA moves one (accounts/scoping.py). */
+                  <FormField label="Social Worker" hint="Only this social worker, and the ISA, can see the record.">
+                    <Select value={form.social_worker || ''} onChange={(e) => setForm({ ...form, social_worker: e.target.value })}>
+                      <option value="">— No social worker yet —</option>
+                      {socialWorkers.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                      {form.social_worker && !socialWorkers.some((w) => String(w.id) === String(form.social_worker)) && (
+                        <option value={form.social_worker}>{form.social_worker_name || 'Current social worker'} (inactive)</option>
+                      )}
+                    </Select>
+                  </FormField>
+                )}
                 <FormField label="Assign Psychologist">
                   <Select value={form.psychologist || ''} onChange={(e) => setForm({ ...form, psychologist: e.target.value })}>
                     <option value="">— Unassigned —</option>

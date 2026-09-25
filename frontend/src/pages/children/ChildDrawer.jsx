@@ -141,7 +141,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
   ].filter(([f]) => f === dated || child[f] || (!dated && f === ADMISSION))
     .map(([f, label]) => [label, child[f] || '—']);
   const showReopen = canReopen && child.status === 'inactive';
-  const hasRecommendationContent = child.recommendation || child.referral_source || child.education_level || child.current_placement;
+  const hasRecommendationContent = child.recommendation || child.referral_source;
   const fields = [
     ['Category', child.case_category || '—'],
     ['Middle Name', child.middle_name || '—'],
@@ -150,7 +150,9 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
     ['Place of Birth or Place Found', child.place_of_birth_or_found || '—'],
     ['Birth Status', child.birth_status || '—'],
     ['Legal Status', child.legal_status || '—'],
+    ['Educational Placement', child.education_level || '—'],
     ['Assigned Psychologist', child.psychologist_name || '—'],
+    ['Social Worker', child.social_worker_name || 'No social worker yet'],
     ...(asked('surrendered_by') || child.surrendered_by ? [['Previous Custodian', child.surrendered_by || '—']] : []),
     ['Address', location],
     ...(child.landmark ? [['Landmark', child.landmark]] : []),
@@ -218,7 +220,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
                 <div>
                   <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 8 }}>Recommendation</div>
                   {child.recommendation && <p style={{ fontSize: 13, color: 'var(--text-body)', margin: '0 0 10px', lineHeight: 1.55 }}>{child.recommendation}</p>}
-                  {[['Referral Source', child.referral_source], ['Educational Placement', child.education_level], ['Current Whereabouts', child.current_placement]]
+                  {[['Referral Source', child.referral_source]]
                     .filter(([, v]) => v).map(([k, v]) => (
                       <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, paddingBottom: 10, borderBottom: '1px solid var(--divider-row)', marginBottom: 10 }}>
                         <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>{k}</span>

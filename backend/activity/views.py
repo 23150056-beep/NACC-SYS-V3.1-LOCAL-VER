@@ -3,7 +3,8 @@ from rest_framework import mixins, viewsets, permissions
 from accounts.models import Role
 from activity.models import ActivityLog
 from activity.serializers import ActivityLogSerializer
-from accounts.scoping import role_of
+from accounts.scoping import role_of, scope_to_visible
+from children.models import Child
 
 
 class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
@@ -18,21 +19,22 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             # Psychologists only see notifications targeted at them.
             qs = qs.filter(recipient=self.request.user)
         elif role == Role.STAFF:
-            # Staff see the case-coordination stream (records + assessments),
-            # PLUS anything addressed to them personally.
+            # Staff see what happened to their OWN records, plus anything
+            # addressed to them personally.
             #
-            # "Guardian" stays in this list although the model is gone: these
-            # are log rows, and the ones written before July still say it.
-            # Dropping it here would hide history, not tidy it.
+            # This was every child-record event in the office, when staff
+            # worked one shared caseload. Since 24 Sep 2026 each social worker
+            # holds their own records (accounts/scoping.py), and a feed naming
+            # every child in the agency was the one screen still showing the
+            # others. The legacy "Guardian" and "Assessment" rows went with
+            # it: their ids are not children's, so there is no way to tell
+            # whose they were. Administrators still see all of them.
             #
-            # The recipient half is what stops this being a firehose. Every
-            # `recipient=` in the codebase used to point at a psychologist, so
-            # a staff member could not be told anything personally even in
-            # principle; case events are now addressed to their owner.
             # It stays inside the RECORD category, so widening the filter does
             # not quietly hand staff the security audit trail as well.
+            own = scope_to_visible(Child.objects.all(), self.request, path=None)
             qs = qs.filter(
-                Q(entity_type__in=["Child", "Guardian", "Assessment"])
+                Q(entity_type="Child", entity_id__in=own.values("pk"))
                 | Q(recipient=self.request.user),
                 category=ActivityLog.RECORD,
             )

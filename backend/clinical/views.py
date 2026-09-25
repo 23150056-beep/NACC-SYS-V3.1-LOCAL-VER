@@ -40,7 +40,7 @@ from clinical.serializers import (
 )
 from clinical.self_report_detection import detect_concerns
 from clinical.self_report_model_check import start_model_check
-from clinical.services import extract_text
+from clinical.services import ensure_text, extract_text
 
 logger = logging.getLogger(__name__)
 
@@ -430,6 +430,17 @@ class PsychologicalReportViewSet(_ChildScopedClinicalViewSet):
     def download(self, request, pk=None):
         return _serve_attachment(self.get_object())
 
+    @action(detail=True, methods=["get"])
+    def text(self, request, pk=None):
+        """The report's words, for reading it on screen without downloading
+        the file (24 Sep 2026). Same object, same scope as `download`: whoever
+        may fetch the file may read its text, nobody else. A Word 97-2003 file
+        cannot be read and says so; the screen then offers the download."""
+        obj = self.get_object()
+        body = ensure_text(obj)
+        return Response({"filename": obj.original_filename, "text": body,
+                         "readable": bool(body.strip())})
+
 
 class CaseReferralViewSet(viewsets.ModelViewSet):
     """The social worker's side of the split-view document area:
@@ -456,6 +467,14 @@ class CaseReferralViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         self._assert_can_write()
+        # A social worker files referrals for their own records only - the
+        # referral is what unlocks a child's calendar, and a record they
+        # cannot open is not theirs to unlock (accounts/scoping.py).
+        from children.models import Child
+        child = serializer.validated_data["child"]
+        if not scope_to_visible(Child.objects.filter(pk=child.pk), self.request,
+                                path=None).exists():
+            raise PermissionDenied("You can only file a referral for a child in your own records.")
         upload = serializer.validated_data["file"]
         extracted = extract_text(upload)
         obj = serializer.save(uploaded_by=self.request.user,
@@ -523,7 +542,10 @@ class OpinionnaireInviteViewSet(viewsets.ModelViewSet):
 
     def _assert_can_write(self, child):
         role = _role(self.request)
-        if role in (Role.ADMINISTRATOR, Role.STAFF):
+        if role == Role.ADMINISTRATOR:
+            return
+        # A social worker, for their own records (accounts/scoping.py).
+        if role == Role.STAFF and child.social_worker_id == self.request.user.id:
             return
         if role == Role.PSYCHOLOGIST and child.assigned_psychologist_id == self.request.user.id:
             return

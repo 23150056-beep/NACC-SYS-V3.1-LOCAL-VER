@@ -114,7 +114,7 @@ export const caseDate = (child) => {
 export const ALWAYS_REQUIRED = [
   'case_category', 'case_type',
   'first_name', 'last_name', 'birth_date', 'gender',
-  'place_of_birth_or_found', 'birth_status',
+  'place_of_birth_or_found', 'birth_status', 'education_level',
   'house_number', 'street', 'barangay', 'municipality', 'province',
 ];
 export const requiredFields = (caseType, typeOfAdoption) => {
@@ -131,6 +131,10 @@ export const LEGAL_STATUSES = [
   'With IVC',
   'Judicially Declared Abandoned',
 ];
+
+// Who referred the child (owner's list, 24 Sep 2026). Must match backend
+// Child.REFERRAL_SOURCE_CHOICES; a record still holding typed text keeps it.
+export const REFERRAL_SOURCES = ['RACCO', 'LGU', 'CCA', 'RCF'];
 
 // SIBRA and ICA Relative were retired on 24 Sep 2026. A record that holds one
 // keeps it, and the form still shows it on that record.

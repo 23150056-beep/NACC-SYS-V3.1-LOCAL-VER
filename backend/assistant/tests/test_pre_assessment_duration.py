@@ -199,9 +199,11 @@ class ChatbotDurationTest(SummaryCardTest):
         self.assertNotIn("still open", out["note"])
         self.assertNotIn("before its start date", out["note"])
 
-    def test_staff_and_administrators_see_the_agency(self):
-        for user in (self.admin, self.staff):
-            self.assertEqual(2, self.stats(user)["total"])
+    def test_administrators_see_the_agency_and_a_social_worker_their_own(self):
+        self.assertEqual(2, self.stats(self.admin)["total"])
+        self.assertEqual(0, self.stats(self.staff)["total"])
+        Child.objects.update(social_worker=self.staff)
+        self.assertEqual(2, self.stats(self.staff)["total"])
 
     def test_a_period_with_nothing_completed_has_no_figure(self):
         out = self.stats(self.admin, period="next_week")

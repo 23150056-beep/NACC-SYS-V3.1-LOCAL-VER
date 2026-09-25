@@ -77,6 +77,11 @@ export default function Children() {
   const isPsych = user?.role_name === 'Psychologist';
   const [children, setChildren] = useState([]);
   const [psychologists, setPsychologists] = useState([]);
+  // Social worker accounts, for the ISA's filter and the form's owner field.
+  // Each SW sees only the records they hold (accounts/scoping.py), so only
+  // the ISA ever chooses or moves one.
+  const [socialWorkers, setSocialWorkers] = useState([]);
+  const [swFilter, setSwFilter] = useState('');
   const [blocks, setBlocks] = useState([]);
   // childId -> [scheduled appointments in the next 7 days], sorted by start.
   const [apptsByChild, setApptsByChild] = useState({});
@@ -115,6 +120,10 @@ export default function Children() {
       // ends: the endpoint is IsAdminOrStaff, and the list is only rendered
       // behind canManage. Asking as a psychologist earned a guaranteed 403.
       canManage && (() => api.get('/psychologists/').then((r) => setPsychologists(r.data))),
+      isAdmin && (() => api.get('/users/').then((r) => setSocialWorkers((r.data || [])
+        .filter((u) => u.role_name === 'Staff' && u.status === 'active')
+        .map((u) => ({ id: u.id, name: u.fullname || u.email }))
+        .sort((a, b) => a.name.localeCompare(b.name))))),
       // Availability blocks power the assignment-time comparison panel — admin/staff only.
       canManage && (() => api.get('/availability/').then((r) => setBlocks(r.data))),
       // Upcoming (next 7 days) scheduled appointments → roster chips + drawer list.
@@ -133,7 +142,7 @@ export default function Children() {
         // still reports the failure once, with everything else.
         .catch((e) => { setApptsByChild({}); throw e; }),
     ], 'Could not load the records. Check your connection and refresh.');
-  }, [canManage, toast]);
+  }, [canManage, isAdmin, toast]);
   useEffect(() => { load(); }, [load]);
 
   const setQ = (v) => setSearchParams(v ? { q: v } : {}, { replace: true });
@@ -153,6 +162,8 @@ export default function Children() {
     .filter((c) => c.fullname.toLowerCase().includes(q.toLowerCase()) || c.ref.toLowerCase().includes(q.toLowerCase()))
     .filter((c) => status === 'all' || c.status === status)
     .filter((c) => !showArchiveColumns || !reasonFilter || c.termination?.reason_category === reasonFilter)
+    .filter((c) => !isAdmin || !swFilter
+      || (swFilter === 'none' ? !c.social_worker : String(c.social_worker) === swFilter))
     .sort((a, b) => sortMode === 'newest'
       ? b.id - a.id  // LIFO: newest record first
       : a.fullname.localeCompare(b.fullname, undefined, { sensitivity: 'base' }));
@@ -194,6 +205,9 @@ export default function Children() {
       c.age != null ? `${c.age}y` : null,
       !layout.recordsCategoryCol ? c.case_category : null,
       !layout.recordsPsychCol ? (c.psychologist_name || 'no psychologist') : null,
+      // The ISA sees every SW's records, so says whose each is; a SW's list
+      // is all theirs, and saying so on every row would be noise.
+      isAdmin ? (c.social_worker_name ? `SW ${c.social_worker_name}` : 'no social worker') : null,
     ].filter(Boolean).join(' · ');
   };
 
@@ -204,10 +218,12 @@ export default function Children() {
   const exportCsv = () => {
     const head = showArchiveColumns
       ? ['Case ref', 'Child', 'Age', 'Case type', 'Terminated on', 'Reason', 'Terminated by', 'Note']
-      : ['Case ref', 'Child', 'Age', 'Gender', 'Case type', 'Category', 'Case status', 'Psychologist', 'Pre-assessment'];
+      : ['Case ref', 'Child', 'Age', 'Gender', 'Case type', 'Category', 'Case status', 'Psychologist', 'Pre-assessment',
+        ...(isAdmin ? ['Social worker'] : [])];
     const body = visible.map((c) => (showArchiveColumns
       ? [c.ref, c.fullname, c.age, c.case_type, c.termination?.date, c.termination?.reason_category, c.termination?.terminated_by, c.termination?.note]
-      : [c.ref, c.fullname, c.age, c.gender, c.case_type, c.case_category, c.status === 'active' ? 'Active' : 'Archived', c.psychologist_name, c.pre_assessment_status]));
+      : [c.ref, c.fullname, c.age, c.gender, c.case_type, c.case_category, c.status === 'active' ? 'Active' : 'Archived', c.psychologist_name, c.pre_assessment_status,
+        ...(isAdmin ? [c.social_worker_name || ''] : [])]));
     const csv = [head, ...body].map((r) => r.map(csvCell).join(',')).join('\r\n');
     const url = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
@@ -273,7 +289,7 @@ export default function Children() {
     setFieldErrors(null);
     const payload = { ...form, expected_updated_at: form.updated_at };
     delete payload.age; delete payload.group; delete payload.ref;
-    delete payload.psychologist_name;
+    delete payload.psychologist_name; delete payload.social_worker_name;
     delete payload._origPsychologist; delete payload.termination; delete payload.photo;
     delete payload.updated_at; delete payload._conflict; delete payload._draft;
     // A file, not a column. It is uploaded separately once the child exists,
@@ -281,6 +297,10 @@ export default function Children() {
     const referralFile = form.referralFile || null;
     delete payload.referralFile;
     if (!payload.psychologist) payload.psychologist = null;
+    // Only when the form holds one: a record loaded before this field existed
+    // must not send "none" and quietly take the record off its social worker.
+    if (payload.social_worker === '') payload.social_worker = null;
+    if (payload.social_worker === undefined) delete payload.social_worker;
     if (!payload.birth_date) delete payload.birth_date;
     // Sent as null, not left out: the form clears the date a case no longer
     // asks for, and leaving it out of the request would keep it on the record.
@@ -415,6 +435,15 @@ export default function Children() {
             options={STATUS_FILTERS.map((f) => ({ ...f, dot: dotColor[f.key], count: counts[f.key] || 0 }))}
           />
           <span style={{ flex: 1 }} />
+          {isAdmin && (
+            <div style={{ width: 200 }}>
+              <Select size="sm" value={swFilter} onChange={(e) => setSwFilter(e.target.value)} aria-label="Filter by social worker">
+                <option value="">Every social worker</option>
+                <option value="none">No social worker yet</option>
+                {socialWorkers.map((w) => <option key={w.id} value={String(w.id)}>{w.name}</option>)}
+              </Select>
+            </div>
+          )}
           {showArchiveColumns && (
             <div style={{ width: 210 }}>
               <Select size="sm" value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)} aria-label="Filter by termination reason">
@@ -545,7 +574,7 @@ export default function Children() {
       </div>
 
       {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} canReopen={canManage} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => setReopening(sel)} onClose={() => setSel(null)} />}
-      {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} fieldErrors={fieldErrors} onSubmit={save} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
+      {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} socialWorkers={isAdmin ? socialWorkers : null} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} fieldErrors={fieldErrors} onSubmit={save} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
       {terminating && <TerminateModal child={terminating} onConfirm={terminate} onClose={() => setTerminating(null)} />}
       {reopening && (
         <ConfirmDialog

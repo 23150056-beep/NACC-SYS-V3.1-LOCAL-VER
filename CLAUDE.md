@@ -557,6 +557,27 @@ none of the real ones has been seen.
   to a model whose window is a few thousand tokens. 8,000 characters is
   arithmetic, not a measurement - `ai_eval --feature summary` measures it,
   fitted against whole, on the machine that runs the model.
+- **Reports are read on screen too** (24 Sep 2026, staff asked): a PDF in a
+  frame, and a Word file as its text, headings kept, through
+  `/report-files/<id>/text/`. Same object and queryset as the download, so it
+  shows nobody anything the Download button would not.
+- **A PDF frame must NOT be sandboxed** (`components/PdfFrame.jsx`, shared with
+  the consent-scan preview). Chrome refuses a PDF in a sandboxed frame outright
+  - its viewer is a plugin and no sandbox flag allows one - and shows a grey
+  broken-file icon. The consent preview did exactly that from 2 Sep to 24 Sep,
+  unnoticed, because headless checks never looked at the frame. The lock is
+  the blob's type instead: `utils/pdf.js` types every framed blob as
+  `application/pdf` itself, so it reaches the PDF viewer and never renders as
+  a page. Measured: an HTML file uploaded as `.pdf` shows "failed to load" and
+  runs nothing. Check a frame in headful Chromium (`xvfb-run`), not headless.
+- **Print on a child's record prints a psychological report**
+  (`components/PsychReportPrint.jsx`), not the screen: identifying
+  information, reason for referral, background, procedures, observations,
+  results, summary, recommendations, signature block. It is a STANDARD layout
+  until the agency's template is seen, filled only from what the reader could
+  already see; remarks and self-report flags are left out, and anything not
+  recorded prints as lines to complete by hand. index.css hides every
+  `<header>` when printing, which is why it uses none.
 - **Demo reports come in three layouts** (`clinical/demo_reports.py`), turned
   over within each psychologist's children - turned over across the list they
   fell in step with the seeder's round-robin and each psychologist saw one.
@@ -607,6 +628,11 @@ middle name, a date found, and every question that applies made mandatory.
   `surrendered_by` lost its three placeholder choices and widened to 150
   (children 0022). Still required where the case type asks it; old values
   such as "Relatives" are ordinary text now and were left alone.
+- **Educational Placement moved to Child's Profile and is required** there
+  ("Not in school" is an answer); **Referral Source is a pick** from RACCO /
+  LGU / CCA / RCF (children 0023), with typed text on older records kept by
+  the same change-only rule; **Current Whereabouts left the form and every
+  screen** (owner, 24 Sep 2026) - the column and what it holds are kept.
 - **A rename cannot ride along with a deploy the old release survives.** On
   24 Sep the demo API's first deploy of 0020 failed on Render's side after the
   web had gone live; had the migration run first, the old API - still serving
@@ -614,6 +640,71 @@ middle name, a date found, and every question that applies made mandatory.
   `middle_initial`. Replayed on PostgreSQL 16 it does exactly that. A manual
   redeploy of the same commit went through in two minutes. Prefer additive
   migrations (add, copy, drop later); widening a column, as 0022 does, is safe.
+
+## Each social worker's own records
+
+Owner's decision, 24 Sep 2026: **each SW keeps their own records**, not one
+shared list. `Child.social_worker` says whose a record is, and
+`accounts/scoping.py` - the one rule nearly every endpoint already used - now
+narrows Staff to it. Administrators (the ISA) see everything; psychologists
+are unchanged (their assigned children).
+
+- **A new record is its creator's** (`ChildViewSet.perform_create`), whatever
+  the request says. **Only the ISA moves one** - the record form's Social
+  Worker field, shown to the ISA only; a SW sending a different one gets 400,
+  sending the same one is fine because the edit form resends everything. It
+  must be a Staff account.
+- **Existing records were backfilled** (children 0025): the uploader of the
+  latest case referral if a SW, else whoever the activity log says created
+  it if a SW, else nobody - and nobody means only the ISA sees it until it is
+  assigned (Records' "No social worker yet" filter). An administrator's
+  upload is never read as ownership. On the hosted demo every seeded referral
+  was filed by one staff account, so that account received every demo child.
+- **The doors that skipped the rule, now closed**, each with a test in
+  `children/tests/test_own_records.py`: the child report page (checked
+  psychologists only), the duplicate check, case-referral upload, survey
+  invites, the two slot endpoints, booking/moving/cancelling a session, the
+  activity feed, and report-check findings naming a child. A child-related
+  query that is not built on `scope_to_visible` is the bug.
+- **The duplicate check still searches every record** - a second record for
+  the same child is the worse failure - but another SW's match says only that
+  it exists and who holds it ("held by R. Santos - ask the ISA"): no id, no
+  birth date, nothing from the record.
+- **Dashboard is their own; Agency Summary stays agency-wide** (the owner's
+  choice): the Summary holds counts with no names and mirrors the agency's own
+  report form. The assistant answers a SW about their own records.
+- **The calendar still shows every session**, other SWs' children as "C-0042 ·
+  Ref. E. Pascua" (`scheduling/visibility.py`): booking needs the
+  psychologist's real day. A SW acts only on their own children's sessions;
+  the server refuses the rest and the screen offers no buttons for them.
+- `seed_demo_data` has a second SW (Rosa Santos) and `demo_owners.py` shares
+  seeded children round-robin across the staff accounts present; the
+  referral is filed by the child's own SW. A caseload with no SW is one no
+  staff account can see.
+- **Archiving a SW does not move their records.** The ISA transfers them; the
+  Social Worker field lists an inactive holder as "(inactive)".
+
+## Names on the schedule
+
+Owner's decision, 24 Sep 2026, in `scheduling/visibility.py`: on the calendar
+a social worker sees the name of a child **in their own records** and every
+other appointment as **"C-0042 · Ref. E. Pascua"** - the record's SW.
+Administrators and psychologists see names. (It first followed whoever filed
+the child's latest referral; the backfill made the two agree on the day it
+switched to the record.)
+
+- **The case reference is not decoration.** The literal request was "only the
+  referring staff's name"; one worker's fifteen children would then be fifteen
+  identical chips, and cancelling one would be a guess.
+- **Applied where data leaves the server**, not in the screen: the
+  appointments API (`child_name` is null, `name_hidden` true), the assistant's
+  schedule answers, and the booking refusal that used to name the other child
+  in the slot. A name the screen hides is still in the response.
+- **Every screen that shows a schedule row goes through `scheduleName()`**
+  (`utils/child.js`): the calendar, the Today card, the left rail's "Needs you
+  today". The rail read `child_name` directly and showed staff a blank row for
+  every masked child - `child_name` is null there by design, so a screen that
+  reads it raw is the bug.
 
 ## Confirmations
 

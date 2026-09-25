@@ -10,6 +10,8 @@ import { PA_STATUSES, PA_STATUS_TONES } from '../config/caseData';
 import { loadAll } from '../utils/load';
 import { printBlankForm } from '../utils/printForm';
 import InstrumentFormDrawer, { EMPTY_INSTRUMENT } from '../components/InstrumentFormDrawer';
+import PdfFrame from '../components/PdfFrame';
+import { pdfObjectUrl } from '../utils/pdf';
 
 const STEPS = ['Child', 'Consent', 'Interview', 'Instruments', 'Problems', 'Complete'];
 
@@ -457,7 +459,23 @@ function ConsentStep({ child, consents, templates, onLinked, onRefresh, setError
   const openPreview = async (c) => {
     try {
       const res = await api.get(`/consents/${c.id}/download/`, { responseType: 'blob' });
-      setPreview({ url: URL.createObjectURL(res.data), type: res.data.type, title: c.scan_filename || c.signer_name });
+      // The server serves a scan as a PDF, an image, or - for a file from
+      // before uploads were restricted - an attachment. Only the first two are
+      // shown in the page; a PDF is re-typed here so the frame gets nothing
+      // else (components/PdfFrame.jsx).
+      const type = res.data.type || '';
+      const url = type.startsWith('application/pdf') ? pdfObjectUrl(res.data)
+        : type.startsWith('image/') ? URL.createObjectURL(res.data) : null;
+      if (!url) {
+        // Served as an attachment: save it, as the server intends.
+        const saved = URL.createObjectURL(res.data);
+        const a = document.createElement('a');
+        a.href = saved; a.download = c.scan_filename || 'consent-scan'; a.click();
+        URL.revokeObjectURL(saved);
+        toast.info('This file cannot be previewed here, so it was downloaded instead.');
+        return;
+      }
+      setPreview({ url, type, title: c.scan_filename || c.signer_name });
     } catch { toast.error('Could not load the file.'); }
   };
   const closePreview = () => { if (preview) URL.revokeObjectURL(preview.url); setPreview(null); };
@@ -555,22 +573,13 @@ function ConsentStep({ child, consents, templates, onLinked, onRefresh, setError
             <div style={{ flex: 1, minHeight: 0, background: 'var(--ink-50)' }}>
               {preview.type.startsWith('image/')
                 ? <img src={preview.url} alt="Consent scan" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-                : (
-                  /* sandbox with no allow-scripts. The src is a blob: URL,
-                     and a blob inherits THIS page's origin — so anything
-                     executable in it would run as the app and could read the
-                     tokens in localStorage. The server now refuses to serve a
-                     consent scan as anything but a PDF or an image, and this
-                     is the second lock: a PDF still previews without scripts.
-                     Do not add allow-scripts to make some viewer work. */
-                  <iframe
-                    title="Consent scan"
-                    src={preview.url}
-                    sandbox=""
-                    referrerPolicy="no-referrer"
-                    style={{ width: '100%', height: '100%', border: 'none' }}
-                  />
-                )}
+                /* The src is a blob: URL, and a blob inherits THIS page's
+                   origin - so anything executable in it would run as the app.
+                   The server refuses to serve a consent scan inline as
+                   anything but a PDF or an image, and openPreview is the
+                   second lock: only a blob it typed as a PDF reaches here.
+                   Why this is not a sandboxed frame: components/PdfFrame.jsx. */
+                : <PdfFrame url={preview.url} title="Consent scan" />}
             </div>
           </div>
         </div>

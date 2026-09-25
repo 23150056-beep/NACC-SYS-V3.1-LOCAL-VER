@@ -57,3 +57,29 @@ export const PURPOSE_LABEL = {
   session: 'Session',
   follow_up: 'Follow-up',
 };
+
+/* How a schedule names a child (owner's decision, 24 Sep 2026).
+ *
+ * The server leaves `child_name` out for a social worker unless the child is
+ * in their own records (backend scheduling/visibility.py), and sends the case
+ * reference and the social worker whose record it is instead. This turns
+ * either shape into the words on a chip: the name when there is one,
+ * otherwise "C-0042 · Ref. E. Pascua". The reference is what keeps one
+ * worker's many children from reading as a row of identical chips.
+ */
+export function shortName(full = '') {
+  const parts = String(full).trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return parts[0] || '';
+  const first = parts[0];
+  let i = parts.length - 1;
+  while (i > 1 && PARTICLE.test(parts[i - 1])) i -= 1;
+  return `${first[0]}. ${parts.slice(i).join(' ')}`;
+}
+
+export function scheduleName(a) {
+  if (a.child_name) return a.child_name;
+  const ref = a.case_ref || (a.child ? caseRef(a.child) : 'A child');
+  // referred_by_name is the social worker whose record the child is
+  // (scheduling/visibility.py); none yet means only the ISA holds it.
+  return a.referred_by_name ? `${ref} · Ref. ${shortName(a.referred_by_name)}` : `${ref} · no social worker yet`;
+}

@@ -82,7 +82,9 @@ def install_referrals(children, uploaded_by=None):
         body = build_text(child)
         referral = CaseReferral(
             child=child,
-            uploaded_by=uploaded_by,
+            # The child's own social worker files it, as a real one would;
+            # `uploaded_by` is for a child that has none.
+            uploaded_by=child.social_worker or uploaded_by,
             original_filename=filename,
             description=DEMO_DESCRIPTION,
             # The text is kept alongside the PDF so the document-summary path

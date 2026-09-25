@@ -168,8 +168,10 @@ def errors_for(psychologist, child, start, duration_minutes,
     clash = _clashes(Appointment.objects.filter(psychologist=psychologist),
                      start, end, exclude_id)
     if clash is not None:
+        # The other child is named by case reference only: whoever is booking
+        # may be a social worker who did not refer them (visibility.py).
         return {"start": f"{clash.psychologist.fullname or 'This psychologist'} is "
-                         f"already booked with {clash.child.fullname} from "
+                         f"already booked (case C-{clash.child_id:04d}) from "
                          f"{timezone.localtime(clash.start).strftime('%H:%M')}."}
 
     if child is not None:

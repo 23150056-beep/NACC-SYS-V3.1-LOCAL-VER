@@ -28,6 +28,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from accounts.models import Role
+from children import demo_owners
 from children.models import Child
 from clinical import demo_referrals, demo_reports
 from scheduling import demo_schedule
@@ -126,8 +127,11 @@ class Command(BaseCommand):
         # live on this database rather than the seeder's.
         blocks = demo_schedule.install_availability(psychologists)
         self.stdout.write(f"  availability: {blocks} block(s) added")
+        # Each social worker sees only their own records, so a child with none
+        # is one no staff account can see (children/demo_owners.py).
+        demo_owners.assign_social_workers(list(Child.objects.order_by("pk")))
         referrals = demo_referrals.install_referrals(
-            list(Child.objects.filter(status=Child.ACTIVE)),
+            list(Child.objects.filter(status=Child.ACTIVE).select_related("social_worker")),
             uploaded_by=User.objects.filter(role__role_name=Role.STAFF).first())
         self.stdout.write(f"  case referrals: {referrals} written")
         # After the reassignment above: a report's author is the psychologist

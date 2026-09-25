@@ -442,8 +442,9 @@ _CAN_ASK = {
         "follow-up, and which children have flagged something in their own "
         "words"),
     "Staff": (
-        "the schedule, the agency's numbers — children by case type, stage, "
-        "age, sex or psychologist, new intakes, closures and why, "
+        "your children's schedule, the numbers for your records — children "
+        "by case type, stage, age, sex or psychologist, new intakes, closures "
+        "and why, "
         "attendance and no-shows, the wait for a first session, and time in "
         "pre-assessment — "
         "children with a particular concern, a summary of one child, and who "
@@ -495,22 +496,29 @@ def _scope(request):
 
 
 def _scope_appointments(request, qs):
-    """(queryset, own) under the schedule's rule — the Dashboard's, the
-    Calendar's and the appointments API's: only a psychologist is narrowed to
-    their own calendar. One copy, used by the schedule answer and by the
-    attendance numbers, so the two cannot scope a session differently."""
+    """(queryset, own) under the Dashboard's schedule rule: a psychologist
+    sees their own calendar, a social worker their own children's sessions
+    (24 Sep 2026 - each SW keeps their own records), an administrator the
+    agency's. One copy, used by the schedule answer and by the attendance
+    numbers, so the two cannot scope a session differently."""
     from accounts.models import Role
     from accounts.scoping import role_of
-    own = role_of(request) == Role.PSYCHOLOGIST
-    return (qs.filter(psychologist=request.user) if own else qs), own
+    role = role_of(request)
+    if role == Role.PSYCHOLOGIST:
+        return qs.filter(psychologist=request.user), True
+    if role == Role.STAFF:
+        # A social worker's own children, as on their Dashboard (24 Sep 2026).
+        return qs.filter(child__social_worker=request.user), True
+    return qs, False
 
 
 def _resolve_appointments(request, args):
     """The schedule, scoped the way the Dashboard scopes it.
 
-    A psychologist sees their own sessions. Staff and administrators hold none,
-    so they see the agency's — which is what the Dashboard's schedule strip
-    already shows them, and what the panel's own suggested questions ask for:
+    A psychologist sees their own sessions, and a social worker the sessions
+    of their own children. Administrators hold none, so they see the agency's
+    — which is what the Dashboard's schedule strip already shows them, and
+    what the panel's own suggested questions ask for:
     "What was scheduled last week?" is an administrator's example. Filtering
     every role by `psychologist=request.user` answered that example "Nothing
     recorded" for two roles out of three, while the screen behind the panel
@@ -537,12 +545,15 @@ def _resolve_appointments(request, args):
 
     appts, own = _scope_appointments(request, Appointment.objects.filter(
         status__in=statuses, start__date__gte=start, start__date__lt=end))
-    appts = appts.select_related("child", "psychologist").order_by("start")
+    from scheduling import visibility
+    appts = appts.select_related("child", "child__social_worker", "psychologist").order_by("start")
 
     total = appts.count()
     return {"kind": "appointments", "when": period,
             "scope": "own" if own else "agency", "total": total, "items": [
-                {"child": a.child.fullname,
+                # The calendar's rule (scheduling/visibility.py). A social
+                # worker is only answered about their own children here.
+                {"child": visibility.label(request.user, a.child),
                  "psychologist": display_name(a.psychologist),
                  "when": timezone.localtime(a.start).strftime("%a %d %b, %H:%M"),
                  "purpose": a.get_purpose_display(),

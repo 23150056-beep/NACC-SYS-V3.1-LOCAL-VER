@@ -88,6 +88,11 @@ class TheFormAndTheServerAgreeTest(SimpleTestCase):
     def test_what_is_always_required(self):
         self.assertEqual(intake.ALWAYS_REQUIRED, _js_array(self.js, "ALWAYS_REQUIRED"))
 
+    def test_the_referral_sources(self):
+        self.assertEqual(["RACCO", "LGU", "CCA", "RCF"], _js_array(self.js, "REFERRAL_SOURCES"))
+        self.assertEqual(_js_array(self.js, "REFERRAL_SOURCES"),
+                         [c for c, _ in Child.REFERRAL_SOURCE_CHOICES])
+
     def test_which_case_types_record_a_placement_and_which_an_admission(self):
         placed = re.search(r"if \(\[(.*?)\]\.includes\(caseType\)\) return PLACEMENT", self.js)
         admitted = re.search(r"if \(\[(.*?)\]\.includes\(caseType\)\) return ADMISSION", self.js)
@@ -138,7 +143,8 @@ class MiddleNameTest(TestCase):
 
 class _Staff(APITestCase):
     def setUp(self):
-        self.client.force_authenticate(make_user("intake@t.ph", Role.STAFF))
+        self.staff = make_user("intake@t.ph", Role.STAFF)
+        self.client.force_authenticate(self.staff)
 
     def post(self, **over):
         return self.client.post("/api/children/", complete(**over), format="json")
@@ -213,6 +219,34 @@ class CreatingARecordTest(_Staff):
         r = self.post(case_category="Orphaned", birth_status="Unknown")
         self.assertEqual(201, r.status_code, r.data)
 
+    def test_educational_placement_is_asked_and_referral_source_is_a_pick(self):
+        r = self.post(education_level="")
+        self.assertEqual(400, r.status_code)
+        self.assertIn("education_level", r.data)
+        r = self.post(education_level="Not in school", referral_source="LGU")
+        self.assertEqual(201, r.status_code, r.data)
+        r = self.post(last_name="Tan", referral_source="MSWDO San Fernando")
+        self.assertEqual(400, r.status_code, "typed text is no longer a new pick")
+        self.assertIn("referral_source", r.data)
+        r = self.post(last_name="Uy", referral_source="")
+        self.assertEqual(201, r.status_code, "Referral Source stays optional")
+
+    def test_a_typed_referral_source_on_record_survives_an_edit(self):
+        old = Child.objects.create(social_worker=self.staff, 
+            first_name="Old", last_name="Referral", birth_date=date(2015, 5, 5),
+            gender="Male", case_type="Residential Care", case_category="Dependent",
+            referral_source="MSWDO San Fernando", current_placement="Bahay Kalinga")
+        r = self.client.put(f"/api/children/{old.id}/", {
+            "birth_date": "2015-05-05", "gender": "Male", "case_type": "Residential Care",
+            "case_category": "Dependent", "referral_source": "MSWDO San Fernando",
+            "medical_notes": "Checked.",
+        }, format="json")
+        self.assertEqual(200, r.status_code, r.data)
+        old.refresh_from_db()
+        # Current Whereabouts left the form, and what it held is kept.
+        self.assertEqual(("MSWDO San Fernando", "Bahay Kalinga"),
+                         (old.referral_source, old.current_placement))
+
     def test_the_previous_custodian_is_typed_in(self):
         """Free text since 24 Sep 2026 - staff write who actually had the
         child. Still required where the case asks it, and a blank is a blank
@@ -268,7 +302,7 @@ class EditingARecordTest(_Staff):
 
     def test_a_record_from_before_the_rule_can_still_be_edited(self):
         """The blanks it already had are not held against an unrelated edit."""
-        old = Child.objects.create(
+        old = Child.objects.create(social_worker=self.staff, 
             first_name="Old", last_name="Record", birth_date=date(2015, 5, 5),
             gender="Male", case_type="Foster Care", case_category="Dependent")
         r = self.client.put(f"/api/children/{old.id}/", {
@@ -279,7 +313,7 @@ class EditingARecordTest(_Staff):
         self.assertEqual(200, r.status_code, r.data)
 
     def test_a_retired_value_on_record_survives_an_unrelated_edit(self):
-        old = Child.objects.create(
+        old = Child.objects.create(social_worker=self.staff, 
             first_name="Old", last_name="Adoption", birth_date=date(2015, 5, 5),
             gender="Male", case_type="Adoption", case_category="Surrendered",
             birth_status="Child", type_of_adoption="SIBRA")

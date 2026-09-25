@@ -31,9 +31,9 @@ class HasCaseReferralTest(APITestCase):
         self.psy = User.objects.create_user(
             email="p@racco1.gov.ph", username="p", password="pass1234",
             role=Role.objects.create(role_name=Role.PSYCHOLOGIST))
-        self.with_ref = Child.objects.create(
+        self.with_ref = Child.objects.create(social_worker=self.staff, 
             fullname="Has Referral", assigned_psychologist=self.psy)
-        self.without = Child.objects.create(
+        self.without = Child.objects.create(social_worker=self.staff, 
             fullname="No Referral", assigned_psychologist=self.psy)
         CaseReferral.objects.create(
             child=self.with_ref, uploaded_by=self.staff,
@@ -81,7 +81,7 @@ class HasCaseReferralTest(APITestCase):
 
         small = count()
         for i in range(12):
-            child = Child.objects.create(fullname=f"Bulk {i}",
+            child = Child.objects.create(social_worker=self.staff, fullname=f"Bulk {i}",
                                          assigned_psychologist=self.psy)
             if i % 2 == 0:
                 CaseReferral.objects.create(

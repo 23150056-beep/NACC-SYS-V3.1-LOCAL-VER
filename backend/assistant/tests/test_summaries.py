@@ -25,7 +25,7 @@ class SummaryTestBase(APITestCase):
             email="q@racco1.gov.ph", username="q", password="pass1234", role=psy_role)
         self.staff = User.objects.create_user(
             email="s@racco1.gov.ph", username="s", password="pass1234", role=staff_role)
-        self.child = Child.objects.create(fullname="Maria", assigned_psychologist=self.psy)
+        self.child = Child.objects.create(social_worker=self.staff, fullname="Maria", assigned_psychologist=self.psy)
         self.report = PsychologicalReport.objects.create(
             child=self.child, author=self.psy, extracted_text="Full report text.")
         self.referral = CaseReferral.objects.create(

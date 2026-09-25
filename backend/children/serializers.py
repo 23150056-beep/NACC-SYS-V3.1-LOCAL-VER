@@ -19,6 +19,13 @@ class ChildSerializer(serializers.ModelSerializer):
     psychologist_name = serializers.CharField(
         source="assigned_psychologist.fullname", read_only=True, default=None,
     )
+    # Whose record this is (accounts/scoping.py). Staff never choose it: a new
+    # record is theirs (ChildViewSet.perform_create) and only an administrator
+    # moves one. Must be a staff account, or empty.
+    social_worker = serializers.PrimaryKeyRelatedField(
+        queryset=User.objects.all(), required=False, allow_null=True,
+    )
+    social_worker_name = serializers.SerializerMethodField()
 
     # Declared explicitly (not auto-generated from the model's `choices=`) so
     # the automatic ChoiceField membership check does NOT run before our own
@@ -32,6 +39,8 @@ class ChildSerializer(serializers.ModelSerializer):
     # status "Child", adoption types "SIBRA" and "ICA Relative".
     birth_status = serializers.CharField(required=False, allow_blank=True)
     type_of_adoption = serializers.CharField(required=False, allow_blank=True)
+    # And for Referral Source, which was free text until it became a list.
+    referral_source = serializers.CharField(required=False, allow_blank=True, max_length=150)
 
     termination = serializers.SerializerMethodField()
     terminations = serializers.SerializerMethodField()
@@ -53,7 +62,7 @@ class ChildSerializer(serializers.ModelSerializer):
             "date_of_admission", "date_of_placement_to_custodian", "type_of_adoption",
             "photo", "referral_source", "referral_reason",
             "education_level", "current_placement", "medical_notes", "recommendation",
-            "psychologist", "psychologist_name",
+            "psychologist", "psychologist_name", "social_worker", "social_worker_name",
             "termination", "terminations",
             "pre_assessment_status", "instruments_used", "has_case_referral",
             "updated_at",
@@ -61,6 +70,27 @@ class ChildSerializer(serializers.ModelSerializer):
         # The tracker moves only through the advance-status / terminate actions.
         # fullname is derived (Child.save() composes it from the name parts).
         read_only_fields = ["case_status", "updated_at", "fullname"]
+
+    def get_social_worker_name(self, obj):
+        return display_name(obj.social_worker) or None
+
+    def validate_social_worker(self, value):
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        role = getattr(getattr(user, "role", None), "role_name", None)
+        unchanged = self.instance is not None and value == self.instance.social_worker
+        if unchanged:
+            return value
+        if role != Role.ADMINISTRATOR:
+            # A staff member's own new record is set in perform_create, which
+            # overrides whatever arrives here; anything else is a transfer.
+            if self.instance is None and role == Role.STAFF:
+                return value
+            raise serializers.ValidationError(
+                "Only an administrator can move a record to another social worker.")
+        if value is not None and getattr(value.role, "role_name", None) != Role.STAFF:
+            raise serializers.ValidationError("Choose a social worker (SW) account.")
+        return value
 
     def get_pre_assessment_status(self, obj):
         # 5-state pipeline status; see Child.pre_assessment_status.
@@ -167,6 +197,10 @@ class ChildSerializer(serializers.ModelSerializer):
     def validate_type_of_adoption(self, value):
         return self._current_or_unchanged(
             "type_of_adoption", value, Child.TYPE_OF_ADOPTION_CHOICES)
+
+    def validate_referral_source(self, value):
+        return self._current_or_unchanged(
+            "referral_source", value, Child.REFERRAL_SOURCE_CHOICES)
 
     def validate_case_category(self, value):
         # Task 13 lock ("edits stay partial-friendly") applies here too: the

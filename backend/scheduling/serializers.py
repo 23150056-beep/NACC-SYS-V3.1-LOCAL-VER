@@ -1,6 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
 
+from scheduling import visibility
 from scheduling.models import AvailabilityBlock, Appointment, Unavailability
 
 
@@ -72,7 +73,13 @@ class AvailabilityBlockSerializer(serializers.ModelSerializer):
 
 
 class AppointmentSerializer(serializers.ModelSerializer):
-    child_name = serializers.CharField(source="child.fullname", read_only=True)
+    # Whether the child's name is shown depends on who is looking - see
+    # scheduling/visibility.py. Without a request there is nobody to show it
+    # to, so it is left out.
+    child_name = serializers.SerializerMethodField()
+    case_ref = serializers.SerializerMethodField()
+    referred_by_name = serializers.SerializerMethodField()
+    name_hidden = serializers.SerializerMethodField()
     psychologist_name = serializers.CharField(
         source="psychologist.fullname", read_only=True, default=None)
     booked_by_name = serializers.CharField(
@@ -80,11 +87,42 @@ class AppointmentSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Appointment
-        fields = ["id", "child", "child_name", "psychologist", "psychologist_name",
+        fields = ["id", "child", "child_name", "case_ref", "referred_by_name", "name_hidden",
+                  "psychologist", "psychologist_name",
                   "start", "duration_minutes", "purpose", "status",
                   "pre_assessment", "notes", "booked_by", "booked_by_name", "created_at"]
         read_only_fields = ["booked_by", "status"]
         extra_kwargs = {"psychologist": {"required": False}}
+
+    def _who(self, obj):
+        # Computed once per row and shared by the four fields below.
+        cache = self.__dict__.setdefault("_who_cache", {})
+        if obj.pk not in cache:
+            request = self.context.get("request")
+            cache[obj.pk] = visibility.who(getattr(request, "user", None), obj.child)
+        return cache[obj.pk]
+
+    def to_representation(self, obj):
+        data = super().to_representation(obj)
+        if self._who(obj)["name_hidden"]:
+            # Free text typed by whoever booked it - "bring Ana's school
+            # records" - is the child's name by another route. Another social
+            # worker's session carries none of it.
+            data["notes"] = ""
+            data["pre_assessment"] = None
+        return data
+
+    def get_child_name(self, obj):
+        return self._who(obj)["child_name"]
+
+    def get_case_ref(self, obj):
+        return self._who(obj)["case_ref"]
+
+    def get_referred_by_name(self, obj):
+        return self._who(obj)["referred_by_name"]
+
+    def get_name_hidden(self, obj):
+        return self._who(obj)["name_hidden"]
 
     def validate_start(self, value):
         # Checked when MOVING one too, not only when creating it - otherwise a
