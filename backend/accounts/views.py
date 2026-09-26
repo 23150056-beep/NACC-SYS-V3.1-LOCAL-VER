@@ -32,7 +32,7 @@ from activity.serializers import ActivityLogSerializer
 from activity.services import log_activity
 from children.notifications import send_temporary_password_notification
 from accounts.sms_notifications import (
-    notify_temporary_password, start_phone_verification,
+    TooManyCodes, notify_temporary_password, start_phone_verification,
     confirm_phone_verification)
 from accounts.sms import check_gateway, send_sms
 from accounts.phone import (normalise_ph_mobile, InvalidPhilippineMobile,
@@ -367,7 +367,11 @@ class MyPhoneView(generics.GenericAPIView):
             return Response({"phone": "Enter your mobile number."},
                             status=status.HTTP_400_BAD_REQUEST)
 
-        result = start_phone_verification(request.user, number)
+        try:
+            result = start_phone_verification(request.user, number)
+        except TooManyCodes as exc:
+            return Response({"detail": str(exc)},
+                            status=status.HTTP_429_TOO_MANY_REQUESTS)
         if not result.ok:
             # The gateway's own words. A code that never arrives with no
             # explanation is how the mail integration cost a day.
@@ -437,11 +441,15 @@ class SmsConfigTestView(generics.GenericAPIView):
 
     def post(self, request):
         user = request.user
-        if not user.phone:
+        # Verified, not merely present. Migration 0008 copied numbers out of
+        # contact_details unverified, so an administrator can have a number
+        # nobody has proved - and a typo there is a stranger's handset.
+        if not user.phone or not user.phone_verified:
             return Response(
                 {"ok": False,
-                 "detail": "Add your own mobile number first — this sends the "
-                           "test to you, not to anyone else."},
+                 "detail": "Add and verify your own mobile number in My "
+                           "Profile first — this sends the test to you, not "
+                           "to anyone else."},
                 status=status.HTTP_400_BAD_REQUEST)
         # A different reference each time. The gateway's own guidance is that
         # repeatedly sending nearly identical text to one number is classified

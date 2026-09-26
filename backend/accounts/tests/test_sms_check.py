@@ -130,10 +130,10 @@ class TheTestMessageIsNotIdenticalEveryTimeTest(APITestCase):
         self.assertNotEqual(first, second)
 
     def test_it_still_fits_one_segment(self):
-        from accounts.sms import SINGLE_SEGMENT
+        from accounts.sms import fits_one_segment
         with patch("accounts.views.send_sms") as sender:
             sender.return_value.ok = True
             sender.return_value.detail = "ok"
             self.client.post(URL)
             text = sender.call_args[0][1]
-        self.assertLessEqual(len(text), SINGLE_SEGMENT)
+        self.assertTrue(fits_one_segment(text), text)

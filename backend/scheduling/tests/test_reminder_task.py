@@ -7,16 +7,22 @@ calling it twice cannot text anybody twice, which matters because the free
 schedulers this is designed for retry.
 """
 from datetime import datetime, time, timedelta
+from io import StringIO
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.core.management import call_command
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
+from accounts import sms_notifications
 from accounts.models import Role
+from accounts.sms import SmsResult
 from children.models import Child
-from scheduling.models import Appointment
+from scheduling.models import Appointment, SessionReminder
+from scheduling.reminders import send_session_reminders
 
 User = get_user_model()
 URL = "/api/tasks/session-reminders/"
@@ -55,15 +61,14 @@ class TheGuardTest(ReminderTaskBase):
     def test_a_wrong_token_is_refused_and_sends_nothing(self):
         resp = self.client.post(URL, HTTP_X_TASK_TOKEN="not-the-token")
         self.assertEqual(resp.status_code, 403)
-        self.assertIsNone(cache.get(f"session-reminder:{self.psy.pk}:"
-                                    f"{(timezone.localdate() + timedelta(days=1))}"))
+        self.assertFalse(SessionReminder.objects.exists())
 
     @override_settings(SESSION_REMINDER_TOKEN=TOKEN)
     def test_the_right_token_works_either_way_it_is_sent(self):
         for header in ({"HTTP_X_TASK_TOKEN": TOKEN},
                        {"HTTP_AUTHORIZATION": f"Bearer {TOKEN}"}):
             with self.subTest(header=list(header)[0]):
-                cache.clear()
+                SessionReminder.objects.all().delete()
                 resp = self.client.post(URL, **header)
                 self.assertEqual(resp.status_code, 200, resp.data)
                 self.assertEqual(resp.data["sent"], 1)
@@ -109,3 +114,48 @@ class WhatItDoesTest(ReminderTaskBase):
         self.assertNotIn(self.child.fullname, blob)
         self.assertNotIn(self.psy.email, blob)
         self.assertNotIn(self.psy.phone, blob)
+
+
+class TheRecordOfWhoWasToldTest(ReminderTaskBase):
+    """`manage.py send_session_reminders` is a fresh process every run, and
+    the default cache lives in one process's memory. A record kept there was
+    empty on every run, so "safe to run twice" was not true for the one
+    command the local copy actually uses."""
+
+    def test_it_outlives_the_cache(self):
+        first = send_session_reminders()
+        cache.clear()           # what a new process starts with
+        second = send_session_reminders()
+        self.assertEqual(first["sent"], 1)
+        self.assertEqual(second["sent"], 0)
+        self.assertEqual(second["skipped"], 1)
+
+    def test_a_refused_send_is_not_recorded_and_is_retried(self):
+        refused = SmsResult(False, "The gateway did not queue the message")
+        with patch.object(sms_notifications, "send_sms", return_value=refused):
+            first = send_session_reminders()
+        self.assertEqual((first["sent"], first["failed"]), (0, 1))
+        self.assertFalse(SessionReminder.objects.exists())
+        self.assertIn("did not queue", " ".join(first["lines"]))
+
+        second = send_session_reminders()
+        self.assertEqual(second["sent"], 1)
+        self.assertEqual(SessionReminder.objects.get().session_count, 2)
+
+    def test_the_command_has_sent_before_it_exits(self):
+        """It used to queue on a daemon thread, which dies with the process -
+        the command printed "queued" and exited before anything was sent."""
+        out = StringIO()
+        with patch.object(sms_notifications, "send_sms",
+                          return_value=SmsResult(True, "ok")) as sender:
+            call_command("send_session_reminders", stdout=out)
+            sender.assert_called_once()
+        self.assertIn("1 reminder(s) sent", out.getvalue())
+
+    @override_settings(SESSION_REMINDER_TOKEN=TOKEN)
+    def test_the_endpoint_counts_failures_without_naming_anyone(self):
+        refused = SmsResult(False, "refused")
+        with patch.object(sms_notifications, "send_sms", return_value=refused):
+            resp = self.client.post(URL, HTTP_X_TASK_TOKEN=TOKEN)
+        self.assertEqual(resp.data["failed"], 1)
+        self.assertNotIn(self.psy.email, str(resp.data))

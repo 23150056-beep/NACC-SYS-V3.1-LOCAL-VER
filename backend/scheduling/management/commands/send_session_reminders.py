@@ -31,7 +31,13 @@ class Command(BaseCommand):
 
         if report["dry_run"]:
             self.stdout.write(self.style.WARNING("Dry run — nothing was sent."))
+            return
+        summary = (f"{report['sent']} reminder(s) sent, {report['skipped']} "
+                   f"skipped, {report['failed']} failed, for {report['date']}.")
+        if report["failed"]:
+            # Not recorded as told, so running this again retries them.
+            self.stdout.write(self.style.ERROR(
+                summary + " Run it again once the gateway is fixed; only the "
+                          "failed ones are retried."))
         else:
-            self.stdout.write(self.style.SUCCESS(
-                f"{report['sent']} reminder(s) queued, {report['skipped']} "
-                f"skipped, for {report['date']}."))
+            self.stdout.write(self.style.SUCCESS(summary))

@@ -14,8 +14,8 @@ does:
 * **Constant-time comparison**, so the token cannot be recovered a byte at a
   time from response timings.
 * **What it can do is bounded.** Triggering it repeatedly cannot send repeated
-  messages — the reminder records who it has told, so the second call today is
-  a no-op. The worst a leaked token buys is knowing whether anyone has sessions
+  messages — the reminder records who it has told (a SessionReminder row), so
+  the second call today is a no-op. The worst a leaked token buys is knowing whether anyone has sessions
   tomorrow, which is why the response counts people rather than naming them.
 """
 import hmac
@@ -60,12 +60,14 @@ class SessionReminderTaskView(generics.GenericAPIView):
 
         dry_run = str(request.query_params.get("dry_run", "")).lower() in ("1", "true", "yes")
         report = send_session_reminders(today=False, dry_run=dry_run)
-        logger.info("Session reminders for %s: %s sent, %s skipped",
-                    report["date"], report["sent"], report["skipped"])
+        logger.info("Session reminders for %s: %s sent, %s skipped, %s failed",
+                    report["date"], report["sent"], report["skipped"],
+                    report["failed"])
         # Counts, not names. A scheduler's logs are not a place for a caseload.
         return Response({
             "date": report["date"],
             "sent": report["sent"],
             "skipped": report["skipped"],
+            "failed": report["failed"],
             "dry_run": report["dry_run"],
         }, status=status.HTTP_200_OK)

@@ -718,6 +718,35 @@ switched to the record.)
 - The record form also asks before closing with unsaved input; a new record's
   draft is flushed and kept, an edit's changes are discarded only on "Discard".
 
+## Text messages (Semaphore)
+
+Audited 26 Sep 2026 when the owner chose Semaphore. `SMS_PROVIDER` picks the
+gateway in `accounts/sms.py`; unset writes every message, verification codes
+included, to the API log. Local setup: docs/LOCAL-SETUP.md "Text messages".
+
+- **Only a `message_id` counts as sent.** Semaphore puts refusals in 200
+  bodies in several shapes (`{"field": ["reason"]}`, a list of sentences,
+  `[]`), and the old reader called every one of them sent.
+  `test_sms_semaphore.py` pins each; it is the only gateway that had none.
+- **Semaphore silently discards a message that begins with TEST** - accepted,
+  never sent, nothing said. The sender refuses one, and a test reads every
+  message the system sends for it.
+- **One segment means GSM-7.** One character outside it (an em dash, a curly
+  quote) makes a segment 70 characters, not 160, and the text costs three
+  credits. The trim used to append "…", which did exactly that. Measure with
+  `fits_one_segment()`, never `len()`.
+- **Verification codes go by Semaphore's OTP route**: `send_sms(...,
+  otp_code=)` with `{otp}` in the text, 2 credits, never trimmed, once a
+  minute and five an hour per account. Skipped while `SMS_ENDPOINT` is set.
+- **The session reminder sends synchronously and records who was told in
+  `SessionReminder`**, never the cache. The cache is per-process LocMem: the
+  management command is a fresh process each run, so a cache record was
+  always empty, and a `queue_sms` daemon thread dies when the command exits.
+  `queue_sms` is for request threads in a long-lived server only.
+- **Verification codes still live in that LocMem cache.** Fine under
+  `runserver`; under gunicorn with more than one worker, a code stored by one
+  worker is not found by the next. Not changed - hosted is out of scope.
+
 ## Role names on screen
 
 Administrator shows as **"ISA (Administrator)"** and Staff as **"SW (Staff)"**

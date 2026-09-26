@@ -797,7 +797,7 @@ apart.
 
 | | `semaphore` | `philsms` | `textbee` |
 |---|---|---|---|
-| Per message | ~₱0.50 | from ~₱0.35 | free (your own SIM) |
+| Per message | ~₱0.50; a verification code 2 credits (OTP route) | from ~₱0.35 | free (your own SIM) |
 | Minimum outlay | a top-up | a top-up — check the dashboard, not the marketing page | none |
 | Account needed | business | business | **personal** |
 | Sender shown | `NACC` once approved | `NACC` once approved | **the handset's own number** |
@@ -856,11 +856,13 @@ for the same reason the mail has one.
 1. **Settings** → **Text messages** → **Check the key**. This asks the gateway
    who you are and sends nothing, so a mistyped key costs no credit and needs
    no verified handset. On `textbee` it reports how many phones are paired,
-   which is that gateway's real failure mode.
+   which is that gateway's real failure mode. On `semaphore` it fails when the
+   account is inactive or has no credit, and its account route allows only
+   one or two calls a minute.
 2. Sign in as an administrator → **My Profile** → add and verify your own
    mobile number. You will receive a six-digit code.
 3. **Settings** → **Text messages** → **Send a test text**.
-3. The screen prints what the gateway actually replied — a bad key, an
+4. The screen prints what the gateway actually replied — a bad key, an
    unapproved sender name and an empty balance all say so in their own words.
 
 If no code arrives at step 1, the gateway is refusing and step 2 will say why.
@@ -877,6 +879,9 @@ If no code arrives at step 1, the gateway is refusing and step 2 will say why.
 - **The recipient never verified their number.** An unverified number is
   skipped silently by design — a number somebody typed may be a typo, and a
   typo is a stranger's handset. Check **Users** for who has a verified number.
+- **A message beginning with the word TEST** is discarded by Semaphore
+  without a word. The sender refuses one before it leaves, and a test reads
+  every message the system sends for it.
 - **A link in the message.** Since 2023 the NTC has required carriers to block
   every SMS containing a clickable URL, in real time — so a message with one
   is dropped by the network after the gateway has accepted and billed it,
@@ -894,10 +899,14 @@ manage.py send_session_reminders             # tomorrow
 manage.py send_session_reminders --dry-run   # print, send nothing
 ```
 
-Run it once a day. It is safe to run twice — it records who it has already
-told and will not double-text. On Render's free plan there is no cron, so this
-is either a paid add-on or somebody running it; `--dry-run` first is a good
-habit either way.
+Run it once a day. It is safe to run twice — who was told is a row in the
+database (`tbl_session_reminder`), claimed before the text goes, so neither a
+second run nor two overlapping ones double-text. A text the gateway refuses is
+not recorded, and the next run retries it. Each message is sent before the
+command returns, so "sent" in its report means the gateway accepted it.
+
+On Render's free plan there is no cron, so this is either a paid add-on or
+somebody running it; `--dry-run` first is a good habit either way.
 
 ## 9c. Running the daily reminder without paying for cron
 
