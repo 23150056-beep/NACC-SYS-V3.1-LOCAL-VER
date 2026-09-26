@@ -1,3 +1,5 @@
+from datetime import timedelta
+
 from django.conf import settings
 from django.db import models
 
@@ -127,16 +129,25 @@ class SessionReminder(models.Model):
     default in-memory one - per process - so `manage.py
     send_session_reminders`, a fresh process every run, always found it empty
     and would have texted everybody again; and two overlapping runs could both
-    pass a check-then-set. A row is claimed before sending and deleted if the
-    gateway refuses, so a failed text is retried rather than remembered.
+    pass a check-then-set.
+
+    A row is claimed before sending and stamped `sent_at` once the gateway
+    accepts; a refusal deletes it, so the next run retries. A claim never
+    stamped - the process died mid-send - is taken over by a later run once
+    it is older than CLAIM_LEASE, rather than read as "already told" forever.
     """
+
+    # Comfortably longer than a send can take (a twenty-second timeout), so
+    # a claim this old belongs to a run that is gone, not one still sending.
+    CLAIM_LEASE = timedelta(minutes=10)
 
     psychologist = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
         related_name="session_reminders")
     day = models.DateField()
     session_count = models.PositiveSmallIntegerField()
-    sent_at = models.DateTimeField(auto_now_add=True)
+    claimed_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "tbl_session_reminder"

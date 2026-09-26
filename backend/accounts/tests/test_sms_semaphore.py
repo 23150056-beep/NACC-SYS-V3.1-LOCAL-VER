@@ -257,6 +257,11 @@ class SemaphoreCheckTest(SimpleTestCase):
         result, _ = self._check(json.dumps({**self.ACCOUNT, "status": "Inactive"}))
         self.assertFalse(result.ok)
 
+    def test_an_answer_that_cannot_be_read_confirms_nothing(self):
+        # A maintenance page or a proxy's error page, served as a 200.
+        result, _ = self._check("<html>maintenance</html>")
+        self.assertFalse(result.ok)
+
     def test_a_refused_key_in_a_200_is_a_failure(self):
         result, _ = self._check(json.dumps(
             {"apikey": ["The selected apikey is invalid."]}))

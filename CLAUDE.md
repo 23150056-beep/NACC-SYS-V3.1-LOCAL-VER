@@ -738,14 +738,17 @@ included, to the API log. Local setup: docs/LOCAL-SETUP.md "Text messages".
 - **Verification codes go by Semaphore's OTP route**: `send_sms(...,
   otp_code=)` with `{otp}` in the text, 2 credits, never trimmed, once a
   minute and five an hour per account. Skipped while `SMS_ENDPOINT` is set.
-- **The session reminder sends synchronously and records who was told in
-  `SessionReminder`**, never the cache. The cache is per-process LocMem: the
+- **Nothing SMS keeps state in the cache.** The cache is per-process LocMem.
+  The session reminder records who was told in `SessionReminder`: the
   management command is a fresh process each run, so a cache record was
-  always empty, and a `queue_sms` daemon thread dies when the command exits.
-  `queue_sms` is for request threads in a long-lived server only.
-- **Verification codes still live in that LocMem cache.** Fine under
-  `runserver`; under gunicorn with more than one worker, a code stored by one
-  worker is not found by the next. Not changed - hosted is out of scope.
+  always empty, and a `queue_sms` daemon thread dies when the command exits
+  (`queue_sms` is for request threads in a long-lived server only). The
+  phone code and its resend limits are a `PhoneVerification` row: under
+  gunicorn each worker had its own cache, so a code stored by one worker was
+  "expired" to the next and the limits multiplied by the worker count.
+- `send_session_reminders` exits non-zero when any reminder was refused.
+  The sign-up email code (`accounts/email_verification.py`) is still in the
+  cache, with the same multi-worker weakness.
 
 ## Role names on screen
 

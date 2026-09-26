@@ -14,6 +14,28 @@ from accounts.sms_notifications import notify_session_reminder
 from scheduling.models import Appointment, SessionReminder
 
 
+def _claim(rows, psychologist, day, count):
+    """The day's row for this psychologist, now ours to send - or None.
+
+    None when it was already sent, or when another run claimed it within the
+    lease and may still be sending. A claim older than the lease that was
+    never stamped sent belongs to a run that died mid-send; it is taken over
+    by one conditional UPDATE, so two runs cannot both take it.
+    """
+    try:
+        with transaction.atomic():
+            return SessionReminder.objects.create(
+                psychologist=psychologist, day=day, session_count=count)
+    except IntegrityError:
+        pass
+    now = timezone.now()
+    stale = rows.filter(sent_at__isnull=True,
+                        claimed_at__lt=now - SessionReminder.CLAIM_LEASE)
+    if not stale.update(claimed_at=now, session_count=count):
+        return None
+    return rows.get()
+
+
 def send_session_reminders(*, today=False, dry_run=False):
     """Text each psychologist a count of their sessions. Returns a report.
 
@@ -23,9 +45,10 @@ def send_session_reminders(*, today=False, dry_run=False):
     is a free external pinger, and those retry.
 
     Who was told is a SessionReminder row, claimed before the send so two
-    overlapping runs cannot both text, and deleted if the gateway refuses so
-    the next run tries again. Each message is sent before this returns, so
-    "sent" in the report means the gateway accepted it.
+    overlapping runs cannot both text, stamped once the gateway accepts, and
+    deleted if it refuses so the next run tries again. Each message is sent
+    before this returns, so "sent" in the report means the gateway accepted
+    it.
     """
     target = timezone.localdate() + timedelta(days=0 if today else 1)
     word = "today" if today else "tomorrow"
@@ -49,28 +72,30 @@ def send_session_reminders(*, today=False, dry_run=False):
             report["skipped"] += 1
             continue
 
+        rows = SessionReminder.objects.filter(psychologist=psychologist, day=target)
         if dry_run:
             # Looks without claiming: a dry run that took the day's row would
             # leave the real run that follows nothing to send.
-            if SessionReminder.objects.filter(psychologist=psychologist,
-                                              day=target).exists():
+            if rows.filter(sent_at__isnull=False).exists():
                 report["lines"].append(f"skip  {label}: already told about {target}")
                 report["skipped"] += 1
             else:
                 report["lines"].append(f"would text {label}: {count} session(s) {word}")
             continue
 
-        try:
-            with transaction.atomic():
-                claim = SessionReminder.objects.create(
-                    psychologist=psychologist, day=target, session_count=count)
-        except IntegrityError:
-            report["lines"].append(f"skip  {label}: already told about {target}")
+        claim = _claim(rows, psychologist, target, count)
+        if claim is None:
+            told = rows.filter(sent_at__isnull=False).exists()
+            report["lines"].append(
+                f"skip  {label}: " + (f"already told about {target}" if told
+                                      else "another run is sending it now"))
             report["skipped"] += 1
             continue
 
         result = notify_session_reminder(psychologist, count, when=word)
         if result.ok:
+            claim.sent_at = timezone.now()
+            claim.save(update_fields=["sent_at"])
             report["lines"].append(f"sent  {label}: {count} session(s) {word}")
             report["sent"] += 1
         else:

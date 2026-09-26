@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
@@ -142,6 +142,34 @@ class TheRecordOfWhoWasToldTest(ReminderTaskBase):
         self.assertEqual(second["sent"], 1)
         self.assertEqual(SessionReminder.objects.get().session_count, 2)
 
+    def test_a_sent_reminder_is_stamped(self):
+        send_session_reminders()
+        self.assertIsNotNone(SessionReminder.objects.get().sent_at)
+
+    def test_a_claim_whose_run_died_is_taken_over(self):
+        """Claimed, never stamped sent: the process died mid-send. Reading
+        that row as "already told" lost the reminder for good."""
+        SessionReminder.objects.create(
+            psychologist=self.psy, day=timezone.localdate() + timedelta(days=1),
+            session_count=2)
+        SessionReminder.objects.update(
+            claimed_at=timezone.now() - SessionReminder.CLAIM_LEASE
+            - timedelta(minutes=1))
+        report = send_session_reminders()
+        self.assertEqual(report["sent"], 1)
+        self.assertIsNotNone(SessionReminder.objects.get().sent_at)
+
+    def test_a_claim_still_inside_its_lease_is_left_alone(self):
+        """Another run may be sending it right now."""
+        SessionReminder.objects.create(
+            psychologist=self.psy, day=timezone.localdate() + timedelta(days=1),
+            session_count=2)
+        with patch.object(sms_notifications, "send_sms") as sender:
+            report = send_session_reminders()
+            sender.assert_not_called()
+        self.assertEqual(report["skipped"], 1)
+        self.assertIn("another run", " ".join(report["lines"]))
+
     def test_the_command_has_sent_before_it_exits(self):
         """It used to queue on a daemon thread, which dies with the process -
         the command printed "queued" and exited before anything was sent."""
@@ -151,6 +179,14 @@ class TheRecordOfWhoWasToldTest(ReminderTaskBase):
             call_command("send_session_reminders", stdout=out)
             sender.assert_called_once()
         self.assertIn("1 reminder(s) sent", out.getvalue())
+
+    def test_the_command_fails_when_a_reminder_was_refused(self):
+        """A non-zero exit, so whatever schedules it sees the failure."""
+        refused = SmsResult(False, "refused")
+        with patch.object(sms_notifications, "send_sms", return_value=refused):
+            with self.assertRaises(CommandError) as caught:
+                call_command("send_session_reminders", stdout=StringIO())
+        self.assertIn("1 failed", str(caught.exception))
 
     @override_settings(SESSION_REMINDER_TOKEN=TOKEN)
     def test_the_endpoint_counts_failures_without_naming_anyone(self):
