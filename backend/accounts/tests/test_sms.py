@@ -14,14 +14,16 @@ The second is that an unverified number never receives anything. A number
 somebody typed is a number that might be a typo, and a typo is a stranger's
 handset.
 """
+from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.test import TestCase, override_settings
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from accounts.models import Role
+from accounts.models import PhoneVerification, Role
 from accounts.phone import (
     InvalidPhilippineMobile, as_typed, normalise_ph_mobile,
 )
@@ -226,8 +228,8 @@ class PhoneEndpointIsBoundToTheCallerTest(SmsBase):
     def test_the_right_code_verifies(self):
         self._auth("p@racco1.gov.ph")
         self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
-        entry = cache.get(f"phone-verify:{self.psy.pk}")
-        resp = self.client.put(URL, {"code": entry["code"]}, format="json")
+        code = PhoneVerification.objects.get(user=self.psy).code
+        resp = self.client.put(URL, {"code": code}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
         self.psy.refresh_from_db()
         self.assertEqual(self.psy.phone, "+639171234567")
@@ -236,10 +238,13 @@ class PhoneEndpointIsBoundToTheCallerTest(SmsBase):
     def test_guessing_is_limited(self):
         self._auth("p@racco1.gov.ph")
         self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
+        real = PhoneVerification.objects.get(user=self.psy).code
+        wrong = "111111" if real != "111111" else "222222"
         for _ in range(sms_notifications.CODE_MAX_ATTEMPTS + 1):
-            self.client.put(URL, {"code": "000000"}, format="json")
-        entry = cache.get(f"phone-verify:{self.psy.pk}")
-        self.assertIsNone(entry, "the code survived more guesses than allowed")
+            self.client.put(URL, {"code": wrong}, format="json")
+        resp = self.client.put(URL, {"code": real}, format="json")
+        self.assertEqual(resp.status_code, 400,
+                         "the code survived more guesses than allowed")
 
     def test_asking_again_within_a_minute_is_refused(self):
         """Each code is a paid text to a number the caller typed. Without a
@@ -250,17 +255,55 @@ class PhoneEndpointIsBoundToTheCallerTest(SmsBase):
         self.assertEqual(first.status_code, 200, first.data)
         self.assertEqual(again.status_code, 429, again.data)
 
+    def _a_minute_passes(self):
+        PhoneVerification.objects.filter(user=self.psy).update(
+            last_sent_at=timezone.now() - timedelta(minutes=2))
+
     def test_there_is_an_hourly_ceiling_as_well(self):
         self._auth("p@racco1.gov.ph")
         codes = []
         for _ in range(sms_notifications.CODE_MAX_PER_HOUR):
-            cache.delete(f"phone-verify-wait:{self.psy.pk}")
             codes.append(self.client.post(
                 URL, {"phone": "0917 123 4567"}, format="json").status_code)
-        cache.delete(f"phone-verify-wait:{self.psy.pk}")
+            self._a_minute_passes()
         over = self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
         self.assertEqual(codes, [200] * sms_notifications.CODE_MAX_PER_HOUR)
         self.assertEqual(over.status_code, 429)
+
+    def test_the_ceiling_resets_after_an_hour(self):
+        self._auth("p@racco1.gov.ph")
+        for _ in range(sms_notifications.CODE_MAX_PER_HOUR):
+            self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
+            self._a_minute_passes()
+        PhoneVerification.objects.filter(user=self.psy).update(
+            window_started_at=timezone.now() - timedelta(hours=1, minutes=1))
+        resp = self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+    def test_the_code_and_the_limits_are_shared_by_every_worker(self):
+        """Each gunicorn worker has its own in-memory cache; clearing it is
+        what a request landing on a different worker looks like. The code
+        and the limits used to live there, so the worker that took the reply
+        called the code expired and kept its own count of codes sent."""
+        self._auth("p@racco1.gov.ph")
+        self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
+        cache.clear()
+        again = self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
+        cache.clear()
+        code = PhoneVerification.objects.get(user=self.psy).code
+        resp = self.client.put(URL, {"code": code}, format="json")
+        self.assertEqual(again.status_code, 429)
+        self.assertEqual(resp.status_code, 200, resp.data)
+
+    def test_an_expired_code_does_not_verify(self):
+        self._auth("p@racco1.gov.ph")
+        self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
+        row = PhoneVerification.objects.get(user=self.psy)
+        row.expires_at = timezone.now() - timedelta(seconds=1)
+        row.save()
+        resp = self.client.put(URL, {"code": row.code}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("expired", resp.data["code"])
 
     def test_a_refused_send_does_not_use_up_the_wait(self):
         """A gateway refusal is fixed and retried at once, not a minute later."""

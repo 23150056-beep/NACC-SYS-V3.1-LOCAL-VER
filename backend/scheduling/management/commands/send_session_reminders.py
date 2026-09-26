@@ -9,7 +9,7 @@ this is the door for a person at a keyboard.
 
 Safe to run twice: whoever has already been told about a given day is skipped.
 """
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from scheduling.reminders import send_session_reminders
 
@@ -35,9 +35,9 @@ class Command(BaseCommand):
         summary = (f"{report['sent']} reminder(s) sent, {report['skipped']} "
                    f"skipped, {report['failed']} failed, for {report['date']}.")
         if report["failed"]:
-            # Not recorded as told, so running this again retries them.
-            self.stdout.write(self.style.ERROR(
-                summary + " Run it again once the gateway is fixed; only the "
-                          "failed ones are retried."))
-        else:
-            self.stdout.write(self.style.SUCCESS(summary))
+            # Not recorded as told, so running this again retries them. A
+            # non-zero exit, so whatever schedules this sees the failure.
+            raise CommandError(summary + " Run it again once the gateway is "
+                                         "fixed; only the failed ones are "
+                                         "retried.")
+        self.stdout.write(self.style.SUCCESS(summary))

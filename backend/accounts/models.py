@@ -170,3 +170,33 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return f"Profile for {self.user.email}"
+
+
+class PhoneVerification(models.Model):
+    """The code texted to a number and waiting to be typed back, and how
+    often this account has asked for one. One row per account.
+
+    In the database for the reason SessionReminder is: the default cache
+    lives in one process's memory, and gunicorn with more than one worker
+    gave each worker its own. A code stored by the worker that sent it was
+    "expired" to the worker that took the reply, and each worker kept its
+    own count against the resend limits - which multiplied them.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="phone_verification")
+    number = models.CharField(max_length=16, blank=True, default="")
+    # Blank means no code is outstanding.
+    code = models.CharField(max_length=12, blank=True, default="")
+    tries = models.PositiveSmallIntegerField(default=0)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    window_started_at = models.DateTimeField(null=True, blank=True)
+    sent_in_window = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "tbl_phone_verification"
+
+    def __str__(self):
+        return f"Phone verification for {self.user.email}"

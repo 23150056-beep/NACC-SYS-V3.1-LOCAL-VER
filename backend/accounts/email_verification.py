@@ -6,8 +6,10 @@ mistyped and the credential goes to whoever owns the typo, or nowhere at all
 while the applicant waits for a mail that cannot arrive.
 
 Deliberately the same shape as accounts/sms_notifications' phone verification
-- a six-digit code in the cache, a short life, a limited number of guesses -
-because two ways of doing the same thing is two things to get wrong. The code
+- a six-digit code, a short life, a limited number of guesses - because two
+ways of doing the same thing is two things to get wrong. One difference: this
+code is still in the cache, which each gunicorn worker holds separately; the
+phone code moved to a PhoneVerification row for exactly that reason. The code
 is keyed by address rather than by user id: the person confirming is not
 signed in, and cannot be, since a PENDING account is not allowed to
 authenticate.

@@ -14,9 +14,12 @@ might be a typo, and a typo is a stranger's handset.
 """
 import logging
 import secrets
+from datetime import timedelta
 
-from django.core.cache import cache
+from django.db import transaction
+from django.utils import timezone
 
+from accounts.models import PhoneVerification
 from accounts.sms import SmsResult, queue_sms, send_sms
 
 logger = logging.getLogger(__name__)
@@ -137,10 +140,6 @@ def notify_session_reminder(psychologist, count, when="tomorrow"):
 # Proving a number belongs to the person who typed it
 # --------------------------------------------------------------------------
 
-def _code_key(user_id):
-    return f"phone-verify:{user_id}"
-
-
 def start_phone_verification(user, number):
     """Text a code to `number` and remember it for a few minutes.
 
@@ -155,37 +154,47 @@ def start_phone_verification(user, number):
     Raises TooManyCodes when this account has asked too recently or too
     often. A refused send does not count against either limit.
     """
-    wait_key = f"phone-verify-wait:{user.pk}"
-    count_key = f"phone-verify-count:{user.pk}"
-    if (cache.get(count_key) or 0) >= CODE_MAX_PER_HOUR:
-        raise TooManyCodes("Too many codes have been sent to this account in "
-                           "the last hour. Try again later.")
-    if not cache.add(wait_key, True, CODE_RESEND_SECONDS):
-        raise TooManyCodes("A code was sent less than a minute ago. Give it a "
-                           "moment to arrive, or ask again in a minute.")
+    now = timezone.now()
+    with transaction.atomic():
+        PhoneVerification.objects.get_or_create(user=user)
+        row = PhoneVerification.objects.select_for_update().get(user=user)
+        before = {"last_sent_at": row.last_sent_at,
+                  "window_started_at": row.window_started_at,
+                  "sent_in_window": row.sent_in_window}
+        if (row.window_started_at is None
+                or now - row.window_started_at >= timedelta(hours=1)):
+            row.window_started_at, row.sent_in_window = now, 0
+        if row.sent_in_window >= CODE_MAX_PER_HOUR:
+            raise TooManyCodes("Too many codes have been sent to this account "
+                               "in the last hour. Try again later.")
+        if (row.last_sent_at is not None
+                and now - row.last_sent_at < timedelta(seconds=CODE_RESEND_SECONDS)):
+            raise TooManyCodes("A code was sent less than a minute ago. Give "
+                               "it a moment to arrive, or ask again in a "
+                               "minute.")
+        code = f"{secrets.randbelow(1_000_000):06d}"
+        row.number, row.code, row.tries = number, code, 0
+        row.expires_at = now + timedelta(seconds=CODE_TTL_SECONDS)
+        row.last_sent_at = now
+        row.sent_in_window += 1
+        row.save()
 
-    code = f"{secrets.randbelow(1_000_000):06d}"
-    cache.set(_code_key(user.pk), {"code": code, "number": number, "tries": 0},
-              CODE_TTL_SECONDS)
+    # Sent after the claim commits, not inside it: SQLite locks the whole
+    # database for a write, and a gateway can take twenty seconds to answer.
     result = send_sms(
         number,
         "NACC SYS: your verification code is {otp}. It expires in 10 minutes.",
         "phone verification",
         otp_code=code,
     )
+    mine = PhoneVerification.objects.filter(pk=row.pk, code=code)
     if not result.ok:
-        cache.delete(_code_key(user.pk))
-        cache.delete(wait_key)
+        mine.update(code="", **before)
         return result
-
     if result.code and result.code != code:
         # The gateway put a different code on the handset. That one is what
         # the person will type, so it is the one that has to be remembered.
-        cache.set(_code_key(user.pk),
-                  {"code": result.code, "number": number, "tries": 0},
-                  CODE_TTL_SECONDS)
-    cache.add(count_key, 0, 3600)
-    cache.incr(count_key)
+        mine.update(code=result.code)
     return result
 
 
@@ -195,24 +204,27 @@ def confirm_phone_verification(user, submitted):
     Counts attempts, because six digits is guessable given enough tries and
     this is the step that decides whether an account can be texted at all.
     """
-    key = _code_key(user.pk)
-    entry = cache.get(key)
-    if not entry:
-        return False, ("That code has expired. Ask for a new one.")
+    with transaction.atomic():
+        row = (PhoneVerification.objects.select_for_update()
+               .filter(user=user).first())
+        if row is None or not row.code or row.expires_at <= timezone.now():
+            return False, "That code has expired. Ask for a new one."
 
-    entry["tries"] += 1
-    if entry["tries"] > CODE_MAX_ATTEMPTS:
-        cache.delete(key)
-        return False, ("Too many wrong codes. Ask for a new one.")
-    cache.set(key, entry, CODE_TTL_SECONDS)
+        row.tries += 1
+        if row.tries > CODE_MAX_ATTEMPTS:
+            row.code = ""
+            row.save(update_fields=["code", "tries"])
+            return False, "Too many wrong codes. Ask for a new one."
 
-    if (submitted or "").strip() != entry["code"]:
-        left = CODE_MAX_ATTEMPTS - entry["tries"]
-        return False, (f"That code is not right. {left} attempt"
-                       f"{'' if left == 1 else 's'} left.")
+        if (submitted or "").strip() != row.code:
+            row.save(update_fields=["tries"])
+            left = CODE_MAX_ATTEMPTS - row.tries
+            return False, (f"That code is not right. {left} attempt"
+                           f"{'' if left == 1 else 's'} left.")
 
-    cache.delete(key)
-    user.phone = entry["number"]
-    user.phone_verified = True
-    user.save(update_fields=["phone", "phone_verified", "updated_at"])
+        row.code = ""
+        row.save(update_fields=["code", "tries"])
+        user.phone = row.number
+        user.phone_verified = True
+        user.save(update_fields=["phone", "phone_verified", "updated_at"])
     return True, "Number verified. You will now get text notifications."

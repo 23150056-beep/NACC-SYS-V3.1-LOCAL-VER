@@ -239,8 +239,8 @@ The next day's session reminders are sent by a command, not automatically:
 ```
 
 Safe to run twice: who was told is recorded in the database, so the second
-run skips them. A text Semaphore refuses is not recorded, and running the
-command again retries only those.
+run skips them. A text Semaphore refuses is not recorded, the command exits
+with an error, and running it again retries only those.
 
 ### What it costs, and what it refuses
 

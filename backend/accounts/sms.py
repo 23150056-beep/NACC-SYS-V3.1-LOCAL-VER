@@ -478,7 +478,10 @@ def check_gateway():
     try:
         parsed = json.loads(body)
     except ValueError:
-        return SmsResult(True, f"The gateway answered: {body}")
+        # A maintenance page or a proxy's error arrives as a 200 too. An
+        # answer that cannot be read has confirmed nothing about the key.
+        return SmsResult(False, "The gateway's answer could not be read, so "
+                                f"the key is not confirmed: {body}")
 
     if isinstance(parsed, dict) and str(parsed.get("status", "")).lower() == "error":
         return SmsResult(False, "The gateway refused the key: "
