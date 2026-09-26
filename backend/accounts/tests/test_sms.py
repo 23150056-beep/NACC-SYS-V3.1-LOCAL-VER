@@ -26,7 +26,7 @@ from accounts.phone import (
     InvalidPhilippineMobile, as_typed, normalise_ph_mobile,
 )
 from accounts import sms_notifications
-from accounts.sms import SINGLE_SEGMENT, send_sms
+from accounts.sms import UCS2_SEGMENT, SmsResult, fits_one_segment, send_sms
 from children.models import Child
 
 User = get_user_model()
@@ -116,11 +116,19 @@ class NothingConfidentialLeavesTest(SmsBase):
             assigned_psychologist=self.psy)
 
         sent = []
-        with patch.object(sms_notifications, "queue_sms",
-                          side_effect=lambda n, t, d: sent.append(t) or True):
+
+        def capture(number, text, description, otp_code=None):
+            sent.append(text.replace("{otp}", otp_code) if otp_code else text)
+            return SmsResult(True, "captured", code=otp_code)
+
+        # Both doors: the notifications queue, the reminder and the code are
+        # sent now. Capturing only one of them let the other two go untested.
+        with patch.object(sms_notifications, "queue_sms", side_effect=capture), \
+             patch.object(sms_notifications, "send_sms", side_effect=capture):
             sms_notifications.notify_temporary_password(self.psy)
             sms_notifications.notify_new_assignment(child)
             sms_notifications.notify_session_reminder(self.psy, 3)
+            sms_notifications.start_phone_verification(self.psy, "+639171234567")
         return sent, child
 
     def test_no_message_carries_a_child_name(self):
@@ -141,10 +149,26 @@ class NothingConfidentialLeavesTest(SmsBase):
             self.assertNotIn(word, joined)
 
     def test_every_message_fits_one_segment(self):
-        """Two texts arriving out of order say something nobody wrote."""
+        """Two texts arriving out of order say something nobody wrote.
+
+        Counted the way the telco counts: one character outside the GSM-7
+        alphabet (an em dash, a curly quote) makes a segment 70 characters,
+        and the same message costs three."""
+        sent, _ = self._every_message()
+        self.assertEqual(len(sent), 4, sent)
+        for text in sent:
+            self.assertTrue(fits_one_segment(text), repr(text))
+
+    def test_no_message_begins_with_test(self):
+        """Semaphore silently discards any message that begins with TEST."""
         sent, _ = self._every_message()
         for text in sent:
-            self.assertLessEqual(len(text), SINGLE_SEGMENT, repr(text))
+            self.assertFalse(text.strip().lower().startswith("test"), repr(text))
+
+    def test_the_assignment_names_the_case_the_way_the_screens_do(self):
+        """C-0042, which the search box finds, rather than a bare id."""
+        sent, child = self._every_message()
+        self.assertIn(f"C-{child.pk:04d}", sent[1])
 
 
 class OnlyVerifiedNumbersReceiveTest(SmsBase):
@@ -217,6 +241,48 @@ class PhoneEndpointIsBoundToTheCallerTest(SmsBase):
         entry = cache.get(f"phone-verify:{self.psy.pk}")
         self.assertIsNone(entry, "the code survived more guesses than allowed")
 
+    def test_asking_again_within_a_minute_is_refused(self):
+        """Each code is a paid text to a number the caller typed. Without a
+        limit any signed-in account could text a stranger on a loop."""
+        self._auth("p@racco1.gov.ph")
+        first = self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
+        again = self.client.post(URL, {"phone": "0917 765 4321"}, format="json")
+        self.assertEqual(first.status_code, 200, first.data)
+        self.assertEqual(again.status_code, 429, again.data)
+
+    def test_there_is_an_hourly_ceiling_as_well(self):
+        self._auth("p@racco1.gov.ph")
+        codes = []
+        for _ in range(sms_notifications.CODE_MAX_PER_HOUR):
+            cache.delete(f"phone-verify-wait:{self.psy.pk}")
+            codes.append(self.client.post(
+                URL, {"phone": "0917 123 4567"}, format="json").status_code)
+        cache.delete(f"phone-verify-wait:{self.psy.pk}")
+        over = self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
+        self.assertEqual(codes, [200] * sms_notifications.CODE_MAX_PER_HOUR)
+        self.assertEqual(over.status_code, 429)
+
+    def test_a_refused_send_does_not_use_up_the_wait(self):
+        """A gateway refusal is fixed and retried at once, not a minute later."""
+        self._auth("p@racco1.gov.ph")
+        with patch.object(sms_notifications, "send_sms",
+                          return_value=SmsResult(False, "sender: invalid")):
+            refused = self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
+        retried = self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
+        self.assertEqual(refused.status_code, 502)
+        self.assertIn("sender", refused.data["detail"])
+        self.assertEqual(retried.status_code, 200, retried.data)
+
+    def test_the_code_on_the_handset_is_the_one_that_verifies(self):
+        """Should the gateway ever send a code of its own instead of the one
+        supplied, that is the code the person types."""
+        self._auth("p@racco1.gov.ph")
+        with patch.object(sms_notifications, "send_sms",
+                          return_value=SmsResult(True, "ok", code="424242")):
+            self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
+        resp = self.client.put(URL, {"code": "424242"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+
     def test_removing_the_number_stops_the_messages(self):
         self.psy.phone = "+639171234567"
         self.psy.phone_verified = True
@@ -255,6 +321,19 @@ class TheTestButtonTest(SmsBase):
         resp = self.client.post("/api/sms-test/")
         self.assertEqual(resp.status_code, 400)
 
+    def test_an_unverified_number_is_nowhere_to_send(self):
+        """Migration 0008 copied numbers out of contact_details unverified,
+        so an administrator can hold one nobody proved. A typo there is a
+        stranger's handset."""
+        self.admin.phone = "+639998887777"
+        self.admin.phone_verified = False
+        self.admin.save()
+        self._auth("admin@racco1.gov.ph")
+        with patch("accounts.views.send_sms") as sender:
+            resp = self.client.post("/api/sms-test/")
+            sender.assert_not_called()
+        self.assertEqual(resp.status_code, 400)
+
     def test_it_reports_what_the_gateway_said(self):
         self.admin.phone = "+639998887777"
         self.admin.phone_verified = True
@@ -286,6 +365,35 @@ class TheSenderRefusesBadInputTest(TestCase):
             with self.subTest(number=number):
                 self.assertFalse(send_sms(number, text, "probe").ok)
 
+    # The console provider stood in by one that hands back the text it was
+    # given, so the tests can read what would have gone out.
+    ECHO = {"console": lambda number, text, description: SmsResult(True, text)}
+
     def test_an_over_long_message_is_trimmed_not_split(self):
-        result = send_sms("09171234567", "x" * 400, "probe")
+        with patch.dict("accounts.sms.PROVIDERS", self.ECHO):
+            result = send_sms("09171234567", "x" * 400, "probe")
         self.assertTrue(result.ok)
+        self.assertTrue(fits_one_segment(result.detail))
+        # Not "…": that is outside GSM-7, and appending it to trim a message
+        # into one segment made it three.
+        self.assertTrue(result.detail.endswith("..."), result.detail)
+
+    def test_a_non_gsm_message_is_trimmed_to_seventy(self):
+        with patch.dict("accounts.sms.PROVIDERS", self.ECHO):
+            result = send_sms("09171234567", "Salamat — " * 20, "probe")
+        self.assertTrue(result.ok)
+        self.assertTrue(fits_one_segment(result.detail))
+        self.assertLessEqual(len(result.detail), UCS2_SEGMENT)
+
+    def test_a_code_is_never_trimmed(self):
+        """A message cut off through the code is worse than none."""
+        result = send_sms("09171234567", "x" * 200 + " {otp}", "probe",
+                          otp_code="123456")
+        self.assertFalse(result.ok)
+
+    def test_a_code_is_written_in_where_there_is_no_code_route(self):
+        with patch.dict("accounts.sms.PROVIDERS", self.ECHO):
+            result = send_sms("09171234567", "Code {otp}.", "probe",
+                              otp_code="012345")
+        self.assertEqual("Code 012345.", result.detail)
+        self.assertEqual("012345", result.code)

@@ -117,3 +117,31 @@ class Unavailability(models.Model):
 
     def covers(self, day):
         return self.starts_on <= day <= self.ends_on
+
+
+class SessionReminder(models.Model):
+    """The record that a psychologist was texted about one day's sessions.
+
+    One row per psychologist per day, and the database's unique constraint is
+    what stops a second text. It used to be a cache key, and the cache is the
+    default in-memory one - per process - so `manage.py
+    send_session_reminders`, a fresh process every run, always found it empty
+    and would have texted everybody again; and two overlapping runs could both
+    pass a check-then-set. A row is claimed before sending and deleted if the
+    gateway refuses, so a failed text is retried rather than remembered.
+    """
+
+    psychologist = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="session_reminders")
+    day = models.DateField()
+    session_count = models.PositiveSmallIntegerField()
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "tbl_session_reminder"
+        ordering = ["-day", "psychologist_id"]
+        constraints = [
+            models.UniqueConstraint(fields=["psychologist", "day"],
+                                    name="one_session_reminder_per_day"),
+        ]

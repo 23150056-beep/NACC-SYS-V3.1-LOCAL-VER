@@ -12,6 +12,7 @@ free-tier service being awake.
 | Uploaded files | Cloudflare R2 | `backend/media/` on disk |
 | Google Sign-In | on | off — the button hides itself ([turn it on](#google-sign-in-on-your-own-machine)) |
 | Assignment emails | Brevo | not sent; skipped with a log line |
+| Text messages | the gateway `SMS_PROVIDER` names | written to the API window's log unless configured ([send them for real](#text-messages-semaphore)) |
 | Addresses (PSGC) | seeded on deploy | seeded by the setup script |
 
 Nothing local can reach the live database or the live bucket. Records you make
@@ -200,6 +201,61 @@ anything in Google.
 
 Comment the variable out of `backend/.env` and restart the API. The button
 disappears again; nothing else changes.
+
+## Text messages (Semaphore)
+
+Off by default. Every text is written to the **API window** instead —
+including the six-digit code for verifying your own number, so the whole flow
+works locally without a gateway. Look for a line starting `SMS (console)`.
+
+To send real texts through Semaphore, in `backend/.env`:
+
+```
+SMS_PROVIDER=semaphore
+SMS_API_KEY=<the key from your Semaphore dashboard>
+SMS_SENDER_NAME=NACC
+```
+
+`SMS_SENDER_NAME` must be a name Semaphore has **approved** for your account;
+leave it out to use their default sender. Leave `SMS_ENDPOINT` unset.
+
+**Restart the API window**, then, in this order:
+
+1. **Settings → Text messages → Check the key.** Asks Semaphore for the
+   account and balance and sends nothing. It fails — rather than printing a
+   zero under a green tick — when the account is inactive or has no credit.
+   Semaphore allows only one or two of these a minute; a second press can
+   answer "wait a minute".
+2. **My Profile → Mobile number.** Add your own number and enter the code
+   that arrives. Only a verified number ever receives anything.
+3. **Settings → Text messages → Send a test text.** Goes to your own verified
+   number and prints exactly what Semaphore replied, including its message id.
+
+The next day's session reminders are sent by a command, not automatically:
+
+```
+.venv\Scripts\python manage.py send_session_reminders --dry-run
+.venv\Scripts\python manage.py send_session_reminders
+```
+
+Safe to run twice: who was told is recorded in the database, so the second
+run skips them. A text Semaphore refuses is not recorded, and running the
+command again retries only those.
+
+### What it costs, and what it refuses
+
+- **1 credit per message; 2 for a verification code**, which goes by
+  Semaphore's OTP route — kept apart from bulk traffic, so a ten-minute code
+  is not held in a queue. A person can ask for a code once a minute and five
+  times an hour.
+- **Every message fits one segment.** A single character outside the GSM-7
+  alphabet (an em dash, a curly quote) makes a segment 70 characters instead
+  of 160, and the same text costs three credits. A test reads every message
+  the system sends and fails if one does not fit.
+- **A message beginning with the word TEST is refused before sending.**
+  Semaphore silently discards those — accepted, not sent, nothing said.
+- **No links.** Carriers block SMS containing a URL after the gateway has
+  accepted and billed it. The messages say "Sign in" instead.
 
 ## Starting over
 

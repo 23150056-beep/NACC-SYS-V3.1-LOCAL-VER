@@ -17,7 +17,7 @@ import secrets
 
 from django.core.cache import cache
 
-from accounts.sms import queue_sms, send_sms
+from accounts.sms import SmsResult, queue_sms, send_sms
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,16 @@ logger = logging.getLogger(__name__)
 # that a text arriving slowly is not.
 CODE_TTL_SECONDS = 10 * 60
 CODE_MAX_ATTEMPTS = 5
+
+# How often one account may ask for a code. Every request is a paid message to
+# a number the caller typed, so without a limit any signed-in account could
+# text a stranger's handset on a loop and spend the agency's credit doing it.
+CODE_RESEND_SECONDS = 60
+CODE_MAX_PER_HOUR = 5
+
+
+class TooManyCodes(Exception):
+    """Raised with a sentence for the person waiting on a code."""
 
 
 def _deliverable(user):
@@ -69,9 +79,13 @@ def notify_temporary_password(user):
 def notify_new_assignment(child):
     """Tell the psychologist they have a new case. Not which child.
 
-    The case number is enough to find it after signing in, and it means the
-    child's name never reaches a telco.
+    The case reference is enough to find it after signing in, and it means
+    the child's name never reaches a telco. It is written the way every
+    screen writes it - C-0042, not 42 - so it can be typed straight into the
+    search box.
     """
+    from scheduling.visibility import case_ref
+
     psychologist = getattr(child, "assigned_psychologist", None)
     if psychologist is None:
         return False
@@ -80,8 +94,8 @@ def notify_new_assignment(child):
         return False
     return queue_sms(
         number,
-        f"NACC SYS: a new case has been assigned to you (case {child.id}). "
-        f"Sign in to review it.",
+        f"NACC SYS: a new case has been assigned to you (case "
+        f"{case_ref(child)}). Sign in to review it.",
         "assignment notice",
     )
 
@@ -96,12 +110,22 @@ def notify_session_reminder(psychologist, count, when="tomorrow"):
     Deliberate on two counts: five separate texts about five sessions is the
     kind of thing that gets a sender muted, and a per-appointment message
     would have to say which child it was about to be worth reading.
+
+    Sent now and the SmsResult returned, unlike the two above. This runs from
+    a scheduled job rather than a save, so nothing is waiting on it - and the
+    job needs the gateway's answer, because it records who was told. It used
+    to be queued on a daemon thread, which dies with the process: a
+    `manage.py send_session_reminders` run exits the moment it has queued, so
+    it reported messages "queued" that were never sent, and recorded them as
+    told so a second run would not try again.
     """
     number = _deliverable(psychologist)
-    if not number or count < 1:
-        return False
+    if not number:
+        return SmsResult(False, "No verified mobile number on file.")
+    if count < 1:
+        return SmsResult(False, "No sessions to remind about.")
     sessions = "session" if count == 1 else "sessions"
-    return queue_sms(
+    return send_sms(
         number,
         f"NACC SYS: you have {count} {sessions} scheduled {when}. "
         f"Sign in to see the schedule.",
@@ -123,18 +147,45 @@ def start_phone_verification(user, number):
     Sent synchronously, unlike the notifications: the person is sitting in
     front of the screen waiting for it, and if the gateway refuses they need
     to be told now rather than left watching a handset.
+
+    Sent as a one-time code (send_sms's otp_code), which on Semaphore means
+    its code route - kept apart from bulk traffic, so a busy afternoon on the
+    networks does not hold a ten-minute code in a queue.
+
+    Raises TooManyCodes when this account has asked too recently or too
+    often. A refused send does not count against either limit.
     """
+    wait_key = f"phone-verify-wait:{user.pk}"
+    count_key = f"phone-verify-count:{user.pk}"
+    if (cache.get(count_key) or 0) >= CODE_MAX_PER_HOUR:
+        raise TooManyCodes("Too many codes have been sent to this account in "
+                           "the last hour. Try again later.")
+    if not cache.add(wait_key, True, CODE_RESEND_SECONDS):
+        raise TooManyCodes("A code was sent less than a minute ago. Give it a "
+                           "moment to arrive, or ask again in a minute.")
+
     code = f"{secrets.randbelow(1_000_000):06d}"
     cache.set(_code_key(user.pk), {"code": code, "number": number, "tries": 0},
               CODE_TTL_SECONDS)
     result = send_sms(
         number,
-        f"NACC SYS: your verification code is {code}. "
-        f"It expires in 10 minutes.",
+        "NACC SYS: your verification code is {otp}. It expires in 10 minutes.",
         "phone verification",
+        otp_code=code,
     )
     if not result.ok:
         cache.delete(_code_key(user.pk))
+        cache.delete(wait_key)
+        return result
+
+    if result.code and result.code != code:
+        # The gateway put a different code on the handset. That one is what
+        # the person will type, so it is the one that has to be remembered.
+        cache.set(_code_key(user.pk),
+                  {"code": result.code, "number": number, "tries": 0},
+                  CODE_TTL_SECONDS)
+    cache.add(count_key, 0, 3600)
+    cache.incr(count_key)
     return result
 
 

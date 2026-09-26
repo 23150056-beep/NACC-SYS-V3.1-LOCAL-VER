@@ -7,19 +7,11 @@ drifted would be the one nobody watches.
 """
 from datetime import timedelta
 
-from django.core.cache import cache
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from accounts.sms_notifications import notify_session_reminder
-from scheduling.models import Appointment
-
-# Long enough that a second run the same day is refused, and that a run just
-# after midnight still remembers yesterday evening's.
-_REMEMBER_SECONDS = 36 * 3600
-
-
-def _told_key(user_id, day):
-    return f"session-reminder:{user_id}:{day.isoformat()}"
+from scheduling.models import Appointment, SessionReminder
 
 
 def send_session_reminders(*, today=False, dry_run=False):
@@ -29,6 +21,11 @@ def send_session_reminders(*, today=False, dry_run=False):
     is skipped, so an overlapping schedule or a retried request cannot
     double-text. That matters more than usual here — the schedule this runs on
     is a free external pinger, and those retry.
+
+    Who was told is a SessionReminder row, claimed before the send so two
+    overlapping runs cannot both text, and deleted if the gateway refuses so
+    the next run tries again. Each message is sent before this returns, so
+    "sent" in the report means the gateway accepted it.
     """
     target = timezone.localdate() + timedelta(days=0 if today else 1)
     word = "today" if today else "tomorrow"
@@ -42,7 +39,7 @@ def send_session_reminders(*, today=False, dry_run=False):
             counts[psychologist] = counts.get(psychologist, 0) + 1
 
     report = {"date": target.isoformat(), "when": word, "dry_run": dry_run,
-              "sent": 0, "skipped": 0, "lines": []}
+              "sent": 0, "skipped": 0, "failed": 0, "lines": []}
 
     for psychologist, count in sorted(counts.items(), key=lambda kv: kv[0].pk):
         label = psychologist.fullname or psychologist.email
@@ -52,23 +49,34 @@ def send_session_reminders(*, today=False, dry_run=False):
             report["skipped"] += 1
             continue
 
-        key = _told_key(psychologist.pk, target)
-        if cache.get(key):
+        if dry_run:
+            # Looks without claiming: a dry run that took the day's row would
+            # leave the real run that follows nothing to send.
+            if SessionReminder.objects.filter(psychologist=psychologist,
+                                              day=target).exists():
+                report["lines"].append(f"skip  {label}: already told about {target}")
+                report["skipped"] += 1
+            else:
+                report["lines"].append(f"would text {label}: {count} session(s) {word}")
+            continue
+
+        try:
+            with transaction.atomic():
+                claim = SessionReminder.objects.create(
+                    psychologist=psychologist, day=target, session_count=count)
+        except IntegrityError:
             report["lines"].append(f"skip  {label}: already told about {target}")
             report["skipped"] += 1
             continue
 
-        if dry_run:
-            report["lines"].append(f"would text {label}: {count} session(s) {word}")
-            continue
-
-        if notify_session_reminder(psychologist, count, when=word):
-            cache.set(key, True, _REMEMBER_SECONDS)
+        result = notify_session_reminder(psychologist, count, when=word)
+        if result.ok:
             report["lines"].append(f"sent  {label}: {count} session(s) {word}")
             report["sent"] += 1
         else:
-            report["lines"].append(f"skip  {label}: sending was refused")
-            report["skipped"] += 1
+            claim.delete()
+            report["lines"].append(f"FAIL  {label}: {result.detail}")
+            report["failed"] += 1
 
     if not counts:
         report["lines"].append(f"no scheduled sessions {word} ({target})")
