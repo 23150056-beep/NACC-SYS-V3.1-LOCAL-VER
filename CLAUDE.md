@@ -524,6 +524,14 @@ Built 27 Aug 2026. Flags distress in a child's own words. Design in
   words are not a colleague's prior opinions. Case notes are unaffected: they
   still follow `assignee_sees_history`, which defaults to True and filters at
   read time rather than deleting anything.
+- **That filter is `accounts.scoping.hide_earlier_history`**, applied after
+  `scope_to_visible` by every reader of the six opinion records (remarks,
+  reports, interviews, treatment plans, result entries, pre-assessments): the
+  record endpoints, the child's page and Monitoring. Until 27 Sep 2026 only the
+  child's page applied it, so `/api/remarks/?child=` served the notes it hid,
+  and the next psychologist could even edit them. The record base class hides
+  by default; problems and consents opt out, as the page always had them.
+  `clinical/tests/test_carry_history.py`.
 - `manage.py scan_self_reports` backfills and is idempotent; re-run it after
   adding a phrase.
 

@@ -7,7 +7,7 @@ from rest_framework.response import Response
 
 from accounts.display import display_name
 from accounts.models import Role
-from accounts.scoping import role_of as _role, scope_to_visible
+from accounts.scoping import hide_earlier_history, role_of as _role, scope_to_visible
 from accounts.permissions import CanViewResults, IsAdminOrStaff
 from children.models import Child, TerminationRecord
 from children.serializers import ChildSerializer
@@ -39,7 +39,6 @@ class ChildReportView(generics.GenericAPIView):
                      .prefetch_related("pre_assessments__instruments").get(pk=child_id))
         except Child.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
-        role = _role(request)
 
         pas = child.pre_assessments.all().select_related("consent", "interview", "psychologist")
         results = child.result_entries.select_related("instrument", "entered_by")
@@ -53,19 +52,20 @@ class ChildReportView(generics.GenericAPIView):
         self_report_flags = child.self_report_flags.select_related("reviewed_by")
 
         # Carry-history control: a newly assigned psychologist without history
-        # sees only records they authored themselves.
+        # sees only records they authored themselves. The same helper the
+        # record endpoints apply, so this page and /api/remarks/ cannot
+        # disagree about a row again - they did until 27 Sep 2026.
         #
         # self_report_flags is deliberately absent from this block. Self-reports
         # are the child's own words, not a colleague's prior opinions, and the
-        # person responsible for her now must see them. The omission is a
-        # decision, not an oversight.
-        if role == Role.PSYCHOLOGIST and not child.assignee_sees_history:
-            pas = pas.filter(psychologist=request.user)
-            results = results.filter(entered_by=request.user)
-            remarks = remarks.filter(author=request.user)
-            plans = plans.filter(author=request.user)
-            files = files.filter(author=request.user)
-            interviews = interviews.filter(interviewer=request.user)
+        # person responsible for her now must see them. Problems and case
+        # referrals likewise. The omissions are decisions, not oversights.
+        pas = hide_earlier_history(pas, request, "psychologist")
+        results = hide_earlier_history(results, request, "entered_by")
+        remarks = hide_earlier_history(remarks, request, "author")
+        plans = hide_earlier_history(plans, request, "author")
+        files = hide_earlier_history(files, request, "author")
+        interviews = hide_earlier_history(interviews, request, "interviewer")
 
         return Response({
             "child": ChildSerializer(child).data,
@@ -104,16 +104,23 @@ class MonitoringListView(generics.GenericAPIView):
                   .order_by("start")):
             next_appt.setdefault(a.child_id, a.start)
 
+        # The latest remark and classification are opinions, and the report
+        # count stands for a list: each goes through the carry-history
+        # control, so a newly assigned psychologist is not quoted the previous
+        # psychologist's last note here while the child's page hides it.
         latest_result = {}
-        for r in ResultEntry.objects.filter(child_id__in=ids).order_by("date", "id"):
+        for r in hide_earlier_history(ResultEntry.objects.filter(child_id__in=ids),
+                                      request, "entered_by").order_by("date", "id"):
             latest_result[r.child_id] = r
         # The note itself, not just its date: monitoring shows the psychologist's
         # most recent remark, and re-querying per row would be N+1.
         last_remark = {}
-        for r in RemarkNote.objects.filter(child_id__in=ids).order_by("date", "id"):
+        for r in hide_earlier_history(RemarkNote.objects.filter(child_id__in=ids),
+                                      request, "author").order_by("date", "id"):
             last_remark[r.child_id] = r
         report_counts = {}
-        for r in PsychologicalReport.objects.filter(child_id__in=ids):
+        for r in hide_earlier_history(PsychologicalReport.objects.filter(child_id__in=ids),
+                                      request, "author"):
             report_counts[r.child_id] = report_counts.get(r.child_id, 0) + 1
 
         rows = []
