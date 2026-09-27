@@ -7,7 +7,8 @@ from rest_framework.response import Response
 
 from accounts.display import display_name
 from accounts.models import Role
-from accounts.scoping import hide_earlier_history, role_of as _role, scope_to_visible
+from accounts.scoping import (hide_earlier_history, role_of as _role, scope_to_visible,
+                              visible_pre_assessments)
 from accounts.permissions import CanViewResults, IsAdminOrStaff
 from children.models import Child, TerminationRecord
 from children.serializers import ChildSerializer
@@ -36,7 +37,7 @@ class ChildReportView(generics.GenericAPIView):
         # while staff saw every child and was a side door once they did not.
         try:
             child = (scope_to_visible(Child.objects.all(), request, path=None)
-                     .prefetch_related("pre_assessments__instruments").get(pk=child_id))
+                     .prefetch_related(visible_pre_assessments(request)).get(pk=child_id))
         except Child.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
@@ -77,7 +78,8 @@ class ChildReportView(generics.GenericAPIView):
             "reports": PsychologicalReportSerializer(
                 files, many=True, context={"request": request}).data,
             "problems": ProblemEntrySerializer(problems, many=True).data,
-            "case_referrals": CaseReferralSerializer(case_referrals, many=True).data,
+            "case_referrals": CaseReferralSerializer(
+                case_referrals, many=True, context={"request": request}).data,
             "opinionnaires": OpinionnaireInviteSerializer(opinionnaires, many=True).data,
             "self_report_flags": SelfReportFlagSerializer(self_report_flags, many=True).data,
         })
@@ -91,7 +93,7 @@ class MonitoringListView(generics.GenericAPIView):
     def get(self, request):
         children = (Child.objects.exclude(status=Child.INACTIVE)
                     .select_related("assigned_psychologist")
-                    .prefetch_related("pre_assessments__instruments", "consents"))
+                    .prefetch_related(visible_pre_assessments(request), "consents"))
         children = scope_to_visible(children, request, path=None)
         children = list(children)
         ids = [c.id for c in children]

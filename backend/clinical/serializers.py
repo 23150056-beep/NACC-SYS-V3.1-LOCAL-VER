@@ -149,7 +149,31 @@ class PreAssessmentSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class PsychologicalReportSerializer(serializers.ModelSerializer):
+class _DraftSummaryForWritersOnly:
+    """An unconfirmed `ai_summary` goes only to those who may confirm it.
+
+    A confirmed summary is the writer's own words, for every reader. An
+    unconfirmed one is a model's draft awaiting them: the child's page showed
+    it only to the document's writers, but until 27 Sep 2026 every reader's
+    API response carried it - a social worker received the psychologist's
+    report draft, a psychologist the social worker's referral draft. The rule
+    is the one the summary endpoints apply (assistant/views.py _DOC_KINDS), and
+    with no request known the draft is left out.
+    """
+
+    def may_write(self, request, obj):
+        raise NotImplementedError
+
+    def to_representation(self, obj):
+        data = super().to_representation(obj)
+        if data.get("ai_summary") and not obj.ai_summary_confirmed:
+            request = self.context.get("request")
+            if request is None or not self.may_write(request, obj):
+                data["ai_summary"] = None
+        return data
+
+
+class PsychologicalReportSerializer(_DraftSummaryForWritersOnly, serializers.ModelSerializer):
     child_name = serializers.CharField(source="child.fullname", read_only=True)
     author_name = serializers.CharField(source="author.fullname", read_only=True, default=None)
     has_text = serializers.SerializerMethodField()
@@ -167,6 +191,10 @@ class PsychologicalReportSerializer(serializers.ModelSerializer):
 
     def get_has_text(self, obj):
         return bool(obj.extracted_text)
+
+    def may_write(self, request, obj):
+        from accounts.permissions import is_admin_or_assignee
+        return is_admin_or_assignee(request, obj.child)
 
     def get_check_findings(self, obj):
         """What the check found, minus any other child the READER cannot see.
@@ -222,7 +250,7 @@ class PsychologicalReportSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class CaseReferralSerializer(serializers.ModelSerializer):
+class CaseReferralSerializer(_DraftSummaryForWritersOnly, serializers.ModelSerializer):
     child_name = serializers.CharField(source="child.fullname", read_only=True)
     uploaded_by_name = serializers.CharField(source="uploaded_by.fullname", read_only=True, default=None)
     has_text = serializers.SerializerMethodField()
@@ -237,6 +265,10 @@ class CaseReferralSerializer(serializers.ModelSerializer):
 
     def get_has_text(self, obj):
         return bool(obj.extracted_text)
+
+    def may_write(self, request, obj):
+        from accounts.permissions import writes_case_referrals
+        return writes_case_referrals(request)
 
     def validate_file(self, f):
         ext = (f.name.rsplit(".", 1)[-1] if "." in f.name else "").lower()

@@ -105,3 +105,27 @@ def hide_earlier_history(qs, request, author_field, path="child"):
         return qs
     return qs.filter(Q(**{f"{path}__assignee_sees_history": True})
                      | Q(**{author_field: request.user}))
+
+
+def visible_pre_assessments(request):
+    """A prefetch of each child's pre-assessments under the carry-history
+    control, instruments included.
+
+    A child's pre-assessment status and "instruments used" are worked out from
+    `child.pre_assessments.all()`, which reads whatever was prefetched. Hiding
+    the pre-assessment rows was not enough on its own: prefetched whole, the
+    same response said "Answered" and listed the previous psychologist's test
+    titles beside an empty pre-assessment list, and Monitoring counted and
+    dated them. Every screen that shows those fields prefetches through this.
+
+    Business rules that load a child without it still see every
+    pre-assessment - hiding a colleague's history from a reader must not
+    change what the case is.
+    """
+    from django.db.models import Prefetch
+    from children.models import Child
+
+    # By relation rather than by import: children never imports clinical.
+    pre_assessment = Child._meta.get_field("pre_assessments").related_model
+    return Prefetch("pre_assessments", queryset=hide_earlier_history(
+        pre_assessment.objects.prefetch_related("instruments"), request, "psychologist"))

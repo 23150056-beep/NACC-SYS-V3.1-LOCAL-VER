@@ -51,7 +51,10 @@ authors' remarks when `assignee_sees_history` is off — so:
 
 The same happened with the previous psychologist's own brief on the morning of
 a reassignment. Now a brief is served only to the person it was drafted for
-(`_todays_briefs(user)`), and prefetch keys on (user, child).
+(`_todays_briefs(user)`), and prefetch keys on (user, child). Review found one
+more case: a psychologist's own brief drafted while history was carried, still
+served after the ISA hid it. Where history is hidden, a brief older than the
+child record's last change is now drafted again (`_current_brief`).
 
 ### 2. A summary is a write, and it was checked as a read
 
@@ -69,8 +72,11 @@ button was shown to everyone, so:
 
 Both now go through `_document_to_summarise`, which applies the document's own
 write rule — reports: `is_admin_or_assignee`, the clinical viewsets' rule;
-referrals: administrator or staff, the referral viewset's rule — plus the
+referrals: `writes_case_referrals`, the referral viewset's rule — plus the
 history check. The buttons are hidden from anyone the server would refuse.
+Review then found the API still handed every reader the unconfirmed draft
+the screen hid; the report and referral serializers now return a draft only
+to someone who may confirm it, and a confirmed summary to everyone.
 
 ### 3. "Only the chatbot is hosted" was written down and not enforced
 
@@ -122,8 +128,16 @@ and a browser check on 27 Sep found the planted note in none of the 33 API
 responses behind the child's page, Monitoring and Results & Reports with
 history hidden, and in all of them with it carried.
 
-Left as it was: the child's "instruments used" lists test names from every
-pre-assessment. A test's name is not an opinion, and the page already showed it.
+Review of the first version found what was still worked out from the hidden
+pre-assessments: the child's pre-assessment status ("Answered" beside an empty
+list), the instruments used, and Monitoring's pre-assessment count and last
+activity. Those now come from `accounts.scoping.visible_pre_assessments`, a
+filtered prefetch used by the child's page, the children API and Monitoring.
+Business rules that load a child without it still see every pre-assessment.
+
+Care-gap alerts were left as they are: they are about the agency's process,
+not a colleague's findings, and "pre-assessment overdue" on a child the agency
+has already assessed would send the psychologist to repeat it.
 
 ## Next steps, role by role
 

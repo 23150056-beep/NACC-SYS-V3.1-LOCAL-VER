@@ -126,6 +126,29 @@ class BriefBelongsToWhoeverDraftedItTest(RoleFixture):
         spawn.assert_called_once()
 
 
+    def test_a_brief_drafted_before_history_was_hidden_is_not_served_after(self):
+        # Review of the first version: keyed by user, a psychologist's own
+        # brief drafted while history was carried was still served after the
+        # ISA hid it - the previous psychologist's note included.
+        self.child.assignee_sees_history = True
+        self.child.save()
+        self.assertIn("PREVIOUS PSYCHOLOGIST'S NOTE", self._draft_as(self.psy).data["draft"])
+        self.child.assignee_sees_history = False
+        self.child.save()
+
+        self.assertEqual(self._latest(self.psy).status_code, 404)
+        # Nor does prefetch count the stale one as done.
+        start = timezone.make_aware(datetime.combine(timezone.localdate(), time(12, 0)))
+        Appointment.objects.create(child=self.child, psychologist=self.psy, start=start,
+                                   status=Appointment.SCHEDULED)
+        with patch.object(views, "_start_prefetch_thread"):
+            res = self.client.post("/api/assistant/prefetch-briefs/")
+        self.assertEqual(res.data["queued"], [self.child.id])
+        # Drafted again, it is the psychologist's own notes only, and served.
+        self.assertNotIn("PREVIOUS PSYCHOLOGIST'S NOTE", self._draft_as(self.psy).data["draft"])
+        self.assertEqual(self._latest(self.psy).status_code, 200)
+
+
 class SummaryIsAWriteToTheDocumentTest(RoleFixture):
     """Drafting a summary replaces what is in `ai_summary`, and the screen
     warns that a confirmed one "cannot be recovered". Confirming one saves it
@@ -202,6 +225,47 @@ class SummaryIsAWriteToTheDocumentTest(RoleFixture):
         self.assertEqual(res.status_code, 404)
         theirs.refresh_from_db()
         self.assertEqual(theirs.ai_summary, "Earlier confirmed summary.")
+
+
+    def _summaries_seen_by(self, user):
+        self.client.force_authenticate(user)
+        chart = self.client.get(f"/api/reports/child/{self.child.id}/").data
+        return {
+            "report": self.client.get(
+                f"/api/report-files/?child={self.child.id}").data[0]["ai_summary"],
+            "referral": self.client.get(
+                f"/api/case-referrals/?child={self.child.id}").data[0]["ai_summary"],
+            "chart report": chart["reports"][0]["ai_summary"],
+            "chart referral": chart["case_referrals"][0]["ai_summary"],
+        }
+
+    def test_an_unconfirmed_draft_goes_only_to_those_who_may_confirm_it(self):
+        # Review of the first version: the screen showed a draft only to its
+        # writers, but every reader's API response carried it.
+        PsychologicalReport.objects.filter(pk=self.report.pk).update(
+            ai_summary="REPORT DRAFT", ai_summary_confirmed=False)
+        CaseReferral.objects.filter(pk=self.referral.pk).update(
+            ai_summary="REFERRAL DRAFT", ai_summary_confirmed=False)
+        expected = {
+            self.sw: ("REFERRAL DRAFT", None),
+            self.psy: (None, "REPORT DRAFT"),
+            self.admin: ("REFERRAL DRAFT", "REPORT DRAFT"),
+        }
+        for user, (referral, report) in expected.items():
+            seen = self._summaries_seen_by(user)
+            with self.subTest(user=user.email):
+                self.assertEqual(seen["report"], report)
+                self.assertEqual(seen["chart report"], report)
+                self.assertEqual(seen["referral"], referral)
+                self.assertEqual(seen["chart referral"], referral)
+
+    def test_a_confirmed_summary_is_for_every_reader(self):
+        for user in (self.sw, self.psy, self.admin):
+            seen = self._summaries_seen_by(user)
+            with self.subTest(user=user.email):
+                self.assertEqual(seen["report"], self.CONFIRMED)
+                self.assertEqual(seen["chart referral"],
+                                 "The social worker's confirmed summary.")
 
 
 @override_settings(**HOSTED)

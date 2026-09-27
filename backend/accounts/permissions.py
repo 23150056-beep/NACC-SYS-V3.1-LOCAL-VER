@@ -100,6 +100,16 @@ def is_admin_or_assignee(request, child):
                 and child.assigned_psychologist_id == request.user.id))
 
 
+def writes_case_referrals(request):
+    """Administrators and social workers file, edit and delete case
+    referrals; psychologists read them. The referral viewset's write rule,
+    here because the assistant's summary endpoints and the referral
+    serializer's draft summary apply it too - three copies of a write rule is
+    how the summary endpoints came to check a read rule instead. A social
+    worker is further limited to their own records by scope_to_visible."""
+    return _role_name(request) in (Role.ADMINISTRATOR, Role.STAFF)
+
+
 class ProgressRecordAccess(BasePermission):
     """Progress log & goals. Read: admin/staff/psychologist. Write: admin or the
     child's assigned psychologist (Staff read-only). Object-level restricts a
