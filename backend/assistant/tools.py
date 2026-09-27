@@ -733,6 +733,7 @@ def _resolve_statistics(request, args):
     its number.
     """
     from django.utils import timezone
+    from accounts.models import Role
     from accounts.scoping import role_of, scope_to_visible
     from children.models import Child, TerminationRecord
     from clinical.models import PreAssessment
@@ -833,6 +834,15 @@ def _resolve_statistics(request, args):
         span = " in the last six months"
     else:
         span = ", all time"
+    screen = _stat_screen(measure, by, role_of(request))
+    if screen is _SUMMARY and role_of(request) == Role.STAFF:
+        # A social worker is answered over their own records, and the Agency
+        # Summary counts the whole agency (the owner's choice, 24 Sep 2026).
+        # The link stays - the breakdown is on that screen - but a number
+        # that disagrees with the screen it links to, unexplained, reads as
+        # a wrong answer.
+        notes.append("These are your own records. The Agency Summary counts the "
+                     "whole agency, so its figures can be larger.")
     subject = _stat_subject(measure, status, by, span, total)
     # The figure the question asked for, when it is not the count: "how long
     # do children wait?" is answered in days. `total` stays the number of
@@ -845,8 +855,7 @@ def _resolve_statistics(request, args):
             "status": status if measure == "children" else None,
             "period": period, "total": total, "rows": rows,
             "subject": subject, "title": f"{total} {subject}",
-            "note": " ".join(notes), "figure": figure,
-            "screen": _stat_screen(measure, by, role_of(request))}
+            "note": " ".join(notes), "figure": figure, "screen": screen}
 
 
 def _attendance_note(att):
@@ -1194,6 +1203,8 @@ def _resolve_unassigned_children(request, args):
     child cannot be in it. Empty is the honest answer, and the alternative
     would hand them the agency's whole caseload.
     """
+    from accounts.models import Role
+    from accounts.scoping import role_of
     from children.models import Child
 
     qs = (_scope(request)
@@ -1203,8 +1214,21 @@ def _resolve_unassigned_children(request, args):
     # list itself, and that renderer's own "no open concern matches that
     # wording" is about a different question entirely — seen in the browser
     # answering "which children have no psychologist?" with it.
+    #
+    # And the sentence is about what was searched. It said "Every active child
+    # has a psychologist assigned" to everyone, which for a psychologist - who
+    # can never have an unassigned child in view - was a claim about the
+    # agency made from a query that could not see it.
+    role = role_of(request)
+    if role == Role.PSYCHOLOGIST:
+        empty = ("You see only the children assigned to you, so none of them is "
+                 "unassigned. The ISA assigns new children.")
+    elif role == Role.STAFF:
+        empty = "Every active child in your records has a psychologist assigned."
+    else:
+        empty = "Every active child has a psychologist assigned."
     return {"kind": "children", "concern": "no assigned psychologist",
-            "empty": "Every active child has a psychologist assigned.",
+            "empty": empty,
             "items": [{"id": c.id, "name": c.fullname} for c in qs[:40]]}
 
 

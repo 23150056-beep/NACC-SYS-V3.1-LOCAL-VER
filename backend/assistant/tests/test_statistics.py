@@ -268,6 +268,18 @@ class ScreenLinkTest(StatisticsBase):
         # A psychologist cannot open the Agency Summary. No link beats a dead one.
         self.assertIsNone(self.stats(self.psy, by="age_band")["screen"])
 
+    def test_a_social_worker_is_told_the_summary_counts_more_than_they_asked(self):
+        # Their answer counts their own records; the Agency Summary counts the
+        # agency (the owner's choice, 24 Sep 2026). Linked without a word, the
+        # screen contradicts the answer - the failure this chatbot ranks worst.
+        out = self.stats(self.staff, by="psychologist")
+        self.assertIn("your own records", out["note"])
+        self.assertIn("whole agency", out["note"])
+        # Nobody else is answered over a narrower scope than the screen.
+        self.assertNotIn("your own records", self.stats(self.admin, by="age_band")["note"])
+        # And the Dashboard is theirs too, so it needs no such note.
+        self.assertNotIn("your own records", self.stats(self.staff, by="case_type")["note"])
+
     def test_dashboard_numbers_link_the_dashboard_for_everyone(self):
         for user in (self.admin, self.psy):
             self.assertEqual("/", self.stats(user, by="case_type")["screen"]["path"])

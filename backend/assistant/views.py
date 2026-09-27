@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from accounts.models import Role
 from accounts.scoping import (role_of as _role, role_of_user as _role_of,
                               visible_children)
-from accounts.permissions import IsAdministrator, IsAdminOrStaff
+from accounts.permissions import IsAdministrator, IsAdminOrStaff, is_admin_or_assignee
 from assistant import evaluation, prompts, tools
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.serializers import AssistantSettingSerializer
@@ -160,6 +160,21 @@ class PreSessionBriefView(AssistantBaseView):
                          "disclaimer": DISCLAIMER})
 
 
+def _todays_briefs(user):
+    """Briefs drafted today FOR this user - never anyone else's.
+
+    A brief is written from what its requester may see: the carry-history
+    control (_brief_only_author) decides which remarks go in. Keyed by child
+    alone, the cache handed the first brief of the day to whoever opened the
+    child next, so an administrator's full-history brief reached a newly
+    assigned psychologist the control was hiding that history from - and so
+    did the previous psychologist's own, the same morning as a reassignment.
+    """
+    return AssistantJob.objects.filter(
+        job_type="brief", ok=True, created_by=user,
+        created_at__date=timezone.localdate())
+
+
 class LatestBriefView(AssistantBaseView):
     """Today's already-generated brief, served instantly.
 
@@ -173,9 +188,7 @@ class LatestBriefView(AssistantBaseView):
         except Child.DoesNotExist:
             return Response({"detail": "Not found."},
                             status=status.HTTP_404_NOT_FOUND)
-        job = AssistantJob.objects.filter(
-            job_type="brief", input_ref=f"child:{child.id}", ok=True,
-            created_at__date=timezone.localdate()).first()
+        job = _todays_briefs(request.user).filter(input_ref=f"child:{child.id}").first()
         if not job:
             return Response({"detail": "No brief drafted today."},
                             status=status.HTTP_404_NOT_FOUND)
@@ -184,8 +197,9 @@ class LatestBriefView(AssistantBaseView):
                          "disclaimer": DISCLAIMER})
 
 
-# Children currently being briefed, so two page loads cannot queue the same
-# child twice. Guarded by its own lock; the generation lock lives in services.
+# (user id, child id) pairs currently being briefed, so two page loads cannot
+# queue the same brief twice. Per user, like the briefs themselves. Guarded by
+# its own lock; the generation lock lives in services.
 _IN_FLIGHT = set()
 _IN_FLIGHT_LOCK = threading.Lock()
 
@@ -213,7 +227,7 @@ def _generate_briefs_now(child_ids, user):
                 logger.info("Prefetch skipped child %s: runtime unavailable", child_id)
     finally:
         with _IN_FLIGHT_LOCK:
-            _IN_FLIGHT.difference_update(child_ids)
+            _IN_FLIGHT.difference_update((user.pk, cid) for cid in child_ids)
 
 
 def _start_prefetch_thread(child_ids, user):
@@ -244,18 +258,18 @@ class PrefetchBriefsView(AssistantBaseView):
             start__date=today, psychologist=request.user)
 
         child_ids = list(dict.fromkeys(appts.values_list("child_id", flat=True)))
-        already = set(AssistantJob.objects.filter(
-            job_type="brief", ok=True, created_at__date=today,
+        already = set(_todays_briefs(request.user).filter(
             input_ref__in=[f"child:{cid}" for cid in child_ids]
         ).values_list("input_ref", flat=True))
 
         queued, skipped = [], []
         with _IN_FLIGHT_LOCK:
             for cid in child_ids:
-                if f"child:{cid}" in already or cid in _IN_FLIGHT:
+                key = (request.user.pk, cid)
+                if f"child:{cid}" in already or key in _IN_FLIGHT:
                     skipped.append(cid)
                 else:
-                    _IN_FLIGHT.add(cid)
+                    _IN_FLIGHT.add(key)
                     queued.append(cid)
 
         if queued:
@@ -263,11 +277,63 @@ class PrefetchBriefsView(AssistantBaseView):
         return Response({"queued": queued, "skipped": skipped})
 
 
-# kind -> (model, input_ref prefix, human label for the prompt, author field name)
+def _writes_reports(request, doc):
+    # _ChildScopedClinicalViewSet._assert_can_write: an administrator, or the
+    # psychologist the child is assigned to. Staff read reports, never write.
+    return is_admin_or_assignee(request, doc.child)
+
+
+def _writes_referrals(request, doc):
+    # CaseReferralViewSet._assert_can_write: administrators and social workers.
+    # A social worker only ever reaches their own records here, because the
+    # document was found through visible_children.
+    return _role(request) in (Role.ADMINISTRATOR, Role.STAFF)
+
+
+# kind -> (model, input_ref prefix, human label for the prompt, author field
+#          name, who may write the document, what anyone else is told)
 _DOC_KINDS = {
-    "report": (PsychologicalReport, "report", "psychological report", "author"),
-    "case-referral": (CaseReferral, "casereferral", "case referral", "uploaded_by"),
+    "report": (PsychologicalReport, "report", "psychological report", "author",
+               _writes_reports,
+               "Only the child's psychologist or an administrator can summarise "
+               "a psychological report."),
+    "case-referral": (CaseReferral, "casereferral", "case referral", "uploaded_by",
+                      _writes_referrals,
+                      "Only a social worker or an administrator can summarise a "
+                      "case referral."),
 }
+
+
+def _document_to_summarise(request, kind, doc_id):
+    """(document, None) when this caller may put a summary on it, else
+    (None, the refusal).
+
+    Summarising and confirming are both WRITES to the document: a draft
+    replaces what is in `ai_summary` - the screen warns a confirmed one
+    "cannot be recovered" - and a confirmation saves text as the
+    psychologist's own. They used to check only that the caller could READ
+    the document, so a social worker could replace a psychologist's confirmed
+    summary, a psychologist a social worker's, and either could save words of
+    their own in its place. One helper for both, so the two cannot differ
+    again; confirming had already lost the carry-history check below.
+    """
+    model, _, _, author_field, may_write, refusal = _DOC_KINDS[kind]
+    doc = (model.objects.select_related("child")
+           .filter(pk=doc_id, child__in=visible_children(request)).first())
+    # Carry-history control: without it, a newly assigned psychologist must
+    # not have a document they did not author fed to the model, since the
+    # draft it produces would surface facts this screen otherwise hides - nor
+    # overwrite the summary of a document the screen does not show them.
+    if doc is not None and (
+            _role(request) == Role.PSYCHOLOGIST and not doc.child.assignee_sees_history
+            and getattr(doc, f"{author_field}_id") != request.user.id):
+        doc = None
+    if doc is None:
+        return None, Response({"detail": "Not found."},
+                              status=status.HTTP_404_NOT_FOUND)
+    if not may_write(request, doc):
+        return None, Response({"detail": refusal}, status=status.HTTP_403_FORBIDDEN)
+    return doc, None
 
 
 class DocumentSummaryView(AssistantBaseView):
@@ -281,19 +347,10 @@ class DocumentSummaryView(AssistantBaseView):
 
     def post(self, request, doc_id):
         gate()
-        model, prefix, label, author_field = _DOC_KINDS[self.kind]
-        doc = model.objects.filter(
-            pk=doc_id, child__in=visible_children(request)).first()
-        if not doc:
-            return Response({"detail": "Not found."},
-                            status=status.HTTP_404_NOT_FOUND)
-        # Carry-history control: without it, a newly assigned psychologist must
-        # not have a document they did not author fed to the model, since the
-        # draft it produces would surface facts this screen otherwise hides.
-        if (_role(request) == Role.PSYCHOLOGIST and not doc.child.assignee_sees_history
-                and getattr(doc, f"{author_field}_id") != request.user.id):
-            return Response({"detail": "Not found."},
-                            status=status.HTTP_404_NOT_FOUND)
+        _, prefix, label, *_ = _DOC_KINDS[self.kind]
+        doc, refused = _document_to_summarise(request, self.kind, doc_id)
+        if refused:
+            return refused
         if not ensure_text(doc).strip():
             return Response(
                 {"detail": "No text could be extracted from this document."},
@@ -324,12 +381,10 @@ class ConfirmSummaryView(AssistantBaseView):
     kind = None
 
     def post(self, request, doc_id):
-        model, prefix, _, _ = _DOC_KINDS[self.kind]
-        doc = model.objects.filter(
-            pk=doc_id, child__in=visible_children(request)).first()
-        if not doc:
-            return Response({"detail": "Not found."},
-                            status=status.HTTP_404_NOT_FOUND)
+        prefix = _DOC_KINDS[self.kind][1]
+        doc, refused = _document_to_summarise(request, self.kind, doc_id)
+        if refused:
+            return refused
         text = request.data.get("text")
         if not isinstance(text, str) or not text.strip():
             return Response({"detail": "A confirmed summary cannot be empty."},
@@ -531,7 +586,7 @@ class AssistantCheckView(AssistantBaseView):
                              "detail": "The assistant is switched off."})
         started = time.monotonic()
         try:
-            get_ai_client().generate("Reply with the single word: OK.")
+            get_ai_client(allow_hosted=True).generate("Reply with the single word: OK.")
         except AIUnavailable as exc:
             return Response({"ok": False, "latency_ms": None, "detail": str(exc)})
         elapsed = int((time.monotonic() - started) * 1000)
@@ -664,7 +719,9 @@ class AssistantAskView(AssistantBaseView):
                 {"detail": f"Keep the question under {MAX_QUESTION} characters."},
                 status=status.HTTP_400_BAD_REQUEST)
 
-        client = get_ai_client()
+        # The one feature whose prompt may leave the machine: it is the typed
+        # question, and records only ever come back from the database.
+        client = get_ai_client(allow_hosted=True)
         creator = request.user if request.user.is_authenticated else None
         started = time.monotonic()
         try:
@@ -751,7 +808,7 @@ class ModelHealthView(AssistantBaseView):
             return Response({"reachable": False, "provider": "off", "model": "",
                              "detail": "The assistant is switched off."})
 
-        client = get_ai_client()
+        client = get_ai_client(allow_hosted=True)
         provider = ("hosted" if isinstance(client, OpenAICompatibleClient)
                     else "local")
         model = getattr(client, "model", "")

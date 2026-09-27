@@ -27,11 +27,16 @@ class Command(BaseCommand):
         # "qwen2.5:3b-instruct / localhost:11434" while timing a Cloudflare
         # model, which is the wrong answer from the one command whose whole
         # job is saying what the assistant is talking to.
-        client = get_ai_client()
+        client = get_ai_client(allow_hosted=True)
         hosted = not isinstance(client, OllamaClient)
         self.stdout.write(f"URL:   {client.base_url}")
         self.stdout.write(f"Model: {client.model}")
         self.stdout.write(f"Where: {'HOSTED' if hosted else 'local runtime'}")
+        if hosted:
+            # What answers the chatbot is not what drafts: that stays local,
+            # so on this deployment it does not run at all.
+            self.stdout.write("Drafting: off - briefs, summaries, polish and the "
+                              "self-report check never use a hosted model.")
 
         started = time.monotonic()
         try:

@@ -425,6 +425,20 @@ Settings, no per-feature flags.
 - **`manage.py ai_eval` measures all of that**; `manage.py ai_check` says
   whether the runtime is reachable. Neither runs in the test suite — both need
   a live Ollama. Never claim the output is fine without running `ai_eval`.
+- **A brief belongs to whoever drafted it** (27 Sep 2026). It is written from
+  what its requester may see, so `LatestBriefView` and prefetch look up
+  today's brief by user AND child. Keyed by child alone it handed an ISA's
+  full-history brief to a psychologist whose screen hides that history.
+- **Summarising and confirming are writes to the document**, checked by
+  `_document_to_summarise`: reports by `is_admin_or_assignee`, referrals by
+  administrator or staff — the documents' own viewset rules — plus the
+  carry-history check. Checked as reads, a social worker could replace a
+  psychologist's confirmed summary for good. The buttons are hidden to match.
+- **`get_ai_client()` refuses a hosted model unless the caller passes
+  `allow_hosted=True`.** Only the chatbot, the two administrator probes,
+  `ai_check` and `ai_eval` do. Everything else drafts from case records and
+  answers 503 on a hosted deployment. Audit and next steps:
+  `docs/superpowers/specs/2026-09-27-assistant-role-access-design.md`.
 
 ## The chatbot
 
@@ -808,7 +822,8 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   four times faster than the local 3B, same accuracy.
 - **Only the chatbot is hosted.** Polish drifts 67% on Taglish and the
   self-report detector missed 28%; both belong to `qwen2.5:3b` and transfer to
-  nothing.
+  nothing. Enforced in code since 27 Sep 2026 (`allow_hosted`, above); until
+  then every drafting feature used the hosted model once the flag was on.
 - **Cloudflare retires models** — `llama-3.1-8b` returns 410. Check
   `/api/assistant/model-health/` before assuming the code broke.
 
