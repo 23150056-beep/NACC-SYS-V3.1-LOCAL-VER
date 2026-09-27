@@ -98,19 +98,32 @@ already said it was. Nothing is deployed until this branch reaches `cloud-setup`
   about the agency from a query that cannot see it. Each role is now told what
   was actually checked.
 
-## Found, not fixed here — outside the assistant
+## Found outside the assistant, and fixed too
 
-**The clinical list endpoints ignore the carry-history control.** The child's
-page hides a previous psychologist's notes when `assignee_sees_history` is off,
-but `GET /api/remarks/?child=<id>` returns them. Verified with a throwaway test on
-27 Sep 2026: the chart returned no remarks, and the list endpoint returned the
-previous psychologist's note. The same base class, `_ChildScopedClinicalViewSet`,
-serves `/report-files/`, `/interviews/`, `/treatment-plans/` and `/result-entries/`,
-so all four are expected to leak the same way. The screens do not call these for
-another author's rows, so nobody sees it by accident. It is a side door for
-anyone reading the API. The fix belongs in `_ChildScopedClinicalViewSet.get_queryset`,
-the same author filter `ChildReportView` applies. It is not part of this change
-because it is not the assistant.
+**The carry-history control was applied on the child's page and nowhere else.**
+With `assignee_sees_history` off, the page hid the previous psychologist's
+records, but the endpoints behind it served them:
+
+- `GET /api/remarks/?child=<id>` returned the previous psychologist's notes,
+  and `/report-files/`, `/interviews/`, `/treatment-plans/`, `/result-entries/`
+  and `/pre-assessments/` did the same through their shared base class;
+- the previous psychologist's report could be downloaded and read as text;
+- their note could be **edited** — the write check lets the child's
+  psychologist edit any of the child's records;
+- Monitoring printed each child's latest remark and classification whoever
+  wrote them, and counted reports the page did not list.
+
+The rule is now `accounts.scoping.hide_earlier_history`, beside
+`scope_to_visible`, and every one of those readers goes through it — the
+child's page included, so the page and the endpoints cannot disagree again.
+The record base class hides by default; problems and consents opt out, as the
+page always had them. `clinical/tests/test_carry_history.py` holds each door,
+and a browser check on 27 Sep found the planted note in none of the 33 API
+responses behind the child's page, Monitoring and Results & Reports with
+history hidden, and in all of them with it carried.
+
+Left as it was: the child's "instruments used" lists test names from every
+pre-assessment. A test's name is not an opinion, and the page already showed it.
 
 ## Next steps, role by role
 

@@ -10,7 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.models import Role
-from accounts.scoping import role_of as _role, scope_to_visible
+from accounts.scoping import hide_earlier_history, role_of as _role, scope_to_visible
 from accounts.permissions import CanManageInstruments, ProgressRecordAccess
 from activity.models import ActivityLog
 from activity.services import log_activity
@@ -208,6 +208,11 @@ class _ChildScopedClinicalViewSet(viewsets.ModelViewSet):
     pagination_class = None
     model = None
     author_field = None  # set by subclass: who recorded the row
+    # The carry-history control (accounts.scoping.hide_earlier_history). On by
+    # default so a new record type is covered unless it says otherwise; only
+    # the child's page applied it until 27 Sep 2026, and every endpoint here
+    # served the rows that page hid - to read, to download and to edit.
+    hides_history = True
 
     def get_queryset(self):
         # The author comes along with the child, because every serializer in
@@ -224,6 +229,8 @@ class _ChildScopedClinicalViewSet(viewsets.ModelViewSet):
                 return qs.none()
             qs = qs.filter(child_id=child_id)
         qs = scope_to_visible(qs, self.request)
+        if self.hides_history:
+            qs = hide_earlier_history(qs, self.request, self.author_field)
         return qs
 
     def _assert_can_write(self, child):
@@ -315,6 +322,9 @@ class ConsentRecordViewSet(_ChildScopedClinicalViewSet):
     model = ConsentRecord
     serializer_class = ConsentRecordSerializer
     author_field = "recorded_by"
+    # A guardian's signature is not a colleague's opinion, and the next
+    # psychologist's pre-assessment needs it on file.
+    hides_history = False
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     @action(detail=True, methods=["get"])
@@ -365,6 +375,9 @@ class ProblemEntryViewSet(_ChildScopedClinicalViewSet):
     model = ProblemEntry
     serializer_class = ProblemEntrySerializer
     author_field = "logged_by"
+    # The presenting problems are the case, not an opinion about it; the
+    # child's page has always shown them whoever logged them.
+    hides_history = False
 
 
 class PsychologicalReportViewSet(_ChildScopedClinicalViewSet):

@@ -79,3 +79,29 @@ def scope_to_visible(qs, request, path="child"):
         return qs.none()
     field = owner if path is None else f"{path}__{owner}"
     return qs.filter(**{field: request.user})
+
+
+def hide_earlier_history(qs, request, author_field, path="child"):
+    """Narrow a queryset of clinical records to the carry-history control.
+
+    `Child.assignee_sees_history = False` spares a newly assigned psychologist
+    a colleague's prior opinions: of that child's records they see only what
+    they wrote themselves. Everyone else, and every child whose history is
+    carried, is untouched - so, like scope_to_visible, this is safe to apply
+    unconditionally.
+
+    `author_field` is who wrote the row ("author", "entered_by", ...). A row
+    whose author was deleted has none, and is hidden with the rest: nobody can
+    say it was theirs.
+
+    It lives here because it is the same kind of rule as scope_to_visible and
+    had the same history: written out once, on the child's page, while the
+    record endpoints and Monitoring served the rows that page had just hidden.
+    Apply it after scope_to_visible, never instead of it.
+    """
+    from django.db.models import Q
+
+    if role_of(request) != Role.PSYCHOLOGIST:
+        return qs
+    return qs.filter(Q(**{f"{path}__assignee_sees_history": True})
+                     | Q(**{author_field: request.user}))
