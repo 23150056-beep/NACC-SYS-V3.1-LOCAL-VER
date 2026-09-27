@@ -151,3 +151,41 @@ class ScreensAgreeTest(CarryHistoryBase):
         row = self.client.get("/api/reports/monitoring/").data[0]
         self.assertEqual(row["latest_remark"], "THEIRS")
         self.assertEqual(row["report_count"], 2)
+
+    def test_what_is_worked_out_from_pre_assessments_follows_them(self):
+        """Review of the first version: the rows were hidden, but the child's
+        pre-assessment status, the instruments used, and Monitoring's count and
+        last activity were still worked out from every pre-assessment - so
+        "Answered" and the previous psychologist's test titles sat beside an
+        empty pre-assessment list."""
+        from clinical.models import InstrumentCatalog
+        PreAssessment.objects.filter(psychologist=self.previous).update(
+            status=PreAssessment.COMPLETED, date="2099-01-01")
+        theirs = PreAssessment.objects.get(psychologist=self.previous)
+        theirs.instruments.add(InstrumentCatalog.objects.create(title="PREVIOUS-TEST-TITLE"))
+
+        def seen_by(user):
+            self.client.force_authenticate(user)
+            chart = self.client.get(f"/api/reports/child/{self.child.id}/").data["child"]
+            record = self.client.get(f"/api/children/{self.child.id}/").data
+            listed = next(c for c in self.client.get("/api/children/").data
+                          if c["id"] == self.child.id)
+            row = self.client.get("/api/reports/monitoring/").data[0]
+            return chart, record, listed, row
+
+        for chart_or_record in seen_by(self.psy)[:3]:
+            self.assertEqual(chart_or_record["pre_assessment_status"], Child.PA_IN_PROGRESS)
+            self.assertEqual(chart_or_record["instruments_used"], [])
+        row = seen_by(self.psy)[3]
+        self.assertEqual(row["pre_assessment_status"], Child.PA_IN_PROGRESS)
+        self.assertEqual(row["pre_assessment_count"], 0)
+        self.assertNotEqual(row["last_activity"], "2099-01-01")
+
+        # The control: the record really has a completed one, and the ISA
+        # is shown it everywhere.
+        chart, record, listed, row = seen_by(self.admin)
+        for seen in (chart, record, listed, row):
+            self.assertEqual(seen["pre_assessment_status"], Child.PA_ANSWERED)
+        self.assertEqual(chart["instruments_used"], ["PREVIOUS-TEST-TITLE"])
+        self.assertEqual(row["pre_assessment_count"], 1)
+        self.assertEqual(row["last_activity"], "2099-01-01")

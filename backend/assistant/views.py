@@ -13,7 +13,8 @@ from rest_framework.response import Response
 from accounts.models import Role
 from accounts.scoping import (role_of as _role, role_of_user as _role_of,
                               visible_children)
-from accounts.permissions import IsAdministrator, IsAdminOrStaff, is_admin_or_assignee
+from accounts.permissions import (IsAdministrator, IsAdminOrStaff, is_admin_or_assignee,
+                                  writes_case_referrals)
 from assistant import evaluation, prompts, tools
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.serializers import AssistantSettingSerializer
@@ -175,6 +176,23 @@ def _todays_briefs(user):
         created_at__date=timezone.localdate())
 
 
+def _current_brief(user, child):
+    """Today's brief of this child for this user, if it can still be served.
+
+    Per user is not enough on its own. A brief drafted while the child's
+    history was carried quotes the previous psychologist; once the ISA hides
+    that history, the same psychologist's brief of that morning still did. So
+    where history is hidden from this user, a brief older than the child
+    record's last change is not served - it may have been drafted under the
+    other setting - and is drafted again from what the user may now see.
+    Found in review of the first version.
+    """
+    briefs = _todays_briefs(user).filter(input_ref=f"child:{child.id}")
+    if _brief_only_author(child, user, _role_of(user)) is not None:
+        briefs = briefs.filter(created_at__gte=child.updated_at)
+    return briefs.first()
+
+
 class LatestBriefView(AssistantBaseView):
     """Today's already-generated brief, served instantly.
 
@@ -188,7 +206,7 @@ class LatestBriefView(AssistantBaseView):
         except Child.DoesNotExist:
             return Response({"detail": "Not found."},
                             status=status.HTTP_404_NOT_FOUND)
-        job = _todays_briefs(request.user).filter(input_ref=f"child:{child.id}").first()
+        job = _current_brief(request.user, child)
         if not job:
             return Response({"detail": "No brief drafted today."},
                             status=status.HTTP_404_NOT_FOUND)
@@ -258,15 +276,16 @@ class PrefetchBriefsView(AssistantBaseView):
             start__date=today, psychologist=request.user)
 
         child_ids = list(dict.fromkeys(appts.values_list("child_id", flat=True)))
-        already = set(_todays_briefs(request.user).filter(
-            input_ref__in=[f"child:{cid}" for cid in child_ids]
-        ).values_list("input_ref", flat=True))
+        # A day's sessions, so a query per child is a handful - and one rule
+        # for what counts as done, shared with LatestBriefView.
+        already = {child.id for child in visible.filter(pk__in=child_ids)
+                   if _current_brief(request.user, child)}
 
         queued, skipped = [], []
         with _IN_FLIGHT_LOCK:
             for cid in child_ids:
                 key = (request.user.pk, cid)
-                if f"child:{cid}" in already or key in _IN_FLIGHT:
+                if cid in already or key in _IN_FLIGHT:
                     skipped.append(cid)
                 else:
                     _IN_FLIGHT.add(key)
@@ -284,10 +303,10 @@ def _writes_reports(request, doc):
 
 
 def _writes_referrals(request, doc):
-    # CaseReferralViewSet._assert_can_write: administrators and social workers.
-    # A social worker only ever reaches their own records here, because the
-    # document was found through visible_children.
-    return _role(request) in (Role.ADMINISTRATOR, Role.STAFF)
+    # CaseReferralViewSet's rule: administrators and social workers. A social
+    # worker only ever reaches their own records here, because the document
+    # was found through visible_children.
+    return writes_case_referrals(request)
 
 
 # kind -> (model, input_ref prefix, human label for the prompt, author field

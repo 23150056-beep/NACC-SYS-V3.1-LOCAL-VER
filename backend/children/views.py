@@ -9,7 +9,7 @@ from accounts.display import display_name
 from accounts.models import Role
 from accounts.permissions import (ChildRecordAccess,
                                   is_admin_or_assignee)
-from accounts.scoping import role_of, scope_to_visible
+from accounts.scoping import role_of, scope_to_visible, visible_pre_assessments
 from activity.models import ActivityLog
 from activity.services import log_activity
 from children.models import Child, TerminationRecord
@@ -93,7 +93,9 @@ class ChildViewSet(viewsets.ModelViewSet):
         # case_referrals joins the prefetch so has_case_referral costs one
         # query for the page rather than one per child — the list returns
         # the whole caseload on several screens.
-        qs = qs.prefetch_related("pre_assessments__instruments", "terminations",
+        # Pre-assessments under the carry-history control, because the
+        # status and the instruments used are worked out from them.
+        qs = qs.prefetch_related(visible_pre_assessments(self.request), "terminations",
                                  "consents", "case_referrals")
         # psychologist_name is rendered on every row, so without this the list
         # costs an extra query per child: 47 for 40 children, against 7 with

@@ -428,12 +428,15 @@ Settings, no per-feature flags.
 - **A brief belongs to whoever drafted it** (27 Sep 2026). It is written from
   what its requester may see, so `LatestBriefView` and prefetch look up
   today's brief by user AND child. Keyed by child alone it handed an ISA's
-  full-history brief to a psychologist whose screen hides that history.
+  full-history brief to a psychologist whose screen hides that history. Where
+  history is hidden, a brief older than the child's `updated_at` is drafted
+  again (`_current_brief`): it may predate the ISA hiding it.
 - **Summarising and confirming are writes to the document**, checked by
   `_document_to_summarise`: reports by `is_admin_or_assignee`, referrals by
   administrator or staff — the documents' own viewset rules — plus the
   carry-history check. Checked as reads, a social worker could replace a
-  psychologist's confirmed summary for good. The buttons are hidden to match.
+  psychologist's confirmed summary for good. The buttons are hidden to match,
+  and the serializers return an UNCONFIRMED draft only to those same writers.
 - **`get_ai_client()` refuses a hosted model unless the caller passes
   `allow_hosted=True`.** Only the chatbot, the two administrator probes,
   `ai_check` and `ai_eval` do. Everything else drafts from case records and
@@ -531,7 +534,10 @@ Built 27 Aug 2026. Flags distress in a child's own words. Design in
   child's page applied it, so `/api/remarks/?child=` served the notes it hid,
   and the next psychologist could even edit them. The record base class hides
   by default; problems and consents opt out, as the page always had them.
-  `clinical/tests/test_carry_history.py`.
+  What is worked out FROM pre-assessments (status, instruments used,
+  Monitoring's count and last activity) reads the prefetch, so every screen
+  that shows it prefetches through `visible_pre_assessments`; care-gap alerts
+  deliberately do not. `clinical/tests/test_carry_history.py`.
 - `manage.py scan_self_reports` backfills and is idempotent; re-run it after
   adding a phrase.
 

@@ -11,7 +11,7 @@ from rest_framework.response import Response
 
 from accounts.models import Role
 from accounts.scoping import hide_earlier_history, role_of as _role, scope_to_visible
-from accounts.permissions import CanManageInstruments, ProgressRecordAccess
+from accounts.permissions import CanManageInstruments, ProgressRecordAccess, writes_case_referrals
 from activity.models import ActivityLog
 from activity.services import log_activity
 from clinical.models import (
@@ -475,7 +475,7 @@ class CaseReferralViewSet(viewsets.ModelViewSet):
         return qs
 
     def _assert_can_write(self):
-        if _role(self.request) not in (Role.ADMINISTRATOR, Role.STAFF):
+        if not writes_case_referrals(self.request):
             raise PermissionDenied("Only social workers or administrators upload case referrals.")
 
     def perform_create(self, serializer):
