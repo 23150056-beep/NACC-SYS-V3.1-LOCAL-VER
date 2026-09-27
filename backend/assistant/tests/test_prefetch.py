@@ -77,9 +77,11 @@ class PrefetchTest(APITestCase):
 
     def test_skips_children_that_already_have_a_brief_today(self):
         self._appointment(self.mine, self.psy)
+        # Their own: a brief somebody else drafted is not theirs to read
+        # (test_role_access), so it would not count as done.
         AssistantJob.objects.create(
             job_type="brief", input_ref=f"child:{self.mine.id}", ok=True,
-            output_text="already done")
+            output_text="already done", created_by=self.psy)
         with patch.object(views, "_start_prefetch_thread"):
             res = self.client.post(URL)
         self.assertEqual(res.data["queued"], [])

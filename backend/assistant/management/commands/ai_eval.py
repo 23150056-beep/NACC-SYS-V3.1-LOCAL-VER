@@ -251,7 +251,9 @@ class Command(BaseCommand):
             self.stdout.write("The assistant is switched off — nothing to evaluate.")
             raise SystemExit(1)
 
-        self.client = get_ai_client()
+        # A measurement, run by hand, and the step the docs require before a
+        # drafting feature runs on any other model - so it may reach one.
+        self.client = get_ai_client(allow_hosted=True)
         self.stdout.write(f"Model: {cfg.model_name}   reps: {options['reps']}\n")
 
         totals = []

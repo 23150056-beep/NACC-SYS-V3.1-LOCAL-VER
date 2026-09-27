@@ -34,15 +34,28 @@ class AIUnavailable(Exception):
     """Raised whenever a draft cannot be produced. Always surfaces as a 503."""
 
 
+SWITCHED_OFF = "The assistant is switched off."
+
+# Said when a drafting feature is asked for on a deployment whose model is
+# hosted. The drafting features send case notes, whole reports and a child's
+# own answers; the chatbot sends only the question.
+HOSTED_DRAFTING_REFUSED = (
+    "This deployment runs the chatbot on a hosted model, and drafting from "
+    "case records is kept to the agency's own machine.")
+
+
 class NullClient:
     available = False
     model = ""
 
+    def __init__(self, reason=SWITCHED_OFF):
+        self.reason = reason
+
     def generate(self, prompt, system=None):
-        raise AIUnavailable("The assistant is switched off.")
+        raise AIUnavailable(self.reason)
 
     def choose_tool(self, question, tool_payload, system=None):
-        raise AIUnavailable("The assistant is switched off.")
+        raise AIUnavailable(self.reason)
 
 
 class OllamaClient:
@@ -106,7 +119,18 @@ class OllamaClient:
         return fn.get("name"), fn.get("arguments") or {}
 
 
-def get_ai_client():
+def hosted_model_configured():
+    """True when this deployment has consented to, and configured, a hosted
+    model. Credentials alone are not consent; see settings.py."""
+    from django.conf import settings
+
+    return bool(settings.ASSISTANT_ALLOW_HOSTED_MODEL
+                and settings.ASSISTANT_MODEL_URL
+                and settings.ASSISTANT_MODEL_TOKEN
+                and settings.ASSISTANT_MODEL_NAME)
+
+
+def get_ai_client(*, allow_hosted=False):
     """The one place that decides which model answers.
 
     Order matters. The administrator's off switch outranks everything; then a
@@ -114,10 +138,22 @@ def get_ai_client():
     credentials; otherwise the local runtime, which is the default and the only
     one where nothing leaves the machine.
 
-    The hosted branch deliberately ignores AssistantSetting.ollama_url. That
+    `allow_hosted` is the caller saying its prompt may leave the machine. Only
+    the chatbot says so - its prompt is the typed question, never a record -
+    and the probes that test it. Everything else drafts from case records:
+    briefs from case notes, summaries from whole reports, polish from a note
+    being written, the self-report check from a child's own answers. "Only the
+    chatbot runs on the hosted model" was written down three times (CLAUDE.md,
+    CLOUD-DEPLOYMENT.md, the deployment plan) and enforced nowhere, so with
+    the flag on every one of those went to the hosted provider. Refusing is
+    the default so that a new caller has to opt in rather than remember to
+    opt out.
+
+    A drafting caller on a hosted deployment is refused, not sent to the local
+    runtime: the hosted branch ignores AssistantSetting.ollama_url because that
     field is administrator-editable, so on a public deployment anyone holding
     administrator credentials could otherwise repoint the model at a host they
-    control and capture every prompt.
+    control and capture every prompt. The same reasoning covers drafting.
     """
     from django.conf import settings
 
@@ -125,10 +161,9 @@ def get_ai_client():
     if not cfg.enabled:
         return NullClient()
 
-    if (settings.ASSISTANT_ALLOW_HOSTED_MODEL
-            and settings.ASSISTANT_MODEL_URL
-            and settings.ASSISTANT_MODEL_TOKEN
-            and settings.ASSISTANT_MODEL_NAME):
+    if hosted_model_configured():
+        if not allow_hosted:
+            return NullClient(HOSTED_DRAFTING_REFUSED)
         # Said out loud, every time, so "which model answered this" is never a
         # guess. The token is never logged.
         logger.info("Assistant is using the HOSTED model %s at %s",

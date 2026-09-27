@@ -135,6 +135,13 @@ export default function ChildProgressReport() {
   const { child } = data;
   const canWrite = isPsych && String(child.psychologist) === String(user?.id);
   const canAdvance = canWrite || user?.role_name === 'Administrator';
+  // A summary is written onto the document, so it follows the document's own
+  // write rule (assistant/views.py _DOC_KINDS): a report is its psychologist's
+  // or an administrator's, a referral a social worker's or an administrator's.
+  // Offered to anyone else, "Re-summarise" replaced another person's confirmed
+  // summary for good.
+  const canSummariseReport = canAdvance;
+  const canSummariseReferral = isStaffOrAdmin;
   const activePlan = (data.treatment_plans || []).find((p) => p.status === 'active') || (data.treatment_plans || [])[0];
   const csMeta = CASE_STATUS_META[child.case_status] || CASE_STATUS_META.pre_assessment;
 
@@ -689,12 +696,14 @@ export default function ChildProgressReport() {
                   )}
                   <ReportCheckNote report={f} canReview={canAdvance} onReviewed={load} />
                 </div>
-                <Button variant="ghost" size="sm" disabled={summaryBusy} className="racco-no-print"
-                        onClick={() => f.ai_summary_confirmed
-                          ? setConfirmResummarize({ kind: 'report', id: f.id, filename: f.original_filename })
-                          : draftSummary('report', f.id)}>
-                  {f.ai_summary ? 'Re-summarise' : 'AI summary'}
-                </Button>
+                {canSummariseReport && (
+                  <Button variant="ghost" size="sm" disabled={summaryBusy} className="racco-no-print"
+                          onClick={() => f.ai_summary_confirmed
+                            ? setConfirmResummarize({ kind: 'report', id: f.id, filename: f.original_filename })
+                            : draftSummary('report', f.id)}>
+                    {f.ai_summary ? 'Re-summarise' : 'AI summary'}
+                  </Button>
+                )}
                 {f.ai_summary && (
                   <Badge tone={f.ai_summary_confirmed ? 'success' : 'amber'} size="sm">
                     {f.ai_summary_confirmed ? 'Confirmed' : 'Draft (unconfirmed)'}
@@ -842,12 +851,14 @@ export default function ChildProgressReport() {
                     </div>
                   )}
                 </div>
-                <Button variant="ghost" size="sm" disabled={summaryBusy} className="racco-no-print"
-                        onClick={() => f.ai_summary_confirmed
-                          ? setConfirmResummarize({ kind: 'case-referral', id: f.id, filename: f.original_filename })
-                          : draftSummary('case-referral', f.id)}>
-                  {f.ai_summary ? 'Re-summarise' : 'AI summary'}
-                </Button>
+                {canSummariseReferral && (
+                  <Button variant="ghost" size="sm" disabled={summaryBusy} className="racco-no-print"
+                          onClick={() => f.ai_summary_confirmed
+                            ? setConfirmResummarize({ kind: 'case-referral', id: f.id, filename: f.original_filename })
+                            : draftSummary('case-referral', f.id)}>
+                    {f.ai_summary ? 'Re-summarise' : 'AI summary'}
+                  </Button>
+                )}
                 {f.ai_summary && (
                   <Badge tone={f.ai_summary_confirmed ? 'success' : 'amber'} size="sm">
                     {f.ai_summary_confirmed ? 'Confirmed' : 'Draft (unconfirmed)'}

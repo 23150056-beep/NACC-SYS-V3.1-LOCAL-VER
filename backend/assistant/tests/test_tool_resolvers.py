@@ -825,6 +825,25 @@ class UnassignedChildrenResolverTest(ResolverTestBase):
         self.assertIn("psychologist", out["empty"].lower())
         self.assertNotIn("concern", out["empty"].lower())
 
+    def test_nobody_is_told_something_about_children_they_cannot_see(self):
+        # A psychologist's scope holds only children assigned to them, so this
+        # is always empty for them - and the sentence used to be "Every active
+        # child has a psychologist assigned", a claim about the agency made
+        # with Nena Bautista sitting unassigned. Each role is told what was
+        # actually checked.
+        out = self._resolve(self.psy, "list_unassigned_children", {})
+        self.assertNotIn("every active child", out["empty"].lower())
+        self.assertIn("assigned to you", out["empty"])
+
+        staff = User.objects.create_user(
+            email="s@racco1.gov.ph", username="s", password="pass1234",
+            role=Role.objects.get_or_create(role_name=Role.STAFF)[0])
+        self.assertIn("your records", self._resolve(staff, "list_unassigned_children", {})["empty"])
+
+        self.orphaned.delete()
+        self.assertEqual("Every active child has a psychologist assigned.",
+                         self._resolve(self.admin, "list_unassigned_children", {})["empty"])
+
     def test_a_terminated_child_is_not_chased(self):
         self.orphaned.status = "terminated"
         self.orphaned.save()
