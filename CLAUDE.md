@@ -752,6 +752,41 @@ Rules in `children/assignment.py`; design in
   Terminating a case withdraws its open request. Existing assignments were
   not migrated: children already assigned stay assigned.
 
+## Closing a case: two reason lists
+
+Owner's request, 28 Sep 2026 (`children/termination.py`; design in
+`docs/superpowers/specs/2026-09-28-interview-upload-and-closure-reasons-design.md`).
+The ISA closes for where the child went (`TerminationRecord.CASE_OUTCOMES`,
+unchanged). A psychologist closes for where the clinical work ended
+(`TerminationRecord.CLINICAL`), and each of those is offered only when the
+record bears it out:
+
+- **Counseling completed** needs a Session or Follow-up marked *completed* on
+  the calendar. The Counseling stage alone is not a session held.
+- **Favorable pre-assessment** and **Pre-assessment only** need a completed
+  pre-assessment and no counseling at all (not in Counseling, no session held).
+- **Counseling discontinued** needs counseling started (Counseling stage, or a
+  session booked or held, cancelled ones aside). Referred elsewhere and Other
+  are always open.
+- **The dialog asks `/children/{id}/closure-reasons/` and the terminate
+  endpoint refuses by the same function** — never add a reason to one side.
+  `test_every_offer_marked_open_is_accepted` holds them together, and
+  `caseData.js` keeps both lists (for the archive filter) pinned by a test.
+- Neither role can use the other's list. Past closures keep what they were
+  written with.
+
+## Interview templates by upload
+
+The Clinical interview step (pre-assessment step 3) has **Upload a template**:
+a Word or PDF interview form is read by `clinical/form_import.py` (on top of
+the report reader in `clinical/services.py`) into a DRAFT — headings become
+sections, lines under them questions, `Label: ____` short text — and nothing
+is saved until the psychologist reviews it and saves through the ordinary
+`POST /form-templates/`, attestation included. Measured on the agency's own
+`docs/agency-forms/Pre-assessment.docx`: 19 sections, 80 questions, both
+questionnaires. Answers are keyed by question wording, so a repeated question
+gets "(2)" rather than sharing an answer. `.doc` is refused with what to do.
+
 ## Names on the schedule
 
 Owner's decision, 24 Sep 2026, in `scheduling/visibility.py`: on the calendar

@@ -29,6 +29,7 @@ _CONSENT_CONTENT_TYPES = {
     "heic": "image/heic", "heif": "image/heif",
 }
 
+from clinical import form_import
 from clinical.serializers import (
     ALLOWED_CONSENT_EXTENSIONS,
     InstrumentCatalogSerializer, AgencyFormTemplateSerializer,
@@ -40,7 +41,7 @@ from clinical.serializers import (
 )
 from clinical.self_report_detection import detect_concerns
 from clinical.self_report_model_check import start_model_check
-from clinical.services import ensure_text, extract_text
+from clinical.services import ensure_text, extract_text, readable
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +199,42 @@ class AgencyFormTemplateViewSet(_OwnedCatalogViewSet):
         qs = super().get_queryset()
         form_type = self.request.query_params.get("type")
         return qs.filter(form_type=form_type) if form_type else qs
+
+    @action(detail=False, methods=["post"], url_path="import",
+            parser_classes=[MultiPartParser, FormParser])
+    def import_file(self, request):
+        """Read an uploaded form (Word or PDF) and propose a template from it
+        - the Clinical interview step's "Upload a template". Saves nothing:
+        the draft goes to a review dialog, and saving is the ordinary create
+        above, attestation and ownership included (clinical/form_import.py).
+        """
+        upload = request.FILES.get("file")
+        if upload is None:
+            return Response({"file": "Choose the form to upload."}, status=400)
+        name = (upload.name or "").lower()
+        if name.endswith(".doc"):
+            return Response({"file": "Word 97-2003 files (.doc) cannot be read. "
+                                     "Open it in Word and save it as .docx, then upload that."},
+                            status=400)
+        if not readable(name):
+            return Response({"file": "Upload the form as a Word (.docx) or PDF file."}, status=400)
+        if upload.size > form_import.MAX_UPLOAD_BYTES:
+            return Response({"file": "The file is over 5 MB. A form this size is "
+                                     "not a form - check it is the right file."}, status=400)
+        form_type = request.data.get("form_type") or AgencyFormTemplate.CLINICAL_INTERVIEW
+        if form_type not in dict(AgencyFormTemplate.TYPE_CHOICES):
+            return Response({"form_type": "Unknown form type."}, status=400)
+        text = extract_text(upload, name)
+        if not text:
+            return Response({"file": "No text could be read from this file. If it is a "
+                                     "scan, type the form in on the Instruments page instead."},
+                            status=400)
+        stem = (upload.name or "").rsplit(".", 1)[0].replace("-", " ").replace("_", " ").strip()
+        draft = form_import.draft_from_text(text, fallback_title=stem)
+        if not draft["fields"]:
+            return Response({"file": "No questions were found in this file. Each "
+                                     "question should be on its own line."}, status=400)
+        return Response({**draft, "form_type": form_type, "source": upload.name})
 
 
 class _ChildScopedClinicalViewSet(viewsets.ModelViewSet):

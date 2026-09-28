@@ -11,6 +11,7 @@ import { loadAll } from '../utils/load';
 import { printBlankForm } from '../utils/printForm';
 import InstrumentFormDrawer, { EMPTY_INSTRUMENT } from '../components/InstrumentFormDrawer';
 import PdfFrame from '../components/PdfFrame';
+import TemplateUpload from '../components/TemplateUpload';
 import { pdfObjectUrl } from '../utils/pdf';
 
 const STEPS = ['Child', 'Consent', 'Interview', 'Instruments', 'Problems', 'Complete'];
@@ -301,6 +302,7 @@ export default function PreAssessment() {
 
       {step === 2 && (
         <InterviewStep child={child} templates={interviewTemplates} setError={setError}
+          onTemplateAdded={(t) => setInterviewTemplates((list) => [...list, t])}
           onDone={async (interviewId) => {
             try {
               if (interviewId) await patchPa({ interview: interviewId });
@@ -590,7 +592,7 @@ function ConsentStep({ child, consents, templates, onLinked, onRefresh, setError
 
 const RESPONDENT_OPTIONS = ['Custodian/PAP', 'Child', 'Guardian', 'Other…'];
 
-function InterviewStep({ child, templates, onDone, setError }) {
+function InterviewStep({ child, templates, onDone, setError, onTemplateAdded }) {
   const confirm = useConfirm();
   const [templateId, setTemplateId] = useState('');
   const [answers, setAnswers] = useState({});
@@ -650,11 +652,30 @@ function InterviewStep({ child, templates, onDone, setError }) {
         Record the answers to your own Clinical Interview form, or skip if not conducted today.
         {savedCount > 0 && <strong> {savedCount} interview{savedCount > 1 ? 's' : ''} saved this session.</strong>}
       </p>
-      <FormField label="Interview form template">
-        <Select value={templateId} onChange={(e) => { setTemplateId(e.target.value); setAnswers({}); }}>
-          <option value="">— Select template —</option>
-          {templates.map((t) => <option key={t.id} value={t.id}>{t.title} (v{t.version})</option>)}
-        </Select>
+      {/* The template, and the two ways to have one to hand without leaving
+          the step: upload the agency's own form (components/TemplateUpload,
+          owner's request 28 Sep 2026), or print the chosen one blank for an
+          interview done on paper. */}
+      <FormField label="Interview form template" htmlFor="interview-template"
+        hint={templates.length === 0
+          ? 'No interview form yet. Upload yours (Word or PDF) and its questions become a template here.'
+          : 'Or upload another form - its sections and questions are read for you to check.'}>
+        <div id="interview-template-row" style={{ display: 'flex', gap: 8, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+          <div style={{ flex: '1 1 260px', minWidth: 0 }}>
+            <Select id="interview-template" value={templateId} onChange={(e) => { setTemplateId(e.target.value); setAnswers({}); }}>
+              <option value="">— Select template —</option>
+              {templates.map((t) => <option key={t.id} value={t.id}>{t.title} (v{t.version})</option>)}
+            </Select>
+          </div>
+          {tpl && (
+            <Button type="button" variant="ghost" onClick={() => printBlankForm(tpl)} iconLeft={<Icon name="printer" size={16} />}>
+              Print blank
+            </Button>
+          )}
+          <div style={{ flex: 'none' }}>
+            <TemplateUpload onSaved={(t) => { onTemplateAdded?.(t); setTemplateId(String(t.id)); setAnswers({}); }} />
+          </div>
+        </div>
       </FormField>
       {tpl && (
         <>

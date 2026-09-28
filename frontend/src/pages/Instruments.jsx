@@ -10,6 +10,7 @@ import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { loadAll } from '../utils/load';
 import { printBlankForm } from '../utils/printForm';
+import { FIELD_TYPES } from '../config/formFields';
 import InstrumentFormDrawer, { CATEGORIES, EMPTY_INSTRUMENT } from '../components/InstrumentFormDrawer';
 
 const FORM_TYPES = [
@@ -17,14 +18,6 @@ const FORM_TYPES = [
   { v: 'clinical_interview', label: 'Clinical Interview Form' },
   { v: 'problem_checklist', label: 'Problem Checklist' },
   { v: 'self_report_gov', label: 'Self-Report (Government Form)' },
-];
-const FIELD_TYPES = [
-  { v: 'section', label: 'Section heading' },
-  { v: 'text', label: 'Short text' },
-  { v: 'long_text', label: 'Long text' },
-  { v: 'date', label: 'Date' },
-  { v: 'yes_no', label: 'Yes / No' },
-  { v: 'choice', label: 'Choice list' },
 ];
 
 const blankField = () => ({ label: '', field_type: 'text', options: [] });
