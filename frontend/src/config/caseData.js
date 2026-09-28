@@ -115,7 +115,7 @@ export const ALWAYS_REQUIRED = [
   'case_category', 'case_type',
   'first_name', 'last_name', 'birth_date', 'gender',
   'place_of_birth_or_found', 'birth_status', 'education_level',
-  'house_number', 'street', 'barangay', 'municipality', 'province',
+  'house_number', 'street', 'province', 'municipality', 'barangay',
 ];
 export const requiredFields = (caseType, typeOfAdoption) => {
   const date = dateFieldFor(caseType, typeOfAdoption);

@@ -84,7 +84,9 @@ ALWAYS_REQUIRED = [
     "case_category", "case_type",
     "first_name", "last_name", "birth_date", "gender",
     "place_of_birth_or_found", "birth_status", "education_level",
-    "house_number", "street", "barangay", "municipality", "province",
+    # In the form's order, which is what the "Still needed" line lists them in:
+    # province first, because the municipality and barangay lists follow it.
+    "house_number", "street", "province", "municipality", "barangay",
 ]
 
 # Answered by the case type, so asked again whenever the case type (or the
