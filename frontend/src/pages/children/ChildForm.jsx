@@ -641,14 +641,36 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                     </Select>
                   </FormField>
                 )}
-                <FormField label="Assign Psychologist">
-                  <Select value={form.psychologist || ''} onChange={(e) => setForm({ ...form, psychologist: e.target.value })}>
-                    <option value="">— Unassigned —</option>
-                    {psychologists.map((p) => <option key={p.id} value={p.id}>{p.name} — {p.caseload} case{p.caseload === 1 ? '' : 's'}</option>)}
-                  </Select>
-                </FormField>
+                {/* One way to assign, not two: a dropdown above this list
+                    offered the same psychologists without their availability,
+                    and went at the owner's request (28 Sep 2026). Its one
+                    extra, "Unassigned", lives on as "Leave unassigned": a
+                    record may wait for a psychologist, and a pick made by
+                    mistake has to be undoable. */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 30 }}>
+                    <span id="assign-psychologist-label" style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 'var(--text-sm)', color: 'var(--text-strong)' }}>Assign Psychologist</span>
+                    {form.psychologist && (
+                      <Button type="button" variant="ghost" size="sm" onClick={() => setForm({ ...form, psychologist: '' })}>Leave unassigned</Button>
+                    )}
+                  </div>
+                  {!form.psychologist && (
+                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                      {psychologists.length > 0
+                        ? 'Not assigned yet. Pick a psychologist below, or save and assign later.'
+                        : 'No psychologist accounts yet. The record saves unassigned.'}
+                    </span>
+                  )}
+                  {/* Held by somebody no longer on the list (an archived
+                      account): nothing below is highlighted, so say who. */}
+                  {form.psychologist && !psychologists.some((p) => String(p.id) === String(form.psychologist)) && (
+                    <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                      Currently {form.psychologist_name || 'a psychologist'}, who is no longer active. Pick someone below to reassign.
+                    </span>
+                  )}
+                </div>
                 {psychologists.length > 0 && (
-                  <div style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 12, background: 'var(--ink-50)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div role="group" aria-labelledby="assign-psychologist-label" style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 12, background: 'var(--ink-50)', display: 'flex', flexDirection: 'column', gap: 8 }}>
                     <div className="racco-eyebrow" style={{ fontSize: 10 }}>Availability — check before you assign</div>
                     {psychologists.map((p) => {
                       const av = availFor(p.id);
