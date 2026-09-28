@@ -491,10 +491,14 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
               <FormField label="Street Number" required hint="Or the purok or sitio, where there is no street." error={fieldError('street')}>
                 <Input value={form.street || ''} maxLength={150} onChange={(e) => setForm({ ...form, street: e.target.value })} />
               </FormField>
-              <FormField label="Barangay" required error={fieldError('barangay')} hint={brgys.length ? `${brgys.length} in this municipality` : undefined}>
-                <Select value={form.psgc_barangay || ''} disabled={!form.psgc_municipality} onChange={(e) => pickPlace('barangay', e.target.value, brgys)}>
-                  <option value="">{form.psgc_municipality ? '— Select barangay —' : 'Select a municipality first'}</option>
-                  {brgys.map((b) => <option key={b.psgc_code} value={b.psgc_code}>{b.name}</option>)}
+              {/* Province, then municipality, then barangay: the order the
+                  lists unlock in, each filtered by the one before it. They
+                  were laid out the other way round, so the address was filled
+                  right to left past two disabled selects. */}
+              <FormField label="Province" required error={fieldError('province')}>
+                <Select value={form.psgc_province || ''} onChange={(e) => pickPlace('province', e.target.value, provinces)}>
+                  <option value="">— Select province —</option>
+                  {provinces.map((p) => <option key={p.psgc_code} value={p.psgc_code}>{p.name}</option>)}
                 </Select>
               </FormField>
               <FormField label="Municipality / City" required error={fieldError('municipality')}>
@@ -503,10 +507,10 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   {munis.map((m) => <option key={m.psgc_code} value={m.psgc_code}>{m.name}</option>)}
                 </Select>
               </FormField>
-              <FormField label="Province" required error={fieldError('province')}>
-                <Select value={form.psgc_province || ''} onChange={(e) => pickPlace('province', e.target.value, provinces)}>
-                  <option value="">— Select province —</option>
-                  {provinces.map((p) => <option key={p.psgc_code} value={p.psgc_code}>{p.name}</option>)}
+              <FormField label="Barangay" required error={fieldError('barangay')} hint={brgys.length ? `${brgys.length} in this municipality` : undefined}>
+                <Select value={form.psgc_barangay || ''} disabled={!form.psgc_municipality} onChange={(e) => pickPlace('barangay', e.target.value, brgys)}>
+                  <option value="">{form.psgc_municipality ? '— Select barangay —' : 'Select a municipality first'}</option>
+                  {brgys.map((b) => <option key={b.psgc_code} value={b.psgc_code}>{b.name}</option>)}
                 </Select>
               </FormField>
               <FormField label="Landmark" hint="Optional — anything that helps find the house." error={fieldError('landmark')}>
