@@ -12,7 +12,14 @@ import { Button, FormField, PasswordInput, Alert, Icon } from '../ui';
 // reports must_change_password still set (ProtectedRoute.jsx, blank form).
 // The server enforces the lockout independently (accounts/authentication.py);
 // this is just the compliant path out of it.
-export default function PasswordChangeGate({ prefillCurrent = '', title = 'Set a new password', subtitle, onDone }) {
+//
+// A successful change always ends the session (the server answers
+// `reauthenticate`), and `onSignedOut` is how the host takes the person back
+// to the sign-in form. On a protected route the route guard notices the ended
+// session on its own; the Login page shows this card from its own view state,
+// which nothing else resets - without the callback, the card stayed on screen
+// after the password was already changed and the session already gone.
+export default function PasswordChangeGate({ prefillCurrent = '', title = 'Set a new password', subtitle, onDone, onSignedOut }) {
   const { updateUser, logout } = useAuth();
   const toast = useToast();
   const ask = useConfirm();
@@ -40,6 +47,7 @@ export default function PasswordChangeGate({ prefillCurrent = '', title = 'Set a
       if (data?.reauthenticate) {
         toast.success('Password updated. Please sign in with your new password.');
         logout();
+        if (onSignedOut) onSignedOut();
         return;
       }
       updateUser({ must_change_password: false });

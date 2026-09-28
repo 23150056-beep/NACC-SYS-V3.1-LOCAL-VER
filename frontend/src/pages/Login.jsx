@@ -95,6 +95,10 @@ export default function Login() {
         title="Set a new password"
         subtitle="This account has a temporary password issued by an administrator. Choose a new password to continue."
         onDone={() => { toast.success('Password updated. Welcome!'); navigate('/'); }}
+        // The change ends the session, so the way on is the sign-in form -
+        // not this card, which stayed up after the change went through. The
+        // email stays filled in; the temporary password no longer works.
+        onSignedOut={() => { setPassword(''); setError(''); setView('login'); }}
       />
     );
   }
