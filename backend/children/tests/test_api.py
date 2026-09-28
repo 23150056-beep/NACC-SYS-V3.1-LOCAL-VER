@@ -49,7 +49,7 @@ class ChildApiTest(APITestCase):
                                      assigned_psychologist=self.psychologist)
         self._auth("c@racco1.gov.ph", "couns1234")
         resp = self.client.post(f"/api/children/{child.id}/terminate/", {
-            "reason_category": "Services completed", "note": "Case closed."})
+            "reason_category": "Other", "note": "Case closed."})
         self.assertEqual(200, resp.status_code, resp.data)
         names = [c["fullname"] for c in self.client.get("/api/children/").data]
         self.assertNotIn("Ana Lopez", names)

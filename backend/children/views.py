@@ -12,7 +12,7 @@ from accounts.permissions import (ChildRecordAccess,
 from accounts.scoping import role_of, scope_to_visible, visible_pre_assessments
 from activity.models import ActivityLog
 from activity.services import log_activity
-from children import assignment
+from children import assignment, termination
 from children.models import AssignmentRequest, Child, TerminationRecord
 from children.serializers import ChildSerializer
 
@@ -48,7 +48,8 @@ class ChildViewSet(viewsets.ModelViewSet):
         # Terminate/advance have their own rule (admin OR the child's assigned
         # psychologist), enforced in the action body - RecordsAccess would
         # block psychologists.
-        if self.action in ("terminate", "advance_status", "presence", "reopen"):
+        if self.action in ("terminate", "advance_status", "presence", "reopen",
+                           "closure_reasons"):
             return [IsAuthenticated()]
         return super().get_permissions()
 
@@ -213,9 +214,11 @@ class ChildViewSet(viewsets.ModelViewSet):
                             status=status.HTTP_400_BAD_REQUEST)
         reason = request.data.get("reason_category", "")
         note = (request.data.get("note") or "").strip()
-        valid_reasons = {c[0] for c in TerminationRecord.REASON_CHOICES}
-        if reason not in valid_reasons:
-            return Response({"reason_category": "Select a termination reason."},
+        # The ISA's list, or the psychologist's - and a psychologist's reason
+        # only when the record bears it out (children/termination.py).
+        refused = termination.refusal(role_of(request), child, reason)
+        if refused:
+            return Response({"reason_category": refused},
                             status=status.HTTP_400_BAD_REQUEST)
         if not note:
             return Response({"note": "A reason note is required to terminate a case."},
@@ -236,6 +239,19 @@ class ChildViewSet(viewsets.ModelViewSet):
                 "note": record.note,
             },
         }, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="closure-reasons")
+    def closure_reasons(self, request, pk=None):
+        """The reasons the terminate dialog offers this person for this child,
+        and - for a psychologist - what the record shows, so each reason can
+        say why it is or is not open. The terminate endpoint refuses by the
+        same function (children/termination.py)."""
+        child = self.get_object()
+        if not is_admin_or_assignee(request, child):
+            return Response({"detail": "Only the assigned psychologist or an administrator can terminate this case."},
+                            status=status.HTTP_403_FORBIDDEN)
+        reasons, facts = termination.reasons_for(role_of(request), child)
+        return Response({"reasons": reasons, "facts": facts})
 
     @action(detail=True, methods=["post"])
     def reopen(self, request, pk=None):

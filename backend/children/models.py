@@ -223,15 +223,29 @@ class Child(models.Model):
 
 class TerminationRecord(models.Model):
     """Archive/termination of a case, always with a reason. Creating one sets
-    the child to inactive. Reason categories pending RACCO I confirmation."""
-    REASON_CHOICES = [
-        ("Reunified with family", "Reunified with family"),
-        ("Adoption finalized", "Adoption finalized"),
-        ("Transferred to another agency", "Transferred to another agency"),
-        ("Aged out of program", "Aged out of program"),
-        ("Services completed", "Services completed"),
-        ("Other", "Other"),
+    the child to inactive. Reason categories pending RACCO I confirmation.
+
+    Two lists since 28 Sep 2026 (children/termination.py): the ISA closes a
+    case for where the child went, a psychologist for where the clinical
+    work ended - and a psychologist's reasons are offered only when the
+    record bears them out. frontend/src/config/caseData.js mirrors both."""
+    CASE_OUTCOMES = [
+        "Reunified with family",
+        "Adoption finalized",
+        "Transferred to another agency",
+        "Aged out of program",
+        "Services completed",
+        "Other",
     ]
+    CLINICAL = [
+        "Counseling completed",
+        "Favorable pre-assessment, no counseling needed",
+        "Pre-assessment only, evaluation completed",
+        "Counseling discontinued",
+        "Referred to another specialist or service",
+        "Other",
+    ]
+    REASON_CHOICES = [(r, r) for r in dict.fromkeys(CASE_OUTCOMES + CLINICAL)]
 
     child = models.ForeignKey(Child, on_delete=models.CASCADE, related_name="terminations")
     terminated_by = models.ForeignKey(

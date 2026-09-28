@@ -10,7 +10,7 @@ import {
 import { useToast } from '../context/ToastContext';
 import { useConfirm, useNotice } from '../context/ConfirmContext';
 import { useLayout } from '../context/LayoutContext';
-import { TERMINATION_REASONS } from '../config/caseData';
+import { ALL_CLOSURE_REASONS } from '../config/caseData';
 import { loadAll } from '../utils/load';
 import { firstError } from '../utils/errors';
 import ChildForm, { EMPTY } from './children/ChildForm';
@@ -570,7 +570,7 @@ export default function Children() {
             <div style={{ width: 210 }}>
               <Select size="sm" value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)} aria-label="Filter by termination reason">
                 <option value="">All termination reasons</option>
-                {TERMINATION_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                {ALL_CLOSURE_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
               </Select>
             </div>
           )}

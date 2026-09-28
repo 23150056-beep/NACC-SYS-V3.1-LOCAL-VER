@@ -28,7 +28,8 @@ class TerminationApiTest(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
 
     def _payload(self):
-        return {"reason_category": "Reunified with family", "note": "Returned to biological family."}
+        # On both the ISA's list and the psychologist's (children/termination.py).
+        return {"reason_category": "Other", "note": "Returned to biological family."}
 
     def test_assigned_psychologist_can_terminate(self):
         self._auth("p@racco1.gov.ph")
@@ -38,7 +39,7 @@ class TerminationApiTest(APITestCase):
         self.assertEqual(self.child.status, Child.INACTIVE)
         rec = TerminationRecord.objects.get()
         self.assertEqual(rec.terminated_by, self.psy)
-        self.assertEqual(rec.reason_category, "Reunified with family")
+        self.assertEqual(rec.reason_category, "Other")
 
     def test_admin_can_terminate(self):
         self._auth("a@racco1.gov.ph")
@@ -93,7 +94,7 @@ class TerminationApiTest(APITestCase):
         self.client.post(f"/api/children/{self.child.id}/terminate/", self._payload(), format="json")
         data = self.client.get(f"/api/children/{self.child.id}/").data
         self.assertEqual(data["status"], "inactive")
-        self.assertEqual(data["termination"]["reason_category"], "Reunified with family")
+        self.assertEqual(data["termination"]["reason_category"], "Other")
 
     def test_terminate_hidden_child_returns_404_for_other_psychologist(self):
         hidden = Child.objects.create(fullname="Ben", assigned_psychologist=self.other)

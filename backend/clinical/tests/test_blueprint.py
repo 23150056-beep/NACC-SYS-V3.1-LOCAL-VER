@@ -63,7 +63,9 @@ class CaseTrackerTest(BlueprintBase):
     def test_terminate_sets_stage_terminated(self):
         self._auth("p@racco1.gov.ph")
         self.client.post(f"/api/children/{self.child.id}/terminate/", {
-            "reason_category": "Adoption finalized", "note": "Done."}, format="json")
+            # "Other": a psychologist closes from the clinical list since
+            # 28 Sep 2026 (children/termination.py), and it is on both.
+            "reason_category": "Other", "note": "Done."}, format="json")
         self.child.refresh_from_db()
         self.assertEqual(self.child.case_status, Child.STAGE_TERMINATED)
 

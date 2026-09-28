@@ -5,7 +5,7 @@ import { useToast } from '../../context/ToastContext';
 import {
   Alert, Avatar, Badge, Button, ConfirmDialog, FormField, Icon, iconBtn, hoverLift, Select, roleLabel,
 } from '../../ui';
-import { ADMISSION, CASE_TYPE_FIELDS, PLACEMENT, TERMINATION_REASONS, dateFieldFor } from '../../config/caseData';
+import { ADMISSION, CASE_TYPE_FIELDS, PLACEMENT, dateFieldFor } from '../../config/caseData';
 import { PURPOSE_LABEL, StatusChip, fmtDay, fmtTime, localDate } from './shared';
 
 /* The record drawer, and the terminate confirmation it opens.
@@ -420,36 +420,97 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
   );
 }
 
+/* Which reasons are offered comes from the server (GET closure-reasons/,
+ * backend children/termination.py), which the terminate endpoint also
+ * refuses by - so the dialog cannot offer a reason the save would refuse.
+ *
+ * A psychologist closes for where the clinical work ended, and each reason is
+ * open only when the record bears it out: "Counseling completed" needs a
+ * session marked completed, the pre-assessment reasons need a completed
+ * pre-assessment and no counseling. The ones not open are shown greyed with
+ * why - hidden, "Counseling completed" would simply be missing, and nobody
+ * would know it wants a session recorded first. The ISA keeps the case-outcome
+ * list as a dropdown (owner, 28 Sep 2026: "the psychologist side only"). */
 export function TerminateModal({ child, onConfirm, onClose }) {
   const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
+  const [offer, setOffer] = useState(null);
+  const [loadError, setLoadError] = useState('');
   useEffect(() => {
     const onKey = (e) => { if (e.key === 'Escape') onClose(); };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
+  useEffect(() => {
+    let live = true;
+    api.get(`/children/${child.id}/closure-reasons/`)
+      .then((r) => { if (live) setOffer(r.data); })
+      .catch((err) => { if (live) setLoadError(err.response?.data?.detail || 'The reasons could not be loaded. Close this and try again.'); });
+    return () => { live = false; };
+  }, [child.id]);
+  const clinical = !!offer?.facts;
+  const facts = offer?.facts;
+  const chosen = offer?.reasons.find((r) => r.value === reason);
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 80, animation: 'racco-fade-in var(--dur-base) var(--ease-out)' }}>
-      <div role="dialog" aria-modal="true" aria-label={`Terminate ${child.fullname}'s case`} onClick={(e) => e.stopPropagation()} style={{ width: 460, maxWidth: '92%', background: 'var(--surface)', borderRadius: 'var(--radius-xl)', boxShadow: 'var(--shadow-xl)', padding: 22, display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <div role="dialog" aria-modal="true" aria-label={`Terminate ${child.fullname}'s case`} onClick={(e) => e.stopPropagation()} style={{ width: clinical ? 540 : 460, maxWidth: '92%', maxHeight: '92vh', overflowY: 'auto', background: 'var(--surface)', borderRadius: 'var(--radius-xl)', boxShadow: 'var(--shadow-xl)', padding: 22, display: 'flex', flexDirection: 'column', gap: 14 }}>
         <div>
           <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>Terminate case — {child.fullname}</div>
           <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4 }}>
             The record becomes <strong>Inactive (Terminated)</strong> and is archived from active caseloads. A reason is required.
           </div>
         </div>
-        <FormField label="Reason" required>
-          <Select value={reason} onChange={(e) => setReason(e.target.value)}>
-            <option value="">— Select termination reason —</option>
-            {TERMINATION_REASONS.map((r) => <option key={r}>{r}</option>)}
-          </Select>
-        </FormField>
+        {loadError && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{loadError}</Alert>}
+        {!offer && !loadError && <p style={{ fontSize: 12.5, color: 'var(--text-muted)', margin: 0 }}>Loading the reasons…</p>}
+        {clinical && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span className="racco-eyebrow" style={{ fontSize: 10, marginRight: 2 }}>The record shows</span>
+            <Badge tone={facts.pre_assessment_completed ? 'success' : 'neutral'} size="sm" dot>
+              Pre-assessment {facts.pre_assessment_completed ? 'completed' : 'not completed'}
+            </Badge>
+            <Badge tone={facts.in_counseling ? 'brand' : 'neutral'} size="sm" dot>
+              {facts.in_counseling ? 'In counseling' : 'Not moved to counseling'}
+            </Badge>
+            <Badge tone={facts.sessions_held ? 'success' : 'neutral'} size="sm" dot>
+              {facts.sessions_held} counseling session{facts.sessions_held === 1 ? '' : 's'} held
+            </Badge>
+          </div>
+        )}
+        {clinical ? (
+          <FormField label="Reason" required htmlFor="closure-reason-list">
+            <div id="closure-reason-list" role="radiogroup" aria-label="Reason for closing" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {offer.reasons.map((r) => {
+                const on = reason === r.value;
+                return (
+                  <button
+                    key={r.value} type="button" role="radio" aria-checked={on} disabled={!r.available}
+                    onClick={() => setReason(r.value)}
+                    style={{ textAlign: 'left', padding: '9px 11px', borderRadius: 'var(--radius-md)', fontFamily: 'var(--font-sans)', cursor: r.available ? 'pointer' : 'not-allowed', border: `1px solid ${on ? 'var(--blue-500)' : 'var(--border)'}`, background: on ? 'var(--blue-50)' : r.available ? 'var(--surface)' : 'var(--ink-25)' }}
+                  >
+                    <span style={{ display: 'block', fontWeight: 700, fontSize: 13.5, color: !r.available ? 'var(--text-muted)' : on ? 'var(--blue-700)' : 'var(--text-strong)' }}>{r.value}</span>
+                    <span style={{ display: 'block', fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                      {r.available ? r.hint : r.why}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </FormField>
+        ) : offer && (
+          <FormField label="Reason" required>
+            <Select value={reason} onChange={(e) => setReason(e.target.value)}>
+              <option value="">— Select termination reason —</option>
+              {offer.reasons.map((r) => <option key={r.value}>{r.value}</option>)}
+            </Select>
+          </FormField>
+        )}
         <FormField label="Closing summary" required>
           <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={4} placeholder="Describe why this case is being terminated…"
             style={{ width: '100%', resize: 'vertical', padding: '11px 13px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', fontFamily: 'var(--font-sans)', fontSize: 14, lineHeight: 1.55 }} />
         </FormField>
         <div style={{ display: 'flex', gap: 10 }}>
           <Button variant="secondary" fullWidth onClick={onClose}>Cancel</Button>
-          <Button variant="danger" fullWidth disabled={!reason || !note.trim()} onClick={() => onConfirm(child, reason, note.trim())} iconLeft={<Icon name="archive" size={16} />}>Terminate</Button>
+          <Button variant="danger" fullWidth disabled={!chosen?.available || !note.trim()} onClick={() => onConfirm(child, reason, note.trim())} iconLeft={<Icon name="archive" size={16} />}>Terminate</Button>
         </div>
       </div>
     </div>

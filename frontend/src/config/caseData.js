@@ -168,7 +168,9 @@ export const PA_STATUS_TONES = {
   Completed: 'success',
 };
 
-// Termination reason categories (must match backend TerminationRecord.REASON_CHOICES).
+// Why a case is closed - two lists since 28 Sep 2026 (backend
+// children/termination.py). The ISA closes for where the child went; must
+// match TerminationRecord.CASE_OUTCOMES.
 export const TERMINATION_REASONS = [
   'Reunified with family',
   'Adoption finalized',
@@ -177,6 +179,21 @@ export const TERMINATION_REASONS = [
   'Services completed',
   'Other',
 ];
+
+// A psychologist closes for where the clinical work ended, and the server
+// offers each only when the record bears it out. Must match
+// TerminationRecord.CLINICAL; test_closure_reasons.py pins both.
+export const CLINICAL_CLOSURE_REASONS = [
+  'Counseling completed',
+  'Favorable pre-assessment, no counseling needed',
+  'Pre-assessment only, evaluation completed',
+  'Counseling discontinued',
+  'Referred to another specialist or service',
+  'Other',
+];
+
+// Every reason a closed case can carry, for filtering the archive.
+export const ALL_CLOSURE_REASONS = [...new Set([...TERMINATION_REASONS, ...CLINICAL_CLOSURE_REASONS])];
 
 // Province → Municipality/City → Barangay pickers.
 // PLACEHOLDER dataset scoped to Region I (La Union), pending confirmation
