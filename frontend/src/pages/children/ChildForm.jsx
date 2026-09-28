@@ -9,6 +9,12 @@ import {
   LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, TYPES_OF_ADOPTION, caseTypesFor, dateFieldFor,
   requiredFields,
 } from '../../config/caseData';
+import { shortDate } from '../../utils/time';
+
+// "2008-09-29" from the date's LOCAL parts. toISOString() gives the UTC date,
+// which in Manila (UTC+8) is the previous day for anything before 8 a.m.
+const localIsoDay = (d) => [d.getFullYear(), String(d.getMonth() + 1).padStart(2, '0'),
+  String(d.getDate()).padStart(2, '0')].join('-');
 
 /* The add/edit form for a child record — four steps, and the longest single
  * thing in this feature by a wide margin.
@@ -202,12 +208,25 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   };
   const fieldLabel = { fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 };
   const textarea = { width: '100%', resize: 'vertical', padding: '10px 13px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', fontFamily: 'var(--font-sans)', fontSize: 14, lineHeight: 1.5 };
-  // Agency only serves children aged 5-17: the birth date picker's bounds
-  // mirror that (max = today minus 5 years, min = today minus 18 years);
-  // the backend's validate_birth_date is the authoritative check.
+  // Agency only serves children aged 5-17, by exact birthday - the rule the
+  // backend's validate_birth_date applies, and the authoritative check. The
+  // picker offers exactly the dates it accepts: worked out with the same age
+  // arithmetic, from local dates. It used to be today minus 18 and minus 5
+  // years through toISOString(), which in Manila is the day before - so it
+  // offered two birth dates of a child already 18 and refused the day a child
+  // turns 5, and the hint named no dates at all.
   const today = new Date();
-  const maxBirthDate = new Date(today.getFullYear() - 5, today.getMonth(), today.getDate()).toISOString().slice(0, 10);
-  const minBirthDate = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate()).toISOString().slice(0, 10);
+  const ageOn = (born) => today.getFullYear() - born.getFullYear()
+    - ((today.getMonth() < born.getMonth()
+      || (today.getMonth() === born.getMonth() && today.getDate() < born.getDate())) ? 1 : 0);
+  // Stepped rather than computed so 29 February lands where the server's rule
+  // puts it; neither loop runs more than twice.
+  const earliestBirth = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
+  while (ageOn(earliestBirth) > 17) earliestBirth.setDate(earliestBirth.getDate() + 1);
+  const latestBirth = new Date(today.getFullYear() - 5, today.getMonth(), today.getDate());
+  while (ageOn(latestBirth) < 5) latestBirth.setDate(latestBirth.getDate() - 1);
+  const minBirthDate = localIsoDay(earliestBirth);
+  const maxBirthDate = localIsoDay(latestBirth);
   /* The profile asks different questions per track — a Type of Adoption on a
    * reunification case is a question nobody can answer, and one more thing to
    * skip past on every intake. */
@@ -250,7 +269,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
     });
   };
 
-  const todayIso = [today.getFullYear(), String(today.getMonth() + 1).padStart(2, '0'), String(today.getDate()).padStart(2, '0')].join('-');
+  const todayIso = localIsoDay(today);
   // Named, not just disabled: the required fields live on two different steps,
   // so a greyed-out Save with no explanation sends people hunting. The name is
   // locked on an existing record, so an edit never lists it.
@@ -403,7 +422,9 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                 </Alert>
               )}
               <FormField label="Date of Birth" required error={fieldError('birth_date')}
-                hint={!isEdit ? 'The child must be 5 to 17. For a foundling, the estimated date.' : undefined}>
+                hint={!isEdit
+                  ? `The child must be 5 to 17 today: born ${shortDate(earliestBirth)} to ${shortDate(latestBirth)}. For a foundling, the estimated date.`
+                  : undefined}>
                 <Input type="date" value={form.birth_date || ''} min={!isEdit ? minBirthDate : undefined} max={!isEdit ? maxBirthDate : undefined} onChange={(e) => setForm({ ...form, birth_date: e.target.value })} />
               </FormField>
               <FormField label="Date Found" hint="Only for a child who was found." error={fieldError('date_found')}>
