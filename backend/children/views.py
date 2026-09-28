@@ -1,6 +1,6 @@
 ﻿import time
 from django.core.cache import cache
-from django.db.models import Q
+from django.db.models import Prefetch, Q
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -12,9 +12,8 @@ from accounts.permissions import (ChildRecordAccess,
 from accounts.scoping import role_of, scope_to_visible, visible_pre_assessments
 from activity.models import ActivityLog
 from activity.services import log_activity
-from children.models import Child, TerminationRecord
-from children.notifications import send_assignment_notification
-from accounts.sms_notifications import notify_new_assignment
+from children import assignment
+from children.models import AssignmentRequest, Child, TerminationRecord
 from children.serializers import ChildSerializer
 
 
@@ -57,24 +56,55 @@ class ChildViewSet(viewsets.ModelViewSet):
         # A record a social worker adds is theirs (accounts/scoping.py), and
         # nothing they send can make it someone else's. An administrator may
         # name a social worker, or leave it for later.
+        #
+        # The psychologist picked is ASKED, not assigned (children/
+        # assignment.py): the record is saved with nobody, and the child joins
+        # their records when they accept.
+        asked = serializer.validated_data.pop("assigned_psychologist", None)
         if role_of(self.request) == Role.STAFF:
             obj = serializer.save(social_worker=self.request.user)
         else:
             obj = serializer.save()
         self._log(obj, ActivityLog.CREATED)
-        if getattr(obj, "assigned_psychologist", None) is not None:
-            send_assignment_notification(obj)
-            notify_new_assignment(obj)
+        if asked is not None:
+            assignment.request_assignment(obj, asked, by=self.request.user)
 
     def perform_update(self, serializer):
-        # Read the old assignee before save() overwrites it: the email is for a
-        # *change* of psychologist, not for every edit to an assigned case.
-        old = serializer.instance.assigned_psychologist_id if serializer.instance else None
+        """`psychologist` in an edit says who the child SHOULD be with, and
+        the server gets there by asking (children/assignment.py):
+
+        - the psychologist already asked: nothing changes;
+        - the one who holds the child: any open request is withdrawn;
+        - nobody ("Leave unassigned"): the request is withdrawn and the
+          assignment cleared, as it always was - no one needs asking to stop;
+        - anyone else: they are asked, and the child stays where it is until
+          they accept. The carry-history choice travels with the request.
+
+        A psychologist cannot change it at all (the serializer refuses), so
+        what a psychologist's edit resends is left alone.
+        """
+        data = serializer.validated_data
+        instance = serializer.instance
+        if (role_of(self.request) not in (Role.ADMINISTRATOR, Role.STAFF)
+                or "assigned_psychologist" not in data):
+            obj = serializer.save()
+            self._log(obj, ActivityLog.UPDATED)
+            return
+        wanted = data.pop("assigned_psychologist")
+        asking = wanted is not None and wanted.pk != instance.assigned_psychologist_id
+        # Popped only when asking: applied now, it would change what the
+        # CURRENT psychologist sees before anybody has agreed to anything.
+        # Absent means unchanged (request_assignment), not "carry it".
+        carry = data.pop("assignee_sees_history", None) if asking else None
+        if wanted is None:
+            data["assigned_psychologist"] = None
         obj = serializer.save()
         self._log(obj, ActivityLog.UPDATED)
-        if obj.assigned_psychologist_id and obj.assigned_psychologist_id != old:
-            send_assignment_notification(obj)
-            notify_new_assignment(obj)
+        if wanted is None:
+            assignment.withdraw_pending(obj, by=self.request.user)
+        else:
+            assignment.request_assignment(obj, wanted, by=self.request.user,
+                                          carry_history=carry)
 
     def get_queryset(self):
         # Inactive (terminated) cases stay reachable by id - the profile view
@@ -95,8 +125,14 @@ class ChildViewSet(viewsets.ModelViewSet):
         # the whole caseload on several screens.
         # Pre-assessments under the carry-history control, because the
         # status and the instruments used are worked out from them.
-        qs = qs.prefetch_related(visible_pre_assessments(self.request), "terminations",
-                                 "consents", "case_referrals")
+        # assignment_requests for the Awaiting / Declined chips on the same
+        # rows (ChildSerializer.pending_assignment).
+        qs = qs.prefetch_related(
+            visible_pre_assessments(self.request), "terminations", "consents",
+            "case_referrals",
+            Prefetch("assignment_requests",
+                     queryset=AssignmentRequest.objects.select_related(
+                         "psychologist", "requested_by")))
         # psychologist_name is rendered on every row, so without this the list
         # costs an extra query per child: 47 for 40 children, against 7 with
         # it. The guardian join went with guardian_name — nothing reads it.
@@ -191,6 +227,8 @@ class ChildViewSet(viewsets.ModelViewSet):
         child.case_status = Child.STAGE_TERMINATED
         child.save(update_fields=["status", "case_status", "updated_at"])
         self._log(child, ActivityLog.ARCHIVED)
+        # A closed case has nobody left to ask.
+        assignment.withdraw_pending(child, by=request.user)
         return Response({
             "status": "inactive",
             "termination": {

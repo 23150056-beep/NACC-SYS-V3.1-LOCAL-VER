@@ -46,7 +46,7 @@ export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
   const layout = useLayout();
-  const { stats, pendingAccess } = useCensus();
+  const { stats, pendingAccess, pendingAssignments } = useCensus();
 
   const role = user?.role_name || 'Staff';
   const name = user?.fullname || user?.username || 'User';
@@ -83,7 +83,8 @@ export default function Sidebar() {
     return out;
   }, [stats.today_schedule, stats.care_gaps]);
 
-  const badgeFor = (id) => (id === 'users' ? pendingAccess : 0);
+  // Records carries the psychologist's unanswered assignment requests.
+  const badgeFor = (id) => (id === 'users' ? pendingAccess : id === 'records' ? pendingAssignments : 0);
 
   return (
     <aside

@@ -152,6 +152,12 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
     ['Legal Status', child.legal_status || '—'],
     ['Educational Placement', child.education_level || '—'],
     ['Assigned Psychologist', child.psychologist_name || '—'],
+    // Asked, not yet accepted (backend children/assignment.py) - and the last
+    // answer when it was no. Both come only to the ISA and social workers.
+    ...(child.pending_assignment
+      ? [['Waiting on', `${child.pending_assignment.psychologist_name} to accept`]] : []),
+    ...(!child.pending_assignment && child.declined_assignment
+      ? [['Declined by', `${child.declined_assignment.psychologist_name}: “${child.declined_assignment.reason}”`]] : []),
     ['Social Worker', child.social_worker_name || 'No social worker yet'],
     ...(asked('surrendered_by') || child.surrendered_by ? [['Previous Custodian', child.surrendered_by || '—']] : []),
     ['Address', location],

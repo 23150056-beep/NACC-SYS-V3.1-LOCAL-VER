@@ -32,9 +32,13 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             #
             # It stays inside the RECORD category, so widening the filter does
             # not quietly hand staff the security audit trail as well.
+            #
+            # "Assignment" rows carry the child's id too (children/
+            # assignment.py): who was asked to take one of their children,
+            # and the answer.
             own = scope_to_visible(Child.objects.all(), self.request, path=None)
             qs = qs.filter(
-                Q(entity_type="Child", entity_id__in=own.values("pk"))
+                Q(entity_type__in=["Child", "Assignment"], entity_id__in=own.values("pk"))
                 | Q(recipient=self.request.user),
                 category=ActivityLog.RECORD,
             )

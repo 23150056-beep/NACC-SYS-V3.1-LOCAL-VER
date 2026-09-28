@@ -126,7 +126,7 @@ export default function AppHeader() {
   const toast = useToast();
   const confirm = useConfirm();
   const layout = useLayout();
-  const { pendingAccess } = useCensus();
+  const { pendingAccess, pendingAssignments } = useCensus();
   const { events, unreadCount, markSeen } = useActivity();
 
   const role = user?.role_name || 'Staff';
@@ -212,7 +212,8 @@ export default function AppHeader() {
     }
   };
 
-  const badgeFor = (id) => (id === 'users' ? pendingAccess : 0);
+  // Records carries the psychologist's unanswered assignment requests.
+  const badgeFor = (id) => (id === 'users' ? pendingAccess : id === 'records' ? pendingAssignments : 0);
   const roleDot = (ROLE_META[role] || ROLE_META.Staff).color;
 
   return (

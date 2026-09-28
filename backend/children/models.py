@@ -247,5 +247,60 @@ class TerminationRecord(models.Model):
         ordering = ["-created_at"]
 
 
+class AssignmentRequest(models.Model):
+    """A psychologist asked to take a child, and their answer (28 Sep 2026).
+
+    Assigning is asking: picking a psychologist on a record writes one of
+    these, and `Child.assigned_psychologist` changes only when the
+    psychologist accepts. Every scoping rule reads that field, so leaving it
+    alone until then is what keeps a pending child out of the psychologist's
+    records - see children/assignment.py and the design in
+    docs/superpowers/specs/2026-09-28-assignment-acceptance-design.md.
+    """
+    PENDING, ACCEPTED, DECLINED, WITHDRAWN = "pending", "accepted", "declined", "withdrawn"
+    STATUS_CHOICES = [
+        (PENDING, "Pending"), (ACCEPTED, "Accepted"),
+        (DECLINED, "Declined"), (WITHDRAWN, "Withdrawn"),
+    ]
+
+    child = models.ForeignKey(Child, on_delete=models.CASCADE,
+                              related_name="assignment_requests")
+    psychologist = models.ForeignKey(
+        "accounts.User", on_delete=models.CASCADE,
+        related_name="assignment_requests")
+    requested_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="assignment_requests_made")
+    # Who held the child when this was asked, so a transfer reads as one.
+    previous_psychologist = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+")
+    # The carry-history choice, applied to the child at acceptance. Applied at
+    # the request it would change what the CURRENT psychologist sees before
+    # anybody had agreed to anything.
+    carry_history = models.BooleanField(default=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=PENDING)
+    reason = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decided_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+")
+
+    class Meta:
+        db_table = "tbl_assignment_request"
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            # One question open per child at a time. Asking someone else
+            # withdraws the earlier request first (children/assignment.py).
+            models.UniqueConstraint(
+                fields=["child"], condition=models.Q(status="pending"),
+                name="one_pending_assignment_per_child"),
+        ]
+
+    def __str__(self):
+        return f"{self.child_id} -> {self.psychologist_id} ({self.status})"
+
+
 # V2: v1's ProgressNote and Goal were replaced by clinical.RemarkNote and
 # clinical.TreatmentPlan per the psychologist interview.

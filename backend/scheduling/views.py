@@ -67,6 +67,42 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
         self._assert_can_write(instance.psychologist_id)
         instance.delete()
 
+    @action(detail=False, methods=["get"], url_path="openings")
+    def openings(self, request):
+        """The next times a child can be booked with the psychologist who
+        holds them, over two weeks - what a psychologist picks from straight
+        after accepting a case (children/assignment.py). Every one offered is
+        bookable: booking.next_openings runs the endpoint's own rule.
+        """
+        child_id = request.query_params.get("child")
+        if not str(child_id or "").isdigit():
+            return Response({"detail": "Which child?"}, status=400)
+        child = scope_to_visible(Child.objects.filter(pk=child_id), request,
+                                 path=None).select_related("assigned_psychologist").first()
+        if child is None:
+            return Response({"detail": "Not found."}, status=404)
+        psych = child.assigned_psychologist
+        if psych is None:
+            return Response({"detail": "This child has no assigned psychologist yet."},
+                            status=400)
+        try:
+            duration = int(request.query_params.get("duration") or 60)
+        except ValueError:
+            duration = 60
+        duration = max(15, min(duration, 8 * 60))
+        found = booking.next_openings(psych, child, duration_minutes=duration)
+        reason = ""
+        if not found:
+            name = display_name(psych) or "This psychologist"
+            if not booking.referral_on_file(child):
+                reason = booking.missing_referral_error(child)["child"]
+            elif not psych.availability_blocks.filter(active=True).exists():
+                reason = f"{name} has no availability posted yet."
+            else:
+                reason = f"{name} has no open time in the next two weeks."
+        return Response({"psychologist": display_name(psych), "duration": duration,
+                         "openings": found, "reason": reason})
+
     @action(detail=False, methods=["get"], url_path="slots")
     def slots(self, request):
         """The start times somebody can actually pick, for one psychologist

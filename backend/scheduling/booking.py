@@ -245,6 +245,35 @@ def bookable_slots(psychologist, child, day, duration_minutes=60,
     return sorted(unique.values(), key=lambda s: s["start"])
 
 
+def next_openings(psychologist, child, *, duration_minutes=60, days=14,
+                  per_day=2, limit=6, today=None):
+    """The next times `child` could be booked with `psychologist`, across
+    days - "From my availability" in the dialog after accepting a case.
+
+    Built from bookable_slots, so from errors_for: every time offered is one
+    the booking endpoint accepts. At most `per_day` a day, and within a day
+    only times that do not overlap each other, so the choice is between days
+    and parts of a day rather than between 09:00 and 09:30.
+    """
+    if child is not None and not referral_on_file(child):
+        return []
+    today = today or timezone.localdate()
+    found = []
+    for offset in range(days):
+        day = today + timedelta(days=offset)
+        taken_until, that_day = "", 0
+        for slot in bookable_slots(psychologist, child, day, duration_minutes):
+            if that_day >= per_day:
+                break
+            if slot["start"] < taken_until:      # "HH:MM" compares as time
+                continue
+            found.append({"date": day.isoformat(), "weekday": f"{day:%A}", **slot})
+            taken_until, that_day = slot["end"], that_day + 1
+            if len(found) >= limit:
+                return found
+    return found
+
+
 def _spoken(day):
     """"Wednesday 9 Sep" - %-d is a glibc extension and raises on Windows."""
     return f"{day:%A} {day.day} {day:%b}"

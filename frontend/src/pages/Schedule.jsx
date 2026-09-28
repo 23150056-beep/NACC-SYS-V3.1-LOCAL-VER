@@ -9,12 +9,13 @@ import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { loadAll } from '../utils/load';
 import { exactDate } from '../utils/time';
-import { scheduleName } from '../utils/child';
+import { DURATIONS, scheduleName } from '../utils/child';
 import {
   Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, hoverLift, Icon, iconBtn, Input, PAGE, PageHeader, Select,
 } from '../ui';
 import { prefetchBriefs } from '../api/assistant';
 import { useOpenFromLink } from '../utils/links';
+import { firstError } from '../utils/errors';
 
 const localizer = dateFnsLocalizer({ format, parse, startOfWeek, getDay, locales: { 'en-US': enUS } });
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -63,10 +64,6 @@ const OUTCOME_CONFIRM = {
     cancelLabel: 'Not yet',
   },
 };
-const DURATIONS = [
-  { v: 30, label: '30 min' }, { v: 45, label: '45 min' }, { v: 60, label: '1 hour' },
-  { v: 90, label: '1 hr 30' }, { v: 120, label: '2 hours' },
-];
 const SLOT_EMPTY = {
   fontSize: 12.5, color: 'var(--text-muted)', padding: '9px 12px',
   border: '1px dashed var(--border)', borderRadius: 'var(--radius-control)',
@@ -157,20 +154,6 @@ const todayIso = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-/* DRF answers {field: ["message"]}, and rendering that raw put a JSON array on
-   screen. Take the first readable sentence, whatever shape it arrives in. */
-function firstError(data, fallback = 'Booking failed.') {
-  if (!data) return fallback;
-  if (typeof data === 'string') return data;
-  for (const key of ['start', 'child', 'psychologist', 'detail', 'non_field_errors']) {
-    const v = data[key];
-    if (Array.isArray(v) && v.length) return String(v[0]);
-    if (typeof v === 'string' && v) return v;
-  }
-  const first = Object.values(data)[0];
-  if (Array.isArray(first) && first.length) return String(first[0]);
-  return typeof first === 'string' ? first : fallback;
-}
 const STATUS_COLOR = { scheduled: 'var(--blue-600)', completed: 'var(--success-600)', no_show: 'var(--amber-500)', cancelled: 'var(--text-faint)' };
 
 export default function Schedule() {

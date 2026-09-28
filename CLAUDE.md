@@ -712,6 +712,46 @@ are unchanged (their assigned children).
 - **Archiving a SW does not move their records.** The ISA transfers them; the
   Social Worker field lists an inactive holder as "(inactive)".
 
+## Assigning a psychologist is asking
+
+Owner's request, 28 Sep 2026. Picking a psychologist on a record (Add
+Record, or an edit, by a SW or the ISA) writes an `AssignmentRequest`, and
+`Child.assigned_psychologist` changes only when that psychologist accepts.
+Rules in `children/assignment.py`; design in
+`docs/superpowers/specs/2026-09-28-assignment-acceptance-design.md`.
+
+- **Nothing but acceptance writes `assigned_psychologist` through the API.**
+  Every scoping rule reads that field, which is the whole reason a pending
+  child is absent from the psychologist's Records, Monitoring, calendar and
+  assistant without any of them knowing about requests. A new door that sets
+  the field directly skips the question; `test_a_pending_child_is_absent_from_every_door`
+  is the check.
+- **`psychologist` in an edit means who the child SHOULD be with**
+  (`ChildViewSet.perform_update`): the one already asked changes nothing, the
+  holder withdraws the open request, nobody withdraws and unassigns, anyone
+  else is asked. The edit form therefore starts from the pending psychologist,
+  not the holder. A psychologist's own edit resends themselves and is ignored,
+  or it would withdraw the transfer the SW asked for.
+- **One pending request per child**, a partial unique constraint; asking
+  somebody else withdraws the first. Answering is a conditional UPDATE on
+  `status='pending'`, so a second answer gets 409 saying what happened.
+- **Decline needs a reason**, which only the ISA and SWs see
+  (`declined_assignment` on the child serializer is null for psychologists).
+- **The carry-history choice rides on the request** and is applied at
+  acceptance — applied at the request it would change what the CURRENT
+  psychologist sees before anyone agreed. During a transfer the child stays
+  with the holder.
+- **After accepting, "From my availability"** reads
+  `/api/availability/openings/`, built on `booking.bookable_slots`, so every
+  time offered books; "Schedule now" books on the psychologist's own calendar.
+  Both go through `POST /appointments/` unchanged, referral gate included.
+- **Every step ends with an end dialog** (`useNotice()` in
+  `context/ConfirmContext.jsx`, the confirm dialog without the way back) —
+  the owner's "add end dialogue always". Confirm first, notice after.
+- Email and SMS now say a case is *waiting for an answer*; still no name.
+  Terminating a case withdraws its open request. Existing assignments were
+  not migrated: children already assigned stay assigned.
+
 ## Names on the schedule
 
 Owner's decision, 24 Sep 2026, in `scheduling/visibility.py`: on the calendar

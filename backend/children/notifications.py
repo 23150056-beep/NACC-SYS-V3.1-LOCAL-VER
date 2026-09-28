@@ -91,27 +91,31 @@ def build_payload(psychologist, case_number):
             "email": settings.BREVO_SENDER_EMAIL,
         },
         "to": [{"email": psychologist.email, "name": recipient_name}],
-        "subject": "New case assignment",
+        # A question, not a fact, since 28 Sep 2026: the case is theirs only
+        # once they accept it (children/assignment.py).
+        "subject": "A case is waiting for your answer",
         "htmlContent": (
-            "<h2>New case assignment</h2>"
+            "<h2>A case is waiting for your answer</h2>"
             f"<p>Dear {recipient_name},</p>"
-            "<p>A new case has been assigned to you.</p>"
+            "<p>You have been asked to take a case. It joins your records once "
+            "you accept it.</p>"
             f"<p><strong>Case number:</strong> {case_number}</p>"
-            "<p>Sign in to the RACCO I Child Care Management System to review it. "
-            "No case details are included in this email.</p>"
+            "<p>Sign in to the RACCO I Child Care Management System to accept or "
+            "decline it. No case details are included in this email.</p>"
             "<br><small>This is an automated notification.</small>"
         ),
     }
 
 
-def send_assignment_notification(child):
-    """Queue one email to the child's assigned psychologist.
+def send_assignment_notification(child, psychologist=None):
+    """Queue one email to the psychologist asked to take the child - by
+    default the one assigned.
 
     Returns True when a send was queued, False when there was nothing to send
     (no assignee, no address, no API key). Never raises — the caller is in the
     middle of saving a case record.
     """
-    psychologist = getattr(child, "assigned_psychologist", None)
+    psychologist = psychologist or getattr(child, "assigned_psychologist", None)
     if psychologist is None or not getattr(psychologist, "email", ""):
         return False
     if not settings.BREVO_API_KEY:

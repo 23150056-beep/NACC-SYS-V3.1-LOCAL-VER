@@ -93,8 +93,10 @@ class BrevoFailureLoggingTest(SimpleTestCase):
 
 @override_settings(BREVO_API_KEY="test-key")
 class AssignmentEmailTriggerTest(APITestCase):
-    """When it fires: on assignment, and on a *change* of assignee — not on
-    every edit to an already-assigned case."""
+    """When it fires: when a psychologist is asked to take a case, on a new
+    record or a change of psychologist — not on every edit to an assigned
+    case. Since 28 Sep 2026 picking a psychologist asks them rather than
+    assigning (children/assignment.py), so the mail goes out from there."""
 
     def setUp(self):
         self.admin_role = Role.objects.create(role_name=Role.ADMINISTRATOR)
@@ -110,7 +112,7 @@ class AssignmentEmailTriggerTest(APITestCase):
             "email": "admin@racco1.gov.ph", "password": "admin1234"}).data["access"]
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
 
-    @patch("children.views.send_assignment_notification")
+    @patch("children.assignment.send_assignment_notification")
     def test_creating_with_an_assignee_notifies(self, mock_send):
         resp = self.client.post("/api/children/", {
             "fullname": "Nico Reyes", "gender": "Male",
@@ -119,7 +121,7 @@ class AssignmentEmailTriggerTest(APITestCase):
         self.assertEqual(resp.status_code, 201, resp.data)
         mock_send.assert_called_once()
 
-    @patch("children.views.send_assignment_notification")
+    @patch("children.assignment.send_assignment_notification")
     def test_creating_without_an_assignee_does_not(self, mock_send):
         resp = self.client.post("/api/children/", {
             "fullname": "Nico Reyes", "gender": "Male", "case_type": "Foster Care",
@@ -127,7 +129,7 @@ class AssignmentEmailTriggerTest(APITestCase):
         self.assertEqual(resp.status_code, 201, resp.data)
         mock_send.assert_not_called()
 
-    @patch("children.views.send_assignment_notification")
+    @patch("children.assignment.send_assignment_notification")
     def test_reassigning_notifies_the_new_psychologist(self, mock_send):
         child = Child.objects.create(fullname="Nico Reyes", assigned_psychologist=self.psych)
         resp = self.client.patch(f"/api/children/{child.id}/",
@@ -135,7 +137,7 @@ class AssignmentEmailTriggerTest(APITestCase):
         self.assertEqual(resp.status_code, 200, resp.data)
         mock_send.assert_called_once()
 
-    @patch("children.views.send_assignment_notification")
+    @patch("children.assignment.send_assignment_notification")
     def test_editing_an_assigned_case_does_not_re_notify(self, mock_send):
         child = Child.objects.create(fullname="Nico Reyes", assigned_psychologist=self.psych)
         resp = self.client.patch(f"/api/children/{child.id}/",

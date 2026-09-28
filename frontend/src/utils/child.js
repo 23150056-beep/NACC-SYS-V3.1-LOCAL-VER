@@ -58,6 +58,13 @@ export const PURPOSE_LABEL = {
   follow_up: 'Follow-up',
 };
 
+/* The session lengths a booking offers - the Calendar's booking drawer and the
+ * dialog after a psychologist accepts a case. */
+export const DURATIONS = [
+  { v: 30, label: '30 min' }, { v: 45, label: '45 min' }, { v: 60, label: '1 hour' },
+  { v: 90, label: '1 hr 30' }, { v: 120, label: '2 hours' },
+];
+
 /* How a schedule names a child (owner's decision, 24 Sep 2026).
  *
  * The server leaves `child_name` out for a social worker unless the child is

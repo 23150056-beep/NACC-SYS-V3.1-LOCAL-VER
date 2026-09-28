@@ -76,11 +76,12 @@ def notify_temporary_password(user):
 
 
 # --------------------------------------------------------------------------
-# 2. A child was assigned to a psychologist
+# 2. A psychologist is asked to take a child
 # --------------------------------------------------------------------------
 
-def notify_new_assignment(child):
-    """Tell the psychologist they have a new case. Not which child.
+def notify_new_assignment(child, psychologist=None):
+    """Tell the psychologist a case is waiting for their answer - by default
+    the one assigned. Not which child.
 
     The case reference is enough to find it after signing in, and it means
     the child's name never reaches a telco. It is written the way every
@@ -89,16 +90,17 @@ def notify_new_assignment(child):
     """
     from scheduling.visibility import case_ref
 
-    psychologist = getattr(child, "assigned_psychologist", None)
+    psychologist = psychologist or getattr(child, "assigned_psychologist", None)
     if psychologist is None:
         return False
     number = _deliverable(psychologist)
     if not number:
         return False
+    # A question since 28 Sep 2026: the case is theirs once they accept it.
     return queue_sms(
         number,
-        f"NACC SYS: a new case has been assigned to you (case "
-        f"{case_ref(child)}). Sign in to review it.",
+        f"NACC SYS: a case is waiting for you to accept or decline (case "
+        f"{case_ref(child)}). Sign in to answer.",
         "assignment notice",
     )
 

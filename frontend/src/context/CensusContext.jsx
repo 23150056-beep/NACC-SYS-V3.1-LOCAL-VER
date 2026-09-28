@@ -28,7 +28,9 @@ export function CensusProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [pendingAccess, setPendingAccess] = useState(0);
+  const [pendingAssignments, setPendingAssignments] = useState(0);
   const isAdmin = user?.role_name === 'Administrator';
+  const isPsych = user?.role_name === 'Psychologist';
 
   const refresh = useCallback(() => {
     if (!getAccess()) return;
@@ -64,9 +66,24 @@ export function CensusProvider({ children }) {
 
   useEffect(() => { if (user) refreshPendingAccess(); }, [user, refreshPendingAccess]);
 
+  /* Children a psychologist has been asked to take and has not answered
+   * (children/assignment.py). The same reasoning as pendingAccess: the badge
+   * on Records has to be right on every other screen, or the question sits
+   * until somebody happens to open the page it is on. */
+  const refreshPendingAssignments = useCallback(() => {
+    if (!isPsych) { setPendingAssignments(0); return; }
+    api.get('/assignment-requests/', { params: { status: 'pending' } })
+      .then((r) => setPendingAssignments((r.data || []).length))
+      .catch(() => {});   // a badge count; the panel itself reports failures
+  }, [isPsych]);
+
+  useEffect(() => { if (user) refreshPendingAssignments(); }, [user, refreshPendingAssignments]);
+
   const value = useMemo(
-    () => ({ stats, range, setRange, loading, failed, refresh, pendingAccess, refreshPendingAccess }),
-    [stats, range, loading, failed, refresh, pendingAccess, refreshPendingAccess],
+    () => ({ stats, range, setRange, loading, failed, refresh, pendingAccess, refreshPendingAccess,
+      pendingAssignments, refreshPendingAssignments }),
+    [stats, range, loading, failed, refresh, pendingAccess, refreshPendingAccess,
+      pendingAssignments, refreshPendingAssignments],
   );
   return <CensusContext.Provider value={value}>{children}</CensusContext.Provider>;
 }
@@ -75,5 +92,6 @@ export function useCensus() {
   return useContext(CensusContext) || {
     stats: EMPTY, range: 'monthly', setRange: () => {}, loading: false, failed: false, refresh: () => {},
     pendingAccess: 0, refreshPendingAccess: () => {},
+    pendingAssignments: 0, refreshPendingAssignments: () => {},
   };
 }

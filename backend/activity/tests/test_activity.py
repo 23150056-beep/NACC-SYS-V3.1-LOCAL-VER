@@ -112,11 +112,14 @@ class NotificationScopingTest(APITestCase):
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
 
     def test_assigning_child_notifies_psychologist(self):
+        # Assigning asks (children/assignment.py): the bell carries the
+        # question, and the child is not theirs until they accept.
         self._auth("a@racco1.gov.ph")
         self.client.post("/api/children/", {
             "fullname": "New Kid", "case_type": "Foster Care", "psychologist": self.psy.id}, format="json")
-        self.assertTrue(
-            ActivityLog.objects.filter(recipient=self.psy, entity_type="Child").exists())
+        self.assertTrue(ActivityLog.objects.filter(
+            recipient=self.psy, entity_type="Assignment",
+            action=ActivityLog.REQUESTED).exists())
 
     def test_psychologist_sees_only_recipient_notifications(self):
         from activity.services import log_activity

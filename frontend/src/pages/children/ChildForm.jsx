@@ -9,7 +9,7 @@ import {
   LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, TYPES_OF_ADOPTION, caseTypesFor, dateFieldFor,
   requiredFields,
 } from '../../config/caseData';
-import { shortDate } from '../../utils/time';
+import { shortDate, timeAgo } from '../../utils/time';
 
 // "2008-09-29" from the date's LOCAL parts. toISOString() gives the UTC date,
 // which in Manila (UTC+8) is the previous day for anything before 8 a.m.
@@ -80,7 +80,7 @@ const snapshot = (f) => JSON.stringify(Object.keys(f).sort()
   .map((k) => [k, k === 'referralFile' ? Boolean(f[k]) : f[k]]));
 
 
-export default function ChildForm({ form, setForm, draftKey, psychologists, socialWorkers = null, blocks = [], error, fieldErrors = null, isPsych = false, canReopen = false, others = [], onSubmit, onClose, onReopen, onOpenExisting }) {
+export default function ChildForm({ form, setForm, draftKey, psychologists, socialWorkers = null, blocks = [], error, fieldErrors = null, isPsych = false, canReopen = false, others = [], onSubmit, onWithdraw, onClose, onReopen, onOpenExisting }) {
   const [step, setStep] = useState(1);
   // Reopening the form for a different record starts at the beginning again.
   useEffect(() => { setStep(1); }, [form.id]);
@@ -654,6 +654,34 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                       <Button type="button" variant="ghost" size="sm" onClick={() => setForm({ ...form, psychologist: '' })}>Leave unassigned</Button>
                     )}
                   </div>
+                  {/* Assigning is asking (backend children/assignment.py):
+                      the record shows them as the child's psychologist only
+                      once they accept, and this is the place to say so. */}
+                  <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                    The psychologist you pick is asked first. The child joins their records when they accept; if they decline, you see why.
+                  </span>
+                  {form.pending_assignment && (
+                    <Alert tone="warning" icon={<Icon name="hourglass" size={18} />}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', justifyContent: 'space-between' }}>
+                        <span>
+                          Waiting for <strong>{form.pending_assignment.psychologist_name}</strong> to accept
+                          {' '}(asked {timeAgo(form.pending_assignment.created_at)}
+                          {form.pending_assignment.requested_by_name ? ` by ${form.pending_assignment.requested_by_name}` : ''}).
+                          {form.psychologist_name ? ` ${form.psychologist_name} keeps the case until then.` : ''}
+                        </span>
+                        {onWithdraw && (
+                          <Button type="button" variant="secondary" size="sm" onClick={onWithdraw}>Withdraw request</Button>
+                        )}
+                      </div>
+                    </Alert>
+                  )}
+                  {!form.pending_assignment && form.declined_assignment && (
+                    <Alert tone="danger" icon={<Icon name="user-x" size={18} />}>
+                      <strong>{form.declined_assignment.psychologist_name}</strong> declined
+                      {' '}{timeAgo(form.declined_assignment.decided_at)}: &ldquo;{form.declined_assignment.reason}&rdquo;
+                      {' '}Pick someone else below.
+                    </Alert>
+                  )}
                   {!form.psychologist && (
                     <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
                       {psychologists.length > 0
@@ -665,7 +693,8 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                       account): nothing below is highlighted, so say who. */}
                   {form.psychologist && !psychologists.some((p) => String(p.id) === String(form.psychologist)) && (
                     <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-                      Currently {form.psychologist_name || 'a psychologist'}, who is no longer active. Pick someone below to reassign.
+                      Currently {(String(form.pending_assignment?.psychologist) === String(form.psychologist)
+                        ? form.pending_assignment.psychologist_name : form.psychologist_name) || 'a psychologist'}, who is no longer active. Pick someone below to reassign.
                     </span>
                   )}
                 </div>
@@ -681,7 +710,11 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                           aria-pressed={on}
                           style={{ textAlign: 'left', padding: '9px 11px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontFamily: 'var(--font-sans)', border: `1px solid ${on ? 'var(--blue-500)' : 'var(--border)'}`, background: on ? 'var(--blue-50)' : 'var(--surface)', transition: 'var(--transition-base)' }}>
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 5 }}>
-                            <span style={{ fontWeight: 700, fontSize: 13, color: on ? 'var(--blue-700)' : 'var(--text-strong)' }}>{p.name}</span>
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                              <span style={{ fontWeight: 700, fontSize: 13, color: on ? 'var(--blue-700)' : 'var(--text-strong)' }}>{p.name}</span>
+                              {String(form.pending_assignment?.psychologist) === String(p.id) && <Badge tone="amber" size="sm">Asked</Badge>}
+                              {form.id && String(form._origPsychologist) === String(p.id) && <Badge tone="success" size="sm">Has the case</Badge>}
+                            </span>
                             <Badge tone={p.caseload >= 5 ? 'amber' : 'neutral'} size="sm">{p.caseload} case{p.caseload === 1 ? '' : 's'}</Badge>
                           </div>
                           {av.length === 0 ? (

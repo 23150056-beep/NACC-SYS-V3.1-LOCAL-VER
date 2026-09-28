@@ -5,6 +5,7 @@ import { useCensus } from '../context/CensusContext';
 import { useLayout } from '../context/LayoutContext';
 import { Alert, Icon, IconChip, MiniBar, PAGE, Segmented } from '../ui';
 import { ActivityCard, CensusCard, TodayCard } from '../components/RightRail';
+import AssignmentRequests from '../components/AssignmentRequests';
 import { caseRef, initialsOf } from '../utils/child';
 
 /* One prioritised stream, not eleven equal tiles.
@@ -172,6 +173,11 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      {/* Children a psychologist has been asked to take. Above the figures:
+          it is the one thing on this page waiting on them personally, and
+          the child is in none of their other screens until they answer. */}
+      {isPsych && <AssignmentRequests />}
 
       {/* The numbers first: staff and the others come here for the figures,
           and they were at the bottom (the owner, 24 Sep 2026). Without a third

@@ -663,7 +663,9 @@ export function ConfirmDialog({ open = true, onClose, onConfirm, title, descript
       open={open} onClose={onClose} title={title} tone={tone} icon={icon}
       subtitle={null} width={470}
       footer={<>
-        <Button variant="ghost" onClick={onClose}>{cancelLabel}</Button>
+        {/* No cancel on an end dialog (useNotice): there is nothing left to
+            call off, only something to read. */}
+        {cancelLabel && <Button variant="ghost" onClick={onClose}>{cancelLabel}</Button>}
         <Button variant={variant} onClick={onConfirm} disabled={!ready || busy}>{confirmLabel}</Button>
       </>}
     >

@@ -4,9 +4,14 @@ from django.db import models
 
 class ActivityLog(models.Model):
     CREATED, UPDATED, ARCHIVED, LOGIN = "created", "updated", "archived", "login"
+    # A psychologist asked to take a child, and their answer
+    # (children/assignment.py). Entity type "Assignment"; the id is the child's.
+    REQUESTED, ACCEPTED, DECLINED, WITHDRAWN = "requested", "accepted", "declined", "withdrawn"
     ACTION_CHOICES = [
         (CREATED, "Created"), (UPDATED, "Updated"),
         (ARCHIVED, "Archived"), (LOGIN, "Login"),
+        (REQUESTED, "Requested"), (ACCEPTED, "Accepted"),
+        (DECLINED, "Declined"), (WITHDRAWN, "Withdrawn"),
     ]
 
     RECORD, USER, SECURITY = "record", "user", "security"

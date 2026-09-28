@@ -8,14 +8,16 @@ import {
   Input, PAGE, PageHeader, Segmented, Select, TD, TH, THEAD_ROW, TOOLBAR, TR,
 } from '../ui';
 import { useToast } from '../context/ToastContext';
-import { useConfirm } from '../context/ConfirmContext';
+import { useConfirm, useNotice } from '../context/ConfirmContext';
 import { useLayout } from '../context/LayoutContext';
 import { TERMINATION_REASONS } from '../config/caseData';
 import { loadAll } from '../utils/load';
+import { firstError } from '../utils/errors';
 import ChildForm, { EMPTY } from './children/ChildForm';
 import ChildDrawer, { TerminateModal } from './children/ChildDrawer';
 import { fmtDay, fmtTime, localDate } from './children/shared';
 import { ageFrom, ageGroup, caseRef } from '../utils/child';
+import AssignmentRequests from '../components/AssignmentRequests';
 
 // Live "who else has this record open" chip — polls the presence heartbeat endpoint.
 function usePresence(childId) {
@@ -65,11 +67,46 @@ function ScheduleChip({ appts = [] }) {
   );
 }
 
+/* Who the child is with, and who has been asked (children/assignment.py).
+ * A psychologist picked on the record is ASKED, and the child joins their
+ * records only when they accept - so between the pick and the answer the row
+ * has to say so, or it reads as "nobody" and gets picked again. A decline
+ * shows until someone else is asked, with the reason on hover. */
+function PsychologistCell({ child: c, canManage, onAssign }) {
+  const pending = c.pending_assignment;
+  const declined = !pending && !c.psychologist ? c.declined_assignment : null;
+  const assign = canManage && c.status === 'active' && !c.psychologist && !pending;
+  return (
+    <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3 }}>
+      {c.psychologist_name && <span>{c.psychologist_name}</span>}
+      {pending && (
+        <span title={`Asked ${pending.requested_by_name ? `by ${pending.requested_by_name} ` : ''}— the child joins their records once they accept`}>
+          <Badge tone="amber" size="sm" dot>Awaiting {pending.psychologist_name}</Badge>
+        </span>
+      )}
+      {declined && (
+        <span title={`${declined.psychologist_name} declined: ${declined.reason}`}>
+          <Badge tone="danger" size="sm" dot>Declined by {declined.psychologist_name}</Badge>
+        </span>
+      )}
+      {assign && (
+        <button title={`Assign a psychologist to ${c.fullname}`} aria-label={`Assign psychologist to ${c.fullname}`}
+          onClick={(e) => { e.stopPropagation(); onAssign(); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 'var(--radius-pill)', border: '1px dashed var(--blue-300)', background: 'var(--blue-50)', color: 'var(--blue-700)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 11.5, cursor: 'pointer' }}>
+          <Icon name="user-plus" size={13} /> Assign
+        </button>
+      )}
+      {!c.psychologist_name && !pending && !declined && !assign && '—'}
+    </span>
+  );
+}
+
 export default function Children() {
   const { user } = useAuth();
   const { refresh: refreshActivity } = useActivity();
   const toast = useToast();
   const confirm = useConfirm();
+  const notice = useNotice();
   const navigate = useNavigate();
   const layout = useLayout();
   const canManage = ['Administrator', 'Staff'].includes(user?.role_name);
@@ -204,7 +241,8 @@ export default function Children() {
       c.ref,
       c.age != null ? `${c.age}y` : null,
       !layout.recordsCategoryCol ? c.case_category : null,
-      !layout.recordsPsychCol ? (c.psychologist_name || 'no psychologist') : null,
+      !layout.recordsPsychCol ? (c.psychologist_name || (c.pending_assignment ? null : 'no psychologist')) : null,
+      !layout.recordsPsychCol && c.pending_assignment ? `awaiting ${c.pending_assignment.psychologist_name}` : null,
       // The ISA sees every SW's records, so says whose each is; a SW's list
       // is all theirs, and saying so on every row would be noise.
       isAdmin ? (c.social_worker_name ? `SW ${c.social_worker_name}` : 'no social worker') : null,
@@ -249,7 +287,22 @@ export default function Children() {
     const meaningful = draft && Object.entries(draft).some(([k, v]) => k !== 'assignee_sees_history' && v);
     setForm({ ...EMPTY, _draft: meaningful ? draft : null });
   };
-  const openEdit = (c) => { setError(''); setFieldErrors(null); setForm({ ...EMPTY, ...c, psychologist: c.psychologist || '', _origPsychologist: c.psychologist || '' }); };
+  /* `psychologist` in the form is who the child SHOULD be with: the one
+   * asked, while a request is open, else the one who holds them. The server
+   * reads it the same way (ChildViewSet.perform_update), so resending it
+   * untouched changes nothing. `_origPsychologist` stays the holder - the
+   * carry-history choice is about moving the child away from them. */
+  const openEdit = (c) => {
+    setError(''); setFieldErrors(null);
+    const pending = c.pending_assignment;
+    setForm({
+      ...EMPTY, ...c,
+      psychologist: String(pending?.psychologist || c.psychologist || ''),
+      _origPsychologist: c.psychologist || '',
+      _basePsychologist: String(pending?.psychologist || c.psychologist || ''),
+      assignee_sees_history: pending ? pending.carry_history : c.assignee_sees_history,
+    });
+  };
 
   /* /children?openCreate=1 opens the intake form straight away — it is what the
    * dashboard's "Add Record" action links to. The parameter is cleared once
@@ -271,17 +324,26 @@ export default function Children() {
     e.preventDefault();
     const name = form.id ? form.fullname
       : [form.first_name, form.middle_name, form.last_name].filter(Boolean).join(' ');
-    const reassigning = form.id && String(form.psychologist || '') !== String(form._origPsychologist || '');
-    const assignee = psychologists.find((p) => String(p.id) === String(form.psychologist))?.name;
+    // A pick ASKS the psychologist (children/assignment.py): say so before
+    // saving, and say it again after, since the record will not show them as
+    // the child's psychologist until they accept.
+    const changing = String(form.psychologist || '') !== String(form._basePsychologist || '');
+    const asking = !!form.psychologist && (!form.id || changing);
+    const clearing = !!form.id && changing && !form.psychologist;
+    const assignee = psychologists.find((p) => String(p.id) === String(form.psychologist))?.name
+      || 'The psychologist';
+    const askLine = asking
+      ? ` ${assignee} is asked to take the case, and ${name} joins their records once they accept.`
+      : '';
     const ok = await confirm({
       description: form.id
-        ? `This saves your changes to ${name}'s record.`
-        : `This adds ${name} to Records. The child's name cannot be changed once the record is saved, so check the spelling.`,
+        ? `This saves your changes to ${name}'s record.${askLine}`
+        : `This adds ${name} to Records. The child's name cannot be changed once the record is saved, so check the spelling.${askLine}`,
       confirmLabel: form.id ? 'Yes, save changes' : 'Yes, add the record',
       details: form.id
-        ? [['Reassigned to', reassigning ? (assignee || 'Unassigned') : null]]
+        ? [['Asks to take the case', asking ? assignee : null], ['Psychologist', clearing ? 'Unassigned' : null]]
         : [['Category', form.case_category], ['Case type', form.case_type],
-           ['Date of birth', form.birth_date], ['Psychologist', assignee || 'Unassigned'],
+           ['Date of birth', form.birth_date], ['Psychologist', asking ? `${assignee} (asked to accept)` : 'Unassigned'],
            ['Case referral', form.referralFile?.name]],
     });
     if (!ok) return;
@@ -291,6 +353,7 @@ export default function Children() {
     delete payload.age; delete payload.group; delete payload.ref;
     delete payload.psychologist_name; delete payload.social_worker_name;
     delete payload._origPsychologist; delete payload.termination; delete payload.photo;
+    delete payload._basePsychologist; delete payload.pending_assignment; delete payload.declined_assignment;
     delete payload.updated_at; delete payload._conflict; delete payload._draft;
     // A file, not a column. It is uploaded separately once the child exists,
     // because a CaseReferral needs a child id to belong to.
@@ -338,12 +401,34 @@ export default function Children() {
       if (referralFailed) {
         toast.error('Record saved, but the case referral did not upload. '
           + 'Open the record and try again — sessions cannot be booked without it.');
-      } else {
+      } else if (!asking && !clearing) {
         toast.success(form.id ? 'Record updated' : 'Record added');
       }
+      const was = form;
       setForm(null);
       load();
       refreshActivity();
+      // The end dialog. "Joins their records once they accept" is the
+      // sentence that explains why the row does not show them yet.
+      if (asking) {
+        await notice({
+          title: 'Request sent',
+          description: `${assignee} is asked to take ${name}'s case. ${name} joins their records once they `
+            + 'accept. Their answer comes to your notifications and shows on this record.',
+          details: [['Record', was.id ? 'Changes saved' : 'Added to Records'], ['Asked', assignee],
+            ['Currently with', was.id ? (was.psychologist_name || 'Nobody yet') : null],
+            ['Case referral', referralFile ? (referralFailed ? 'Did not upload — add it from the record' : 'On file') : null]],
+        });
+      } else if (clearing) {
+        await notice({
+          title: 'Assignment cleared',
+          description: [
+            was.pending_assignment ? `The request to ${was.pending_assignment.psychologist_name} is withdrawn.` : '',
+            was._origPsychologist ? `${was.psychologist_name || 'The psychologist'} no longer holds ${name}'s case.` : '',
+            'Pick a psychologist whenever you are ready.',
+          ].filter(Boolean).join(' '),
+        });
+      }
     } catch (err) {
       if (err.response?.status === 409) {
         const fresh = err.response.data.current;
@@ -362,6 +447,39 @@ export default function Children() {
         : 'Save failed. Please try again.');
       toast.error('Could not save the record. Please check the marked fields.');
     }
+  };
+
+  /* Withdraw the open request from the record form. The form stays open on
+   * the holder (or nobody), since the rest of the edit may still be wanted. */
+  const withdrawRequest = async () => {
+    const pending = form?.pending_assignment;
+    if (!pending) return;
+    const name = form.fullname;
+    if (!(await confirm({
+      description: `This withdraws the request to ${pending.psychologist_name}. ${name} `
+        + `${form.psychologist_name ? `stays with ${form.psychologist_name}` : 'stays unassigned'}.`,
+      confirmLabel: 'Yes, withdraw it',
+      details: [['Child', name], ['Asked', pending.psychologist_name]],
+    }))) return;
+    try {
+      await api.post(`/assignment-requests/${pending.id}/withdraw/`);
+    } catch (err) {
+      load();
+      await notice({
+        title: 'The request could not be withdrawn', tone: 'warning', icon: 'alert-triangle',
+        description: firstError(err.response?.data, 'Could not withdraw the request. Try again.'),
+      });
+      return;
+    }
+    const holder = form._origPsychologist ? String(form._origPsychologist) : '';
+    setForm((f) => f && ({ ...f, pending_assignment: null, psychologist: holder, _basePsychologist: holder }));
+    load();
+    refreshActivity();
+    await notice({
+      title: 'Request withdrawn',
+      description: `${pending.psychologist_name} is no longer asked to take ${name}'s case. `
+        + 'Pick another psychologist whenever you are ready.',
+    });
   };
 
   const terminate = async (c, reason, note) => {
@@ -418,6 +536,10 @@ export default function Children() {
           <Button variant="primary" onClick={openCreate} iconLeft={<Icon name="user-plus" size={18} />}>Add record</Button>
         )}
       </PageHeader>
+
+      {/* Asked, not yet theirs: the one place these children appear to a
+          psychologist until they answer (components/AssignmentRequests). */}
+      {isPsych && <AssignmentRequests onChanged={load} />}
 
       <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
         {/* Toolbar. Search, the counted status filters and the sort, all in
@@ -527,13 +649,7 @@ export default function Children() {
                         </td>
                         {layout.recordsPsychCol && (
                           <td style={{ ...TD, fontWeight: 600, whiteSpace: 'nowrap' }}>
-                            {c.psychologist_name || (canManage && c.status === 'active' ? (
-                              <button title={`Assign a psychologist to ${c.fullname}`} aria-label={`Assign psychologist to ${c.fullname}`}
-                                onClick={(e) => { e.stopPropagation(); openEdit(c); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })}
-                                style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 'var(--radius-pill)', border: '1px dashed var(--blue-300)', background: 'var(--blue-50)', color: 'var(--blue-700)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 11.5, cursor: 'pointer' }}>
-                                <Icon name="user-plus" size={13} /> Assign
-                              </button>
-                            ) : '—')}
+                            <PsychologistCell child={c} canManage={canManage} onAssign={() => openEdit(c)} />
                           </td>
                         )}
                         <td style={{ ...TD, whiteSpace: 'nowrap' }}>
@@ -574,7 +690,7 @@ export default function Children() {
       </div>
 
       {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} canReopen={canManage} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => setReopening(sel)} onClose={() => setSel(null)} />}
-      {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} socialWorkers={isAdmin ? socialWorkers : null} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} fieldErrors={fieldErrors} onSubmit={save} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
+      {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} socialWorkers={isAdmin ? socialWorkers : null} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} fieldErrors={fieldErrors} onSubmit={save} onWithdraw={withdrawRequest} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
       {terminating && <TerminateModal child={terminating} onConfirm={terminate} onClose={() => setTerminating(null)} />}
       {reopening && (
         <ConfirmDialog

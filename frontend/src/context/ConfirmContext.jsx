@@ -39,19 +39,21 @@ export function ConfirmProvider({ children }) {
   };
 
   const tone = request?.tone || 'brand';
+  const notice = !!request?.notice;
   return (
     <ConfirmContext.Provider value={confirm}>
       {children}
       {request && (
         <ConfirmDialog
           open
-          title={request.title || PROCEED}
+          title={request.title || (notice ? 'Done' : PROCEED)}
           description={request.description}
-          confirmLabel={request.confirmLabel || 'Yes, proceed'}
-          cancelLabel={request.cancelLabel || 'Go back'}
+          confirmLabel={request.confirmLabel || (notice ? 'Done' : 'Yes, proceed')}
+          cancelLabel={notice ? null : (request.cancelLabel || 'Go back')}
           tone={tone}
-          icon={<Icon name={request.icon || (tone === 'danger' ? 'alert-triangle' : 'help-circle')} size={20} />}
-          onClose={() => settle(false)}
+          icon={<Icon name={request.icon || (notice ? 'check-circle' : tone === 'danger' ? 'alert-triangle' : 'help-circle')} size={20} />}
+          // Closing an end dialog any way at all is reading it.
+          onClose={() => settle(notice)}
           onConfirm={() => settle(true)}
         >
           {request.details && (
@@ -78,4 +80,23 @@ const proceed = () => Promise.resolve(true);
 // eslint-disable-next-line react-refresh/only-export-components
 export function useConfirm() {
   return useContext(ConfirmContext) || proceed;
+}
+
+/* The end dialog: what just happened, and what happens next, with one button.
+ *
+ *   const notice = useNotice();
+ *   await notice({ title: 'Request sent', description: '…', details: [['Child', name]] });
+ *
+ * The owner asked for one at the end of every step of the assignment flow
+ * (28 Sep 2026) - asking a psychologist, their accepting or declining, and
+ * withdrawing. A toast is gone in three seconds, and "the child joins their
+ * records once they accept" is the sentence somebody needs to have read. It
+ * is the same dialog as useConfirm, without the way back. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function useNotice() {
+  const confirm = useContext(ConfirmContext);
+  return useCallback(
+    (options = {}) => (confirm ? confirm({ ...options, notice: true }) : Promise.resolve(true)),
+    [confirm],
+  );
 }

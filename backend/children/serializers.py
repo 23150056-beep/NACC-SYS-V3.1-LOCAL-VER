@@ -3,8 +3,8 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from accounts.display import display_name
 from accounts.models import Role
-from children import intake
-from children.models import Child
+from children import assignment, intake
+from children.models import AssignmentRequest, Child
 
 User = get_user_model()
 
@@ -49,6 +49,12 @@ class ChildSerializer(serializers.ModelSerializer):
     pre_assessment_status = serializers.SerializerMethodField()
     instruments_used = serializers.SerializerMethodField()
     has_case_referral = serializers.SerializerMethodField()
+    # Assigning is asking (children/assignment.py): `psychologist` is who holds
+    # the child, and these say who has been asked and who said no. For the ISA
+    # and social workers only - a decline's reason is written to the social
+    # worker, not to whichever psychologist holds the child.
+    pending_assignment = serializers.SerializerMethodField()
+    declined_assignment = serializers.SerializerMethodField()
 
     class Meta:
         model = Child
@@ -65,6 +71,7 @@ class ChildSerializer(serializers.ModelSerializer):
             "psychologist", "psychologist_name", "social_worker", "social_worker_name",
             "termination", "terminations",
             "pre_assessment_status", "instruments_used", "has_case_referral",
+            "pending_assignment", "declined_assignment",
             "updated_at",
         ]
         # The tracker moves only through the advance-status / terminate actions.
@@ -91,6 +98,63 @@ class ChildSerializer(serializers.ModelSerializer):
         if value is not None and getattr(value.role, "role_name", None) != Role.STAFF:
             raise serializers.ValidationError("Choose a social worker (SW) account.")
         return value
+
+    def validate_psychologist(self, value):
+        """Only an active psychologist can be asked. The field took any user
+        id before, a staff account included. The psychologist who holds the
+        child, or who has already been asked, passes unchanged even if their
+        account has since been archived: the edit form resends it."""
+        if value is None:
+            return value
+        if self.instance is not None:
+            if value == self.instance.assigned_psychologist:
+                return value
+            pending = self._pending(self.instance)
+            if pending is not None and pending.psychologist_id == value.pk:
+                return value
+        if not assignment.is_active_psychologist(value):
+            raise serializers.ValidationError("Choose an active psychologist.")
+        return value
+
+    def _sees_requests(self):
+        request = self.context.get("request")
+        role = getattr(getattr(getattr(request, "user", None), "role", None),
+                       "role_name", None) if request else None
+        return role in (Role.ADMINISTRATOR, Role.STAFF)
+
+    @staticmethod
+    def _requests(obj):
+        # Newest first (the model's ordering), and prefetched by the list.
+        return list(obj.assignment_requests.all())
+
+    def _pending(self, obj):
+        return next((r for r in self._requests(obj)
+                     if r.status == AssignmentRequest.PENDING), None)
+
+    def get_pending_assignment(self, obj):
+        if not self._sees_requests():
+            return None
+        req = self._pending(obj)
+        if req is None:
+            return None
+        return {"id": req.id, "psychologist": req.psychologist_id,
+                "psychologist_name": display_name(req.psychologist) or None,
+                "requested_by_name": display_name(req.requested_by) or None,
+                "carry_history": req.carry_history,
+                "created_at": req.created_at}
+
+    def get_declined_assignment(self, obj):
+        """The latest answer, when it was no. Once somebody else is asked or
+        the child is assigned, it is history and no longer shown."""
+        if not self._sees_requests():
+            return None
+        reqs = self._requests(obj)
+        if not reqs or reqs[0].status != AssignmentRequest.DECLINED:
+            return None
+        req = reqs[0]
+        return {"id": req.id, "psychologist": req.psychologist_id,
+                "psychologist_name": display_name(req.psychologist) or None,
+                "reason": req.reason, "decided_at": req.decided_at}
 
     def get_pre_assessment_status(self, obj):
         # 5-state pipeline status; see Child.pre_assessment_status.
