@@ -6,11 +6,12 @@ import {
 import { PROCEED, useConfirm } from '../../context/ConfirmContext';
 import {
   ADMISSION, BIRTH_STATUSES, CASE_CATEGORIES, CASE_CATEGORY_OPTIONS, CASE_TYPES, CASE_TYPE_FIELDS,
-  LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, TYPES_OF_ADOPTION, caseTypesFor, dateFieldFor,
-  requiredFields,
+  DYNAMIC, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, TYPES_OF_ADOPTION, caseChanged, caseTypesFor,
+  dateFieldFor, requiredFields, unaskedAnswers,
 } from '../../config/caseData';
 import { shortDate, timeAgo } from '../../utils/time';
 import CustodianFields from './CustodianFields';
+import { EMPTY, formFromRecord } from './recordForm';
 
 // "2008-09-29" from the date's LOCAL parts. toISOString() gives the UTC date,
 // which in Manila (UTC+8) is the previous day for anything before 8 a.m.
@@ -23,26 +24,14 @@ const localIsoDay = (d) => [d.getFullYear(), String(d.getMonth() + 1).padStart(2
  * It lived in Children.jsx, which was 1,102 lines and nine components. This
  * one accounts for 443 of them and reached for exactly two things outside
  * itself, EMPTY and FORM_STEPS, so it moved with both and nothing else
- * changed. The page now imports it.
+ * changed. The page now imports it. EMPTY has since moved to recordForm.js,
+ * beside formFromRecord, which both the page and "Load latest" use.
  *
  * Since 24 Sep 2026 the old Identity and Case steps are one step, "Child's
  * Profile", with the Category first, and every question that applies to the
  * case has to be answered before a new record saves (config/caseData.js
  * requiredFields; the server refuses the same blanks).
  */
-
-export const EMPTY = {
-  first_name: '', middle_name: '', last_name: '',
-  birth_date: '', date_found: '', gender: '',
-  house_number: '', street: '', landmark: '',
-  province: '', municipality: '', barangay: '', psgc_province: '', psgc_municipality: '', psgc_barangay: '',
-  case_type: '', case_category: '', custodian_name: '', psychologist: '', assignee_sees_history: true,
-  custodian_contact: '', custodian_sms_consent: false,
-  place_of_birth_or_found: '', birth_status: '', legal_status: '',
-  date_of_admission: '', date_of_placement_to_custodian: '', type_of_adoption: '',
-  referral_source: '', referral_reason: '', education_level: '', current_placement: '', medical_notes: '',
-  recommendation: '',
-};
 
 
 /* "Present Environment" was "Address" until 29 Sep 2026 (owner): where the
@@ -72,6 +61,32 @@ const FIELD_INFO = {
 };
 const NAME_FIELDS = ['first_name', 'middle_name', 'last_name'];
 
+/* The fields that show their own error under the control. A refusal for any
+ * other field - or for one the current case type hides - is listed at the top
+ * instead, so "they are marked below" is never said over nothing marked. */
+const SHOWS_ERROR = [
+  'case_category', 'case_type', 'first_name', 'middle_name', 'last_name', 'birth_date', 'date_found',
+  'gender', 'place_of_birth_or_found', 'birth_status', 'legal_status', 'education_level',
+  'type_of_adoption', ADMISSION, PLACEMENT, 'custodian_name', 'custodian_contact',
+  'house_number', 'street', 'province', 'municipality', 'barangay', 'landmark', 'referral_source',
+];
+
+/* A refusal is about the answers it was given. Once the field - or an answer
+ * it was checked against - changes, its message goes, rather than staying
+ * beside a corrected date until the next save. */
+const CHECKED_AGAINST = {
+  date_found: ['birth_date'],
+  [ADMISSION]: ['birth_date', 'case_type', 'type_of_adoption'],
+  [PLACEMENT]: ['birth_date', 'case_type', 'type_of_adoption'],
+  case_category: ['case_type'], case_type: ['case_category'], type_of_adoption: ['case_type'],
+  custodian_name: ['custodian_contact', 'custodian_sms_consent', 'case_type'],
+  custodian_contact: ['custodian_name', 'custodian_sms_consent', 'case_type'],
+  custodian_sms_consent: ['custodian_name', 'custodian_contact', 'case_type'],
+};
+
+/* "A, B and C". */
+const listed = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
+
 /* The options for a list, plus the value this record already holds when that
  * value has since been retired — shown, so an old record does not look blank,
  * and marked, so nobody picks it for a new one. */
@@ -87,7 +102,7 @@ const snapshot = (f) => JSON.stringify(Object.keys(f).sort()
   .map((k) => [k, k === 'referralFile' ? Boolean(f[k]) : f[k]]));
 
 
-export default function ChildForm({ form, setForm, draftKey, psychologists, socialWorkers = null, blocks = [], error, fieldErrors = null, isPsych = false, canReopen = false, others = [], onSubmit, onWithdraw, onClose, onReopen, onOpenExisting }) {
+export default function ChildForm({ form, setForm, draftKey, psychologists, socialWorkers = null, blocks = [], error, fieldErrors = null, refusedWith = null, isPsych = false, canReopen = false, others = [], onSubmit, onWithdraw, onClose, onReopen, onOpenExisting }) {
   const [step, setStep] = useState(1);
   // Reopening the form for a different record starts at the beginning again.
   useEffect(() => { setStep(1); }, [form.id]);
@@ -117,16 +132,6 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
       saveDraft(form);
     }
     onClose();
-  };
-  // A refused save opens the step holding the first field the server named,
-  // rather than leaving somebody on Assignment reading about a street number.
-  useEffect(() => {
-    const first = Object.keys(fieldErrors || {}).find((k) => FIELD_INFO[k]);
-    if (first) setStep(FIELD_INFO[first][0]);
-  }, [fieldErrors]);
-  const fieldError = (name) => {
-    const e = fieldErrors?.[name];
-    return Array.isArray(e) ? e.join(' ') : (e || null);
   };
   const closeRef = useRef(requestClose);
   closeRef.current = requestClose;
@@ -245,52 +250,120 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
    * the other would refuse. */
   const categoryOptions = form.case_type ? (CASE_CATEGORY_OPTIONS[form.case_type] || CASE_CATEGORIES) : CASE_CATEGORIES;
   const caseTypeOptions = caseTypesFor(form.case_category);
+  // What each list leaves out, said in its hint: a list that silently lacks
+  // Family Tracing reads as a form that cannot do it.
+  const hiddenCategories = form.case_type ? CASE_CATEGORIES.filter((c) => !categoryOptions.includes(c)) : [];
+  const hiddenCaseTypes = form.case_category ? CASE_TYPES.filter((t) => !caseTypeOptions.includes(t)) : [];
+  // "(no longer offered)" is for a retired value only. A current category the
+  // case type does not use is not retired, and saying so misled.
+  const categoryLabel = (c) => {
+    if (!CASE_CATEGORIES.includes(c)) return `${c} (no longer offered)`;
+    return categoryOptions.includes(c) ? c : `${c} (not used for ${form.case_type} cases)`;
+  };
+  const caseTypeLabel = (t) => {
+    if (!CASE_TYPES.includes(t)) return `${t} (no longer offered)`;
+    return caseTypeOptions.includes(t) ? t : `${t} (does not take ${form.case_category} children)`;
+  };
 
-  /* Changing the track clears anything the new one does not ask for, so a case
-   * switched from Adoption to Independent Living cannot keep a stale Type of
-   * Adoption that no screen will ever show again — or a date of placement
-   * sitting behind the date of admission it now asks for. */
-  const changeCaseType = (nextType) => {
-    const nextFields = CASE_TYPE_FIELDS[nextType] || [];
-    const nextCategories = CASE_CATEGORY_OPTIONS[nextType] || CASE_CATEGORIES;
-    const nextAdoption = nextFields.includes('type_of_adoption') ? form.type_of_adoption : '';
-    const nextDate = dateFieldFor(nextType, nextAdoption);
-    setForm({
-      ...form,
-      case_type: nextType,
-      case_category: nextCategories.includes(form.case_category) ? form.case_category : '',
-      // The custodian goes with their number and consent: a track that does
-      // not ask who the child lives with keeps none of the three.
-      ...(nextFields.includes('custodian_name') ? {} : {
-        custodian_name: '', custodian_contact: '', custodian_sms_consent: false,
-      }),
-      type_of_adoption: nextAdoption,
-      [ADMISSION]: nextDate === ADMISSION ? form[ADMISSION] : '',
-      [PLACEMENT]: nextDate === PLACEMENT ? form[PLACEMENT] : '',
-    });
-  };
-  // The type of adoption decides which date an adoption records.
-  const changeAdoptionType = (next) => {
-    const nextDate = dateFieldFor(form.case_type, next);
-    setForm({
-      ...form,
-      type_of_adoption: next,
-      [ADMISSION]: nextDate === ADMISSION ? form[ADMISSION] : '',
-      [PLACEMENT]: nextDate === PLACEMENT ? form[PLACEMENT] : '',
-    });
-  };
+  /* Changing the case type (or the type of adoption) changes only what is
+   * ASKED. An answer the new one does not ask for is hidden, not deleted:
+   * switching back brings it back, and the save leaves out whatever the final
+   * choice does not ask (caseData.js unaskedBlanked; Children.jsx save).
+   * Until 29 Sep 2026 they were deleted on the spot, so a slip of the dropdown
+   * lost the custodian, their confirmed number and texting consent, and the
+   * date - and clearing the Case Type to re-pair the Category cost what
+   * clearing the Category did not. */
 
   const todayIso = localIsoDay(today);
-  // Named, not just disabled: the required fields live on two different steps,
-  // so a greyed-out Save with no explanation sends people hunting. The name is
-  // locked on an existing record, so an edit never lists it.
+  const original = isEdit ? form._record || null : null;
+  const differs = (f) => String(original?.[f] ?? '') !== String(form[f] ?? '');
+  // Every answer is new on Add Record; on an edit, only what was changed.
+  const changed = (f) => !isEdit || !original || differs(f);
+  const retyped = !isEdit || (!!original && caseChanged(form, original));
+
+  /* Which blanks the save refuses (backend ChildSerializer._require): on Add
+   * Record, every one. On an edit, a blank the record had filled, or one the
+   * case type asks again because it changed - never one a record has had
+   * since before the rules, and never the custodian of a psychologist, who
+   * cannot record one. The footer used to call all of them "Still blank", in
+   * grey, and let the save go to be refused. The name is locked on an
+   * existing record, so an edit never lists it. */
+  const legacyRecord = !!original && !(original.first_name || original.last_name);
+  const refusedIfBlank = (f) => {
+    if (f === 'custodian_name' && isPsych) return false;
+    if (!isEdit) return true;
+    if (!original || legacyRecord) return false;
+    return !!String(original[f] ?? '').trim() || (retyped && DYNAMIC.includes(f));
+  };
   const missingFields = requiredFields(form.case_type, form.type_of_adoption)
     .filter((f) => !String(form[f] ?? '').trim())
     .filter((f) => !(isEdit && NAME_FIELDS.includes(f)));
-  const missing = missingFields.map((f) => FIELD_INFO[f]?.[1] || f);
-  const missingOnStep = (n) => missingFields.some((f) => FIELD_INFO[f]?.[0] === n);
-  const requiredFieldsFilled = missingFields.length === 0;
-  const firstMissingStep = missingFields.length ? FIELD_INFO[missingFields[0]]?.[0] : null;
+  const needed = missingFields.filter(refusedIfBlank);
+  const oldBlanks = missingFields.filter((f) => !refusedIfBlank(f));
+
+  /* The server's checks on the dates and the pairing (ChildSerializer
+   * validate_birth_date, _check_dates, _check_case), made here as the answers
+   * change: a date only the save refused sent people back from the last step
+   * with no warning on the way. Only what the save will send is checked. */
+  const sent = { ...form, ...unaskedAnswers(form, original) };
+  const wholeDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') && Number(String(v).slice(0, 4)) >= 1900;
+  const problems = {};
+  if (wholeDate(form.birth_date) && changed('birth_date')) {
+    const [y, m, d] = form.birth_date.split('-').map(Number);
+    const age = ageOn(new Date(y, m - 1, d));
+    if (age < 5 || age > 17) problems.birth_date = 'The child must be between 5 and 17 years old.';
+  }
+  const bornMoved = isEdit && changed('birth_date');
+  for (const [f, label] of [['date_found', 'The date found'], [ADMISSION, 'The date of admission'],
+    [PLACEMENT, 'The date of placement']]) {
+    const v = sent[f];
+    // Set by this save - judged by what is sent, as the server judges it, not
+    // by a hidden value the save will not send.
+    const setting = !isEdit || !original || String(original[f] ?? '') !== String(v ?? '');
+    // Against a moved birth date, only the dates the case shows: an older
+    // record can hold the other one, which no screen shows or edits.
+    if (!wholeDate(v) || (!setting && !(bornMoved && (f === 'date_found' || f === dateField)))) continue;
+    if (setting && v > todayIso) problems[f] = `${label} cannot be in the future.`;
+    else if (wholeDate(form.birth_date) && v < form.birth_date) problems[f] = `${label} cannot be before the date of birth.`;
+  }
+  if ((changed('case_type') || changed('case_category')) && CASE_CATEGORIES.includes(form.case_category)
+    && CASE_CATEGORY_OPTIONS[form.case_type] && !CASE_CATEGORY_OPTIONS[form.case_type].includes(form.case_category)) {
+    problems.case_category = `${form.case_category} is not a category for ${form.case_type} cases.`;
+  }
+
+  // The server's refusal, while the answers it refused are still the ones here.
+  const serverMessage = (name) => {
+    const e = fieldErrors?.[name];
+    if (!e || !refusedWith) return null;
+    const same = [name, ...(CHECKED_AGAINST[name] || [])]
+      .every((k) => String(form[k] ?? '') === String(refusedWith[k] ?? ''));
+    return same ? (Array.isArray(e) ? e.join(' ') : String(e)) : null;
+  };
+  const fieldError = (name) => serverMessage(name) || problems[name] || null;
+  const displays = (k) => {
+    if (!SHOWS_ERROR.includes(k)) return false;
+    if (NAME_FIELDS.includes(k)) return !isEdit;
+    if (k === 'custodian_name' || k === 'custodian_contact') return asksFor('custodian_name') && !isPsych;
+    if (k === 'type_of_adoption') return asksFor('type_of_adoption');
+    if (k === ADMISSION || k === PLACEMENT) return dateField === k;
+    return true;
+  };
+  const refused = Object.keys(fieldErrors || {})
+    .filter((k) => !['detail', 'non_field_errors'].includes(k) && serverMessage(k));
+  const unmarked = [...new Set([...refused, ...Object.keys(problems)])].filter((k) => !displays(k));
+  const labelOf = (k) => FIELD_INFO[k]?.[1] || k.replace(/_/g, ' ');
+  // A refused save opens the step holding the first field the server marked,
+  // rather than leaving somebody on Assignment reading about a street number.
+  useEffect(() => {
+    const first = Object.keys(fieldErrors || {}).find((k) => FIELD_INFO[k] && displays(k));
+    if (first) setStep(FIELD_INFO[first][0]);
+    // Once per refusal, not on every keystroke after it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fieldErrors]);
+
+  const blockers = [...needed, ...Object.keys(problems).filter((k) => !needed.includes(k))];
+  const blockedOnStep = (n) => blockers.some((f) => FIELD_INFO[f]?.[0] === n);
+  const firstBlockerStep = blockers.length ? FIELD_INFO[blockers[0]]?.[0] : null;
   return (
     <div onClick={requestClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 70, animation: 'racco-fade-in var(--dur-base) var(--ease-out)' }}>
       <form onSubmit={onSubmit} onClick={(e) => e.stopPropagation()}
@@ -320,11 +393,25 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             </Alert>
           )}
           {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{error}</Alert>}
+          {(refused.length > 0 || unmarked.length > 0) && (
+            <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}
+              title={refused.some(displays) || Object.keys(problems).some(displays)
+                ? 'Some answers need correcting — they are marked below.' : 'Some answers need correcting.'}>
+              {unmarked.length > 0 && (
+                <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                  {unmarked.map((k) => {
+                    const what = labelOf(k);
+                    return <li key={k}>{what.charAt(0).toUpperCase() + what.slice(1)}: {serverMessage(k) || problems[k]}</li>;
+                  })}
+                </ul>
+              )}
+            </Alert>
+          )}
           {form._conflict && (
             <Alert tone="warning" icon={<Icon name="alert-triangle" size={18} />} title="This record was just changed by a teammate.">
               Load their latest version, then re-apply your edits.
               <div style={{ marginTop: 10 }}>
-                <Button type="button" variant="secondary" size="sm" onClick={() => setForm({ ...EMPTY, ...form._conflict, psychologist: form._conflict.psychologist || '', _origPsychologist: form._conflict.psychologist || '' })}>
+                <Button type="button" variant="secondary" size="sm" onClick={() => setForm(formFromRecord(form._conflict))}>
                   Load latest
                 </Button>
               </div>
@@ -340,8 +427,9 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
               {FORM_STEPS.map((label, i) => {
                 const active = step === i + 1;
                 // Visited and nothing left blank. A step walked past with a
-                // required answer still missing is not "done", and says so.
-                const lacking = !isEdit && step > i + 1 && missingOnStep(i + 1);
+                // required answer still missing is not "done", and says so;
+                // on an edit, any step holding something the save refuses.
+                const lacking = (isEdit || step > i + 1) && blockedOnStep(i + 1);
                 const done = step > i + 1 && !lacking;
                 return (
                   <React.Fragment key={label}>
@@ -363,17 +451,21 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 10 }}>Child&apos;s Profile</div>
             <div className="racco-case-grid">
               <FormField label="Category" required error={fieldError('case_category')}
-                hint={form.case_type && categoryOptions.length < CASE_CATEGORIES.length ? `The categories for ${form.case_type} cases.` : undefined}>
+                hint={hiddenCategories.length
+                  ? `${listed(hiddenCategories)} ${hiddenCategories.length === 1 ? 'is' : 'are'} not used for ${form.case_type} cases. To use one, change the Case Type first.`
+                  : undefined}>
                 <Select value={form.case_category || ''} onChange={(e) => setForm({ ...form, case_category: e.target.value })}>
                   <option value="">— Select category —</option>
-                  {withRetired(categoryOptions, form.case_category).map((c) => <option key={c} value={c}>{optionLabel(categoryOptions, c)}</option>)}
+                  {withRetired(categoryOptions, form.case_category).map((c) => <option key={c} value={c}>{categoryLabel(c)}</option>)}
                 </Select>
               </FormField>
               <FormField label="Case Type" required error={fieldError('case_type')}
-                hint={form.case_category && caseTypeOptions.length < CASE_TYPES.length ? `The case types that take ${form.case_category} children.` : undefined}>
-                <Select value={form.case_type || ''} onChange={(e) => changeCaseType(e.target.value)}>
+                hint={hiddenCaseTypes.length
+                  ? `${listed(hiddenCaseTypes)} ${hiddenCaseTypes.length === 1 ? 'does' : 'do'} not take ${form.case_category} children. To pick one, change the Category first.`
+                  : undefined}>
+                <Select value={form.case_type || ''} onChange={(e) => setForm({ ...form, case_type: e.target.value })}>
                   <option value="">— Select case type —</option>
-                  {withRetired(caseTypeOptions, form.case_type).map((t) => <option key={t} value={t}>{t}</option>)}
+                  {withRetired(caseTypeOptions, form.case_type).map((t) => <option key={t} value={t}>{caseTypeLabel(t)}</option>)}
                 </Select>
               </FormField>
 
@@ -470,7 +562,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
               </FormField>
               {asksFor('type_of_adoption') && (
                 <FormField label="Type of Adoption" required error={fieldError('type_of_adoption')}>
-                  <Select value={form.type_of_adoption || ''} onChange={(e) => changeAdoptionType(e.target.value)}>
+                  <Select value={form.type_of_adoption || ''} onChange={(e) => setForm({ ...form, type_of_adoption: e.target.value })}>
                     <option value="">— Select —</option>
                     {withRetired(TYPES_OF_ADOPTION, form.type_of_adoption).map((v) => <option key={v} value={v}>{optionLabel(TYPES_OF_ADOPTION, v)}</option>)}
                   </Select>
@@ -758,11 +850,21 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
               record may have blanks from before the fields were required; the
               edit names them without refusing to save, and the server refuses
               only an answer being taken away. */}
-          {missing.length > 0 && (isEdit || step === FORM_STEPS.length) && (
-            <span role="status" style={{ alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12.5, color: isEdit ? 'var(--text-muted)' : 'var(--amber-700)', marginRight: 'auto', minWidth: 0 }}>
-              {isEdit ? 'Still blank' : 'Still needed'}: {missing.join(', ')}
-              {firstMissingStep && firstMissingStep !== step && (
-                <Button type="button" variant="ghost" size="sm" onClick={() => setStep(firstMissingStep)}>Go to it</Button>
+          {(isEdit || step === FORM_STEPS.length) && (blockers.length > 0 || (isEdit && oldBlanks.length > 0)) && (
+            <span role="status" style={{ alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12.5, marginRight: 'auto', minWidth: 0 }}>
+              {needed.length > 0 && (
+                <span style={{ color: 'var(--amber-700)', fontWeight: 600 }}>
+                  {isEdit ? 'Needed before saving' : 'Still needed'}: {needed.map(labelOf).join(', ')}
+                </span>
+              )}
+              {Object.keys(problems).length > 0 && (
+                <span style={{ color: 'var(--red-600)', fontWeight: 600 }}>Check: {Object.keys(problems).map(labelOf).join(', ')}</span>
+              )}
+              {isEdit && oldBlanks.length > 0 && (
+                <span style={{ color: 'var(--text-muted)' }}>Blank from before, saves as it is: {oldBlanks.map(labelOf).join(', ')}</span>
+              )}
+              {firstBlockerStep && firstBlockerStep !== step && (
+                <Button type="button" variant="ghost" size="sm" onClick={() => setStep(firstBlockerStep)}>Go to it</Button>
               )}
             </span>
           )}
@@ -774,7 +876,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             <Button type="button" variant={isEdit ? 'secondary' : 'primary'} onClick={() => setStep((n) => n + 1)}>Next</Button>
           )}
           {(isEdit || step === FORM_STEPS.length) && (
-            <Button type="submit" variant="primary" disabled={!isEdit && !requiredFieldsFilled} iconLeft={<Icon name="save" size={16} />}>Save Record</Button>
+            <Button type="submit" variant="primary" disabled={blockers.length > 0} iconLeft={<Icon name="save" size={16} />}>Save Record</Button>
           )}
         </div>
       </form>

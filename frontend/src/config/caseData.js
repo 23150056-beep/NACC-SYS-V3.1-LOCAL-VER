@@ -123,6 +123,54 @@ export const requiredFields = (caseType, typeOfAdoption) => {
   return [...ALWAYS_REQUIRED, ...(CASE_TYPE_FIELDS[caseType] || []), ...(date ? [date] : [])];
 };
 
+/* Answered by the case type, so asked again whenever the case type or the type
+ * of adoption changes: an edit that changes either is refused with one of
+ * these blank, even if the record had it blank before. Mirrors DYNAMIC in
+ * backend/children/intake.py (test_intake.py pins the two). */
+export const DYNAMIC = ['custodian_name', 'type_of_adoption', 'date_of_admission', 'date_of_placement_to_custodian'];
+
+/* The answers a case of this type does not ask for, blanked - for what a save
+ * SENDS, never for the form. The form keeps an answer when the case type
+ * changes and only hides it, so switching back brings it back; until 29 Sep
+ * 2026 it deleted them on the spot, and Foster Care -> Residential Care ->
+ * Foster Care lost the custodian, their confirmed number, the texting consent
+ * and the date of placement. */
+export const unaskedBlanked = (caseType, typeOfAdoption) => {
+  const asked = CASE_TYPE_FIELDS[caseType] || [];
+  const adoption = asked.includes('type_of_adoption') ? typeOfAdoption : '';
+  const date = dateFieldFor(caseType, adoption);
+  return {
+    ...(asked.includes('type_of_adoption') ? {} : { type_of_adoption: '' }),
+    ...(asked.includes('custodian_name') ? {} : {
+      custodian_name: '', custodian_contact: '', custodian_sms_consent: false,
+    }),
+    ...(date === ADMISSION ? {} : { [ADMISSION]: null }),
+    ...(date === PLACEMENT ? {} : { [PLACEMENT]: null }),
+  };
+};
+
+// The type of adoption where the case type asks it, else none.
+const askedAdoption = (caseType, typeOfAdoption) => (
+  (CASE_TYPE_FIELDS[caseType] || []).includes('type_of_adoption') ? (typeOfAdoption || '') : '');
+
+/* Whether an edit changes what the case asks - the case type, or the type of
+ * adoption where one is asked. A type of adoption picked while the case was
+ * briefly an Adoption, then left hidden, changes nothing. */
+export const caseChanged = (form, record) => form.case_type !== record.case_type
+  || askedAdoption(form.case_type, form.type_of_adoption)
+    !== askedAdoption(record.case_type, record.type_of_adoption);
+
+/* What a save sends for the answers the final case type does not ask: blank
+ * where the case changed (and on a new record), else exactly what the record
+ * held - an answer typed while the case type was briefly something else is
+ * not kept for a question that is not asked, and an older record's hidden
+ * values go back as they came. */
+export const unaskedAnswers = (form, record) => {
+  const blanked = unaskedBlanked(form.case_type, form.type_of_adoption);
+  if (!record || caseChanged(form, record)) return blanked;
+  return Object.fromEntries(Object.keys(blanked).map((k) => [k, record[k] ?? blanked[k]]));
+};
+
 // New fields from the same official intake form. "N/A" became "Unknown" and
 // "Child" was retired on 24 Sep 2026.
 export const BIRTH_STATUSES = ['Marital', 'Non-Marital', 'Unknown'];

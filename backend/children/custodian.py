@@ -24,6 +24,7 @@ from django.utils import timezone
 
 from accounts.models import Role
 from accounts.phone import InvalidPhilippineMobile, normalise_ph_mobile
+from children import intake
 
 # Same limits as a user confirming their own number (accounts/sms_notifications):
 # every code is a paid text to a number somebody typed.
@@ -78,7 +79,10 @@ def apply(attrs, instance, user, role):
     """Work out the custodian fields a save will write. Returns {field: error}
     for anything refused, and otherwise updates `attrs` in place.
 
-    - A psychologist cannot change any of it.
+    - A psychologist cannot change any of it - except that moving the case to
+      a type that asks for no custodian takes the custodian with it, whoever
+      moves it. Refusing that left a psychologist's case-type change unsavable,
+      with the refusal on a field the new case type does not show.
     - A new custodian or a new number clears consent unless consent is given
       again in the same save, and clears the confirmation unless the new
       number was confirmed by this person within CONFIRMED_FOR.
@@ -92,6 +96,12 @@ def apply(attrs, instance, user, role):
 
     if role not in (Role.ADMINISTRATOR, Role.STAFF):
         changed = [f for f in FIELDS if f in attrs and attrs[f] != before[f]]
+        if changed and _leaves_custodian_behind(attrs, instance) and not any(
+                attrs.get(f) for f in FIELDS):
+            attrs.update(custodian_name="", custodian_contact="", custodian_sms_consent=False,
+                         custodian_sms_consent_at=None, custodian_sms_consent_by=None,
+                         custodian_contact_verified_at=None)
+            return {}
         if changed:
             return {changed[0]: "Only the social worker or the ISA records the custodian."}
         for f in FIELDS:
@@ -123,6 +133,13 @@ def apply(attrs, instance, user, role):
             instance is not None and not instance.custodian_contact_verified_at):
         attrs["custodian_contact_verified_at"] = confirmed_at(user, number)
     return {}
+
+
+def _leaves_custodian_behind(attrs, instance):
+    """This save moves the case to a type that asks for no custodian."""
+    if instance is None or "case_type" not in attrs or attrs["case_type"] == instance.case_type:
+        return False
+    return "custodian_name" not in intake.CASE_TYPE_FIELDS.get(attrs["case_type"], [])
 
 
 def confirmed_at(user, number):

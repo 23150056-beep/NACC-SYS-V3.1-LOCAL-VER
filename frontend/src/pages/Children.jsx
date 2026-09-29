@@ -10,10 +10,11 @@ import {
 import { useToast } from '../context/ToastContext';
 import { useConfirm, useNotice } from '../context/ConfirmContext';
 import { useLayout } from '../context/LayoutContext';
-import { ALL_CLOSURE_REASONS } from '../config/caseData';
+import { ALL_CLOSURE_REASONS, unaskedAnswers } from '../config/caseData';
 import { loadAll } from '../utils/load';
 import { firstError } from '../utils/errors';
-import ChildForm, { EMPTY } from './children/ChildForm';
+import ChildForm from './children/ChildForm';
+import { EMPTY, formFromRecord } from './children/recordForm';
 import ChildDrawer, { TerminateModal } from './children/ChildDrawer';
 import { fmtDay, fmtTime, localDate } from './children/shared';
 import { ageFrom, ageGroup, caseRef } from '../utils/child';
@@ -138,6 +139,8 @@ export default function Children() {
   const [reopenBusy, setReopenBusy] = useState(false);
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState(null);
+  // The form as it was refused: a message stays only while its answer does.
+  const [refusedWith, setRefusedWith] = useState(null);
   const others = usePresence(form?.id || sel?.id);
   // The old standalone Archive page folded in here: admin/staff viewing the
   // Archived filter get the termination-detail columns + reopen; psychologists
@@ -281,34 +284,17 @@ export default function Children() {
   const draftKey = `nacc-child-draft:${user?.id ?? 'anon'}`;
 
   const openCreate = () => {
-    setError(''); setFieldErrors(null);
+    setError(''); setFieldErrors(null); setRefusedWith(null);
     let draft = null;
     try { draft = JSON.parse(localStorage.getItem(draftKey) || 'null'); } catch { /* corrupt draft */ }
     const meaningful = draft && Object.entries(draft).some(([k, v]) => k !== 'assignee_sees_history' && v);
     setForm({ ...EMPTY, _draft: meaningful ? draft : null });
   };
-  /* `psychologist` in the form is who the child SHOULD be with: the one
-   * asked, while a request is open, else the one who holds them. The server
-   * reads it the same way (ChildViewSet.perform_update), so resending it
-   * untouched changes nothing. `_origPsychologist` stays the holder - the
-   * carry-history choice is about moving the child away from them. */
+  // What the form holds for a record is worked out in one place, which the
+  // form's own "Load latest" uses too (ChildForm.jsx formFromRecord).
   const openEdit = (c) => {
-    setError(''); setFieldErrors(null);
-    const pending = c.pending_assignment;
-    setForm({
-      ...EMPTY, ...c,
-      psychologist: String(pending?.psychologist || c.psychologist || ''),
-      _origPsychologist: c.psychologist || '',
-      _basePsychologist: String(pending?.psychologist || c.psychologist || ''),
-      assignee_sees_history: pending ? pending.carry_history : c.assignee_sees_history,
-      // The number as a person types it, and what the record held when
-      // opened: consent and confirmation belong to that person and number
-      // (pages/children/CustodianFields.jsx).
-      custodian_contact: c.custodian_contact_display || '',
-      _origContact: c.custodian_contact || '',
-      _origCustodian: c.custodian_name || '',
-      _origConsent: !!c.custodian_sms_consent,
-    });
+    setError(''); setFieldErrors(null); setRefusedWith(null);
+    setForm(formFromRecord(c));
   };
 
   /* /children?openCreate=1 opens the intake form straight away — it is what the
@@ -356,6 +342,7 @@ export default function Children() {
     if (!ok) return;
     setError('');
     setFieldErrors(null);
+    setRefusedWith(null);
     const payload = { ...form, expected_updated_at: form.updated_at };
     delete payload.age; delete payload.group; delete payload.ref;
     delete payload.psychologist_name; delete payload.social_worker_name;
@@ -364,7 +351,13 @@ export default function Children() {
     for (const k of ['_origContact', '_origCustodian', '_origConsent', '_confirmedNumber',
       'custodian_contact_display', 'custodian_sms_consent_at', 'custodian_sms_consent_by_name',
       'custodian_contact_verified', 'custodian_texts']) delete payload[k];
-    delete payload.updated_at; delete payload._conflict; delete payload._draft;
+    delete payload.updated_at; delete payload._conflict; delete payload._draft; delete payload._record;
+    // The form keeps the answers a case type does not ask for, hidden, so a
+    // changed mind brings them back. What the final case does not ask is sent
+    // blank where the case changed, and as the record held it where it did
+    // not: an unrelated edit of an older record sends it back as it came
+    // (config/caseData.js unaskedAnswers).
+    Object.assign(payload, unaskedAnswers(form, form._record || null));
     // A file, not a column. It is uploaded separately once the child exists,
     // because a CaseReferral needs a child id to belong to.
     const referralFile = form.referralFile || null;
@@ -452,8 +445,11 @@ export default function Children() {
       const body = err.response?.data;
       const perField = body && typeof body === 'object' && !Array.isArray(body) ? body : null;
       setFieldErrors(perField);
+      setRefusedWith(form);
+      // The per-field messages are the form's to show, and to take away as
+      // each is corrected; only what belongs to no field is said here.
       setError(perField
-        ? (perField.detail || perField.non_field_errors?.join(' ') || 'Some answers need correcting — they are marked below.')
+        ? (perField.detail || perField.non_field_errors?.join(' ') || '')
         : 'Save failed. Please try again.');
       toast.error('Could not save the record. Please check the marked fields.');
     }
@@ -700,7 +696,7 @@ export default function Children() {
       </div>
 
       {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} canReopen={canManage} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => setReopening(sel)} onClose={() => setSel(null)} />}
-      {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} socialWorkers={isAdmin ? socialWorkers : null} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} fieldErrors={fieldErrors} onSubmit={save} onWithdraw={withdrawRequest} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
+      {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} socialWorkers={isAdmin ? socialWorkers : null} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} fieldErrors={fieldErrors} refusedWith={refusedWith} onSubmit={save} onWithdraw={withdrawRequest} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
       {terminating && <TerminateModal child={terminating} onConfirm={terminate} onClose={() => setTerminating(null)} />}
       {reopening && (
         <ConfirmDialog

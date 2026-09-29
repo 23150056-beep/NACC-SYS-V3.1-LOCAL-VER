@@ -372,9 +372,9 @@ class ChildSerializer(serializers.ModelSerializer):
             # that path staying lenient (see children/tests/test_api.py
             # and activity/tests/test_activity.py).
             if not legacy_parts:
-                self._require(attrs, creating=True)
+                self._require(attrs, creating=True, role=role)
         if self.instance is not None and not self._is_legacy_record():
-            self._require(attrs, creating=False)
+            self._require(attrs, creating=False, role=role)
         self._check_case(attrs)
         self._check_dates(attrs)
         refused = custodian.apply(attrs, self.instance, getattr(request, "user", None), role)
@@ -395,14 +395,17 @@ class ChildSerializer(serializers.ModelSerializer):
         # this. Holding it to the full intake on its next edit would lock it.
         return not (self.instance.first_name or self.instance.last_name)
 
-    def _require(self, attrs, creating):
+    def _require(self, attrs, creating, role=None):
         """Every question the case asks has an answer.
 
         On create, all of them. On an edit, an answer cannot be taken away -
         but a record from before the rule is not refused for the blanks it
         already had, or nothing about it could be corrected. The questions the
         case type asks are the exception: changing the case type (or the type
-        of adoption) asks them again, so they are answered again."""
+        of adoption) asks them again, so they are answered again. The custodian
+        is never asked of a psychologist, who cannot record one
+        (children/custodian.py): a case-type change on a record with none
+        would otherwise be unsavable for them."""
         blank = lambda v: not str(v or "").strip()  # noqa: E731
         case_type = self._after(attrs, "case_type")
         adoption = self._after(attrs, "type_of_adoption")
@@ -411,6 +414,8 @@ class ChildSerializer(serializers.ModelSerializer):
             for f in ("case_type", "type_of_adoption"))
         missing = {}
         for f in intake.required_fields(case_type, adoption):
+            if f == "custodian_name" and role == Role.PSYCHOLOGIST:
+                continue
             if not blank(self._after(attrs, f)):
                 continue
             if (creating or not blank(getattr(self.instance, f))
@@ -436,17 +441,27 @@ class ChildSerializer(serializers.ModelSerializer):
 
     def _check_dates(self, attrs):
         """None of the case dates is in the future or before the child was
-        born. Checked only where the date is being set, like the birth date."""
+        born. Checked only where the date is being set, like the birth date -
+        or where the birth date is being moved, which could otherwise put the
+        birth after a date already on the record without a word."""
         today = timezone.localdate()
         born = self._after(attrs, "birth_date")
+        born_moved = (self.instance is not None and "birth_date" in attrs
+                      and attrs["birth_date"] != self.instance.birth_date)
+        # Against a moved birth date, only the dates the case shows: an older
+        # record can hold the other one, which no screen shows or edits.
+        shown = {"date_found", intake.date_field_for(self._after(attrs, "case_type"),
+                                                     self._after(attrs, "type_of_adoption"))}
         for f, label in (("date_found", "The date found"),
                          (intake.ADMISSION, "The date of admission"),
                          (intake.PLACEMENT, "The date of placement")):
             value = attrs.get(f)
-            if value is None or (self.instance is not None
-                                 and value == getattr(self.instance, f)):
+            if value is None:
                 continue
-            if value > today:
+            unchanged = self.instance is not None and value == getattr(self.instance, f)
+            if unchanged and not (born_moved and f in shown):
+                continue
+            if not unchanged and value > today:
                 raise serializers.ValidationError({f: f"{label} cannot be in the future."})
             if born and value < born:
                 raise serializers.ValidationError(

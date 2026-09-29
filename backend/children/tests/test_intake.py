@@ -88,6 +88,11 @@ class TheFormAndTheServerAgreeTest(SimpleTestCase):
     def test_what_is_always_required(self):
         self.assertEqual(intake.ALWAYS_REQUIRED, _js_array(self.js, "ALWAYS_REQUIRED"))
 
+    def test_what_a_case_type_change_asks_again(self):
+        # The edit form uses it to tell a blank the save will refuse from an
+        # old one it will not.
+        self.assertEqual(sorted(intake.DYNAMIC), sorted(_js_array(self.js, "DYNAMIC") or []))
+
     def test_the_referral_sources(self):
         self.assertEqual(["RACCO", "LGU", "CCA", "RCF"], _js_array(self.js, "REFERRAL_SOURCES"))
         self.assertEqual(_js_array(self.js, "REFERRAL_SOURCES"),
@@ -299,6 +304,26 @@ class EditingARecordTest(_Staff):
         self.assertEqual({"date_of_admission"}, set(r.data))
         r = self.put(case_type="Residential Care", custodian_name="",
                      date_of_placement_to_custodian=None, date_of_admission="2026-03-02")
+        self.assertEqual(200, r.status_code, r.data)
+
+    def test_moving_the_birth_date_past_a_recorded_date_is_refused(self):
+        """Dates were checked only when they changed, so a birth date moved
+        past a date already on the record went through without a word."""
+        self.assertEqual(200, self.put(date_found="2016-06-01").status_code)
+        r = self.put(birth_date="2017-01-01", date_found="2016-06-01")
+        self.assertEqual(400, r.status_code)
+        self.assertIn("date_found", r.data)
+        # A date already wrong on an older record is not held against an edit
+        # that leaves the birth date alone.
+        Child.objects.filter(pk=self.child.pk).update(date_found=date(2015, 1, 1))
+        r = self.put(date_found="2015-01-01", medical_notes="Seen.")
+        self.assertEqual(200, r.status_code, r.data)
+
+    def test_a_date_the_case_does_not_show_is_not_held_against_a_moved_birth_date(self):
+        # Foster Care shows the placement; an older record may also hold an
+        # admission date, which nothing on screen lets anybody correct.
+        Child.objects.filter(pk=self.child.pk).update(date_of_admission=date(2016, 3, 1))
+        r = self.put(birth_date="2016-06-01", date_of_admission="2016-03-01")
         self.assertEqual(200, r.status_code, r.data)
 
     def test_a_record_from_before_the_rule_can_still_be_edited(self):

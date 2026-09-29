@@ -639,18 +639,38 @@ middle name, a date found, and every question that applies made mandatory.
 - **One date, never both.** A Regular adoption, Residential Care and
   Independent Living record the Date of Admission; every other adoption type,
   Foster Care, Kinship Care and Family Tracing record the Date of Placement to
-  Custodian. An adoption shows neither until its type is picked. Changing the
-  case type or the adoption type clears the date no longer asked, and the save
-  sends it as `null` - Records used to leave an empty date OUT of the request,
-  which kept the old value on the record.
+  Custodian. An adoption shows neither until its type is picked. The save
+  sends the date no longer asked as `null` - Records used to leave an empty
+  date OUT of the request, which kept the old value on the record.
+- **Changing the case type hides answers; it never deletes them** (29 Sep
+  2026). Switching back brings them back. What the final case type does not
+  ask is sent blank where the case changed (`caseData.js caseChanged`: the
+  case type, or the type of adoption where one is asked), and exactly as the
+  record held it where it did not (`unaskedAnswers`) - so a detour through
+  another case type changes nothing, and an older record's hidden values go
+  back as they came. The form's own checks judge what is sent, as the server
+  does. Deleting on the spot lost the
+  custodian, their confirmed number and consent, and the date to one slip of
+  the dropdown, and made clearing the Case Type to re-pair the Category cost
+  what clearing the Category did not.
 - **Category first means the pairing filters both ways**: a category narrows
   the case types and a case type narrows the categories. The server refuses a
   pair the lists do not offer, but only when one of the two is being set.
 - **Mandatory on create; on an edit, an answer cannot be taken away.** A record
   from before the rule keeps its blanks through an unrelated edit (the form
-  names them as "Still blank"), except that changing the case type or adoption
-  type asks that type's questions again. The fullname-only create path the
-  older tests use stays exempt, as it always was.
+  names them "Blank from before, saves as it is"), except that changing the
+  case type or adoption type asks that type's questions again - those, and any
+  answer being taken away, are "Needed before saving" and hold Save, by the
+  server's own rule (`refusedIfBlank` mirrors `_require`; `DYNAMIC` is pinned
+  in test_intake). The custodian is never asked of a psychologist, who cannot
+  record one. The fullname-only create path the older tests use stays exempt.
+- **The form checks what the server checks, as it is typed**: the 5-17 age,
+  dates not in the future or before the birth, the category pairing. A moved
+  birth date is checked against the dates already recorded that the case
+  shows - server and form alike - but not against a hidden older date nobody
+  can edit. A server refusal stays beside its field only while that answer,
+  and what it was checked against, is unchanged (`CHECKED_AGAINST`); one for a
+  field that is not on screen is listed in the alert at the top.
 - **Deliberately optional**: middle name (a foundling or a non-marital child
   may have none), legal status (none issued yet), landmark, date found. Asking
   for something that does not exist gets "N/A" typed into it.
@@ -826,7 +846,9 @@ address logic is unchanged) and asks who the child lives with now - the
   reads back (`/api/custodian-contact/code/`, SW and ISA only, same limits as
   a user's own number). A different custodian or number clears both unless
   given again in the same save; a confirmation counts only for whoever made
-  it, within the hour. A psychologist cannot change any of it.
+  it, within the hour. A psychologist cannot change any of it, except that
+  moving the case to a type that asks for no custodian takes the custodian -
+  number, consent and all - with it, whoever moves it.
 - **Five texts, no child's name**: booked, the day-before reminder (the
   existing `send_session_reminders` job, one `CustodianReminder` per
   appointment), moved, cancelled before it happens, and missed (a no-show

@@ -166,6 +166,42 @@ class ContactAndConsentTest(CustodianBase):
                           medical_notes="Asthma.")
         self.assertEqual(200, res.status_code, "resending the same values is fine")
 
+    def test_a_case_moved_off_custodian_care_takes_the_custodian_with_it(self):
+        """A psychologist's case-type change used to be unsavable: the form
+        blanks the custodian the new type does not ask for, and the refusal
+        landed on a field that type does not show (29 Sep 2026)."""
+        self._texts_on()
+        res = self._patch(user=self.psy, case_type="Residential Care", custodian_name="",
+                          custodian_contact="", custodian_sms_consent=False,
+                          date_of_placement_to_custodian=None, date_of_admission="2026-03-02")
+        self.assertEqual(200, res.status_code, res.data)
+        self.child.refresh_from_db()
+        self.assertEqual(("", ""), (self.child.custodian_name, self.child.custodian_contact))
+        self.assertIsNone(self.child.custodian_contact_verified_at)
+        self.assertFalse(custodian.texts_allowed(self.child))
+
+    def test_a_psychologist_is_not_asked_for_a_custodian_they_cannot_record(self):
+        Child.objects.filter(pk=self.child.pk).update(custodian_name="")
+        res = self._patch(user=self.psy, case_type="Kinship Care",
+                          date_of_placement_to_custodian="2026-03-01")
+        self.assertEqual(200, res.status_code, res.data)
+        res = self._as(self.sw).patch(f"/api/children/{self.child.id}/",
+                                      {"case_type": "Foster Care",
+                                       "date_of_placement_to_custodian": "2026-03-01"},
+                                      format="json")
+        self.assertEqual(400, res.status_code, "the social worker still is")
+        self.assertIn("custodian_name", res.data)
+
+    def test_but_only_blanking_it_and_only_off_custodian_care(self):
+        for over in ({"custodian_name": ""},
+                     {"case_type": "Kinship Care", "custodian_name": "",
+                      "date_of_placement_to_custodian": "2026-03-01"},
+                     {"case_type": "Residential Care", "custodian_name": "Someone else",
+                      "date_of_admission": "2026-03-02"}):
+            res = self._patch(user=self.psy, **over)
+            self.assertEqual(400, res.status_code, over)
+            self.assertIn("custodian_name", res.data, over)
+
 
 class OneTimeCodeTest(CustodianBase):
     def test_a_confirmed_number_is_put_on_the_record_by_the_save(self):
