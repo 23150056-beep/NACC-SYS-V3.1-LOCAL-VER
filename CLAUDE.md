@@ -225,6 +225,16 @@ on running a command by hand. Both are idempotent, and the backfill skips
 records that already carry codes so it can never undo an address someone picked
 in the form.
 
+**The three levels hold together** (29 Sep 2026). The form's municipality and
+barangay lists each remember which place they were fetched for and show
+nothing else - "Loading…" until it arrives; taken in whatever order replies
+came, a slow line had Ilocos Sur offering Ilocos Norte's municipalities. The
+server refuses a municipality outside its province or a barangay outside its
+municipality, and takes the names from the codes (`_check_address`), only
+when a code is being set, so an older address is not refused on an unrelated
+edit. An address typed before the lists existed stays on screen while it is
+re-picked, and "— Select province —" puts it back.
+
 ## Health check
 
 `https://nacc-v3-api.onrender.com/healthz/` returns
@@ -846,7 +856,10 @@ address logic is unchanged) and asks who the child lives with now - the
   reads back (`/api/custodian-contact/code/`, SW and ISA only, same limits as
   a user's own number). A different custodian or number clears both unless
   given again in the same save; a confirmation counts only for whoever made
-  it, within the hour. A psychologist cannot change any of it, except that
+  it, within the hour. **Consent follows the person and number it was given
+  for** (`_consentFor`): change either and it is off, put both back and it is
+  on again - it used to go off for good on one stray keystroke, and the save
+  withdrew it. A psychologist cannot change any of it, except that
   moving the case to a type that asks for no custodian takes the custodian -
   number, consent and all - with it, whoever moves it.
 - **Five texts, no child's name**: booked, the day-before reminder (the

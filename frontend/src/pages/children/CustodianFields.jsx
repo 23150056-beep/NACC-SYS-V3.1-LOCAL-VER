@@ -3,6 +3,7 @@ import api from '../../api/client';
 import { Badge, Button, FormField, Icon, Input } from '../../ui';
 import { firstError } from '../../utils/errors';
 import { shortDate } from '../../utils/time';
+import { consentKey } from './recordForm';
 
 /* The custodian on the Present Environment step: who the child lives with
  * now, their mobile number, and whether the system may text them about
@@ -43,9 +44,16 @@ export default function CustodianFields({ form, setForm, fieldError, readOnly = 
     && (form.custodian_name || '').trim() === (form._origCustodian || '').trim();
   const consentOnFile = form.custodian_sms_consent && form._origConsent && unchangedPerson;
 
-  // Consent belongs to the person and the number: change either and the
-  // custodian has to be asked again.
-  const change = (patch) => setForm({ ...form, ...patch, custodian_sms_consent: false });
+  /* Consent belongs to the person and the number it was given for: change
+   * either and it is off; put both back exactly and it is on again. It used
+   * to go off for good on any keystroke, so a letter typed and deleted in the
+   * name, then saved, withdrew the custodian's consent on the record. */
+  const change = (patch) => {
+    const next = { ...form, ...patch };
+    const same = !!form._consentFor
+      && consentKey(next.custodian_name, asE164(next.custodian_contact)) === form._consentFor;
+    setForm({ ...next, custodian_sms_consent: same });
+  };
 
   const sendCode = async () => {
     setError(''); setNote(''); setBusy(true);
@@ -117,7 +125,10 @@ export default function CustodianFields({ form, setForm, fieldError, readOnly = 
       <div style={{ marginTop: 10, padding: '11px 13px', borderRadius: 'var(--radius-md)', background: on ? 'var(--success-50)' : 'var(--ink-50)', border: `1px solid ${on ? 'var(--success-100, var(--border))' : 'var(--border)'}`, display: 'flex', flexDirection: 'column', gap: 9 }}>
         <label style={{ display: 'flex', gap: 9, alignItems: 'flex-start', fontSize: 12.5, color: number ? 'var(--text-strong)' : 'var(--text-muted)', cursor: number ? 'pointer' : 'not-allowed' }}>
           <input type="checkbox" checked={!!form.custodian_sms_consent} disabled={!number}
-            onChange={(e) => setForm({ ...form, custodian_sms_consent: e.target.checked })}
+            onChange={(e) => setForm({
+              ...form, custodian_sms_consent: e.target.checked,
+              _consentFor: e.target.checked ? consentKey(form.custodian_name, number) : null,
+            })}
             style={{ marginTop: 2, accentColor: 'var(--blue-600)' }} />
           <span>
             <strong>The custodian agreed to receive text reminders</strong> about appointments at

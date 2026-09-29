@@ -377,6 +377,7 @@ class ChildSerializer(serializers.ModelSerializer):
             self._require(attrs, creating=False, role=role)
         self._check_case(attrs)
         self._check_dates(attrs)
+        self._check_address(attrs)
         refused = custodian.apply(attrs, self.instance, getattr(request, "user", None), role)
         if refused:
             raise serializers.ValidationError(refused)
@@ -438,6 +439,48 @@ class ChildSerializer(serializers.ModelSerializer):
         if offered and category in intake.ALL_CATEGORIES and category not in offered:
             raise serializers.ValidationError(
                 {"case_category": f"{category} is not a category for {case_type} cases."})
+
+    _ADDRESS_CODES = ("psgc_province", "psgc_municipality", "psgc_barangay")
+
+    def _check_address(self, attrs):
+        """The municipality is in the province and the barangay in the
+        municipality, and each name is the one its code carries. A slow list in
+        the form once offered Ilocos Norte's municipalities under Ilocos Sur,
+        and Ilocos Sur / Adams / Alibago - three provinces - saved (29 Sep
+        2026). Checked only when a code is being set, so an address typed
+        before the lists existed, or saved before this check, is not refused
+        on an unrelated edit."""
+        if not any(f in attrs and (attrs[f] or "") != (getattr(self.instance, f, "") or "")
+                   for f in self._ADDRESS_CODES):
+            return
+        from locations.models import Barangay, Municipality, Province
+        code = {f: (self._after(attrs, f) or "") for f in self._ADDRESS_CODES}
+        province = municipality = barangay = None
+        if code["psgc_province"]:
+            province = Province.objects.filter(psgc_code=code["psgc_province"]).first()
+            if province is None:
+                raise serializers.ValidationError({"province": "Pick the province from the list."})
+        if code["psgc_municipality"]:
+            municipality = Municipality.objects.filter(psgc_code=code["psgc_municipality"]).first()
+            if municipality is None:
+                raise serializers.ValidationError(
+                    {"municipality": "Pick the municipality from the list."})
+            if province is None or municipality.province_id != province.pk:
+                raise serializers.ValidationError({"municipality": (
+                    f"{municipality.name} is not in {province.name if province else 'the province picked'}. "
+                    "Pick the municipality again.")})
+        if code["psgc_barangay"]:
+            barangay = Barangay.objects.filter(psgc_code=code["psgc_barangay"]).first()
+            if barangay is None:
+                raise serializers.ValidationError({"barangay": "Pick the barangay from the list."})
+            if municipality is None or barangay.municipality_id != municipality.pk:
+                raise serializers.ValidationError({"barangay": (
+                    f"{barangay.name} is not in {municipality.name if municipality else 'the municipality picked'}. "
+                    "Pick the barangay again.")})
+        for field, place in (("province", province), ("municipality", municipality),
+                             ("barangay", barangay)):
+            if place is not None:
+                attrs[field] = place.name
 
     def _check_dates(self, attrs):
         """None of the case dates is in the future or before the child was

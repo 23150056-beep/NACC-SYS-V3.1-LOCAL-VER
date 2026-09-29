@@ -433,3 +433,60 @@ class TheSeederFillsTheFormTest(TestCase):
                      - {intake.date_field_for(child.case_type, child.type_of_adoption)})
             for field in other:
                 self.assertIsNone(getattr(child, field), f"{child.fullname} has both dates")
+
+
+class TheAddressHoldsTogetherTest(_Staff):
+    """A slow list in the form offered one province's municipalities under
+    another, and nothing on the server said no: Ilocos Sur / Adams / Alibago,
+    three provinces, saved (29 Sep 2026)."""
+
+    def setUp(self):
+        super().setUp()
+        from locations.models import Barangay, Municipality, Province
+        self.norte = Province.objects.create(psgc_code="0128", name="Ilocos Norte")
+        self.sur = Province.objects.create(psgc_code="0129", name="Ilocos Sur")
+        self.adams = Municipality.objects.create(psgc_code="012801", name="Adams", province=self.norte)
+        self.bantay = Municipality.objects.create(psgc_code="012903", name="Bantay", province=self.sur)
+        self.pob = Barangay.objects.create(psgc_code="012801001", name="Adams (Pob.)", municipality=self.adams)
+        self.bulag = Barangay.objects.create(psgc_code="012903002", name="Bulag", municipality=self.bantay)
+
+    @staticmethod
+    def address(province, municipality, barangay):
+        return {"psgc_province": province.psgc_code, "province": province.name,
+                "psgc_municipality": municipality.psgc_code, "municipality": municipality.name,
+                "psgc_barangay": barangay.psgc_code, "barangay": barangay.name}
+
+    def test_an_address_that_holds_together_saves(self):
+        r = self.post(**self.address(self.norte, self.adams, self.pob))
+        self.assertEqual(201, r.status_code, r.data)
+
+    def test_a_municipality_from_another_province_is_refused(self):
+        r = self.post(**self.address(self.sur, self.adams, self.pob))
+        self.assertEqual(400, r.status_code)
+        self.assertIn("Adams is not in Ilocos Sur", str(r.data["municipality"]))
+
+    def test_a_barangay_from_another_municipality_is_refused(self):
+        r = self.post(**self.address(self.sur, self.bantay, self.pob))
+        self.assertEqual(400, r.status_code)
+        self.assertIn("Adams (Pob.) is not in Bantay", str(r.data["barangay"]))
+
+    def test_an_unknown_code_is_refused(self):
+        r = self.post(**{**self.address(self.norte, self.adams, self.pob), "psgc_barangay": "999999999"})
+        self.assertEqual(400, r.status_code)
+        self.assertIn("barangay", r.data)
+
+    def test_the_names_are_the_codes_own(self):
+        r = self.post(**{**self.address(self.norte, self.adams, self.pob),
+                         "province": "Ilocos N.", "municipality": "adams", "barangay": "Poblacion"})
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertEqual(("Ilocos Norte", "Adams", "Adams (Pob.)"),
+                         (r.data["province"], r.data["municipality"], r.data["barangay"]))
+
+    def test_an_address_saved_before_the_check_survives_an_unrelated_edit(self):
+        child = Child.objects.get(pk=self.post().data["id"])
+        Child.objects.filter(pk=child.pk).update(**self.address(self.sur, self.adams, self.pob))
+        body = complete(**self.address(self.sur, self.adams, self.pob), medical_notes="Seen.")
+        for f in ("first_name", "middle_name", "last_name"):
+            body.pop(f)
+        r = self.client.put(f"/api/children/{child.id}/", body, format="json")
+        self.assertEqual(200, r.status_code, r.data)

@@ -15,6 +15,11 @@ export const EMPTY = {
   recommendation: '',
 };
 
+/* Who, and which number, texting consent was given for. Consent belongs to
+ * that pair (pages/children/CustodianFields.jsx): change either and it is
+ * off, put both back and it is on again. `number` is as stored, +639... */
+export const consentKey = (name, number) => `${String(name || '').trim()}|${number || ''}`;
+
 /* The form for an existing record. `psychologist` is who the child SHOULD be
  * with: the one asked, while a request is open, else the one who holds them.
  * The server reads it the same way (ChildViewSet.perform_update), so resending
@@ -36,6 +41,7 @@ export const formFromRecord = (c) => {
     _origContact: c.custodian_contact || '',
     _origCustodian: c.custodian_name || '',
     _origConsent: !!c.custodian_sms_consent,
+    _consentFor: c.custodian_sms_consent ? consentKey(c.custodian_name, c.custodian_contact) : null,
     _record: c,
   };
 };

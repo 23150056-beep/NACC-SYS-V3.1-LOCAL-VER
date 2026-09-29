@@ -184,31 +184,62 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
    * is fetched when its parent is chosen, so the browser never holds more than
    * one municipality's barangays — the region has 3,265 of them. */
   const [provinces, setProvinces] = useState([]);
-  const [munis, setMunis] = useState([]);
-  const [brgys, setBrgys] = useState([]);
+  /* Each list remembers which place it was fetched for, and is shown only
+   * while that place is still the one picked. Lists used to be taken in
+   * whatever order the replies came: on a slow line the reply for the
+   * province just left arrived last, and Ilocos Sur offered Ilocos Norte's
+   * municipalities (29 Sep 2026). Until the right list is here the picker
+   * says so, rather than looking like a province with no municipalities. */
+  const [muniList, setMuniList] = useState({ of: '', places: [] });
+  const [brgyList, setBrgyList] = useState({ of: '', places: [] });
+  const munis = muniList.of === form.psgc_province ? muniList.places : [];
+  const brgys = brgyList.of === form.psgc_municipality ? brgyList.places : [];
+  const munisLoading = !!form.psgc_province && muniList.of !== form.psgc_province;
+  const brgysLoading = !!form.psgc_municipality && brgyList.of !== form.psgc_municipality;
 
   useEffect(() => {
     api.get('/locations/provinces/').then((r) => setProvinces(r.data)).catch(() => setProvinces([]));
   }, []);
 
   useEffect(() => {
-    if (!form.psgc_province) { setMunis([]); return; }
-    api.get('/locations/municipalities/', { params: { province: form.psgc_province } })
-      .then((r) => setMunis(r.data)).catch(() => setMunis([]));
+    const of = form.psgc_province;
+    if (!of) return undefined;
+    let current = true;
+    api.get('/locations/municipalities/', { params: { province: of } })
+      .then((r) => { if (current) setMuniList({ of, places: r.data }); })
+      .catch(() => { if (current) setMuniList({ of, places: [] }); });
+    return () => { current = false; };
   }, [form.psgc_province]);
 
   useEffect(() => {
-    if (!form.psgc_municipality) { setBrgys([]); return; }
-    api.get('/locations/barangays/', { params: { municipality: form.psgc_municipality } })
-      .then((r) => setBrgys(r.data)).catch(() => setBrgys([]));
+    const of = form.psgc_municipality;
+    if (!of) return undefined;
+    let current = true;
+    api.get('/locations/barangays/', { params: { municipality: of } })
+      .then((r) => { if (current) setBrgyList({ of, places: r.data }); })
+      .catch(() => { if (current) setBrgyList({ of, places: [] }); });
+    return () => { current = false; };
   }, [form.psgc_municipality]);
+
+  /* An address typed before the lists existed, on the record as it was
+   * opened. It stays on screen while the address is picked again, and
+   * choosing "— Select province —" puts it back: re-picking used to wipe the
+   * typed municipality and barangay with no way back but discarding the
+   * whole edit. */
+  const typedAddress = form._record && !form._record.psgc_province
+    ? [form._record.barangay, form._record.municipality, form._record.province].filter(Boolean).join(', ')
+    : '';
 
   /* Both the code and the name are stored. The code is what survives a place
    * being renamed upstream; the name is what a case worker reads back, and what
    * every record written before this picker existed already holds. */
   const pickPlace = (level, code, options) => {
     const chosen = options.find((o) => o.psgc_code === code);
-    if (level === 'province') {
+    if (level === 'province' && !code && typedAddress) {
+      const r = form._record;
+      setForm({ ...form, psgc_province: '', psgc_municipality: '', psgc_barangay: '',
+                province: r.province || '', municipality: r.municipality || '', barangay: r.barangay || '' });
+    } else if (level === 'province') {
       setForm({ ...form, psgc_province: code, province: chosen?.name || '',
                 psgc_municipality: '', municipality: '', psgc_barangay: '', barangay: '' });
     } else if (level === 'municipality') {
@@ -622,14 +653,14 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                 </Select>
               </FormField>
               <FormField label="Municipality / City" required error={fieldError('municipality')}>
-                <Select value={form.psgc_municipality || ''} disabled={!form.psgc_province} onChange={(e) => pickPlace('municipality', e.target.value, munis)}>
-                  <option value="">{form.psgc_province ? '— Select municipality —' : 'Select a province first'}</option>
+                <Select value={form.psgc_municipality || ''} disabled={!form.psgc_province || munisLoading} onChange={(e) => pickPlace('municipality', e.target.value, munis)}>
+                  <option value="">{!form.psgc_province ? 'Select a province first' : munisLoading ? 'Loading…' : '— Select municipality —'}</option>
                   {munis.map((m) => <option key={m.psgc_code} value={m.psgc_code}>{m.name}</option>)}
                 </Select>
               </FormField>
               <FormField label="Barangay" required error={fieldError('barangay')} hint={brgys.length ? `${brgys.length} in this municipality` : undefined}>
-                <Select value={form.psgc_barangay || ''} disabled={!form.psgc_municipality} onChange={(e) => pickPlace('barangay', e.target.value, brgys)}>
-                  <option value="">{form.psgc_municipality ? '— Select barangay —' : 'Select a municipality first'}</option>
+                <Select value={form.psgc_barangay || ''} disabled={!form.psgc_municipality || brgysLoading} onChange={(e) => pickPlace('barangay', e.target.value, brgys)}>
+                  <option value="">{!form.psgc_municipality ? 'Select a municipality first' : brgysLoading ? 'Loading…' : '— Select barangay —'}</option>
                   {brgys.map((b) => <option key={b.psgc_code} value={b.psgc_code}>{b.name}</option>)}
                 </Select>
               </FormField>
@@ -639,13 +670,13 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
               {/* An address typed before the picker existed has no code, so the
                   selects above sit empty and would look like a blank address.
                   Show what the record actually says. */}
-              {!form.psgc_province && (form.province || form.municipality || form.barangay) && (
+              {typedAddress && (
                 <div style={{ gridColumn: '1 / -1', fontSize: 12.5, color: 'var(--text-muted)', padding: '10px 12px', background: 'var(--ink-50)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
                   Recorded before the address list existed:{' '}
-                  <strong style={{ color: 'var(--text-strong)' }}>
-                    {[form.barangay, form.municipality, form.province].filter(Boolean).join(', ')}
-                  </strong>
-                  . Re-pick it above to attach the official codes — the text stays either way.
+                  <strong style={{ color: 'var(--text-strong)' }}>{typedAddress}</strong>.{' '}
+                  {form.psgc_province
+                    ? 'To keep it as it was instead, choose “— Select province —” above.'
+                    : 'Re-pick it above to attach the official codes, or leave it as it is.'}
                 </div>
               )}
             </div>

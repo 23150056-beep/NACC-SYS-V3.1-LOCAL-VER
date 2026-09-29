@@ -348,7 +348,7 @@ export default function Children() {
     delete payload.psychologist_name; delete payload.social_worker_name;
     delete payload._origPsychologist; delete payload.termination; delete payload.photo;
     delete payload._basePsychologist; delete payload.pending_assignment; delete payload.declined_assignment;
-    for (const k of ['_origContact', '_origCustodian', '_origConsent', '_confirmedNumber',
+    for (const k of ['_origContact', '_origCustodian', '_origConsent', '_confirmedNumber', '_consentFor',
       'custodian_contact_display', 'custodian_sms_consent_at', 'custodian_sms_consent_by_name',
       'custodian_contact_verified', 'custodian_texts']) delete payload[k];
     delete payload.updated_at; delete payload._conflict; delete payload._draft; delete payload._record;
