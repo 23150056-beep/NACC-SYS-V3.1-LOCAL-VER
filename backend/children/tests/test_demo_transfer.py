@@ -303,4 +303,98 @@ class AFreshExportFromAnotherMachineTest(TestCase):
         self._write(social_worker=self.sw.pk + 50)
         out = StringIO()
         call_command("import_demo_data", fixture=str(self.fixture), stdout=out)
-        self.assertIn("local social workers", out.getvalue())
+        self.assertIn("1 social worker(s) here", out.getvalue())
+
+
+class RecordsFollowTheirChildTest(TestCase):
+    """Sessions and notes named the exporting machine's psychologists, and
+    only the child itself was dealt again: on a stand-in branch numbered
+    differently, all 198 demo sessions sat with somebody other than the
+    child's psychologist, 68 of them with a Staff account (29 Sep 2026).
+
+    Built from a real export rather than hand-written rows, then the
+    exporting machine's accounts are taken away: one id is re-used by a
+    social worker, the rest name nobody."""
+
+    def setUp(self):
+        from clinical.models import InstrumentCatalog, RemarkNote
+        from django.utils import timezone
+        from scheduling.models import Appointment
+        psy = Role.objects.create(role_name=Role.PSYCHOLOGIST)
+        staff = Role.objects.create(role_name=Role.STAFF)
+
+        def account(email, role):
+            return User.objects.create_user(
+                email=email, username=email.split("@")[0], password="pass1234",
+                role=role, status=User.ACTIVE)
+
+        local_a, local_b = account("a@local.ph", psy), account("b@local.ph", psy)
+        local_sw = account("sw@local.ph", staff)
+        start = timezone.now() + timedelta(days=3)
+        kid_a = Child.objects.create(fullname="Child A", assigned_psychologist=local_a,
+                                     social_worker=local_sw)
+        kid_b = Child.objects.create(fullname="Child B", assigned_psychologist=local_b,
+                                     social_worker=local_sw)
+        Appointment.objects.create(child=kid_a, psychologist=local_a, booked_by=local_sw,
+                                   start=start)
+        Appointment.objects.create(child=kid_b, psychologist=local_b, booked_by=local_b,
+                                   start=start + timedelta(hours=1))
+        RemarkNote.objects.create(child=kid_a, author=local_a, text="Settling in.")
+        # Child B was with A before a transfer: the earlier psychologist's note.
+        RemarkNote.objects.create(child=kid_b, author=local_a, text="Before the move.")
+        InstrumentCatalog.objects.create(title="B's own scale", owner=local_b)
+        self.fixture = Path(tempfile.mkdtemp()) / "demo.json"
+        call_command("export_demo_data", output=str(self.fixture), stdout=StringIO())
+
+        # The branch.
+        Child.objects.all().delete()
+        InstrumentCatalog.objects.all().delete()
+        User.objects.filter(pk__in=[local_a.pk, local_sw.pk]).delete()
+        local_b.role = staff
+        local_b.save()
+        self.branch_sw = local_b
+        self.p1, self.p2 = account("p1@branch.ph", psy), account("p2@branch.ph", psy)
+        self.pks = (kid_a.pk, kid_b.pk)
+        call_command("import_demo_data", fixture=str(self.fixture), clear=True,
+                     stdout=StringIO())
+
+    def test_every_session_is_with_the_childs_psychologist(self):
+        from scheduling.models import Appointment
+        sessions = list(Appointment.objects.select_related("child"))
+        self.assertEqual(2, len(sessions))
+        for s in sessions:
+            self.assertEqual(s.child.assigned_psychologist_id, s.psychologist_id)
+
+    def test_nothing_clinical_lands_on_a_staff_account(self):
+        from clinical.models import RemarkNote
+        from scheduling.models import Appointment
+        self.assertFalse(RemarkNote.objects.filter(author=self.branch_sw).exists())
+        self.assertFalse(Appointment.objects.filter(psychologist=self.branch_sw).exists())
+
+    def test_what_the_social_worker_did_is_the_new_social_workers(self):
+        from scheduling.models import Appointment
+        booked = Appointment.objects.get(child_id=self.pks[0])
+        self.assertEqual(self.branch_sw, booked.child.social_worker)
+        self.assertEqual(self.branch_sw, booked.booked_by)
+
+    def test_an_earlier_psychologists_note_stays_somebody_elses(self):
+        # A's caseload went to p1 and B's child to p2; the note A wrote on B's
+        # child before the transfer is p1's, so the carry-history rule still
+        # has a colleague's note to hide.
+        from clinical.models import RemarkNote
+        kid_a, kid_b = (Child.objects.get(pk=pk) for pk in self.pks)
+        self.assertEqual((self.p1, self.p2),
+                         (kid_a.assigned_psychologist, kid_b.assigned_psychologist))
+        self.assertEqual(self.p1, RemarkNote.objects.get(child=kid_b).author)
+
+    def test_an_owned_instrument_follows_its_psychologists_caseload(self):
+        from clinical.models import InstrumentCatalog
+        self.assertEqual(self.p2, InstrumentCatalog.objects.get().owner)
+
+    def test_a_child_already_here_keeps_its_psychologist(self):
+        # Without --clear the import adds; only the fixture's children are dealt.
+        Child.objects.all().delete()
+        here = Child.objects.create(fullname="Already here", assigned_psychologist=self.p2)
+        call_command("import_demo_data", fixture=str(self.fixture), stdout=StringIO())
+        here.refresh_from_db()
+        self.assertEqual(self.p2, here.assigned_psychologist)

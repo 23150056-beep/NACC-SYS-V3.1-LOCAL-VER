@@ -275,15 +275,20 @@ both itself. Every one of these paths is covered by a test that goes through
 `booking.bookable_slots`, the real rule; asserting rows exist passes while the
 calendar stays empty.
 
-**A fixture's user ids are the exporting machine's.** `import_demo_data` deals
-the psychologist and the social worker again across the branch's own accounts,
-and `forget_local_people` leaves custodian numbers and consent behind. Rehearsed
-on 29 Sep 2026 against a stand-in branch: a fresh export failed the whole load
-(`social_worker_id` 6 did not exist there), and an id that did exist would have
-handed the children to a psychologist no SW can see through. **Not yet fixed:**
-appointments and the clinical records still carry the local psychologist ids,
-so on a branch numbered differently every imported session sat with someone
-other than the child's psychologist - 68 of 198 with a Staff account.
+**A fixture's user ids are the exporting machine's**, so none is loaded.
+`import_demo_data` deals each child a psychologist and a social worker from the
+branch's own accounts in the rows, before `loaddata`, and every record's user
+links move with its child (`rehome_people`): the child's local psychologist or
+SW becomes its new one, a different psychologist - the one before a transfer -
+becomes whoever got that psychologist's own caseload, and anyone else the
+child's psychologist. `forget_custodian_contacts` leaves custodian numbers and
+consent behind. Rehearsed on 29 Sep 2026 against a stand-in branch numbered
+differently: before, a fresh export failed the load outright (`social_worker_id`
+6 did not exist there), and once it loaded, all 198 sessions sat with somebody
+other than the child's psychologist, 68 of them with a Staff account; after,
+198 of 198 with the child's psychologist and every author a psychologist.
+Without `--clear` only the fixture's children are dealt; a child already there
+keeps its psychologist.
 
 
 ## Booking and the calendar

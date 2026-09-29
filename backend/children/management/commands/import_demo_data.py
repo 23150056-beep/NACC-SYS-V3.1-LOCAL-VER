@@ -4,10 +4,11 @@ Intended for a Neon BRANCH that already carries the real user accounts. The
 children come from `export_demo_data`; the accounts are whatever the branch
 already holds, which is the reason for branching that database at all.
 
-Every imported child is reassigned to a psychologist that exists here. The
-fixture's assignee ids belong to the local machine and mean nothing on the
-branch — left alone, every child would point at the wrong person or at nobody,
-and a caseload nobody can see is not a demo.
+Every imported child is dealt to a psychologist and a social worker that
+exist here, and everything recorded about it moves with it. Every user id in
+the fixture belongs to the local machine and means nothing on the branch —
+left alone, a child and its sessions and notes would point at the wrong
+person or at nobody, and a caseload nobody can see is not a demo.
 
 It also finishes the job, because loading rows is not the same as loading a
 working system. Invented psychological reports are installed here too, for
@@ -22,6 +23,7 @@ import json
 import os
 import tempfile
 
+from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
@@ -67,34 +69,90 @@ def upgrade_rows(rows):
     return changed
 
 
-# What a child row says about the people on the machine it was exported from.
-# The social worker is a local account id, exactly like the psychologist: on
-# the branch it names somebody else or nobody - a missing id fails the load,
-# and a psychologist's id leaves the child with no SW who can see it - so it
-# is dealt again below across the staff who are really here. A custodian's
-# number and consent were given to someone on that machine, and demo
-# custodians carry no number at all (children/demo_custodians.py).
-_LOCAL_ONLY = {"social_worker": None,
-               "custodian_contact": "",
-               "custodian_sms_consent": False,
-               "custodian_sms_consent_at": None,
-               "custodian_sms_consent_by": None,
-               "custodian_contact_verified_at": None}
+# A custodian's number and consent were given to someone on the exporting
+# machine, and demo custodians carry no number at all
+# (children/demo_custodians.py).
+_CUSTODIAN_CONTACT = {"custodian_contact": "",
+                      "custodian_sms_consent": False,
+                      "custodian_sms_consent_at": None,
+                      "custodian_sms_consent_by": None,
+                      "custodian_contact_verified_at": None}
 
 
-def forget_local_people(rows):
-    """Blank the child fields that only mean something on the exporting
-    machine. Returns True if anything changed."""
+def forget_custodian_contacts(rows):
+    """Blank every custodian number and consent in the fixture's children.
+    Returns True if anything changed."""
     changed = False
     for row in rows:
         if row.get("model") != "children.child":
             continue
         fields = row.get("fields", {})
-        for field, blank in _LOCAL_ONLY.items():
+        for field, blank in _CUSTODIAN_CONTACT.items():
             if fields.get(field, blank) != blank:
                 fields[field] = blank
                 changed = True
     return changed
+
+
+def rehome_people(rows, psychologists, social_workers):
+    """Give the fixture's children, and everything recorded about them, to
+    accounts that exist here. Returns (children dealt, links moved).
+
+    Every user id in a fixture is the exporting machine's, and on a branch it
+    names somebody else or nobody: a missing one fails the whole load, and one
+    that lands on a Staff account put 68 of 198 demo sessions "with" a social
+    worker (rehearsed 29 Sep 2026). So nothing local is loaded at all.
+
+    Children are dealt round-robin in pk order across the psychologists and
+    social workers here. Each record then follows its child: what the child's
+    own psychologist or social worker wrote is written by the child's new one.
+    A different psychologist - the one the child was with before a transfer -
+    becomes whoever received that psychologist's own caseload, so history kept
+    from the next psychologist stays somebody else's. Anyone else falls to the
+    child's psychologist, or to nobody where there is no child and the field
+    allows it (an instrument or form owned by nobody is the shared one).
+    """
+    User = get_user_model()
+    children = sorted((r for r in rows if r.get("model") == "children.child"),
+                      key=lambda r: r["pk"])
+    local, new = {}, {}
+    for index, row in enumerate(children):
+        fields = row["fields"]
+        local[row["pk"]] = (fields.get("assigned_psychologist"), fields.get("social_worker"))
+        new[row["pk"]] = (
+            psychologists[index % len(psychologists)].pk,
+            social_workers[index % len(social_workers)].pk if social_workers else None)
+        fields["assigned_psychologist"], fields["social_worker"] = new[row["pk"]]
+
+    # Where each local account's own caseload went: with its first child.
+    caseload = {}
+    for pk in sorted(local):
+        for was, now in zip(local[pk], new[pk]):
+            if was is not None and now is not None:
+                caseload.setdefault(was, now)
+
+    moved = 0
+    for row in rows:
+        if row.get("model") == "children.child":
+            continue
+        fields = row.get("fields", {})
+        child = fields.get("child")
+        own_was, own_now = local.get(child, ()), new.get(child, (None, None))
+        for field in apps.get_model(row["model"])._meta.concrete_fields:
+            if not (field.is_relation and field.related_model is User):
+                continue
+            was = fields.get(field.name)
+            if was is None:
+                continue
+            if was in own_was and own_now[own_was.index(was)] is not None:
+                now = own_now[own_was.index(was)]
+            else:
+                now = caseload.get(was, own_now[0])
+            if now is None and not field.null:
+                now = psychologists[0].pk
+            fields[field.name] = now
+            moved += 1
+    return len(children), moved
 
 
 class Command(BaseCommand):
@@ -135,32 +193,26 @@ class Command(BaseCommand):
         with open(options["fixture"], encoding="utf-8") as handle:
             rows = json.load(handle)
         self.stdout.write(f"  fixture holds {len(rows)} rows")
-        upgraded = upgrade_rows(rows)
-        forgotten = forget_local_people(rows)
-        if upgraded or forgotten:
-            # Load the corrected copy, never the file as given: an older export
-            # names a field the model no longer has, and a newer one names the
-            # exporting machine's social workers.
-            fd, corrected = tempfile.mkstemp(suffix=".json")
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                    json.dump(rows, handle)
-                call_command("loaddata", corrected, verbosity=0)
-            finally:
-                os.remove(corrected)
-            if upgraded:
-                self.stdout.write("  fixture is an older export; child rows upgraded")
-            if forgotten:
-                self.stdout.write("  local social workers and custodian numbers left behind")
-        else:
-            call_command("loaddata", options["fixture"], verbosity=0)
-
-        # Round-robin across whoever is really here. The fixture's assignee ids
-        # are local and meaningless on this database.
-        imported = list(Child.objects.order_by("pk"))
-        for index, child in enumerate(imported):
-            child.assigned_psychologist = psychologists[index % len(psychologists)]
-        Child.objects.bulk_update(imported, ["assigned_psychologist"])
+        if upgrade_rows(rows):
+            self.stdout.write("  fixture is an older export; child rows upgraded")
+        if forget_custodian_contacts(rows):
+            self.stdout.write("  custodian numbers and consent left behind")
+        social_workers = demo_owners.active_staff()
+        imported, moved = rehome_people(rows, psychologists, social_workers)
+        self.stdout.write(
+            f"  {imported} children dealt across {len(psychologists)} psychologist(s) "
+            f"and {len(social_workers)} social worker(s) here; {moved} record "
+            f"link(s) moved with them")
+        # Load the corrected copy, never the file as given: every export names
+        # the exporting machine's accounts, and an older one a field the model
+        # no longer has.
+        fd, corrected = tempfile.mkstemp(suffix=".json")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(rows, handle)
+            call_command("loaddata", corrected, verbosity=0)
+        finally:
+            os.remove(corrected)
 
         # Rows alone are not a working demo. Both of these are what the
         # booking endpoint checks, and the fixture can carry neither: a
@@ -169,7 +221,9 @@ class Command(BaseCommand):
         blocks = demo_schedule.install_availability(psychologists)
         self.stdout.write(f"  availability: {blocks} block(s) added")
         # Each social worker sees only their own records, so a child with none
-        # is one no staff account can see (children/demo_owners.py).
+        # is one no staff account can see (children/demo_owners.py). The
+        # fixture's children were dealt one above; this is for any already
+        # here without one.
         demo_owners.assign_social_workers(list(Child.objects.order_by("pk")))
         custodians = demo_custodians.fill_custodians(list(Child.objects.order_by("pk")))
         self.stdout.write(f"  custodians: {custodians} filled in")
@@ -192,5 +246,5 @@ class Command(BaseCommand):
             self.stdout.write(f"  password set for {email}")
 
         self.stdout.write(
-            f"import_demo_data: {len(imported)} children across "
+            f"import_demo_data: {imported} children across "
             f"{len(psychologists)} psychologists.")

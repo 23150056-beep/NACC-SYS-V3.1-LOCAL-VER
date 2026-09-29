@@ -17,10 +17,15 @@ from children.models import Child
 User = get_user_model()
 
 
+def active_staff():
+    """The staff accounts a demo caseload is shared across, in dealing order."""
+    return list(User.objects.filter(role__role_name=Role.STAFF, status=User.ACTIVE)
+                .order_by("pk"))
+
+
 def assign_social_workers(children):
     """Give each child without a social worker one. Returns how many were set."""
-    workers = list(User.objects.filter(role__role_name=Role.STAFF, status=User.ACTIVE)
-                   .order_by("pk"))
+    workers = active_staff()
     if not workers:
         return 0
     todo = [c for c in children if c.social_worker_id is None]
