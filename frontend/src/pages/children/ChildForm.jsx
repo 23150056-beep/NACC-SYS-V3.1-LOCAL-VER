@@ -89,10 +89,14 @@ const listed = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(',
 
 /* The options for a list, plus the value this record already holds when that
  * value has since been retired — shown, so an old record does not look blank,
- * and marked, so nobody picks it for a new one. */
-const withRetired = (options, value) => (
-  value && !options.includes(value) ? [...options, value] : options
-);
+ * and marked, so nobody picks it for a new one. The record's own value as
+ * opened is passed too, so it stays in the list after something else is
+ * picked and can be picked back; it used to vanish, with no way back but
+ * discarding the whole edit. The server accepts it, being unchanged. */
+const withRetired = (options, ...values) => [
+  ...options,
+  ...[...new Set(values)].filter((v) => v && !options.includes(v)),
+];
 const optionLabel = (options, value) => (options.includes(value) ? value : `${value} (no longer offered)`);
 
 /* What the form holds, minus its own bookkeeping, for telling whether anything
@@ -487,7 +491,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   : undefined}>
                 <Select value={form.case_category || ''} onChange={(e) => setForm({ ...form, case_category: e.target.value })}>
                   <option value="">— Select category —</option>
-                  {withRetired(categoryOptions, form.case_category).map((c) => <option key={c} value={c}>{categoryLabel(c)}</option>)}
+                  {withRetired(categoryOptions, form.case_category, form._record?.case_category).map((c) => <option key={c} value={c}>{categoryLabel(c)}</option>)}
                 </Select>
               </FormField>
               <FormField label="Case Type" required error={fieldError('case_type')}
@@ -575,13 +579,13 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
               <FormField label="Birth Status" required error={fieldError('birth_status')}>
                 <Select value={form.birth_status || ''} onChange={(e) => setForm({ ...form, birth_status: e.target.value })}>
                   <option value="">— Select —</option>
-                  {withRetired(BIRTH_STATUSES, form.birth_status).map((v) => <option key={v} value={v}>{optionLabel(BIRTH_STATUSES, v)}</option>)}
+                  {withRetired(BIRTH_STATUSES, form.birth_status, form._record?.birth_status).map((v) => <option key={v} value={v}>{optionLabel(BIRTH_STATUSES, v)}</option>)}
                 </Select>
               </FormField>
               <FormField label="Legal Status" hint="Leave blank if none has been issued yet." error={fieldError('legal_status')}>
                 <Select value={form.legal_status || ''} onChange={(e) => setForm({ ...form, legal_status: e.target.value })}>
                   <option value="">— Select —</option>
-                  {withRetired(LEGAL_STATUSES, form.legal_status).map((v) => <option key={v} value={v}>{optionLabel(LEGAL_STATUSES, v)}</option>)}
+                  {withRetired(LEGAL_STATUSES, form.legal_status, form._record?.legal_status).map((v) => <option key={v} value={v}>{optionLabel(LEGAL_STATUSES, v)}</option>)}
                 </Select>
               </FormField>
               {/* Moved here from Recommendation (24 Sep 2026): every child has
@@ -595,7 +599,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                 <FormField label="Type of Adoption" required error={fieldError('type_of_adoption')}>
                   <Select value={form.type_of_adoption || ''} onChange={(e) => setForm({ ...form, type_of_adoption: e.target.value })}>
                     <option value="">— Select —</option>
-                    {withRetired(TYPES_OF_ADOPTION, form.type_of_adoption).map((v) => <option key={v} value={v}>{optionLabel(TYPES_OF_ADOPTION, v)}</option>)}
+                    {withRetired(TYPES_OF_ADOPTION, form.type_of_adoption, form._record?.type_of_adoption).map((v) => <option key={v} value={v}>{optionLabel(TYPES_OF_ADOPTION, v)}</option>)}
                   </Select>
                 </FormField>
               )}
@@ -694,7 +698,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                 hint="RACCO · LGU (local government unit) · CCA (child caring agency) · RCF (residential care facility)">
                 <Select value={form.referral_source || ''} onChange={(e) => setForm({ ...form, referral_source: e.target.value })}>
                   <option value="">— Select —</option>
-                  {withRetired(REFERRAL_SOURCES, form.referral_source).map((v) => <option key={v} value={v}>{optionLabel(REFERRAL_SOURCES, v)}</option>)}
+                  {withRetired(REFERRAL_SOURCES, form.referral_source, form._record?.referral_source).map((v) => <option key={v} value={v}>{optionLabel(REFERRAL_SOURCES, v)}</option>)}
                 </Select>
               </FormField>
               <FormField label="Referral Reason" style={{ gridColumn: '1 / -1' }}>

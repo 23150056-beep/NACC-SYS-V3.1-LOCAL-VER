@@ -8,6 +8,13 @@ import {
 import { ADMISSION, CASE_TYPE_FIELDS, PLACEMENT, dateFieldFor } from '../../config/caseData';
 import { PURPOSE_LABEL, StatusChip, fmtDay, fmtTime, localDate } from './shared';
 
+/* Text typed into the record's boxes, shown as typed: its line breaks kept,
+ * as the printed report keeps them, and a long word or link wrapped inside
+ * the box instead of running off the drawer's edge. A numbered
+ * recommendation used to run together into one line. */
+const TYPED_TEXT = { fontSize: 13, color: 'var(--text-body)', margin: 0, lineHeight: 1.55,
+  whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' };
+
 /* The record drawer, and the terminate confirmation it opens.
  *
  * Moved out of Children.jsx with ChildForm before it — the page was 1,102
@@ -231,7 +238,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
               {hasRecommendationContent && (
                 <div>
                   <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 8 }}>Recommendation</div>
-                  {child.recommendation && <p style={{ fontSize: 13, color: 'var(--text-body)', margin: '0 0 10px', lineHeight: 1.55 }}>{child.recommendation}</p>}
+                  {child.recommendation && <p style={{ ...TYPED_TEXT, margin: '0 0 10px' }}>{child.recommendation}</p>}
                   {[['Referral Source', child.referral_source]]
                     .filter(([, v]) => v).map(([k, v]) => (
                       <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, paddingBottom: 10, borderBottom: '1px solid var(--divider-row)', marginBottom: 10 }}>
@@ -244,13 +251,13 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
               {child.referral_reason && (
                 <div>
                   <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 6 }}>Referral reason</div>
-                  <p style={{ fontSize: 13, color: 'var(--text-body)', margin: 0, lineHeight: 1.55 }}>{child.referral_reason}</p>
+                  <p style={TYPED_TEXT}>{child.referral_reason}</p>
                 </div>
               )}
               {child.medical_notes && (
                 <div>
                   <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 6 }}>Medical notes</div>
-                  <p style={{ fontSize: 13, color: 'var(--text-body)', margin: 0, lineHeight: 1.55 }}>{child.medical_notes}</p>
+                  <p style={TYPED_TEXT}>{child.medical_notes}</p>
                 </div>
               )}
               {/* Whether this child can be booked at all, said before the

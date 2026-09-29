@@ -693,7 +693,10 @@ middle name, a date found, and every question that applies made mandatory.
   **Retired values were not**: birth status "Child", SIBRA, ICA Relative, and
   the seeder's "Domestic"/"Relative" stay on the records that hold them, shown
   as "(no longer offered)". The serializer accepts them unchanged and refuses
-  them as a new pick - the same change-only rule as the old categories.
+  them as a new pick - the same change-only rule as the old categories. The
+  record's own value stays in its list for the whole edit (`withRetired` is
+  passed `form._record`'s), so a different pick can be taken back; it used to
+  vanish with no way back but discarding the edit.
   `import_demo_data` upgrades an older fixture the same way before loading it.
 - "Street Number" is the owner's wording; its hint allows a purok or sitio,
   because most addresses in the region have no street.

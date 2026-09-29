@@ -174,7 +174,7 @@ export default function AssignmentRequests({ onChanged }) {
                 </div>
                 <div style={{ fontSize: 12.5, color: 'var(--text-body)', marginTop: 2 }}>{caseLine(r) || '—'}</div>
                 {r.referral_reason && (
-                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.5 }}>
+                  <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4, lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                     <span style={{ fontWeight: 700, color: 'var(--text-body)' }}>Reason for referral: </span>{r.referral_reason}
                   </div>
                 )}
