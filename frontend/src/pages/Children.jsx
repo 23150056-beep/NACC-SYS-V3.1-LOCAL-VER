@@ -320,21 +320,31 @@ export default function Children() {
     // A pick ASKS the psychologist (children/assignment.py): say so before
     // saving, and say it again after, since the record will not show them as
     // the child's psychologist until they accept.
-    const changing = String(form.psychologist || '') !== String(form._basePsychologist || '');
-    const asking = !!form.psychologist && (!form.id || changing);
-    const clearing = !!form.id && changing && !form.psychologist;
+    // Four outcomes, the same four the server reads (ChildViewSet.perform_update):
+    // the pick is unchanged; it is somebody new, who is asked; it is nobody;
+    // or it is the holder again while a request is open, which withdraws that
+    // request and asks nobody - it used to be announced as asking the holder.
+    const pick = String(form.psychologist || '');
+    const holder = String(form._origPsychologist || '');
+    const changing = pick !== String(form._basePsychologist || '');
+    const withdrawing = !!form.id && changing && !!pick && pick === holder;
+    const asking = !!pick && (!form.id || (changing && pick !== holder));
+    const clearing = !!form.id && changing && !pick;
     const assignee = psychologists.find((p) => String(p.id) === String(form.psychologist))?.name
       || 'The psychologist';
+    const wasAsked = form.pending_assignment?.psychologist_name || 'the psychologist asked';
+    const holderName = form.psychologist_name || assignee;
     const askLine = asking
       ? ` ${assignee} is asked to take the case, and ${name} joins their records once they accept.`
-      : '';
+      : withdrawing ? ` The request to ${wasAsked} is withdrawn, and ${name} stays with ${holderName}.` : '';
     const ok = await confirm({
       description: form.id
         ? `This saves your changes to ${name}'s record.${askLine}`
         : `This adds ${name} to Records. The child's name cannot be changed once the record is saved, so check the spelling.${askLine}`,
       confirmLabel: form.id ? 'Yes, save changes' : 'Yes, add the record',
       details: form.id
-        ? [['Asks to take the case', asking ? assignee : null], ['Psychologist', clearing ? 'Unassigned' : null]]
+        ? [['Asks to take the case', asking ? assignee : null], ['Withdraws the request to', withdrawing ? wasAsked : null],
+           ['Stays with', withdrawing ? holderName : null], ['Psychologist', clearing ? 'Unassigned' : null]]
         : [['Category', form.case_category], ['Case type', form.case_type],
            ['Date of birth', form.birth_date], ['Psychologist', asking ? `${assignee} (asked to accept)` : 'Unassigned'],
            ['Case referral', form.referralFile?.name]],
@@ -363,6 +373,9 @@ export default function Children() {
     const referralFile = form.referralFile || null;
     delete payload.referralFile;
     if (!payload.psychologist) payload.psychologist = null;
+    // The history choice goes with a request, so only where there is one to
+    // make or to keep: never with the holder, and never with nobody.
+    if (!pick || pick === holder) delete payload.assignee_sees_history;
     // Only when the form holds one: a record loaded before this field existed
     // must not send "none" and quietly take the record off its social worker.
     if (payload.social_worker === '') payload.social_worker = null;
@@ -404,7 +417,7 @@ export default function Children() {
       if (referralFailed) {
         toast.error('Record saved, but the case referral did not upload. '
           + 'Open the record and try again — sessions cannot be booked without it.');
-      } else if (!asking && !clearing) {
+      } else if (!asking && !clearing && !withdrawing) {
         toast.success(form.id ? 'Record updated' : 'Record added');
       }
       const was = form;
@@ -421,6 +434,12 @@ export default function Children() {
           details: [['Record', was.id ? 'Changes saved' : 'Added to Records'], ['Asked', assignee],
             ['Currently with', was.id ? (was.psychologist_name || 'Nobody yet') : null],
             ['Case referral', referralFile ? (referralFailed ? 'Did not upload — add it from the record' : 'On file') : null]],
+        });
+      } else if (withdrawing) {
+        await notice({
+          title: 'Request withdrawn',
+          description: `${wasAsked} is no longer asked to take ${name}'s case. ${name} stays with ${holderName}.`,
+          details: [['Record', 'Changes saved'], ['Withdrawn', wasAsked], ['Stays with', holderName]],
         });
       } else if (clearing) {
         await notice({

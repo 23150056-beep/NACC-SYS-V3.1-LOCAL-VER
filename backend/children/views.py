@@ -88,6 +88,12 @@ class ChildViewSet(viewsets.ModelViewSet):
         """
         data = serializer.validated_data
         instance = serializer.instance
+        # The carry-history choice belongs to a request and is applied when it
+        # is accepted - never by an edit. Saved here it changed what the
+        # CURRENT psychologist sees with nobody asked: pick someone else,
+        # untick it, pick the holder back, and the holder lost the history.
+        # Absent means unchanged (request_assignment), not "carry it".
+        carry = data.pop("assignee_sees_history", None)
         if (role_of(self.request) not in (Role.ADMINISTRATOR, Role.STAFF)
                 or "assigned_psychologist" not in data):
             obj = serializer.save()
@@ -95,10 +101,8 @@ class ChildViewSet(viewsets.ModelViewSet):
             return
         wanted = data.pop("assigned_psychologist")
         asking = wanted is not None and wanted.pk != instance.assigned_psychologist_id
-        # Popped only when asking: applied now, it would change what the
-        # CURRENT psychologist sees before anybody has agreed to anything.
-        # Absent means unchanged (request_assignment), not "carry it".
-        carry = data.pop("assignee_sees_history", None) if asking else None
+        if not asking:
+            carry = None
         if wanted is None:
             data["assigned_psychologist"] = None
         obj = serializer.save()

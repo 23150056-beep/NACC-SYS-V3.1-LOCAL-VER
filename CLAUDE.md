@@ -788,7 +788,18 @@ Rules in `children/assignment.py`; design in
 - **The carry-history choice rides on the request** and is applied at
   acceptance — applied at the request it would change what the CURRENT
   psychologist sees before anyone agreed. During a transfer the child stays
-  with the holder.
+  with the holder. **No edit writes it** (29 Sep 2026): `perform_update`
+  drops it unless the edit asks somebody, and the form sends it only then.
+  Until then an edit that ended on the holder saved it on the child - pick
+  someone else, untick it, pick the holder back, and the holder lost the
+  history with nobody asked.
+- **Picking the holder back while a request is open withdraws it**, and the
+  record form says so ("Request withdrawn … stays with …"). It used to be
+  announced as asking the holder, because the form compared the pick with
+  the pending psychologist rather than with who holds the child.
+- **The case referral chosen on the Assignment step stays in its box** when
+  the step is left and reopened (each step unmounts), and has a Remove
+  button; the box used to say "No file chosen" while the save still filed it.
 - **After accepting, "From my availability"** reads
   `/api/availability/openings/`, built on `booking.bookable_slots`, so every
   time offered books; "Schedule now" books on the psychologist's own calendar.

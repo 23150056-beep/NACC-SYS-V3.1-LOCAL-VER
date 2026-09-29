@@ -175,6 +175,50 @@ class AcceptTest(AssignmentBase):
         self.child.refresh_from_db()
         self.assertFalse(self.child.assignee_sees_history)
 
+    def test_an_edit_that_asks_nobody_leaves_the_history_alone(self):
+        """Pick someone else, untick the history, pick the holder back: the
+        form sent the unticked box with the holder, and the holder - asked
+        nothing, agreeing to nothing - stopped seeing the child's history."""
+        self.child.assigned_psychologist = self.psy
+        self.child.save()
+        self._ask(self.psy, assignee_sees_history=False)
+        self.child.refresh_from_db()
+        self.assertTrue(self.child.assignee_sees_history)
+        self.assertFalse(AssignmentRequest.objects.exists())
+
+    def test_withdrawing_by_picking_the_holder_leaves_the_history_alone(self):
+        self.child.assigned_psychologist = self.psy
+        self.child.save()
+        req = self._ask(self.psy2, assignee_sees_history=False)
+        self._ask(self.psy, assignee_sees_history=False)
+        req.refresh_from_db()
+        self.child.refresh_from_db()
+        self.assertEqual(AssignmentRequest.WITHDRAWN, req.status)
+        self.assertTrue(self.child.assignee_sees_history,
+                        "a withdrawn request's choice reached the child")
+
+    def test_the_history_cannot_be_changed_without_a_request(self):
+        """No psychologist in the edit at all: still nobody asked."""
+        self.child.assigned_psychologist = self.psy
+        self.child.save()
+        for user in (self.sw, self.admin):
+            res = self._as(user).patch(f"/api/children/{self.child.id}/",
+                                       {"assignee_sees_history": False}, format="json")
+            self.assertEqual(200, res.status_code, res.data)
+            self.child.refresh_from_db()
+            self.assertTrue(self.child.assignee_sees_history, user.email)
+
+    def test_leaving_unassigned_does_not_touch_the_history(self):
+        self.child.assigned_psychologist = self.psy
+        self.child.save()
+        res = self._as(self.sw).patch(f"/api/children/{self.child.id}/",
+                                      {"psychologist": None, "assignee_sees_history": False},
+                                      format="json")
+        self.assertEqual(200, res.status_code, res.data)
+        self.child.refresh_from_db()
+        self.assertIsNone(self.child.assigned_psychologist)
+        self.assertTrue(self.child.assignee_sees_history)
+
     def test_only_the_psychologist_asked_can_answer(self):
         req = self._ask(self.psy)
         self.assertEqual(404, self._answer(req, "accept", user=self.psy2).status_code)

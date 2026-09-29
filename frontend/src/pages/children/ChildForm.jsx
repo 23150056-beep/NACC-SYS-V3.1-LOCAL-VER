@@ -743,11 +743,31 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                        accepts. Offering a .png in the picker and then
                        refusing it on the server is the screen lying. */
                     accept=".pdf,.doc,.docx"
+                    /* Each step unmounts when it is left, and the box came
+                       back saying "No file chosen" while the form still held
+                       the file and filed it on save. It is put back, so the
+                       box says what will be filed; Remove empties both. */
+                    ref={(el) => {
+                      if (!el) return;
+                      const chosen = form.referralFile;
+                      if (!chosen && el.files?.length) el.value = '';
+                      if (chosen instanceof File && el.files?.[0] !== chosen) {
+                        try {
+                          const dt = new DataTransfer();
+                          dt.items.add(chosen);
+                          el.files = dt.files;
+                        } catch { /* no DataTransfer: the badge still names it */ }
+                      }
+                    }}
                     onChange={(e) => setForm({ ...form, referralFile: e.target.files?.[0] || null })}
                     style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-body)' }}
                   />
                   {form.referralFile && (
-                    <Badge tone="success" size="sm">{form.referralFile.name}</Badge>
+                    <>
+                      <Badge tone="success" size="sm">{form.referralFile.name}</Badge>
+                      <Button type="button" variant="ghost" size="sm" aria-label={`Remove ${form.referralFile.name}`}
+                        onClick={() => setForm({ ...form, referralFile: null })}>Remove</Button>
+                    </>
                   )}
                 </div>
               </FormField>
