@@ -275,6 +275,16 @@ both itself. Every one of these paths is covered by a test that goes through
 `booking.bookable_slots`, the real rule; asserting rows exist passes while the
 calendar stays empty.
 
+**A fixture's user ids are the exporting machine's.** `import_demo_data` deals
+the psychologist and the social worker again across the branch's own accounts,
+and `forget_local_people` leaves custodian numbers and consent behind. Rehearsed
+on 29 Sep 2026 against a stand-in branch: a fresh export failed the whole load
+(`social_worker_id` 6 did not exist there), and an id that did exist would have
+handed the children to a psychologist no SW can see through. **Not yet fixed:**
+appointments and the clinical records still carry the local psychologist ids,
+so on a branch numbered differently every imported session sat with someone
+other than the child's psychologist - 68 of 198 with a Staff account.
+
 
 ## Booking and the calendar
 
@@ -820,7 +830,8 @@ address logic is unchanged) and asks who the child lives with now - the
   `CUSTODIAN_TEXTS`, and `test_custodian.py` holds every entry to one GSM-7
   segment that does not start with TEST.
 - **Demo custodians have no contact numbers**, on purpose: an invented mobile
-  is somebody's real handset, and the hosted demo could text it.
+  is somebody's real handset, and the hosted demo could text it. The import
+  drops any number a local copy recorded, for the same reason.
 
 ## Names on the schedule
 

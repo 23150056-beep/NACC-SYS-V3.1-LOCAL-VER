@@ -67,6 +67,36 @@ def upgrade_rows(rows):
     return changed
 
 
+# What a child row says about the people on the machine it was exported from.
+# The social worker is a local account id, exactly like the psychologist: on
+# the branch it names somebody else or nobody - a missing id fails the load,
+# and a psychologist's id leaves the child with no SW who can see it - so it
+# is dealt again below across the staff who are really here. A custodian's
+# number and consent were given to someone on that machine, and demo
+# custodians carry no number at all (children/demo_custodians.py).
+_LOCAL_ONLY = {"social_worker": None,
+               "custodian_contact": "",
+               "custodian_sms_consent": False,
+               "custodian_sms_consent_at": None,
+               "custodian_sms_consent_by": None,
+               "custodian_contact_verified_at": None}
+
+
+def forget_local_people(rows):
+    """Blank the child fields that only mean something on the exporting
+    machine. Returns True if anything changed."""
+    changed = False
+    for row in rows:
+        if row.get("model") != "children.child":
+            continue
+        fields = row.get("fields", {})
+        for field, blank in _LOCAL_ONLY.items():
+            if fields.get(field, blank) != blank:
+                fields[field] = blank
+                changed = True
+    return changed
+
+
 class Command(BaseCommand):
     help = "Load the fictional caseload and assign it to accounts that exist here."
 
@@ -105,17 +135,23 @@ class Command(BaseCommand):
         with open(options["fixture"], encoding="utf-8") as handle:
             rows = json.load(handle)
         self.stdout.write(f"  fixture holds {len(rows)} rows")
-        if upgrade_rows(rows):
-            # An older export: load the upgraded copy, never the file as given,
-            # which names a field the model no longer has.
-            fd, upgraded = tempfile.mkstemp(suffix=".json")
+        upgraded = upgrade_rows(rows)
+        forgotten = forget_local_people(rows)
+        if upgraded or forgotten:
+            # Load the corrected copy, never the file as given: an older export
+            # names a field the model no longer has, and a newer one names the
+            # exporting machine's social workers.
+            fd, corrected = tempfile.mkstemp(suffix=".json")
             try:
                 with os.fdopen(fd, "w", encoding="utf-8") as handle:
                     json.dump(rows, handle)
-                call_command("loaddata", upgraded, verbosity=0)
+                call_command("loaddata", corrected, verbosity=0)
             finally:
-                os.remove(upgraded)
-            self.stdout.write("  fixture predates 24 Sep 2026; child rows upgraded")
+                os.remove(corrected)
+            if upgraded:
+                self.stdout.write("  fixture is an older export; child rows upgraded")
+            if forgotten:
+                self.stdout.write("  local social workers and custodian numbers left behind")
         else:
             call_command("loaddata", options["fixture"], verbosity=0)
 

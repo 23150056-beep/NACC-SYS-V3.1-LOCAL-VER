@@ -238,3 +238,69 @@ class TheImportedCaseloadIsBookableTest(TestCase):
         call_command("import_demo_data", fixture=str(self.fixture))
         self.assertEqual(before,
                          list(CaseReferral.objects.values_list("pk", flat=True)))
+
+
+class AFreshExportFromAnotherMachineTest(TestCase):
+    """An export made since 24 Sep carries the exporting machine's social
+    worker ids, and since 29 Sep its custodian numbers and consent. On a
+    branch those ids name somebody else or nobody: a missing one failed the
+    whole load, and one naming a psychologist left the child with no SW who
+    could see it. Rehearsed against a stand-in branch on 29 Sep 2026."""
+
+    def setUp(self):
+        psy = Role.objects.create(role_name=Role.PSYCHOLOGIST)
+        staff = Role.objects.create(role_name=Role.STAFF)
+        self.psy = User.objects.create_user(
+            email="real.psy@racco1.gov.ph", username="rp", password="pass1234",
+            role=psy, status=User.ACTIVE)
+        self.sw = User.objects.create_user(
+            email="real.sw@racco1.gov.ph", username="rs", password="pass1234",
+            role=staff, status=User.ACTIVE)
+        self.fixture = Path(tempfile.mkdtemp()) / "demo.json"
+
+    def _write(self, social_worker, **extra):
+        rows = [{
+            "model": "children.child",
+            "pk": 900,
+            "fields": {"fullname": "Demo Child", "case_type": "Foster Care",
+                       "assigned_psychologist": self.psy.pk,
+                       "social_worker": social_worker,
+                       "created_at": "2026-08-01T00:00:00Z",
+                       "updated_at": "2026-08-01T00:00:00Z", **extra},
+        }]
+        self.fixture.write_text(json.dumps(rows), encoding="utf-8")
+
+    def test_a_social_worker_id_that_is_nobody_here_still_loads(self):
+        self._write(social_worker=self.sw.pk + 50)
+        call_command("import_demo_data", fixture=str(self.fixture))
+        self.assertEqual(self.sw, Child.objects.get().social_worker)
+
+    def test_a_social_worker_id_that_is_a_psychologist_here_is_dealt_again(self):
+        self._write(social_worker=self.psy.pk)
+        call_command("import_demo_data", fixture=str(self.fixture))
+        self.assertEqual(self.sw, Child.objects.get().social_worker)
+
+    def test_custodian_numbers_and_consent_stay_behind(self):
+        # A demo custodian has a name and never a number, so the demo cannot
+        # text a handset somebody typed into a local copy.
+        self._write(social_worker=self.sw.pk,
+                    custodian_name="Rosa Dela Cruz (foster parent)",
+                    custodian_contact="+639171234567",
+                    custodian_sms_consent=True,
+                    custodian_sms_consent_at="2026-09-29T01:00:00Z",
+                    custodian_sms_consent_by=self.sw.pk + 50,
+                    custodian_contact_verified_at="2026-09-29T01:00:00Z")
+        call_command("import_demo_data", fixture=str(self.fixture))
+        child = Child.objects.get()
+        self.assertEqual("Rosa Dela Cruz (foster parent)", child.custodian_name)
+        self.assertEqual("", child.custodian_contact)
+        self.assertFalse(child.custodian_sms_consent)
+        self.assertIsNone(child.custodian_sms_consent_at)
+        self.assertIsNone(child.custodian_sms_consent_by)
+        self.assertIsNone(child.custodian_contact_verified_at)
+
+    def test_it_says_so(self):
+        self._write(social_worker=self.sw.pk + 50)
+        out = StringIO()
+        call_command("import_demo_data", fixture=str(self.fixture), stdout=out)
+        self.assertIn("local social workers", out.getvalue())
