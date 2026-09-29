@@ -28,7 +28,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from accounts.models import Role
-from children import demo_owners
+from children import demo_custodians, demo_owners
 from children.models import Child
 from clinical import demo_referrals, demo_reports
 from scheduling import demo_schedule
@@ -37,10 +37,15 @@ from scheduling import demo_schedule
 # A fixture is a file somebody exported on a given day, and it keeps that
 # day's field names. These are the changes a child row has been through since;
 # the migrations apply the same ones to a database (children 0020 and 0021).
-_RENAMED_FIELDS = {"middle_initial": "middle_name"}
+# "Previous Custodian" became the Custodian on 29 Sep 2026 (children 0028):
+# the field is renamed, and the old placeholder values - who surrendered the
+# child, never who they live with - are cleared, then filled with a demo
+# custodian after loading (children/demo_custodians.py).
+_RENAMED_FIELDS = {"middle_initial": "middle_name", "surrendered_by": "custodian_name"}
 _RENAMED_VALUES = {"case_category": {"Orphan": "Orphaned"},
                    "birth_status": {"N/A": "Unknown"},
-                   "type_of_adoption": {"Stepparent": "Step-parent"}}
+                   "type_of_adoption": {"Stepparent": "Step-parent"},
+                   "custodian_name": {"Social Worker": "", "Police": "", "Relatives": ""}}
 
 
 def upgrade_rows(rows):
@@ -130,6 +135,8 @@ class Command(BaseCommand):
         # Each social worker sees only their own records, so a child with none
         # is one no staff account can see (children/demo_owners.py).
         demo_owners.assign_social_workers(list(Child.objects.order_by("pk")))
+        custodians = demo_custodians.fill_custodians(list(Child.objects.order_by("pk")))
+        self.stdout.write(f"  custodians: {custodians} filled in")
         referrals = demo_referrals.install_referrals(
             list(Child.objects.filter(status=Child.ACTIVE).select_related("social_worker")),
             uploaded_by=User.objects.filter(role__role_name=Role.STAFF).first())

@@ -5,14 +5,16 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from accounts.display import display_name
+from accounts.phone import as_typed as phone_as_typed
 from accounts.models import Role
 from accounts.permissions import (ChildRecordAccess,
                                   is_admin_or_assignee)
 from accounts.scoping import role_of, scope_to_visible, visible_pre_assessments
 from activity.models import ActivityLog
 from activity.services import log_activity
-from children import assignment, termination
+from children import assignment, custodian, termination
 from children.models import AssignmentRequest, Child, TerminationRecord
 from children.serializers import ChildSerializer
 
@@ -137,7 +139,8 @@ class ChildViewSet(viewsets.ModelViewSet):
         # psychologist_name is rendered on every row, so without this the list
         # costs an extra query per child: 47 for 40 children, against 7 with
         # it. The guardian join went with guardian_name — nothing reads it.
-        qs = qs.select_related("assigned_psychologist", "social_worker")
+        qs = qs.select_related("assigned_psychologist", "social_worker",
+                               "custodian_sms_consent_by")
         return scope_to_visible(qs, self.request, path=None)
 
     def update(self, request, *args, **kwargs):
@@ -325,3 +328,64 @@ class ChildViewSet(viewsets.ModelViewSet):
             return {"yours": False,
                     "held_by": display_name(c.social_worker) or None}
         return Response({"matches": [row(c) for c in matches]})
+
+
+class CustodianContactCodeView(APIView):
+    """The one-time code that confirms a custodian's number (children/custodian.py).
+
+    POST {number}: text a code to it. PUT {number, code}: check what the
+    custodian read back. Confirming changes no record by itself - the record
+    form's save puts the confirmed number on the child, and only for whoever
+    confirmed it, within the hour.
+
+    The ISA and social workers only: they are the ones with the custodian in
+    front of them, and every code is a paid text to a number somebody typed.
+    """
+    permission_classes = [IsAuthenticated]
+
+    def _refuse(self, request):
+        if role_of(request) not in (Role.ADMINISTRATOR, Role.STAFF):
+            return Response({"detail": "Only the social worker or the ISA confirms a custodian's number."},
+                            status=status.HTTP_403_FORBIDDEN)
+        return None
+
+    def _number(self, request):
+        try:
+            number = custodian.normalise(request.data.get("number"))
+        except ValueError as exc:
+            return None, Response({"number": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if not number:
+            return None, Response({"number": "Enter the custodian's mobile number."},
+                                  status=status.HTTP_400_BAD_REQUEST)
+        return number, None
+
+    def post(self, request):
+        refused = self._refuse(request)
+        if refused:
+            return refused
+        number, bad = self._number(request)
+        if bad:
+            return bad
+        try:
+            result = custodian.send_code(request.user, number)
+        except custodian.TooManyCodes as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        if not result.ok:
+            # The gateway's own words: a code that never arrives with no
+            # explanation is the failure that costs an afternoon.
+            return Response({"detail": result.detail}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response({"detail": f"A code was sent to {phone_as_typed(number)}. "
+                                   f"Ask the custodian to read it back. It expires in 10 minutes.",
+                         "number": number})
+
+    def put(self, request):
+        refused = self._refuse(request)
+        if refused:
+            return refused
+        number, bad = self._number(request)
+        if bad:
+            return bad
+        ok, message = custodian.confirm_code(request.user, number, request.data.get("code"))
+        if not ok:
+            return Response({"code": message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({"detail": message, "number": number, "verified": True})

@@ -301,6 +301,13 @@ export default function Children() {
       _origPsychologist: c.psychologist || '',
       _basePsychologist: String(pending?.psychologist || c.psychologist || ''),
       assignee_sees_history: pending ? pending.carry_history : c.assignee_sees_history,
+      // The number as a person types it, and what the record held when
+      // opened: consent and confirmation belong to that person and number
+      // (pages/children/CustodianFields.jsx).
+      custodian_contact: c.custodian_contact_display || '',
+      _origContact: c.custodian_contact || '',
+      _origCustodian: c.custodian_name || '',
+      _origConsent: !!c.custodian_sms_consent,
     });
   };
 
@@ -354,6 +361,9 @@ export default function Children() {
     delete payload.psychologist_name; delete payload.social_worker_name;
     delete payload._origPsychologist; delete payload.termination; delete payload.photo;
     delete payload._basePsychologist; delete payload.pending_assignment; delete payload.declined_assignment;
+    for (const k of ['_origContact', '_origCustodian', '_origConsent', '_confirmedNumber',
+      'custodian_contact_display', 'custodian_sms_consent_at', 'custodian_sms_consent_by_name',
+      'custodian_contact_verified', 'custodian_texts']) delete payload[k];
     delete payload.updated_at; delete payload._conflict; delete payload._draft;
     // A file, not a column. It is uploaded separately once the child exists,
     // because a CaseReferral needs a child id to belong to.

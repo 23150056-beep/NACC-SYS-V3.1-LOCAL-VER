@@ -28,10 +28,10 @@ CATEGORY_OPTIONS = {
 
 # The case-specific questions besides the date, per track.
 CASE_TYPE_FIELDS = {
-    "Adoption": ["surrendered_by", "type_of_adoption"],
-    "Foster Care": ["surrendered_by"],
-    "Kinship Care": ["surrendered_by"],
-    "Family Tracing & Reunification": ["surrendered_by"],
+    "Adoption": ["custodian_name", "type_of_adoption"],
+    "Foster Care": ["custodian_name"],
+    "Kinship Care": ["custodian_name"],
+    "Family Tracing & Reunification": ["custodian_name"],
     "Residential Care": [],
     "Independent Living": [],
 }
@@ -91,7 +91,7 @@ ALWAYS_REQUIRED = [
 
 # Answered by the case type, so asked again whenever the case type (or the
 # type of adoption) changes.
-DYNAMIC = {"surrendered_by", "type_of_adoption", ADMISSION, PLACEMENT}
+DYNAMIC = {"custodian_name", "type_of_adoption", ADMISSION, PLACEMENT}
 
 
 def required_fields(case_type, type_of_adoption=""):

@@ -9,6 +9,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.display import display_name
+from accounts.sms_notifications import notify_custodian
 from accounts.models import Role
 from accounts.scoping import role_of as _role, scope_to_visible
 from activity.models import ActivityLog
@@ -356,6 +357,11 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         log_activity(self.request.user, ActivityLog.CREATED, ActivityLog.RECORD,
                      entity_type="Appointment", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.psychologist)
+        # The custodian brings the child, so they hear it is booked - when
+        # they agreed to texts and the number was confirmed
+        # (children/custodian.py). Queued for after the save commits.
+        if obj.status == Appointment.SCHEDULED and obj.start > timezone.now():
+            notify_custodian(obj, "booked")
 
     def perform_update(self, serializer):
         """Moving an appointment is booking it again, and checked as such.
@@ -382,10 +388,14 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             data.get("duration_minutes", instance.duration_minutes),
             exclude_id=instance.pk,
         )
+        was_at = instance.start
         obj = serializer.save(psychologist=psychologist)
         log_activity(self.request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type="Appointment", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.psychologist)
+        if (obj.start != was_at and obj.status == Appointment.SCHEDULED
+                and obj.start > timezone.now()):
+            notify_custodian(obj, "moved")
 
     def _set_status(self, request, pk, new_status):
         obj = self.get_object()
@@ -410,11 +420,21 @@ class AppointmentViewSet(viewsets.ModelViewSet):
                 return Response(
                     {"detail": "This appointment has not happened yet."},
                     status=status.HTTP_400_BAD_REQUEST)
+        was = obj.status
         obj.status = new_status
         obj.save(update_fields=["status", "updated_at"])
         log_activity(request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type="Appointment", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.psychologist)
+        # The custodian hears of a session called off before it happens, and
+        # of a no-show recorded the same day - "today's appointment" written
+        # up a week late would be wrong, so a late one sends nothing.
+        if was == Appointment.SCHEDULED:
+            if new_status == Appointment.CANCELLED and obj.start > timezone.now():
+                notify_custodian(obj, "cancelled")
+            elif (new_status == Appointment.NO_SHOW
+                  and timezone.localtime(obj.start).date() == timezone.localdate()):
+                notify_custodian(obj, "missed")
         return Response(AppointmentSerializer(obj, context={"request": request}).data)
 
     @action(detail=True, methods=["post"])

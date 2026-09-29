@@ -94,7 +94,7 @@ export default function PsychReportPrint({ data, className = 'racco-print-only' 
     ['Address', address || child.address],
     ['Category / Case type', [child.case_category, child.case_type].filter(Boolean).join(' · ')],
     ['Legal status', child.legal_status],
-    ...(child.surrendered_by ? [['Previous custodian', child.surrendered_by]] : []),
+    ...(child.custodian_name ? [['Custodian', child.custodian_name]] : []),
     [dateLabel, longDate(dateValue)],
     ['Referral source', child.referral_source],
     ['Psychologist', child.psychologist_name],

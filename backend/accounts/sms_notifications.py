@@ -1,4 +1,5 @@
-"""The three messages this system sends by text.
+"""The messages this system sends by text: three to staff and psychologists,
+and, since 29 Sep 2026, appointment texts to a child's custodian (section 4).
 
 Each one is a nudge to open the system, never the thing itself. That is the
 whole design, and it comes from what a text message is: unencrypted, carried
@@ -136,6 +137,75 @@ def notify_session_reminder(psychologist, count, when="tomorrow"):
         f"Sign in to see the schedule.",
         "session reminder",
     )
+
+
+# --------------------------------------------------------------------------
+# 4. The child's custodian: their appointments (29 Sep 2026)
+# --------------------------------------------------------------------------
+#
+# The only texts to somebody who is not a system user, so the rules at the top
+# of this file apply hardest here. No child's name, no case detail, nothing
+# clinical - a date, a time and a place. "The child in your care" is who it is
+# about; the custodian knows. Only when children/custodian.texts_allowed()
+# says so: consent recorded, number confirmed with a code, case open.
+#
+# The wording lives in this one table so it can be changed in one place (the
+# owner means to revise it). Every entry must stay ONE plain GSM-7 segment -
+# test_custodian_texts.py measures each with fits_one_segment - and must not
+# begin with TEST, which Semaphore silently discards.
+
+CUSTODIAN_OFFICE = "the RACCO I office"
+CUSTODIAN_TEXTS = {
+    "booked": ("NACC RACCO I: An appointment is set for the child in your care on "
+               "{when} at {office}. Please arrive 10 minutes early."),
+    "reminder": ("NACC RACCO I reminder: the child in your care has an appointment "
+                 "{day}, {when} at {office}."),
+    "moved": ("NACC RACCO I: The appointment of the child in your care is moved to "
+              "{when} at {office}."),
+    "cancelled": ("NACC RACCO I: The appointment of the child in your care on {when} "
+                  "is cancelled. The office will contact you to rebook."),
+    "missed": ("NACC RACCO I: We missed you at today's appointment. Please contact "
+               "the office to rebook."),
+}
+
+
+def custodian_when(start):
+    """"Tue 30 Sep, 9:30 AM", in local time. Built by hand: %-d and %-I are
+    glibc extensions and raise on Windows, where the local copy runs."""
+    local = timezone.localtime(start)
+    hour = local.hour % 12 or 12
+    return (f"{local:%a} {local.day} {local:%b}, "
+            f"{hour}:{local:%M} {'AM' if local.hour < 12 else 'PM'}")
+
+
+def custodian_text(event, appointment, day="tomorrow"):
+    return CUSTODIAN_TEXTS[event].format(
+        when=custodian_when(appointment.start), day=day, office=CUSTODIAN_OFFICE)
+
+
+def _custodian_number(child):
+    from children.custodian import texts_allowed
+    return child.custodian_contact if texts_allowed(child) else ""
+
+
+def notify_custodian(appointment, event):
+    """Booked, moved, cancelled or missed: queued for after the save commits.
+    Returns whether a text was queued."""
+    number = _custodian_number(appointment.child)
+    if not number:
+        return False
+    return queue_sms(number, custodian_text(event, appointment),
+                     f"custodian {event} notice")
+
+
+def remind_custodian(appointment, day="tomorrow"):
+    """The day-before reminder, sent now and the SmsResult returned - it runs
+    from the reminder job, which records who was told (scheduling/reminders)."""
+    number = _custodian_number(appointment.child)
+    if not number:
+        return SmsResult(False, "Texts to this custodian are off.")
+    return send_sms(number, custodian_text("reminder", appointment, day=day),
+                    "custodian reminder")
 
 
 # --------------------------------------------------------------------------

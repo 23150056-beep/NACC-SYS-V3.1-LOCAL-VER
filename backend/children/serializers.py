@@ -3,7 +3,8 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from accounts.display import display_name
 from accounts.models import Role
-from children import assignment, intake
+from accounts.phone import as_typed as phone_as_typed
+from children import assignment, custodian, intake
 from children.models import AssignmentRequest, Child
 
 User = get_user_model()
@@ -55,6 +56,13 @@ class ChildSerializer(serializers.ModelSerializer):
     # worker, not to whichever psychologist holds the child.
     pending_assignment = serializers.SerializerMethodField()
     declined_assignment = serializers.SerializerMethodField()
+    # The custodian's number, consent and confirmation (children/custodian.py).
+    # Typed any way a person writes a number; stored as +639XXXXXXXXX.
+    custodian_contact = serializers.CharField(required=False, allow_blank=True, max_length=40)
+    custodian_contact_display = serializers.SerializerMethodField()
+    custodian_sms_consent_by_name = serializers.SerializerMethodField()
+    custodian_contact_verified = serializers.SerializerMethodField()
+    custodian_texts = serializers.SerializerMethodField()
 
     class Meta:
         model = Child
@@ -63,7 +71,10 @@ class ChildSerializer(serializers.ModelSerializer):
             "gender", "house_number", "street", "landmark",
             "province", "municipality", "barangay", "address",
             "psgc_province", "psgc_municipality", "psgc_barangay",
-            "case_type", "case_category", "surrendered_by", "status", "case_status", "assignee_sees_history",
+            "case_type", "case_category", "custodian_name", "status", "case_status", "assignee_sees_history",
+            "custodian_contact", "custodian_contact_display", "custodian_sms_consent",
+            "custodian_sms_consent_at", "custodian_sms_consent_by_name",
+            "custodian_contact_verified", "custodian_texts",
             "place_of_birth_or_found", "birth_status", "legal_status",
             "date_of_admission", "date_of_placement_to_custodian", "type_of_adoption",
             "photo", "referral_source", "referral_reason",
@@ -76,7 +87,7 @@ class ChildSerializer(serializers.ModelSerializer):
         ]
         # The tracker moves only through the advance-status / terminate actions.
         # fullname is derived (Child.save() composes it from the name parts).
-        read_only_fields = ["case_status", "updated_at", "fullname"]
+        read_only_fields = ["case_status", "updated_at", "fullname", "custodian_sms_consent_at"]
 
     def get_social_worker_name(self, obj):
         return display_name(obj.social_worker) or None
@@ -98,6 +109,24 @@ class ChildSerializer(serializers.ModelSerializer):
         if value is not None and getattr(value.role, "role_name", None) != Role.STAFF:
             raise serializers.ValidationError("Choose a social worker (SW) account.")
         return value
+
+    def validate_custodian_contact(self, value):
+        try:
+            return custodian.normalise(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
+
+    def get_custodian_contact_display(self, obj):
+        return phone_as_typed(obj.custodian_contact) or None
+
+    def get_custodian_sms_consent_by_name(self, obj):
+        return display_name(obj.custodian_sms_consent_by) or None
+
+    def get_custodian_contact_verified(self, obj):
+        return obj.custodian_contact_verified_at is not None
+
+    def get_custodian_texts(self, obj):
+        return {"on": custodian.texts_allowed(obj), "status": custodian.status_of(obj)}
 
     def validate_psychologist(self, value):
         """Only an active psychologist can be asked. The field took any user
@@ -348,6 +377,9 @@ class ChildSerializer(serializers.ModelSerializer):
             self._require(attrs, creating=False)
         self._check_case(attrs)
         self._check_dates(attrs)
+        refused = custodian.apply(attrs, self.instance, getattr(request, "user", None), role)
+        if refused:
+            raise serializers.ValidationError(refused)
         return attrs
 
     # --- The Add Record rules (children/intake.py) ---------------------------

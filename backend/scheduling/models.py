@@ -156,3 +156,19 @@ class SessionReminder(models.Model):
             models.UniqueConstraint(fields=["psychologist", "day"],
                                     name="one_session_reminder_per_day"),
         ]
+
+
+class CustodianReminder(models.Model):
+    """The record that a child's custodian was texted about one appointment
+    (29 Sep 2026). One row per appointment, and the unique constraint is what
+    stops a second text - claimed before sending, stamped once the gateway
+    accepts, deleted on a refusal, the same as SessionReminder above."""
+
+    appointment = models.OneToOneField(
+        "scheduling.Appointment", on_delete=models.CASCADE,
+        related_name="custodian_reminder")
+    claimed_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "tbl_custodian_reminder"

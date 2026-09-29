@@ -10,6 +10,7 @@ import {
   requiredFields,
 } from '../../config/caseData';
 import { shortDate, timeAgo } from '../../utils/time';
+import CustodianFields from './CustodianFields';
 
 // "2008-09-29" from the date's LOCAL parts. toISOString() gives the UTC date,
 // which in Manila (UTC+8) is the previous day for anything before 8 a.m.
@@ -35,7 +36,8 @@ export const EMPTY = {
   birth_date: '', date_found: '', gender: '',
   house_number: '', street: '', landmark: '',
   province: '', municipality: '', barangay: '', psgc_province: '', psgc_municipality: '', psgc_barangay: '',
-  case_type: '', case_category: '', surrendered_by: '', psychologist: '', assignee_sees_history: true,
+  case_type: '', case_category: '', custodian_name: '', psychologist: '', assignee_sees_history: true,
+  custodian_contact: '', custodian_sms_consent: false,
   place_of_birth_or_found: '', birth_status: '', legal_status: '',
   date_of_admission: '', date_of_placement_to_custodian: '', type_of_adoption: '',
   referral_source: '', referral_reason: '', education_level: '', current_placement: '', medical_notes: '',
@@ -43,7 +45,10 @@ export const EMPTY = {
 };
 
 
-const FORM_STEPS = ['Child\u2019s Profile', 'Address', 'Recommendation', 'Assignment'];
+/* "Present Environment" was "Address" until 29 Sep 2026 (owner): where the
+ * child lives now AND with whom - the address, the custodian and their
+ * contact number - so the step that asks for all three is named for both. */
+const FORM_STEPS = ['Child\u2019s Profile', 'Present Environment', 'Recommendation', 'Assignment'];
 
 /* Where each field lives, and what the "still needed" line calls it. */
 const FIELD_INFO = {
@@ -51,7 +56,9 @@ const FIELD_INFO = {
   first_name: [1, 'first name'], middle_name: [1, 'middle name'], last_name: [1, 'last name'],
   birth_date: [1, 'date of birth'], date_found: [1, 'date found'], gender: [1, 'sex'],
   place_of_birth_or_found: [1, 'place of birth or found'], birth_status: [1, 'birth status'],
-  legal_status: [1, 'legal status'], surrendered_by: [1, 'previous custodian'],
+  legal_status: [1, 'legal status'],
+  custodian_name: [2, 'custodian'], custodian_contact: [2, 'contact number'],
+  custodian_sms_consent: [2, 'consent to texts'],
   type_of_adoption: [1, 'type of adoption'],
   [ADMISSION]: [1, 'date of admission'], [PLACEMENT]: [1, 'date of placement'],
   house_number: [2, 'house number'], street: [2, 'street number'], landmark: [2, 'landmark'],
@@ -252,7 +259,11 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
       ...form,
       case_type: nextType,
       case_category: nextCategories.includes(form.case_category) ? form.case_category : '',
-      surrendered_by: nextFields.includes('surrendered_by') ? form.surrendered_by : '',
+      // The custodian goes with their number and consent: a track that does
+      // not ask who the child lives with keeps none of the three.
+      ...(nextFields.includes('custodian_name') ? {} : {
+        custodian_name: '', custodian_contact: '', custodian_sms_consent: false,
+      }),
       type_of_adoption: nextAdoption,
       [ADMISSION]: nextDate === ADMISSION ? form[ADMISSION] : '',
       [PLACEMENT]: nextDate === PLACEMENT ? form[PLACEMENT] : '',
@@ -457,17 +468,6 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                 <Input value={form.education_level || ''} maxLength={100} placeholder="e.g. Grade 4"
                   onChange={(e) => setForm({ ...form, education_level: e.target.value })} />
               </FormField>
-              {asksFor('surrendered_by') && (
-                /* Typed, not picked: staff record who actually had the child
-                   - a name, a relationship, an office - which no short list
-                   covers. */
-                <FormField label="Previous Custodian" required error={fieldError('surrendered_by')}
-                  hint="Who had the child before — a name, relationship or office.">
-                  <Input value={form.surrendered_by || ''} maxLength={150}
-                    placeholder="e.g. Rosa Dela Cruz (maternal aunt)"
-                    onChange={(e) => setForm({ ...form, surrendered_by: e.target.value })} />
-                </FormField>
-              )}
               {asksFor('type_of_adoption') && (
                 <FormField label="Type of Adoption" required error={fieldError('type_of_adoption')}>
                   <Select value={form.type_of_adoption || ''} onChange={(e) => changeAdoptionType(e.target.value)}>
@@ -501,7 +501,14 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
 
           {step === 2 && (
           <section>
-            <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 4 }}>Address</div>
+            <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 4 }}>Present Environment</div>
+            <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 10 }}>
+              Where the child lives now, and with whom.
+            </div>
+            {asksFor('custodian_name') && (
+              <CustodianFields form={form} setForm={setForm} fieldError={fieldError} readOnly={isPsych} />
+            )}
+            <div className="racco-eyebrow" style={{ fontSize: 10, margin: '6px 0 4px' }}>Address</div>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 10 }}>
               Choose the province first — the municipality and barangay lists follow from it.
             </div>

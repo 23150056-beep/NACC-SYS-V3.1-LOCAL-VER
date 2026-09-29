@@ -652,10 +652,10 @@ middle name, a date found, and every question that applies made mandatory.
   `import_demo_data` upgrades an older fixture the same way before loading it.
 - "Street Number" is the owner's wording; its hint allows a purok or sitio,
   because most addresses in the region have no street.
-- **Previous Custodian is typed, not picked** (staff's request, 24 Sep 2026):
-  `surrendered_by` lost its three placeholder choices and widened to 150
-  (children 0022). Still required where the case type asks it; old values
-  such as "Relatives" are ordinary text now and were left alone.
+- **The Custodian is typed, not picked**: who the child lives with now, on the
+  Present Environment step. It was "Previous Custodian" on Child's Profile
+  until 29 Sep 2026 - see "The custodian and their texts" below. Still
+  required where the case type asks it.
 - **Educational Placement moved to Child's Profile and is required** there
   ("Not in school" is an answer); **Referral Source is a pick** from RACCO /
   LGU / CCA / RCF (children 0023), with typed text on older records kept by
@@ -787,6 +787,41 @@ is saved until the psychologist reviews it and saves through the ordinary
 questionnaires. Answers are keyed by question wording, so a repeated question
 gets "(2)" rather than sharing an answer. `.doc` is refused with what to do.
 
+## The custodian and their texts
+
+Owner's decision, 29 Sep 2026: no previous custodian is held any more. The
+record form's second step is **Present Environment** (was "Address"; the
+address logic is unchanged) and asks who the child lives with now - the
+**Custodian** - with a **Contact Number** beside it. Rules in
+`children/custodian.py`, wording in `accounts/sms_notifications.py` section 4.
+
+- **The field was renamed in code only**: `custodian_name` with
+  `db_column="surrendered_by"`, a state-only migration (children 0028). A real
+  column rename is the 0020 trap - a release still serving during the deploy
+  would 500 on every child query. Keep the `db_column`.
+- **0028 cleared the old pick-list values** (Social Worker, Police, Relatives):
+  they said who SURRENDERED the child, never who they live with. Typed names
+  were kept - the owner's word is they are mostly the present custodian.
+  Nothing invents a custodian for a real record; demo data gets one from
+  `children/demo_custodians.py`, called by `seed_demo_data` and
+  `import_demo_data` only.
+- **A custodian is texted only with consent AND a confirmed number**
+  (`texts_allowed()`): the SW ticks that the custodian agreed (recorded with
+  who and when), and confirms the number with a one-time code the custodian
+  reads back (`/api/custodian-contact/code/`, SW and ISA only, same limits as
+  a user's own number). A different custodian or number clears both unless
+  given again in the same save; a confirmation counts only for whoever made
+  it, within the hour. A psychologist cannot change any of it.
+- **Five texts, no child's name**: booked, the day-before reminder (the
+  existing `send_session_reminders` job, one `CustodianReminder` per
+  appointment), moved, cancelled before it happens, and missed (a no-show
+  recorded the same day only - "today's appointment" written up late would be
+  wrong). The owner means to revise the wording: it is one table,
+  `CUSTODIAN_TEXTS`, and `test_custodian.py` holds every entry to one GSM-7
+  segment that does not start with TEST.
+- **Demo custodians have no contact numbers**, on purpose: an invented mobile
+  is somebody's real handset, and the hosted demo could text it.
+
 ## Names on the schedule
 
 Owner's decision, 24 Sep 2026, in `scheduling/visibility.py`: on the calendar
@@ -826,6 +861,8 @@ switched to the record.)
 Audited 26 Sep 2026 when the owner chose Semaphore. `SMS_PROVIDER` picks the
 gateway in `accounts/sms.py`; unset writes every message, verification codes
 included, to the API log. Local setup: docs/LOCAL-SETUP.md "Text messages".
+Since 29 Sep 2026 a child's custodian is texted too - the only recipient who
+is not a system user; see "The custodian and their texts".
 
 - **Only a `message_id` counts as sent.** Semaphore puts refusals in 200
   bodies in several shapes (`{"field": ["reason"]}`, a list of sentences,

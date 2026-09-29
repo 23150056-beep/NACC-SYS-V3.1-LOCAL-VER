@@ -146,12 +146,27 @@ class Child(models.Model):
     case_type = models.CharField(max_length=150, blank=True, choices=CASE_TYPE_CHOICES)
     # Official agency "Identifying Information" intake form Category list.
     case_category = models.CharField(max_length=50, blank=True, choices=CASE_CATEGORY_CHOICES)
-    # "Previous Custodian" on the form: who had the child before, written in
-    # by staff. It was a three-item placeholder list (Social Worker / Police /
-    # Relatives) until 24 Sep 2026, when staff asked to type the actual
-    # custodian - a name, a relationship, an office. The old values are still
-    # valid text and were left as they were.
-    surrendered_by = models.CharField(max_length=150, blank=True)
+    # The CUSTODIAN: who the child lives with now - a name and relationship,
+    # or the facility - on the form's Present Environment step. Until 29 Sep
+    # 2026 this was "Previous Custodian", who had the child before; the owner
+    # retired that ("the current custodian is mostly the case"), so the field
+    # was renamed and the old placeholder values (Social Worker / Police /
+    # Relatives) were cleared by children 0028. The column keeps its old name,
+    # `surrendered_by`, so the rename needed no change to the database and no
+    # deploy window in which a release still running could break on it.
+    custodian_name = models.CharField(max_length=150, blank=True,
+                                      db_column="surrendered_by")
+    # The custodian's mobile, for appointment texts (children/custodian.py).
+    # Stored as +639XXXXXXXXX (accounts/phone.py). Nothing is texted unless
+    # the custodian agreed AND the number was confirmed with a one-time code:
+    # a number somebody typed may be a typo, and a typo is a stranger.
+    custodian_contact = models.CharField(max_length=16, blank=True)
+    custodian_sms_consent = models.BooleanField(default=False)
+    custodian_sms_consent_at = models.DateTimeField(null=True, blank=True)
+    custodian_sms_consent_by = models.ForeignKey(
+        "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+")
+    custodian_contact_verified_at = models.DateTimeField(null=True, blank=True)
     # Remaining "I. Identifying Information" fields not already covered above.
     place_of_birth_or_found = models.CharField(max_length=150, blank=True)
     birth_status = models.CharField(max_length=20, blank=True, choices=BIRTH_STATUS_CHOICES)
@@ -318,3 +333,33 @@ class AssignmentRequest(models.Model):
 
 # V2: v1's ProgressNote and Goal were replaced by clinical.RemarkNote and
 # clinical.TreatmentPlan per the psychologist interview.
+
+
+class CustodianContactCheck(models.Model):
+    """A one-time code texted to a custodian's number, and its answer
+    (29 Sep 2026, children/custodian.py).
+
+    The social worker asks for a code while the custodian is present, the
+    custodian reads it back, and the record may then text that number. One
+    row per staff member, the way PhoneVerification is one per account: the
+    code and its resend limits live in the database, not the per-process
+    cache, for the reasons given there.
+
+    A confirmed number stays usable for CONFIRMED_FOR, long enough to finish
+    the intake it was checked for (siblings with one custodian included), and
+    only by the person who checked it.
+    """
+    requested_by = models.OneToOneField(
+        "accounts.User", on_delete=models.CASCADE,
+        related_name="custodian_contact_check")
+    number = models.CharField(max_length=16, blank=True, default="")
+    code = models.CharField(max_length=12, blank=True, default="")
+    tries = models.PositiveSmallIntegerField(default=0)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    window_started_at = models.DateTimeField(null=True, blank=True)
+    sent_in_window = models.PositiveSmallIntegerField(default=0)
+    verified_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "tbl_custodian_contact_check"

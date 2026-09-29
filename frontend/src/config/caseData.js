@@ -3,7 +3,8 @@
 // Case types and case categories are now sourced from the official
 // NACC-SAMD-GF-000 (June 2025) certification tool. The location lists below
 // are STILL PLACEHOLDER VALUES pending confirmation from NACC / RACCO I. The
-// Previous Custodian is typed in, not picked (staff's request, 24 Sep 2026).
+// The Custodian - who the child lives with now - is typed in, not picked; it
+// was "Previous Custodian" until 29 Sep 2026 (backend children/custodian.py).
 // V2: "Adoption" included per the psychologist interview ("active/adoption,
 // active/foster care"); final list pending RACCO I confirmation. This
 // placement-track list is now corroborated by NACC-SAMD-GF-000 KRA III
@@ -58,19 +59,19 @@ export const caseTypesFor = (category) => (
 /* Which of the optional case fields each track actually asks for.
  *
  * One map rather than the separate show-this / clear-that lists V2 kept, which
- * had drifted apart: Residential Care preserved a Previous Custodian the form
+ * had drifted apart: Residential Care preserved a custodian the form
  * never showed, and Family Tracing showed the field but wiped the value the
  * moment you selected it. Deriving both the rendering and the clearing from
  * this map means they cannot disagree again.
  *
  * The lists follow what V2 *displayed*, since that is the behaviour staff saw.
- * Whether Residential Care should also record a Previous Custodian is a
+ * Whether Residential Care should also record a custodian is a
  * question for RACCO I, not one to settle by reading old code. */
 export const CASE_TYPE_FIELDS = {
-  Adoption: ['surrendered_by', 'type_of_adoption'],
-  'Foster Care': ['surrendered_by'],
-  'Kinship Care': ['surrendered_by'],
-  'Family Tracing & Reunification': ['surrendered_by'],
+  Adoption: ['custodian_name', 'type_of_adoption'],
+  'Foster Care': ['custodian_name'],
+  'Kinship Care': ['custodian_name'],
+  'Family Tracing & Reunification': ['custodian_name'],
   'Residential Care': [],
   'Independent Living': [],
 };

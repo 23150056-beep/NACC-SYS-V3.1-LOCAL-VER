@@ -10,8 +10,10 @@ from datetime import timedelta
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from accounts.sms_notifications import notify_session_reminder
-from scheduling.models import Appointment, SessionReminder
+from accounts.sms_notifications import notify_session_reminder, remind_custodian
+from children.custodian import texts_allowed
+from scheduling.models import Appointment, CustodianReminder, SessionReminder
+from scheduling.visibility import case_ref
 
 
 def _claim(rows, psychologist, day, count):
@@ -105,4 +107,58 @@ def send_session_reminders(*, today=False, dry_run=False):
 
     if not counts:
         report["lines"].append(f"no scheduled sessions {word} ({target})")
+    _remind_custodians(target, word, dry_run, report)
     return report
+
+
+def _claim_custodian(appointment):
+    """This appointment's reminder row, now ours to send - or None. The same
+    claim, lease and takeover as _claim above, one row per appointment."""
+    try:
+        with transaction.atomic():
+            return CustodianReminder.objects.create(appointment=appointment)
+    except IntegrityError:
+        pass
+    rows = CustodianReminder.objects.filter(appointment=appointment)
+    now = timezone.now()
+    stale = rows.filter(sent_at__isnull=True,
+                        claimed_at__lt=now - SessionReminder.CLAIM_LEASE)
+    if not stale.update(claimed_at=now):
+        return None
+    return rows.get()
+
+
+def _remind_custodians(target, word, dry_run, report):
+    """Text each custodian who agreed about their child's appointment on
+    `target` (children/custodian.py). Lines name the case reference, never
+    the child: this report is printed to a terminal and a log."""
+    appointments = (Appointment.objects
+                    .filter(start__date=target, status=Appointment.SCHEDULED)
+                    .select_related("child").order_by("start", "pk"))
+    for appointment in appointments:
+        if not texts_allowed(appointment.child):
+            continue
+        ref = f"custodian of {case_ref(appointment.child_id)}"
+        rows = CustodianReminder.objects.filter(appointment=appointment)
+        if dry_run:
+            if rows.filter(sent_at__isnull=False).exists():
+                report["lines"].append(f"skip  {ref}: already told")
+                report["skipped"] += 1
+            else:
+                report["lines"].append(f"would text {ref}: appointment {word}")
+            continue
+        claim = _claim_custodian(appointment)
+        if claim is None:
+            report["lines"].append(f"skip  {ref}: already told")
+            report["skipped"] += 1
+            continue
+        result = remind_custodian(appointment, day=word)
+        if result.ok:
+            claim.sent_at = timezone.now()
+            claim.save(update_fields=["sent_at"])
+            report["lines"].append(f"sent  {ref}: appointment {word}")
+            report["sent"] += 1
+        else:
+            claim.delete()
+            report["lines"].append(f"FAIL  {ref}: {result.detail}")
+            report["failed"] += 1

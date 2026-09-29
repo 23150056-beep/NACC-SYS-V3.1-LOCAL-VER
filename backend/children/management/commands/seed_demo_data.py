@@ -38,7 +38,7 @@ from django.utils import timezone
 from accounts.models import Role, User
 from config.demo_guard import refuse_if_not_local
 from children import intake as intake_rules
-from children import demo_owners
+from children import demo_custodians, demo_owners
 from children.models import Child
 from clinical.models import (
     AgencyFormTemplate, ConsentRecord, InstrumentCatalog, OpinionnaireInvite,
@@ -223,6 +223,7 @@ class Command(BaseCommand):
         # Each social worker sees only their own records, so a child with none
         # is one no staff account can see (children/demo_owners.py).
         demo_owners.assign_social_workers(list(Child.objects.order_by("pk")))
+        demo_custodians.fill_custodians(list(Child.objects.order_by("pk")))
         referrals = demo_referrals.install_referrals(
             list(Child.objects.filter(status=Child.ACTIVE).select_related("social_worker")),
             uploaded_by=User.objects.filter(role__role_name=Role.STAFF).first())
@@ -355,9 +356,13 @@ class Command(BaseCommand):
             category = rng.choice(CATEGORIES)
             if category not in intake_rules.CATEGORY_OPTIONS[case_type]:
                 category = extra.choice(intake_rules.CATEGORY_OPTIONS[case_type])
-            surrendered_by = (rng.choice(["Social Worker", "Police", "Relatives"])
-                              if "surrendered_by" in intake_rules.CASE_TYPE_FIELDS[case_type]
-                              else "")
+            # This draw once picked "Previous Custodian" from a placeholder
+            # list. It stays, unused, so every later draw from `rng` - and so
+            # the whole seeded caseload - is what it was; the Custodian (who
+            # the child lives with now) is filled in below, after each child
+            # has the pk it is derived from (children/demo_custodians.py).
+            if "custodian_name" in intake_rules.CASE_TYPE_FIELDS[case_type]:
+                rng.choice(["Social Worker", "Police", "Relatives"])
             adoption = (rng.choice(["Regular", "Domestic Relative", "Step-parent"])
                         if case_type == "Adoption" else "")
             birth_status = rng.choice(["Marital", "Non-Marital", "Unknown"])
@@ -371,7 +376,7 @@ class Command(BaseCommand):
                 psgc_barangay=brgy.psgc_code,
                 place_of_birth_or_found=f"{muni.name}, {province.name}",
                 case_type=case_type, case_category=category,
-                surrendered_by=surrendered_by, type_of_adoption=adoption,
+                type_of_adoption=adoption,
                 birth_status=birth_status,
                 # Kindergarten at five, then a grade a year - the way a case
                 # worker would write it, and never blank now that it is asked.

@@ -159,7 +159,13 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
     ...(!child.pending_assignment && child.declined_assignment
       ? [['Declined by', `${child.declined_assignment.psychologist_name}: “${child.declined_assignment.reason}”`]] : []),
     ['Social Worker', child.social_worker_name || 'No social worker yet'],
-    ...(asked('surrendered_by') || child.surrendered_by ? [['Previous Custodian', child.surrendered_by || '—']] : []),
+    // Who the child lives with now, and whether they get appointment texts
+    // (backend children/custodian.py).
+    ...(asked('custodian_name') || child.custodian_name ? [['Custodian', child.custodian_name || '—']] : []),
+    ...(child.custodian_contact_display || asked('custodian_name')
+      ? [['Contact Number', child.custodian_contact_display
+        ? `${child.custodian_contact_display} · ${child.custodian_texts?.status || ''}`
+        : '—']] : []),
     ['Address', location],
     ...(child.landmark ? [['Landmark', child.landmark]] : []),
     ...dateRows,

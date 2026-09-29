@@ -1,4 +1,5 @@
-"""Text each psychologist a count of tomorrow's sessions.
+"""Text each psychologist a count of tomorrow's sessions, and each child's
+custodian who agreed to texts a reminder of the appointment (29 Sep 2026).
 
 The work is in scheduling/reminders.py, shared with the scheduled endpoint —
 this is the door for a person at a keyboard.
@@ -15,7 +16,8 @@ from scheduling.reminders import send_session_reminders
 
 
 class Command(BaseCommand):
-    help = "Text each psychologist how many sessions they have tomorrow."
+    help = ("Text each psychologist how many sessions they have tomorrow, and "
+            "each custodian who agreed to texts a reminder of the appointment.")
 
     def add_arguments(self, parser):
         parser.add_argument("--today", action="store_true",
