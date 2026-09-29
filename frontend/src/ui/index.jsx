@@ -4,6 +4,7 @@ import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutE
 import { createPortal } from 'react-dom';
 import * as Lucide from 'lucide-react';
 import { initialsOf } from '../utils/child';
+import { clock } from '../utils/time';
 
 /* ----------------------------- Icon ----------------------------- */
 function toPascal(name) {
@@ -428,6 +429,33 @@ export function Select({ value, onChange, children, size = 'md', invalid = false
       </select>
       <span style={{ position: 'absolute', right: 13, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)', fontSize: 11 }}>▼</span>
     </div>
+  );
+}
+
+/* ----------------------------- TimeInput ----------------------------- *
+ * A time picked from the 12-hour clock ("9:15 AM"), every `step` minutes,
+ * the way a calendar app offers it. Value in and out is still "HH:MM", which
+ * is what the API speaks, and onChange gets the select's own event, so it
+ * drops in where an <Input type="time"> was.
+ *
+ * The native time input was the one place left that could show 14:00: it
+ * draws whichever clock the browser's region uses, and no attribute asks it
+ * for the other. A time already saved off the step (09:10) is kept as an
+ * option rather than silently snapped, so opening an edit changes nothing.
+ */
+export function TimeInput({ value = '', onChange, step = 15, placeholder = 'Choose a time', ...rest }) {
+  const current = value ? String(value).slice(0, 5) : '';
+  const times = [];
+  for (let m = 0; m < 24 * 60; m += step) {
+    times.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
+  }
+  if (current && !times.includes(current)) times.push(current);
+  times.sort();
+  return (
+    <Select value={current} onChange={onChange} {...rest}>
+      {!current && <option value="" disabled>{placeholder}</option>}
+      {times.map((t) => <option key={t} value={t}>{clock(t)}</option>)}
+    </Select>
   );
 }
 

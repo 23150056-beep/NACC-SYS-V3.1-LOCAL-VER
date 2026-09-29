@@ -22,6 +22,7 @@ from clinical.serializers import (
     CaseReferralSerializer, OpinionnaireInviteSerializer, ClinicalInterviewRecordSerializer,
     SelfReportFlagSerializer,
 )
+from config.clock import clock
 
 
 
@@ -147,7 +148,8 @@ class MonitoringListView(generics.GenericAPIView):
                 "latest_classification": (res.classification or None) if res else None,
                 "latest_remark": (remark.text or None) if remark else None,
                 "last_activity": last_activity.isoformat() if last_activity else None,
-                "next_session": (tz.localtime(next_appt[c.id]).strftime("%Y-%m-%d %H:%M")
+                "next_session": (f"{tz.localtime(next_appt[c.id]):%Y-%m-%d} "
+                                 f"{clock(tz.localtime(next_appt[c.id]))}"
                                  if c.id in next_appt else None),
                 "report_count": report_counts.get(c.id, 0),
                 "pre_assessment_count": len(completed),

@@ -11,6 +11,7 @@ import {
 } from '../ui';
 import { PA_STATUS_TONES, caseDate, reportTypeLabel } from '../config/caseData';
 import { loadAll } from '../utils/load';
+import { clock } from '../utils/time';
 import { polishRemark, sendFeedback, getLatestBrief, generateBrief, summarizeDocument, confirmSummary } from '../api/assistant';
 import ReportCheckNote from '../components/ReportCheckNote';
 import UploadDrawer from '../components/UploadDrawer';
@@ -1008,7 +1009,7 @@ export default function ChildProgressReport() {
       {/* Pre-session brief modal */}
       {brief && (
         <Modal open onClose={() => setBrief(null)} title="Pre-session brief"
-               subtitle={`Drafted ${new Date(brief.generatedAt).toLocaleTimeString()}`}
+               subtitle={`Drafted ${clock(brief.generatedAt)}`}
                width={560}>
           <Alert tone="info" disclaimer style={{ marginBottom: 12 }}>
             AI-drafted decision support, not a diagnosis. The licensed psychologist

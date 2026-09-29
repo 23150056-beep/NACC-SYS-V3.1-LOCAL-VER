@@ -22,6 +22,7 @@ from django.utils import timezone
 
 from accounts.models import PhoneVerification
 from accounts.sms import SmsResult, queue_sms, send_sms
+from config.clock import clock
 
 logger = logging.getLogger(__name__)
 
@@ -173,9 +174,7 @@ def custodian_when(start):
     """"Tue 30 Sep, 9:30 AM", in local time. Built by hand: %-d and %-I are
     glibc extensions and raise on Windows, where the local copy runs."""
     local = timezone.localtime(start)
-    hour = local.hour % 12 or 12
-    return (f"{local:%a} {local.day} {local:%b}, "
-            f"{hour}:{local:%M} {'AM' if local.hour < 12 else 'PM'}")
+    return f"{local:%a} {local.day} {local:%b}, {clock(local)}"
 
 
 def custodian_text(event, appointment, day="tomorrow"):

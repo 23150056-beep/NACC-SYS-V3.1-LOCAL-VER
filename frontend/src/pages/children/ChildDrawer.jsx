@@ -7,6 +7,7 @@ import {
 } from '../../ui';
 import { ADMISSION, CASE_TYPE_FIELDS, PLACEMENT, dateFieldFor } from '../../config/caseData';
 import { PURPOSE_LABEL, StatusChip, fmtDay, fmtTime, localDate } from './shared';
+import { clock, clockRange } from '../../utils/time';
 
 /* Text typed into the record's boxes, shown as typed: its line breaks kept,
  * as the printed report keeps them, and a long word or link wrapped inside
@@ -128,7 +129,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
         start: `${pendingSlot.date}T${pendingSlot.start}:00`,
         duration_minutes: 60, purpose, notes: '',
       });
-      toast.success(`Booked — ${pendingSlot.weekday} ${pendingSlot.date} at ${pendingSlot.start}`);
+      toast.success(`Booked — ${pendingSlot.weekday} ${pendingSlot.date} at ${clock(pendingSlot.start)}`);
       setPendingSlot(null);
       loadSlots();
     } catch (err) {
@@ -358,14 +359,14 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
                     {slots.slots.map((s, i) => (
                       <button key={i} type="button" onClick={() => { setPendingSlot(s); setPurpose(defaultPurpose); }}
                         style={{ padding: '5px 11px', borderRadius: 'var(--radius-pill)', border: '1px solid var(--success-100)', background: 'var(--success-50)', color: 'var(--success-600)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 11.5, cursor: 'pointer' }}>
-                        {s.weekday.slice(0, 3)} {s.date.slice(5)} · {s.start}–{s.end}
+                        {s.weekday.slice(0, 3)} {s.date.slice(5)} · {clockRange(s.start, s.end)}
                       </button>
                     ))}
                   </div>
                   {pendingSlot && (
                     <div style={{ marginTop: 10, padding: '11px 13px', borderRadius: 'var(--radius-md)', background: 'var(--blue-50)', border: '1px solid var(--blue-200)', display: 'flex', flexDirection: 'column', gap: 9 }}>
                       <span style={{ fontSize: 12.5, color: 'var(--text-strong)', fontWeight: 600 }}>
-                        Book {child.fullname} with {slots.psychologist} — {pendingSlot.weekday} {pendingSlot.date} at {pendingSlot.start}?
+                        Book {child.fullname} with {slots.psychologist} — {pendingSlot.weekday} {pendingSlot.date} at {clock(pendingSlot.start)}?
                       </span>
                       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                         <Select value={purpose} onChange={(e) => setPurpose(e.target.value)} style={{ maxWidth: 180 }}>

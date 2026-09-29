@@ -21,6 +21,7 @@ import re
 
 from accounts.display import display_name
 from accounts.scoping import visible_children
+from config.clock import clock
 
 # Enum values the model reached for that were not in the enum. Deterministic,
 # instant, free — and the single change that took measured accuracy from 91%
@@ -512,6 +513,13 @@ def _scope_appointments(request, qs):
     return qs, False
 
 
+def _when(start):
+    """"Wed 30 Sep, 2:00 PM" - the 12-hour clock, as every screen writes it."""
+    from django.utils import timezone
+    local = timezone.localtime(start)
+    return f"{local:%a %d %b}, {clock(local)}"
+
+
 def _resolve_appointments(request, args):
     """The schedule, scoped the way the Dashboard scopes it.
 
@@ -529,7 +537,6 @@ def _resolve_appointments(request, args):
     runs to hundreds of rows, and a list cut short without saying so reads as
     the whole schedule. `total` always carries the real count.
     """
-    from django.utils import timezone
     from scheduling.models import Appointment
 
     period = args["when"]
@@ -555,7 +562,7 @@ def _resolve_appointments(request, args):
                 # worker is only answered about their own children here.
                 {"child": visibility.label(request.user, a.child),
                  "psychologist": display_name(a.psychologist),
-                 "when": timezone.localtime(a.start).strftime("%a %d %b, %H:%M"),
+                 "when": _when(a.start),
                  "purpose": a.get_purpose_display(),
                  "status": a.status} for a in appts[:APPOINTMENT_PAGE]]}
 

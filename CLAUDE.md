@@ -962,6 +962,26 @@ Administrator shows as **"ISA (Administrator)"** and Staff as **"SW (Staff)"**
 stored `role_name`, every permission check and every API answer still say
 "Administrator" and "Staff". Never compare anything against the label.
 
+## Times on screen: the 12-hour clock
+
+Owner's request, 29 Sep 2026: no military time anywhere. Every time a person
+reads says "9:30 AM", never "09:30".
+
+- **Screens go through `clock()` / `clockRange()`** in `utils/time.js`, built
+  by hand. `toLocaleTimeString` lets the browser's region pick the clock, so
+  an en-GB machine printed 14:05 - and with `hour12: true`, "2:05 pm".
+- **No `<input type="time">`.** It draws whatever clock the OS region uses and
+  no attribute changes it. Use `TimeInput` (`ui/index.jsx`), a 12-hour
+  select that still reads and writes "HH:MM".
+- **The calendar's formats are pinned** (`CAL_FORMATS` in `Schedule.jsx`); the
+  localizer's defaults ask the locale.
+- **Server prose goes through `config/clock.py`**: booking refusals, the
+  availability overlap, the assistant's schedule answers, Monitoring's next
+  session, custodian texts. `scheduling/tests/test_twelve_hour_clock.py`.
+- **Data stays "HH:MM".** A slot's `start`, `availability_today`, the Today
+  strip's `time`: the screen sends them back when booking and compares them as
+  strings, so it formats them, and the API does not.
+
 ## The demo deployment
 
 Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in

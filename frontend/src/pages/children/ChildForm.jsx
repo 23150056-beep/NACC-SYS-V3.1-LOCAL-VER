@@ -9,7 +9,7 @@ import {
   DYNAMIC, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, TYPES_OF_ADOPTION, caseChanged, caseTypesFor,
   dateFieldFor, requiredFields, unaskedAnswers,
 } from '../../config/caseData';
-import { shortDate, timeAgo } from '../../utils/time';
+import { clockRange, shortDate, timeAgo } from '../../utils/time';
 import CustodianFields from './CustodianFields';
 import { EMPTY, formFromRecord } from './recordForm';
 
@@ -182,7 +182,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   // Availability-comparison panel helpers (Task 18) — matches AvailabilityBlock 0=Monday.
   const DAY_ABBR = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
   const availFor = (pid) => blocks.filter((b) => String(b.psychologist) === String(pid));
-  const blockLabel = (b) => `${b.date || DAY_ABBR[b.weekday]} ${String(b.start_time).slice(0, 5)}–${String(b.end_time).slice(0, 5)}`;
+  const blockLabel = (b) => `${b.date || DAY_ABBR[b.weekday]} ${clockRange(b.start_time, b.end_time)}`;
   // Cascading location pickers; clear children when a parent changes.
   /* Addresses come from the PSGC tables now, not a hand-kept list. Each level
    * is fetched when its parent is chosen, so the browser never holds more than

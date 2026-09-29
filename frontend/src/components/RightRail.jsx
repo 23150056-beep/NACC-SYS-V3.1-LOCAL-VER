@@ -6,7 +6,7 @@ import { useActivity } from '../context/ActivityContext';
 import { Icon } from '../ui';
 import { ACTION_META, eventDestination, eventText } from '../utils/activity';
 import { PURPOSE_LABEL, scheduleName } from '../utils/child';
-import { timeAgo } from '../utils/time';
+import { clock, clockRange, timeAgo } from '../utils/time';
 
 /* Ambient context: the numbers, the day and the stream, in a third column.
  *
@@ -115,7 +115,7 @@ export function TodayCard() {
         <div style={{ padding: '9px 13px', background: 'var(--ink-25)', display: 'flex', alignItems: 'flex-start', gap: 7 }}>
           <Icon name="clock" size={14} style={{ color: 'var(--success-500)', marginTop: 1 }} />
           <span style={{ fontWeight: 600, fontSize: 11, lineHeight: 1.5, color: 'var(--text-body)' }}>
-            {availability.map((b) => `${b.psychologist} ${b.start}–${b.end}`).join(' · ')}
+            {availability.map((b) => `${b.psychologist} ${clockRange(b.start, b.end)}`).join(' · ')}
           </span>
         </div>
       )}
@@ -131,7 +131,7 @@ export function TodayCard() {
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--blue-50)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <span className="racco-mono" style={{ width: 44, flex: 'none', fontWeight: 600, fontSize: 12, color: t.time, paddingTop: 1 }}>{a.time}</span>
+            <span className="racco-mono" style={{ width: 62, flex: 'none', whiteSpace: 'nowrap', fontWeight: 600, fontSize: 12, color: t.time, paddingTop: 1 }}>{clock(a.time)}</span>
             <span style={{ flex: 1, minWidth: 0, borderLeft: `2px solid ${t.tone}`, paddingLeft: 10 }}>
               <span style={{ display: 'block', fontWeight: 700, fontSize: 12.5, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{scheduleName(a)}</span>
               <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
