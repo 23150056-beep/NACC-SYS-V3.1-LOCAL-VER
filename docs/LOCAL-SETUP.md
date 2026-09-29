@@ -242,6 +242,49 @@ Safe to run twice: who was told is recorded in the database, so the second
 run skips them. A text Semaphore refuses is not recorded, the command exits
 with an error, and running it again retries only those.
 
+### Testing the custodian texts
+
+A child's custodian is texted about the child's appointments: when one is
+booked, the day before, when it is moved, when it is cancelled, and when a
+no-show is recorded the same day. Only once the record holds the custodian's
+consent **and** a number confirmed with a code. To see every one on your own
+phone, make yourself the custodian of one demo child.
+
+With `SMS_PROVIDER` unset all of this still works, free: each text, the code
+included, appears in the API window as a line starting `SMS (console)`.
+
+1. **Sign in as a social worker**: `e.pascua@racco1.gov.ph` / `demo1234`
+   after `seed_demo_data`. Only a social worker or the ISA can set a
+   custodian's number; a psychologist sees it and cannot change it.
+2. **Records → one of your Adoption, Foster Care, Kinship Care or Family
+   Tracing children → Edit → Present Environment.** The other case types do
+   not ask for a custodian, so the fields are not there.
+3. **Contact Number**: type your own mobile, then **Send a code to confirm
+   this number**. Type in the six digits that arrive (or from the
+   `your code is` line in the API window) and press **Confirm**. The code
+   lasts ten minutes; the confirmation counts only for you, for an hour.
+4. **Tick "The custodian agreed to receive text reminders".** The line below
+   should read *Appointment texts on*. **Save Record.** The record's drawer
+   now shows the number with "Texts on".
+5. **Schedule**, for that child:
+
+   | Text | How to make it go |
+   |---|---|
+   | Booked | **Book** a session for any time after now. |
+   | Moved | Open the session and **Reschedule** it. |
+   | Cancelled | Open it and **Cancel** it before its start time. |
+   | Reminder | Book one for tomorrow and run `send_session_reminders --dry-run`, then again without `--dry-run`. Add `--today` to be reminded about a session later today instead. |
+   | Missed | Book one for later today. Once its start time has passed, sign in as the child's psychologist (the seeded ones are `demo1234` too) or the ISA, open it and press **No-show**. A no-show recorded on a later day texts nothing. |
+
+   Outside the psychologist's posted hours, book as the psychologist: their
+   own calendar is not held to those hours.
+6. **Clean up**: edit the record, clear the Contact Number and save. That
+   clears the consent with it.
+
+A text that should have gone and did not usually means the record is not
+ready: the drawer says whether the consent or the confirmation is missing,
+and a closed case is never texted. What each text costs is below.
+
 ### What it costs, and what it refuses
 
 - **1 credit per message; 2 for a verification code**, which goes by
