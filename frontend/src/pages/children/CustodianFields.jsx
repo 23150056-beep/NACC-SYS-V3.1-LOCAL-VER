@@ -131,8 +131,8 @@ export default function CustodianFields({ form, setForm, fieldError, readOnly = 
             })}
             style={{ marginTop: 2, accentColor: 'var(--blue-600)' }} />
           <span>
-            <strong>The custodian agreed to receive text reminders</strong> about appointments at
-            this number - the date, time and place only, nothing about the case.
+            <strong>The custodian agreed to receive appointment texts</strong> at this number -
+            the date, time and place only, nothing about the case.
             {consentOnFile && form.custodian_sms_consent_by_name && (
               <span style={{ display: 'block', color: 'var(--text-muted)', marginTop: 2 }}>
                 Recorded by {form.custodian_sms_consent_by_name}

@@ -263,7 +263,7 @@ included, appears in the API window as a line starting `SMS (console)`.
    this number**. Type in the six digits that arrive (or from the
    `your code is` line in the API window) and press **Confirm**. The code
    lasts ten minutes; the confirmation counts only for you, for an hour.
-4. **Tick "The custodian agreed to receive text reminders".** The line below
+4. **Tick "The custodian agreed to receive appointment texts".** The line below
    should read *Appointment texts on*. **Save Record.** The record's drawer
    now shows the number with "Texts on".
 5. **Schedule**, for that child:
