@@ -1055,36 +1055,63 @@ only:
 
 ```
 cd backend
+.venv\Scripts\python manage.py migrate
 .venv\Scripts\python manage.py export_demo_data --output ..\demo_fixture.json
 ```
 
-That writes ~1,067 rows: 40 children and their remarks, appointments,
-self-reports and problems. No users — the branch already has the real ones.
+The `migrate` is for your local database: an export from one that is behind
+fails on the columns it lacks. The export writes about a thousand rows: 40
+children and their remarks, appointments, self-reports and problems. No users —
+the branch already has the real ones.
 
-Then, in the same window:
+Then, in the same window, point it at the branch. Open `backend\.env`, copy the
+value after `DEMO_DATABASE_URL=`, and paste it between the quotes:
 
 ```
-set DATABASE_URL=%DEMO_DATABASE_URL%
+set "DATABASE_URL=<the DEMO_DATABASE_URL value from backend\.env>"
+.venv\Scripts\python manage.py shell -c "from django.db import connection as c; print(c.settings_dict['HOST'])"
+```
+
+**Not `set DATABASE_URL=%DEMO_DATABASE_URL%`**, which this step used to say.
+`backend\.env` is read by Django, not by Command Prompt, so the window has no
+`DEMO_DATABASE_URL` and leaves `%DEMO_DATABASE_URL%` as literal text. **Keep
+the quotes**: a Neon string can end `&channel_binding=require`, and an
+unquoted `&` cuts the `set` short there and runs the rest as a second command.
+
+The second line must print the host in the string you pasted — the branch's
+`ep-...` endpoint, not production's. **Stop if it does not**: the import below
+deletes every child on whatever it is connected to. Then:
+
+```
 .venv\Scripts\python manage.py migrate
 .venv\Scripts\python manage.py import_demo_data --fixture ..\demo_fixture.json --clear --set-password m.bulan@racco1.gov.ph:<a-password-you-choose>
 ```
 
-Expected output:
+Expected output (counts vary with your local data):
 
 ```
   cleared N existing children
-  fixture holds 1067 rows
+  fixture holds N rows
+  40 children dealt across N psychologist(s) and N social worker(s) here; N record link(s) moved with them
+  availability: N block(s) added
+  custodians: N filled in
+  case referrals: N written
+  psychological reports: N written
   password set for m.bulan@racco1.gov.ph
-import_demo_data: 40 children across 3 psychologists.
+import_demo_data: 40 children across N psychologists.
 ```
+
+An older fixture adds `fixture is an older export; child rows upgraded`, and
+one carrying a custodian's number adds `custodian numbers and consent left
+behind` — demo custodians never have one, so the demo cannot text anybody.
 
 **Close that terminal afterwards.** `set DATABASE_URL` persists for the life of
 the window, and a later `manage.py` command in it would run against the branch.
 
-> `--clear` **deletes every child** on the target before loading. Check the
-> connection string is the branch and not `production` before you run it. If you are
-> not certain, run `manage.py showmigrations --list | head` first and confirm it
-> connects to what you expect.
+> `--clear` **deletes every child** on the target before loading, and
+> everything recorded against them — sessions booked on the demo included.
+> The host check above is what stands between this and `production`; do not
+> skip it.
 
 `--set-password` gives one existing account a known password to demonstrate
 with. It affects the branch only; `production` is untouched.
