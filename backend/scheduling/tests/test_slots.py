@@ -210,7 +210,11 @@ class SlotsRespectTodayTests(SchedulingBase):
         now = timezone.localtime()
         opens = (now + timedelta(minutes=30)).replace(second=0, microsecond=0)
         closes = opens + timedelta(hours=3)
-        if closes.date() != opens.date():
+        # Both ends must fall today. Checking only that the window did not
+        # cross midnight let a run after 23:30 through with a window wholly
+        # tomorrow - 00:20-03:20 written against today's date, already past,
+        # so nothing was offered and CI went red on every late-evening push.
+        if not opens.date() == closes.date() == now.date():
             self.skipTest("too close to midnight for a three-hour window")
         AvailabilityBlock.objects.create(
             psychologist=self.psy, date=now.date(),
