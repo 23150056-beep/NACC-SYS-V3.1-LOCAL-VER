@@ -16,6 +16,7 @@ import { firstError } from '../utils/errors';
 import ChildForm from './children/ChildForm';
 import { EMPTY, formFromRecord } from './children/recordForm';
 import ChildDrawer, { TerminateModal } from './children/ChildDrawer';
+import CaseloadCard from './children/CaseloadCard';
 import { fmtDay, fmtTime, localDate } from './children/shared';
 import { ageFrom, ageGroup, caseRef } from '../utils/child';
 import { shortDate } from '../utils/time';
@@ -727,19 +728,10 @@ export default function Children() {
           <span style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)' }}>
             Showing <strong style={{ color: 'var(--text-strong)' }}>{visible.length}</strong> of {rows.length} children
           </span>
-          {canManage && psychologists.length > 0 && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              <span className="racco-eyebrow" style={{ fontSize: 'var(--text-3xs)' }}>Caseload</span>
-              {psychologists.map((p) => (
-                <span key={p.id} title={`${p.name}: ${p.caseload} active case${p.caseload === 1 ? '' : 's'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 'var(--radius-pill)', background: 'var(--surface)', border: '1px solid var(--border)', fontSize: 11.5 }}>
-                  <span style={{ fontWeight: 600, color: 'var(--text-body)' }}>{p.name}</span>
-                  <span className="racco-mono" style={{ fontWeight: 800, color: p.caseload >= 5 ? 'var(--red-700)' : 'var(--blue-600)' }}>{p.caseload}</span>
-                </span>
-              ))}
-            </span>
-          )}
         </div>
       </div>
+
+      {canManage && psychologists.length > 0 && <CaseloadCard psychologists={psychologists} />}
 
       {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} canReopen={canManage} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => setReopening(sel)} onClose={() => setSel(null)} />}
       {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} socialWorkers={isAdmin ? socialWorkers : null} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} fieldErrors={fieldErrors} refusedWith={refusedWith} onSubmit={save} onWithdraw={withdrawRequest} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
