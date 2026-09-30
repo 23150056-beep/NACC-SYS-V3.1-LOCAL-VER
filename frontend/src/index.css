@@ -514,6 +514,11 @@ tr:focus-visible {
     opacity: 1;
   }
 }
+@keyframes racco-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
 
 /* Chat panel: each turn rises into place, and the assistant "thinks" with the
    three dots people already recognise from every messenger. */

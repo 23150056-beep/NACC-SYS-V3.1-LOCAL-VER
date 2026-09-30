@@ -1066,6 +1066,11 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   self-report detector missed 28%; both belong to `qwen2.5:3b` and transfer to
   nothing. Enforced in code since 27 Sep 2026 (`allow_hosted`, above); until
   then every drafting feature used the hosted model once the flag was on.
+- **The free API sleeps after ~15 minutes idle** and the first request then
+  takes about a minute (entrypoint.sh re-runs migrate and the PSGC steps on
+  every boot). A refresh in that minute used to show a bare "Loading…" that
+  read as broken; `ProtectedRoute`'s `WaitingForServer` now says the server is
+  waking after 3 s and offers "Try again" after 75 s. Not a fault to debug.
 - **Cloudflare retires models** — `llama-3.1-8b` returns 410. Check
   `/api/assistant/model-health/` before assuming the code broke.
 
