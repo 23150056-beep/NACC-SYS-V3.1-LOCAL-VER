@@ -18,6 +18,7 @@ import { EMPTY, formFromRecord } from './children/recordForm';
 import ChildDrawer, { TerminateModal } from './children/ChildDrawer';
 import { fmtDay, fmtTime, localDate } from './children/shared';
 import { ageFrom, ageGroup, caseRef } from '../utils/child';
+import { shortDate } from '../utils/time';
 import AssignmentRequests from '../components/AssignmentRequests';
 
 // Live "who else has this record open" chip — polls the presence heartbeat endpoint.
@@ -510,15 +511,26 @@ export default function Children() {
   const terminate = async (c, reason, note) => {
     try {
       await api.post(`/children/${c.id}/terminate/`, { reason_category: reason, note });
-      toast.success(`${c.fullname}'s case is now inactive`);
-      setTerminating(null);
-      setSel(null);
-      load();
-      refreshActivity();
     } catch (err) {
       const d = err.response?.data;
       toast.error(d?.note || d?.reason_category || d?.detail || 'Could not terminate the case.');
+      return;
     }
+    setTerminating(null);
+    setSel(null);
+    load();
+    refreshActivity();
+    // The end dialog (owner, 30 Sep 2026): what was closed, and with what
+    // reason, read back once it is done - a toast was gone before anyone read it.
+    await notice({
+      title: 'Case terminated',
+      icon: 'archive',
+      description: `${c.fullname}'s case is now inactive and moved to the archive. Every record is kept, `
+        + 'and a social worker or the ISA can reopen it if the child returns.',
+      details: [['Child', `${c.fullname} (${caseRef(c.id)})`], ['Reason', reason],
+        ['Closing summary', note.length > 160 ? `${note.slice(0, 157)}…` : note],
+        ['Closed on', shortDate(new Date())]],
+    });
   };
 
   const reopen = async () => {

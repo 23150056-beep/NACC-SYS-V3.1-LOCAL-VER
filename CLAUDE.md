@@ -852,6 +852,9 @@ record bears it out:
   `caseData.js` keeps both lists (for the archive filter) pinned by a test.
 - Neither role can use the other's list. Past closures keep what they were
   written with.
+- **Terminating ends with an end dialog** (`useNotice`, owner 30 Sep 2026):
+  "Case terminated", reading back the child and case number, the reason, the
+  closing summary and the date - it was a toast, gone before anyone read it.
 
 ## Interview templates by upload
 
