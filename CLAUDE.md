@@ -725,6 +725,10 @@ shared list. `Child.social_worker` says whose a record is, and
 narrows Staff to it. Administrators (the ISA) see everything; psychologists
 are unchanged (their assigned children).
 
+- **Only a social worker adds a record** (owner, 30 Sep 2026): the ISA's
+  `POST /children/` is refused (`ChildViewSet.create`, 403) and Records and the
+  Dashboard offer "Add record" to Staff only. The ISA still assigns,
+  transfers, closes and reopens. `test_the_isa_does_not_add_records`.
 - **A new record is its creator's** (`ChildViewSet.perform_create`), whatever
   the request says. **Only the ISA moves one** (a closed case taken over at
   intake aside, below) - the record form's Social

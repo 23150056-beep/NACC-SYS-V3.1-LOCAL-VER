@@ -113,8 +113,12 @@ class NotificationScopingTest(APITestCase):
 
     def test_assigning_child_notifies_psychologist(self):
         # Assigning asks (children/assignment.py): the bell carries the
-        # question, and the child is not theirs until they accept.
-        self._auth("a@racco1.gov.ph")
+        # question, and the child is not theirs until they accept. A social
+        # worker adds the record - the ISA no longer does (30 Sep 2026).
+        User.objects.create_user(
+            email="s@racco1.gov.ph", username="s", password="pass1234",
+            role=Role.objects.create(role_name=Role.STAFF))
+        self._auth("s@racco1.gov.ph")
         self.client.post("/api/children/", {
             "fullname": "New Kid", "case_type": "Foster Care", "psychologist": self.psy.id}, format="json")
         self.assertTrue(ActivityLog.objects.filter(
