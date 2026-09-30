@@ -11,7 +11,7 @@ import { loadAll } from '../utils/load';
 import { clock, clockRange, exactDate } from '../utils/time';
 import { DURATIONS, scheduleName } from '../utils/child';
 import {
-  Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, hoverLift, Icon, iconBtn, Input, PAGE, PageHeader, Select, TimeInput,
+  Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, hoverLift, Icon, iconBtn, Input, PAGE, PageHeader, Select,
 } from '../ui';
 import { prefetchBriefs } from '../api/assistant';
 import { useOpenFromLink } from '../utils/links';
@@ -1191,8 +1191,8 @@ export default function Schedule() {
                 </FormField>
               )}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <FormField label="From"><TimeInput value={blockForm.start_time} onChange={(e) => setBlockForm({ ...blockForm, start_time: e.target.value })} /></FormField>
-                <FormField label="To"><TimeInput value={blockForm.end_time} onChange={(e) => setBlockForm({ ...blockForm, end_time: e.target.value })} /></FormField>
+                <FormField label="From"><Input type="time" value={blockForm.start_time} onChange={(e) => setBlockForm({ ...blockForm, start_time: e.target.value })} /></FormField>
+                <FormField label="To"><Input type="time" value={blockForm.end_time} onChange={(e) => setBlockForm({ ...blockForm, end_time: e.target.value })} /></FormField>
               </div>
               <FormField label="Capacity" hint="How many appointments fit in this block per day.">
                 <Input type="number" min="1" value={blockForm.capacity} onChange={(e) => setBlockForm({ ...blockForm, capacity: e.target.value })} />

@@ -970,9 +970,12 @@ reads says "9:30 AM", never "09:30".
 - **Screens go through `clock()` / `clockRange()`** in `utils/time.js`, built
   by hand. `toLocaleTimeString` lets the browser's region pick the clock, so
   an en-GB machine printed 14:05 - and with `hour12: true`, "2:05 pm".
-- **No `<input type="time">`.** It draws whatever clock the OS region uses and
-  no attribute changes it. Use `TimeInput` (`ui/index.jsx`), a 12-hour
-  select that still reads and writes "HH:MM".
+- **Availability From/To stay a typed `<input type="time">`** - the owner's
+  call, 30 Sep 2026: a psychologist types their own hours rather than
+  picking from a list, and the 15-minute `TimeInput` dropdown there was
+  reverted. The box draws whatever clock the computer's region uses; what is
+  saved still shows as 12-hour everywhere else. `TimeInput` (`ui/index.jsx`)
+  remains on "Schedule now" after accepting a case.
 - **The calendar's formats are pinned** (`CAL_FORMATS` in `Schedule.jsx`); the
   localizer's defaults ask the locale.
 - **Server prose goes through `config/clock.py`**: booking refusals, the
