@@ -530,16 +530,30 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
               {!isEdit && dupes.length > 0 && (
                 <Alert tone="warning" icon={<Icon name="alert-triangle" size={18} />} title="A similar record already exists" style={{ gridColumn: '1 / -1' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
-                    {dupes.map((m, i) => (m.yours === false ? (
-                      /* Another social worker's record: that it exists and who
-                         holds it, nothing from the record (owner's decision,
-                         24 Sep 2026 - children/views.py check_duplicate). */
+                    {dupes.map((m, i) => (m.yours === false ? (m.reopenable && canReopen ? (
+                      /* Another worker's CLOSED case: reopen it here and it
+                         becomes yours (owner, 30 Sep 2026). Still nothing
+                         from the record but the name you typed and who held it. */
+                      <div key={`held-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 13 }}>
+                        <strong>{m.fullname}</strong>
+                        <Badge tone="neutral" size="sm" dot>Archived (Terminated)</Badge>
+                        <span style={{ color: 'var(--text-muted)' }}>
+                          held by {m.held_by || 'no social worker'}
+                        </span>
+                        <Button variant="secondary" onClick={() => onReopen(m)} iconLeft={<Icon name="rotate-ccw" size={14} />}>
+                          Reopen it — it becomes yours
+                        </Button>
+                      </div>
+                    ) : (
+                      /* Another social worker's ACTIVE record: that it exists
+                         and who holds it, nothing from the record (owner's
+                         decision, 24 Sep 2026 - children/views.py check_duplicate). */
                       <div key={`held-${i}`} style={{ fontSize: 13 }}>
                         A record for this child is already held by{' '}
                         <strong>{m.held_by || 'no social worker yet'}</strong>.
                         Ask the ISA (Administrator) to transfer it to you instead of adding a second record.
                       </div>
-                    ) : (
+                    )) : (
                       <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                         <strong style={{ fontSize: 13 }}>{m.fullname}</strong>
                         <Badge tone={m.status === 'inactive' ? 'neutral' : 'success'} size="sm" dot>

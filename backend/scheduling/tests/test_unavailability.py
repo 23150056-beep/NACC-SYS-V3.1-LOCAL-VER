@@ -63,7 +63,9 @@ class LeaveBlocksBookingTest(SchedulingBase):
         # "Not available" is what the availability window already says. This is
         # a different fact and should read like one.
         self._leave()
-        self.assertIn("Sep", str(self._book().data))
+        # The leave's own day, e.g. "7 Oct". This read "Sep" and so held only
+        # while next Wednesday fell in September.
+        self.assertIn(f"{self.when.day} {self.when:%b}", str(self._book().data))
 
     def test_a_session_on_the_last_day_is_refused_too(self):
         # Inclusive at both ends: leave "12th to the 16th" includes the 16th,

@@ -1,6 +1,7 @@
 ﻿import time
 from django.core.cache import cache
 from django.db.models import Prefetch, Q
+from django.http import Http404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -270,9 +271,28 @@ class ChildViewSet(viewsets.ModelViewSet):
         Administrator-only until 24 Sep 2026, when the owner opened it to
         staff: they run intake, a returning child arrives at intake, and
         reopening restores rather than erases. Terminating stays with the
-        assigned psychologist or an administrator."""
-        child = self.get_object()
+        assigned psychologist or an administrator.
+
+        Since 30 Sep 2026 a social worker may also reopen a terminated case
+        held by another worker, or by nobody, and it becomes theirs - but only
+        one found at intake: the request carries the name typed into Add
+        Record (first_name, last_name, or last_name and birth_date), matched by
+        the duplicate check's own rule. By id alone it stays a 404, so no
+        worker can walk the ids and collect other workers' closed cases. An
+        ACTIVE case held by someone else still goes to the ISA."""
         role = role_of(request)
+        taking_over, previous = False, None
+        try:
+            child = self.get_object()
+        except Http404:
+            q = (_intake_match(request.data.get("first_name"), request.data.get("last_name"),
+                               request.data.get("birth_date"))
+                 if role == Role.STAFF else None)
+            child = (Child.objects.filter(q, pk=pk, status=Child.INACTIVE)
+                     .select_related("social_worker").first() if q is not None else None)
+            if child is None:
+                raise
+            taking_over, previous = True, child.social_worker
         if role not in (Role.ADMINISTRATOR, Role.STAFF):
             return Response({"detail": "Only staff or an administrator can reopen a terminated case."},
                             status=status.HTTP_403_FORBIDDEN)
@@ -282,9 +302,18 @@ class ChildViewSet(viewsets.ModelViewSet):
         child.status = Child.ACTIVE
         child.case_status = Child.STAGE_PRE_ASSESSMENT
         child.assigned_psychologist = None
-        child.save(update_fields=["status", "case_status", "assigned_psychologist", "updated_at"])
-        self._log(child, ActivityLog.UPDATED)
-        return Response({"status": child.status, "case_status": child.case_status})
+        fields = ["status", "case_status", "assigned_psychologist", "updated_at"]
+        if taking_over:
+            child.social_worker = request.user
+            fields.append("social_worker")
+        child.save(update_fields=fields)
+        # Taken over: the worker who held it is told, since it has just left
+        # their records. Otherwise as before.
+        log_activity(request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
+                     entity_type="Child", entity_label=child.fullname, entity_id=child.id,
+                     recipient=previous if taking_over else child.assigned_psychologist)
+        return Response({"status": child.status, "case_status": child.case_status,
+                         "social_worker": child.social_worker_id})
 
     @action(detail=False, methods=["get"], url_path="check-duplicate")
     def check_duplicate(self, request):
@@ -302,16 +331,10 @@ class ChildViewSet(viewsets.ModelViewSet):
         if role not in (Role.ADMINISTRATOR, Role.STAFF):
             return Response({"detail": "Staff or administrators only."},
                             status=status.HTTP_403_FORBIDDEN)
-        first = (request.query_params.get("first_name") or "").strip()
-        last = (request.query_params.get("last_name") or "").strip()
-        birth = (request.query_params.get("birth_date") or "").strip()
-        if not last:
-            return Response({"matches": []})
-        q = Q(last_name__iexact=last) if not first else \
-            Q(last_name__iexact=last, first_name__iexact=first)
-        if birth and not first:
-            q &= Q(birth_date=birth)
-        elif not first:
+        q = _intake_match(request.query_params.get("first_name"),
+                          request.query_params.get("last_name"),
+                          request.query_params.get("birth_date"))
+        if q is None:
             return Response({"matches": []})  # last name alone is too broad
         # select_related: every row below renders the psychologist's name, and
         # without the join that is an extra query per match - on an endpoint the
@@ -329,9 +352,35 @@ class ChildViewSet(viewsets.ModelViewSet):
                         "psychologist_name": display_name(c.assigned_psychologist) or None,
                         "social_worker_name": display_name(c.social_worker) or None,
                         "yours": True}
-            return {"yours": False,
-                    "held_by": display_name(c.social_worker) or None}
+            held = {"yours": False, "held_by": display_name(c.social_worker) or None}
+            # A TERMINATED case a social worker finds here they may reopen and
+            # take over (owner, 30 Sep 2026): a returning child arrives at
+            # whoever runs intake that day, not at the worker who closed it.
+            # The id is only good together with the name typed (see reopen);
+            # still no birth date and no psychologist.
+            if c.status == Child.INACTIVE and role == Role.STAFF:
+                held.update({"id": c.id, "fullname": c.fullname, "status": c.status,
+                             "reopenable": True})
+            return held
         return Response({"matches": [row(c) for c in matches]})
+
+
+def _intake_match(first, last, birth):
+    """The duplicate check's rule for "this is the same child", as a filter:
+    last name and first name, or last name and birth date. None when what was
+    typed is too little to say - a last name alone matches half a barangay.
+
+    Shared with `reopen`, which lets a social worker take over another
+    worker's TERMINATED case only by the name they typed at intake - so the
+    case has to be found the way the duplicate check found it, not by id."""
+    first, last, birth = (str(v or "").strip() for v in (first, last, birth))
+    if not last:
+        return None
+    if first:
+        return Q(last_name__iexact=last, first_name__iexact=first)
+    if birth:
+        return Q(last_name__iexact=last, birth_date=birth)
+    return None
 
 
 class CustodianContactCodeView(APIView):

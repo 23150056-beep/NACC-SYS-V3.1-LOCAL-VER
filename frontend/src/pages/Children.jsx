@@ -525,8 +525,12 @@ export default function Children() {
     const c = reopening;
     setReopenBusy(true);
     try {
-      await api.post(`/children/${c.id}/reopen/`);
-      toast.success(`${c.fullname}'s case is active again — previous records retained`);
+      // A case taken over at intake is found again by the name typed there;
+      // the server will not hand over another worker's case by id alone.
+      await api.post(`/children/${c.id}/reopen/`, c.typed || {});
+      toast.success(c.takeover
+        ? `${c.fullname}'s case is active again and now in your records — previous records retained`
+        : `${c.fullname}'s case is active again — previous records retained`);
       setReopening(null);
       setSel(null);
       // Reopened from the Add Record duplicate warning: the old record is the
@@ -547,7 +551,15 @@ export default function Children() {
   // Through the same confirmation as every other reopen. It used to call
   // reopen() with the match as an argument reopen() never read, so it reopened
   // nothing and closed the form anyway.
-  const onDupReopen = (m) => setReopening({ id: m.id, fullname: m.fullname, fromForm: true });
+  const onDupReopen = (m) => setReopening({
+    id: m.id, fullname: m.fullname, fromForm: true,
+    // Another worker's closed case (or nobody's): reopening makes it this
+    // worker's, and the server wants the name it was found by.
+    ...(m.yours === false && {
+      takeover: true, heldBy: m.held_by,
+      typed: { first_name: form?.first_name || '', last_name: form?.last_name || '', birth_date: form?.birth_date || '' },
+    }),
+  });
   const onDupOpenExisting = (m) => { setForm(null); const c = rows.find((r) => r.id === m.id); if (c) setSel(c); };
 
   return (
@@ -730,6 +742,11 @@ export default function Children() {
         >
           {/* The half people forget, and the half that needs doing next: the
               case comes back with nobody responsible for it. */}
+          {reopening.takeover && (
+            <Alert tone="info" icon={<Icon name="folder-input" size={18} />}>
+              It moves to your records{reopening.heldBy ? <> from <strong>{reopening.heldBy}</strong>, who is notified</> : ''}.
+            </Alert>
+          )}
           <Alert tone="warning" icon={<Icon name="user-x" size={18} />}>
             The psychologist assignment is cleared. Assign one fresh afterwards,
             or the case sits in nobody’s caseload.

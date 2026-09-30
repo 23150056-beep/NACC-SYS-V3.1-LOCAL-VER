@@ -726,7 +726,8 @@ narrows Staff to it. Administrators (the ISA) see everything; psychologists
 are unchanged (their assigned children).
 
 - **A new record is its creator's** (`ChildViewSet.perform_create`), whatever
-  the request says. **Only the ISA moves one** - the record form's Social
+  the request says. **Only the ISA moves one** (a closed case taken over at
+  intake aside, below) - the record form's Social
   Worker field, shown to the ISA only; a SW sending a different one gets 400,
   sending the same one is fine because the edit form resends everything. It
   must be a Staff account.
@@ -743,9 +744,18 @@ are unchanged (their assigned children).
   activity feed, and report-check findings naming a child. A child-related
   query that is not built on `scope_to_visible` is the bug.
 - **The duplicate check still searches every record** - a second record for
-  the same child is the worse failure - but another SW's match says only that
-  it exists and who holds it ("held by R. Santos - ask the ISA"): no id, no
-  birth date, nothing from the record.
+  the same child is the worse failure - but another SW's ACTIVE match says
+  only that it exists and who holds it ("held by R. Santos - ask the ISA"):
+  no id, no birth date, nothing from the record.
+- **A CLOSED case found there can be reopened and taken over** (owner, 30 Sep
+  2026): a returning child arrives at whoever runs intake that day. Add
+  Record offers "Reopen it — it becomes yours" for another SW's (or nobody's)
+  terminated case; `reopen` moves `social_worker` to the one reopening and
+  tells the previous holder (an activity event addressed to them). Only by the
+  name typed at intake - the request carries it and `_intake_match()`, the
+  duplicate check's own rule, must match - so by id alone it is still a 404
+  and nobody can walk the ids collecting closed cases. The ISA's reopen moves
+  nobody. `children/tests/test_reopen_at_intake.py`.
 - **Dashboard is their own; Agency Summary stays agency-wide** (the owner's
   choice): the Summary holds counts with no names and mirrors the agency's own
   report form. The assistant answers a SW about their own records.
