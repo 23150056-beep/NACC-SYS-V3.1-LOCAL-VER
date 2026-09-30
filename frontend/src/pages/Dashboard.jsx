@@ -119,10 +119,8 @@ export default function Dashboard() {
     { label: 'Add my availability', icon: 'clock', to: '/schedule?availability=1' },
     { label: 'Upload report', icon: 'upload', to: '/reports?upload=1' },
   ] : [
-    // Adding records is the social worker's (owner, 30 Sep 2026); the ISA's
-    // first action is booking instead.
-    ...(role === 'Staff' ? [{ label: 'Add record', icon: 'user-plus', to: '/children?openCreate=1', primary: true }] : []),
-    { label: 'Book appointment', icon: 'calendar-plus', to: '/schedule?book=1', primary: role !== 'Staff' },
+    { label: 'Add record', icon: 'user-plus', to: '/children?openCreate=1', primary: true },
+    { label: 'Book appointment', icon: 'calendar-plus', to: '/schedule?book=1' },
     { label: 'Upload case referral', icon: 'upload', to: '/reports?upload=1' },
     // Only when somebody is actually waiting. A permanent "Review access"
     // leading to an empty queue is a button that cries wolf, and the count is

@@ -125,19 +125,6 @@ class OwnRecordsTest(TestCase):
             f"/api/children/{self.orphan.id}/", {"social_worker": self.editha.id}, format="json")
         self.assertEqual(200, ok.status_code, ok.data)
 
-    def test_the_isa_does_not_add_records(self):
-        # Owner, 30 Sep 2026: intake is the social worker's; the ISA assigns,
-        # transfers and closes records but no longer adds them.
-        before = Child.objects.count()
-        r = self._as(self.admin).post("/api/children/", complete(), format="json")
-        self.assertEqual(403, r.status_code, r.data)
-        self.assertIn("social workers", r.data["detail"])
-        self.assertEqual(before, Child.objects.count())
-        # A social worker still does, and it is theirs.
-        r = self._as(self.editha).post("/api/children/", complete(), format="json")
-        self.assertEqual(201, r.status_code, r.data)
-        self.assertEqual(self.editha, Child.objects.get(pk=r.data["id"]).social_worker)
-
     # --- The duplicate check --------------------------------------------------
 
     def test_a_duplicate_held_by_another_worker_says_who_and_nothing_else(self):

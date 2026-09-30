@@ -115,9 +115,6 @@ export default function Children() {
   const canManage = ['Administrator', 'Staff'].includes(user?.role_name);
   const isAdmin = user?.role_name === 'Administrator';
   const isPsych = user?.role_name === 'Psychologist';
-  // Records are added by social workers only (owner, 30 Sep 2026); the ISA
-  // assigns, transfers and closes them. The server refuses the ISA too.
-  const canAdd = user?.role_name === 'Staff';
   const [children, setChildren] = useState([]);
   const [psychologists, setPsychologists] = useState([]);
   // Social worker accounts, for the ISA's filter and the form's owner field.
@@ -309,7 +306,7 @@ export default function Children() {
   const autoOpenCreate = searchParams.get('openCreate') === '1';
   useEffect(() => {
     if (!autoOpenCreate || form) return;
-    if (canAdd) openCreate();
+    openCreate();
     const next = new URLSearchParams(searchParams);
     next.delete('openCreate');
     setSearchParams(next, { replace: true });
@@ -585,7 +582,7 @@ export default function Children() {
         subtitle={`${counts.all} children · ${counts.active || 0} active · ${counts.inactive || 0} archived`}
       >
         <Button variant="secondary" onClick={exportCsv} iconLeft={<Icon name="download" size={17} />}>Export CSV</Button>
-        {canAdd && (
+        {canManage && (
           <Button variant="primary" onClick={openCreate} iconLeft={<Icon name="user-plus" size={18} />}>Add record</Button>
         )}
       </PageHeader>

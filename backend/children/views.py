@@ -56,22 +56,10 @@ class ChildViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated()]
         return super().get_permissions()
 
-    def create(self, request, *args, **kwargs):
-        """Records are added by social workers only (owner, 30 Sep 2026).
-
-        Intake is the social worker's job and a record is the social worker's
-        own (accounts/scoping.py); the ISA assigns, transfers and closes them
-        but no longer adds them. Refused here, not only hidden on the screen:
-        a rule on the button alone is not a rule."""
-        if role_of(request) == Role.ADMINISTRATOR:
-            return Response({"detail": "Records are added by social workers. The ISA can "
-                                       "assign, transfer and close them."},
-                            status=status.HTTP_403_FORBIDDEN)
-        return super().create(request, *args, **kwargs)
-
     def perform_create(self, serializer):
         # A record a social worker adds is theirs (accounts/scoping.py), and
-        # nothing they send can make it someone else's.
+        # nothing they send can make it someone else's. An administrator may
+        # name a social worker, or leave it for later.
         #
         # The psychologist picked is ASKED, not assigned (children/
         # assignment.py): the record is saved with nobody, and the child joins

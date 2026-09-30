@@ -112,16 +112,8 @@ class AssignmentEmailTriggerTest(APITestCase):
             "email": "admin@racco1.gov.ph", "password": "admin1234"}).data["access"]
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
 
-    def _as_social_worker(self):
-        # Records are added by social workers only (30 Sep 2026).
-        staff = User.objects.create_user(
-            email="sw@racco1.gov.ph", username="sw", password="x",
-            role=Role.objects.create(role_name=Role.STAFF))
-        self.client.force_authenticate(staff)
-
     @patch("children.assignment.send_assignment_notification")
     def test_creating_with_an_assignee_notifies(self, mock_send):
-        self._as_social_worker()
         resp = self.client.post("/api/children/", {
             "fullname": "Nico Reyes", "gender": "Male",
             "case_type": "Foster Care", "psychologist": self.psych.id,
@@ -131,7 +123,6 @@ class AssignmentEmailTriggerTest(APITestCase):
 
     @patch("children.assignment.send_assignment_notification")
     def test_creating_without_an_assignee_does_not(self, mock_send):
-        self._as_social_worker()
         resp = self.client.post("/api/children/", {
             "fullname": "Nico Reyes", "gender": "Male", "case_type": "Foster Care",
         }, format="json")
