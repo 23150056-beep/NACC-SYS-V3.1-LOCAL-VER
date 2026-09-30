@@ -432,18 +432,22 @@ export function Select({ value, onChange, children, size = 'md', invalid = false
 }
 
 /* ----------------------------- TimeInput ----------------------------- *
- * A time made from its three parts: the hour (1-12, each once), the minute
- * (00-59) and AM or PM. Value in and out is "HH:MM", what the API speaks, and
- * onChange gets that string once all three parts are set.
+ * A time on the 12-hour clock, set from one dropdown that shows its three
+ * parts at once: hours 01-12, minutes 00-59 and AM/PM, side by side. Value in
+ * and out is "HH:MM", what the API speaks; onChange gets that string once all
+ * three parts are set.
  *
- * The owner found the hours counted twice (30 Sep 2026). A list of whole
- * times every 15 minutes ran 12 to 11 once for AM and again for PM, and could
- * not make 9:07; the browser's own time box and its picker are the browser's
- * to draw, clock and all, and nothing here can change them. So the hour is
- * listed once, AM/PM says which half of the day, and any minute can be made.
+ * The owner's calls, 30 Sep 2026, in order. No list of preset times: a
+ * 15-minute list ran 12 to 11 once for AM and again for PM, and could not make
+ * 9:07. No browser time box: its picker scrolls the hours round past 12 and
+ * the minutes past 59, and it draws the computer's region's clock. Keep that
+ * box's look - "09:00 AM" and a clock - and open all three parts at once.
+ * Each column is a plain list that ends; nothing wraps round.
  */
 const HOURS_12 = Array.from({ length: 12 }, (_, i) => String(i + 1));
 const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+const PERIODS = ['AM', 'PM'];
+const TIME_PANEL_W = 212;
 
 function timeParts(value) {
   const m = /^(\d{1,2}):(\d{2})/.exec(value || '');
@@ -454,11 +458,16 @@ function timeParts(value) {
 
 export function TimeInput({ value = '', onChange, id, disabled = false, style = {} }) {
   const [parts, setParts] = useState(() => timeParts(value));
-  const [active, setActive] = useState(null);
-  const hourRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState(null);
+  const [focused, setFocused] = useState(false);
+  const boxRef = useRef(null);
+  const panelRef = useRef(null);
+  const valueId = useId();
   // A value set from outside (opening an edit) replaces what is on screen. A
   // half-made time is never sent up, so it is left alone.
   useEffect(() => { if (value) setParts(timeParts(value)); }, [value]);
+
   const set = (patch) => {
     const next = { ...parts, ...patch };
     // An hour picked first reads as on the hour until a minute is picked.
@@ -469,45 +478,124 @@ export function TimeInput({ value = '', onChange, id, disabled = false, style = 
       onChange?.(`${String(h).padStart(2, '0')}:${next.minute}`);
     }
   };
-  /* Drawn as the one box the browser's time field was - "09:00 AM", a clock
-     at the end, no arrows - with the part being set shaded as it shaded its
-     segments. Only the lists behind the parts differ. */
-  const part = (name) => ({
-    appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none',
-    border: 'none', outline: 'none', padding: '1px 1px', borderRadius: 3,
-    background: active === name ? 'var(--blue-100)' : 'transparent',
-    fontFamily: 'var(--font-sans)', fontSize: 15, color: 'var(--text-strong)',
-    fontVariantNumeric: 'tabular-nums', cursor: disabled ? 'not-allowed' : 'pointer',
-  });
-  const on = (name) => ({ onFocus: () => setActive(name), onBlur: () => setActive(null) });
-  const openHour = () => {
-    if (disabled || !hourRef.current) return;
-    hourRef.current.focus();
-    try { hourRef.current.showPicker?.(); } catch { /* focus is enough */ }
+
+  // In a portal with fixed coordinates, as Menu is, so the drawer's or the
+  // dialog's scrolling cannot clip it. Opens upward when there is no room.
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    const r = boxRef.current?.getBoundingClientRect();
+    if (r) {
+      const h = panelRef.current?.offsetHeight || 240;
+      const below = window.innerHeight - r.bottom;
+      setPos({
+        top: below < h + 8 && r.top > h + 8 ? r.top - h - 4 : r.bottom + 4,
+        left: Math.max(8, Math.min(window.innerWidth - TIME_PANEL_W - 8, r.left)),
+      });
+    }
+    // The page scrolling moves the box out from under the panel, so close.
+    // The panel's own columns scrolling is the point of it, so not those.
+    const onScroll = (e) => { if (!panelRef.current?.contains(e.target)) setOpen(false); };
+    const onResize = () => setOpen(false);
+    const onDown = (e) => {
+      if (!panelRef.current?.contains(e.target) && !boxRef.current?.contains(e.target)) setOpen(false);
+    };
+    // On window, in the capture phase: it runs before the dialog underneath
+    // hears the key, so Escape closes the panel and not the whole dialog.
+    const onEscape = (e) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault(); e.stopPropagation();
+      setOpen(false); boxRef.current?.focus();
+    };
+    window.addEventListener('scroll', onScroll, true);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('keydown', onEscape, true);
+    document.addEventListener('mousedown', onDown);
+    return () => {
+      window.removeEventListener('scroll', onScroll, true);
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('keydown', onEscape, true);
+      document.removeEventListener('mousedown', onDown);
+    };
+  }, [open]);
+
+  // Each column opens on what is chosen, and focus lands on the hour.
+  useEffect(() => {
+    if (!open || !pos || !panelRef.current) return;
+    panelRef.current.querySelectorAll('[role=listbox]').forEach((col) => {
+      const on = col.querySelector('[aria-selected="true"]');
+      if (on) col.scrollTop = on.offsetTop - (col.clientHeight - on.offsetHeight) / 2;
+    });
+    const hours = panelRef.current.querySelector('[role=listbox]');
+    (hours?.querySelector('[aria-selected="true"]') || hours?.querySelector('button'))?.focus({ preventScroll: true });
+  }, [open, pos]);
+
+  // Up and down within a column, left and right across. The ends are ends:
+  // after 12 or 59 there is nothing further, as asked.
+  const onPanelKey = (e) => {
+    if (e.key === 'Tab') { e.preventDefault(); setOpen(false); boxRef.current?.focus(); return; }
+    const btn = e.target.closest?.('button');
+    if (!btn) return;
+    const col = btn.parentElement;
+    const items = Array.from(col.querySelectorAll('button'));
+    const i = items.indexOf(btn);
+    if (e.key === 'ArrowDown' && i < items.length - 1) { e.preventDefault(); items[i + 1].focus(); }
+    if (e.key === 'ArrowUp' && i > 0) { e.preventDefault(); items[i - 1].focus(); }
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      const cols = Array.from(panelRef.current.querySelectorAll('[role=listbox]'));
+      const to = cols[cols.indexOf(col) + (e.key === 'ArrowRight' ? 1 : -1)];
+      if (to) { e.preventDefault(); (to.querySelector('[aria-selected="true"]') || to.querySelector('button')).focus(); }
+    }
   };
-  return (
+
+  const column = (label, items, current, pick, show = (x) => x, first = false) => (
     <div
-      role="group"
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 0, width: '100%', height: 'var(--field-h)', padding: '0 12px', background: disabled ? 'var(--ink-50)' : 'var(--surface)', border: `1px solid ${active ? 'var(--blue-500)' : 'var(--border-strong)'}`, borderRadius: 'var(--radius-md)', boxShadow: active ? 'var(--shadow-focus)' : 'none', transition: 'border-color var(--dur-fast), box-shadow var(--dur-fast)', ...style }}
+      role="listbox" aria-label={label} className="racco-scroll"
+      style={{ position: 'relative', flex: 1, maxHeight: 224, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, padding: '2px 4px', borderLeft: first ? 'none' : '1px solid var(--divider)' }}
     >
-      <select ref={hourRef} id={id} aria-label={id ? undefined : 'Hour'} value={parts.hour} disabled={disabled} onChange={(e) => set({ hour: e.target.value })} style={part('hour')} {...on('hour')}>
-        {!parts.hour && <option value="" disabled>--</option>}
-        {HOURS_12.map((h) => <option key={h} value={h}>{h.padStart(2, '0')}</option>)}
-      </select>
-      <span aria-hidden="true" style={{ fontSize: 15, color: 'var(--text-strong)' }}>:</span>
-      <select aria-label="Minutes" value={parts.minute} disabled={disabled} onChange={(e) => set({ minute: e.target.value })} style={part('minute')} {...on('minute')}>
-        {!parts.minute && <option value="" disabled>--</option>}
-        {MINUTES.map((m) => <option key={m} value={m}>{m}</option>)}
-      </select>
-      <select aria-label="AM or PM" value={parts.period} disabled={disabled} onChange={(e) => set({ period: e.target.value })} style={{ ...part('period'), marginLeft: 4 }} {...on('period')}>
-        {!parts.period && <option value="" disabled>--</option>}
-        <option value="AM">AM</option>
-        <option value="PM">PM</option>
-      </select>
-      <span aria-hidden="true" onClick={openHour} style={{ marginLeft: 'auto', display: 'inline-flex', color: 'var(--text-strong)', cursor: disabled ? 'not-allowed' : 'pointer' }}>
-        <Icon name="clock" size={16} />
-      </span>
+      {items.map((x) => {
+        const on = x === current;
+        return (
+          <button
+            key={x} type="button" role="option" aria-selected={on}
+            onClick={() => pick(x)}
+            onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = 'var(--ink-50)'; }}
+            onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = 'transparent'; }}
+            style={{ flex: 'none', height: 30, border: 'none', borderRadius: 'var(--radius-sm)', background: on ? 'var(--blue-600)' : 'transparent', color: on ? '#fff' : 'var(--text-strong)', fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: on ? 700 : 500, fontVariantNumeric: 'tabular-nums', cursor: 'pointer' }}
+          >
+            {show(x)}
+          </button>
+        );
+      })}
     </div>
+  );
+
+  const ring = open || focused;
+  return (
+    <>
+      <button
+        ref={boxRef} id={id} type="button" disabled={disabled}
+        aria-haspopup="listbox" aria-expanded={open} aria-describedby={valueId}
+        onClick={() => setOpen((v) => !v)}
+        onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
+        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, width: '100%', height: 'var(--field-h)', padding: '0 12px', background: disabled ? 'var(--ink-50)' : 'var(--surface)', border: `1px solid ${ring ? 'var(--blue-500)' : 'var(--border-strong)'}`, borderRadius: 'var(--radius-md)', boxShadow: ring ? 'var(--shadow-focus)' : 'none', outline: 'none', transition: 'border-color var(--dur-fast), box-shadow var(--dur-fast)', fontFamily: 'var(--font-sans)', fontSize: 15, color: 'var(--text-strong)', fontVariantNumeric: 'tabular-nums', textAlign: 'left', cursor: disabled ? 'not-allowed' : 'pointer', ...style }}
+      >
+        <span id={valueId} style={{ flex: 1 }}>
+          {parts.hour ? parts.hour.padStart(2, '0') : '--'}:{parts.minute || '--'} {parts.period || '--'}
+        </span>
+        <Icon name="clock" size={16} />
+      </button>
+      {open && createPortal(
+        <div
+          ref={panelRef} role="group" aria-label="Choose a time" onKeyDown={onPanelKey}
+          style={{ position: 'fixed', top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: TIME_PANEL_W, display: 'flex', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-lg)', padding: 4, zIndex: 95, animation: 'racco-pop-in var(--dur-fast) var(--ease-out)' }}
+        >
+          {column('Hour', HOURS_12, parts.hour, (h) => set({ hour: h }), (h) => h.padStart(2, '0'), true)}
+          {column('Minutes', MINUTES, parts.minute, (m) => set({ minute: m }))}
+          {column('AM or PM', PERIODS, parts.period, (p) => set({ period: p }))}
+        </div>,
+        document.body,
+      )}
+    </>
   );
 }
 
