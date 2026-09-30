@@ -4,7 +4,6 @@ import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutE
 import { createPortal } from 'react-dom';
 import * as Lucide from 'lucide-react';
 import { initialsOf } from '../utils/child';
-import { clock } from '../utils/time';
 
 /* ----------------------------- Icon ----------------------------- */
 function toPascal(name) {
@@ -433,29 +432,67 @@ export function Select({ value, onChange, children, size = 'md', invalid = false
 }
 
 /* ----------------------------- TimeInput ----------------------------- *
- * A time picked from the 12-hour clock ("9:15 AM"), every `step` minutes,
- * the way a calendar app offers it. Value in and out is still "HH:MM", which
- * is what the API speaks, and onChange gets the select's own event, so it
- * drops in where an <Input type="time"> was.
+ * A time made from its three parts: the hour (1-12, each once), the minute
+ * (00-59) and AM or PM. Value in and out is "HH:MM", what the API speaks, and
+ * onChange gets that string once all three parts are set.
  *
- * The native time input was the one place left that could show 14:00: it
- * draws whichever clock the browser's region uses, and no attribute asks it
- * for the other. A time already saved off the step (09:10) is kept as an
- * option rather than silently snapped, so opening an edit changes nothing.
+ * The owner found the hours counted twice (30 Sep 2026). A list of whole
+ * times every 15 minutes ran 12 to 11 once for AM and again for PM, and could
+ * not make 9:07; the browser's own time box and its picker are the browser's
+ * to draw, clock and all, and nothing here can change them. So the hour is
+ * listed once, AM/PM says which half of the day, and any minute can be made.
  */
-export function TimeInput({ value = '', onChange, step = 15, placeholder = 'Choose a time', ...rest }) {
-  const current = value ? String(value).slice(0, 5) : '';
-  const times = [];
-  for (let m = 0; m < 24 * 60; m += step) {
-    times.push(`${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`);
-  }
-  if (current && !times.includes(current)) times.push(current);
-  times.sort();
+const HOURS_12 = Array.from({ length: 12 }, (_, i) => String(i + 1));
+const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+
+function timeParts(value) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(value || '');
+  if (!m) return { hour: '', minute: '', period: '' };
+  const h = Number(m[1]);
+  return { hour: String(h % 12 || 12), minute: m[2], period: h < 12 ? 'AM' : 'PM' };
+}
+
+export function TimeInput({ value = '', onChange, id, disabled = false, style = {} }) {
+  const [parts, setParts] = useState(() => timeParts(value));
+  const [focus, setFocus] = useState(false);
+  // A value set from outside (opening an edit) replaces what is on screen. A
+  // half-made time is never sent up, so it is left alone.
+  useEffect(() => { if (value) setParts(timeParts(value)); }, [value]);
+  const set = (patch) => {
+    const next = { ...parts, ...patch };
+    // An hour picked first reads as on the hour until a minute is picked.
+    if (patch.hour && !next.minute) next.minute = '00';
+    setParts(next);
+    if (next.hour && next.minute && next.period) {
+      const h = (Number(next.hour) % 12) + (next.period === 'PM' ? 12 : 0);
+      onChange?.(`${String(h).padStart(2, '0')}:${next.minute}`);
+    }
+  };
+  const part = {
+    border: 'none', outline: 'none', background: 'transparent', height: '100%', padding: '0 2px',
+    fontFamily: 'var(--font-sans)', fontSize: 15, color: 'var(--text-strong)',
+    cursor: disabled ? 'not-allowed' : 'pointer',
+  };
   return (
-    <Select value={current} onChange={onChange} {...rest}>
-      {!current && <option value="" disabled>{placeholder}</option>}
-      {times.map((t) => <option key={t} value={t}>{clock(t)}</option>)}
-    </Select>
+    <div
+      role="group" onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 2, width: '100%', height: 'var(--field-h)', padding: '0 8px', background: disabled ? 'var(--ink-50)' : 'var(--surface)', border: `1px solid ${focus ? 'var(--blue-500)' : 'var(--border-strong)'}`, borderRadius: 'var(--radius-md)', boxShadow: focus ? 'var(--shadow-focus)' : 'none', transition: 'border-color var(--dur-fast), box-shadow var(--dur-fast)', ...style }}
+    >
+      <select id={id} aria-label={id ? undefined : 'Hour'} value={parts.hour} disabled={disabled} onChange={(e) => set({ hour: e.target.value })} style={part}>
+        {!parts.hour && <option value="" disabled>--</option>}
+        {HOURS_12.map((h) => <option key={h} value={h}>{h}</option>)}
+      </select>
+      <span aria-hidden="true" style={{ fontWeight: 700, color: 'var(--text-muted)' }}>:</span>
+      <select aria-label="Minutes" value={parts.minute} disabled={disabled} onChange={(e) => set({ minute: e.target.value })} style={part}>
+        {!parts.minute && <option value="" disabled>--</option>}
+        {MINUTES.map((m) => <option key={m} value={m}>{m}</option>)}
+      </select>
+      <select aria-label="AM or PM" value={parts.period} disabled={disabled} onChange={(e) => set({ period: e.target.value })} style={{ ...part, marginLeft: 4 }}>
+        {!parts.period && <option value="" disabled>AM/PM</option>}
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+      </select>
+    </div>
   );
 }
 

@@ -385,7 +385,7 @@ function ScheduleFirstSession({ request, psychologistId, onDone }) {
               <Input type="date" value={date} min={localIsoDay()} onChange={(e) => setDate(e.target.value)} />
             </FormField>
             <FormField label="Time">
-              <TimeInput value={time} step={15} onChange={(e) => setTime(e.target.value)} />
+              <TimeInput value={time} onChange={setTime} />
             </FormField>
           </div>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 0', lineHeight: 1.5 }}>
