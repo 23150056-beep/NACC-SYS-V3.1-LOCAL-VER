@@ -44,6 +44,23 @@ export function clockRange(start, end) {
   return `${clock(start)}–${clock(end)}`;
 }
 
+/** "8 AM–12 PM", "1–5 PM", "9:30–11 AM": a window as short as it reads, for
+ *  a grid of them. Minutes only when not :00, and AM/PM once when both ends
+ *  share it. Still the 12-hour clock; clockRange() is the long form. */
+export function shortRange(start, end) {
+  const part = (v) => {
+    const m = /^(\d{1,2}):(\d{2})/.exec(String(v || ''));
+    if (!m) return null;
+    const h = Number(m[1]);
+    const min = Number(m[2]);
+    return { t: `${h % 12 || 12}${min ? `:${m[2]}` : ''}`, p: h < 12 ? 'AM' : 'PM' };
+  };
+  const a = part(start);
+  const b = part(end);
+  if (!a || !b) return clockRange(start, end);
+  return a.p === b.p ? `${a.t}–${b.t} ${b.p}` : `${a.t} ${a.p}–${b.t} ${b.p}`;
+}
+
 /** "12 Aug 2026, 3:40 PM" — the full moment, for tooltips and fact rows. */
 export function exactDate(iso) {
   if (!iso) return '';

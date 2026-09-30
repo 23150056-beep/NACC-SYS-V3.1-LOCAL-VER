@@ -797,6 +797,15 @@ Rules in `children/assignment.py`; design in
   record form says so ("Request withdrawn … stays with …"). It used to be
   announced as asking the holder, because the form compared the pick with
   the pending psychologist rather than with who holds the child.
+- **The Assignment step's availability panel is a week grid**
+  (`pages/children/PsychologistPicker.jsx`, owner's request 30 Sep 2026): a
+  row per psychologist, their caseload beside the name (amber from 5), a
+  column per day with that day's windows in short 12-hour form
+  (`shortRange()`: "8 AM-12 PM", "1-5 PM"), today's column marked, weekend
+  columns only when somebody works them, one-off dates under the row. It
+  replaced a card of "Mon 08:00-12:00" chips per person, which could not be
+  compared across people without reading every chip. Each row is still the
+  button that picks the psychologist.
 - **The case referral chosen on the Assignment step stays in its box** when
   the step is left and reopened (each step unmounts), and has a Remove
   button; the box used to say "No file chosen" while the save still filed it.

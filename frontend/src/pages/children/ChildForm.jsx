@@ -9,8 +9,9 @@ import {
   DYNAMIC, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, TYPES_OF_ADOPTION, caseChanged, caseTypesFor,
   dateFieldFor, requiredFields, unaskedAnswers,
 } from '../../config/caseData';
-import { clockRange, shortDate, timeAgo } from '../../utils/time';
+import { shortDate, timeAgo } from '../../utils/time';
 import CustodianFields from './CustodianFields';
+import PsychologistPicker from './PsychologistPicker';
 import { EMPTY, formFromRecord } from './recordForm';
 
 // "2008-09-29" from the date's LOCAL parts. toISOString() gives the UTC date,
@@ -179,10 +180,6 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
     }, 600);
     return () => clearTimeout(t);
   }, [form.first_name, form.last_name, form.birth_date, form.id]);
-  // Availability-comparison panel helpers (Task 18) — matches AvailabilityBlock 0=Monday.
-  const DAY_ABBR = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const availFor = (pid) => blocks.filter((b) => String(b.psychologist) === String(pid));
-  const blockLabel = (b) => `${b.date || DAY_ABBR[b.weekday]} ${clockRange(b.start_time, b.end_time)}`;
   // Cascading location pickers; clear children when a parent changes.
   /* Addresses come from the PSGC tables now, not a hand-kept list. Each level
    * is fetched when its parent is chosen, so the browser never holds more than
@@ -853,37 +850,12 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   )}
                 </div>
                 {psychologists.length > 0 && (
-                  <div role="group" aria-labelledby="assign-psychologist-label" style={{ marginTop: 10, border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 12, background: 'var(--ink-50)', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <div className="racco-eyebrow" style={{ fontSize: 10 }}>Availability — check before you assign</div>
-                    {psychologists.map((p) => {
-                      const av = availFor(p.id);
-                      const on = String(form.psychologist) === String(p.id);
-                      return (
-                        <button type="button" key={p.id}
-                          onClick={() => setForm({ ...form, psychologist: String(p.id) })}
-                          aria-pressed={on}
-                          style={{ textAlign: 'left', padding: '9px 11px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontFamily: 'var(--font-sans)', border: `1px solid ${on ? 'var(--blue-500)' : 'var(--border)'}`, background: on ? 'var(--blue-50)' : 'var(--surface)', transition: 'var(--transition-base)' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 5 }}>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                              <span style={{ fontWeight: 700, fontSize: 13, color: on ? 'var(--blue-700)' : 'var(--text-strong)' }}>{p.name}</span>
-                              {String(form.pending_assignment?.psychologist) === String(p.id) && <Badge tone="amber" size="sm">Asked</Badge>}
-                              {form.id && String(form._origPsychologist) === String(p.id) && <Badge tone="success" size="sm">Has the case</Badge>}
-                            </span>
-                            <Badge tone={p.caseload >= 5 ? 'amber' : 'neutral'} size="sm">{p.caseload} case{p.caseload === 1 ? '' : 's'}</Badge>
-                          </div>
-                          {av.length === 0 ? (
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11.5, color: 'var(--amber-600)', fontWeight: 600 }}>
-                              <Icon name="alert-triangle" size={12} /> No availability set — sessions can&apos;t be booked yet
-                            </span>
-                          ) : (
-                            <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
-                              {av.map((b) => <Badge key={b.id} tone="success" size="sm">{blockLabel(b)}</Badge>)}
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <PsychologistPicker
+                    psychologists={psychologists} blocks={blocks} value={form.psychologist}
+                    onPick={(id) => setForm({ ...form, psychologist: String(id) })}
+                    pendingId={form.pending_assignment?.psychologist ?? null}
+                    holderId={form.id ? form._origPsychologist : null}
+                  />
                 )}
                 {isEdit && form.psychologist && String(form.psychologist) !== String(form._origPsychologist) && (
                   <div style={{ marginTop: 10, padding: '11px 13px', borderRadius: 'var(--radius-md)', background: 'var(--blue-50)', border: '1px solid var(--blue-200)' }}>
