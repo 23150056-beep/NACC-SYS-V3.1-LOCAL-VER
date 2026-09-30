@@ -4,6 +4,7 @@ import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutE
 import { createPortal } from 'react-dom';
 import * as Lucide from 'lucide-react';
 import { initialsOf } from '../utils/child';
+import { finishTime, timeValue, typeTime } from '../utils/time';
 
 /* ----------------------------- Icon ----------------------------- */
 function toPascal(name) {
@@ -432,170 +433,88 @@ export function Select({ value, onChange, children, size = 'md', invalid = false
 }
 
 /* ----------------------------- TimeInput ----------------------------- *
- * A time on the 12-hour clock, set from one dropdown that shows its three
- * parts at once: hours 01-12, minutes 00-59 and AM/PM, side by side. Value in
- * and out is "HH:MM", what the API speaks; onChange gets that string once all
- * three parts are set.
+ * A time on the 12-hour clock: typed into a box that says HH:MM until it is
+ * filled, with AM/PM in a dropdown beside it. Value in and out is "HH:MM"
+ * (24-hour), what the API speaks; onChange gets it once the box and AM/PM
+ * are both done, and '' while either is not.
  *
- * The owner's calls, 30 Sep 2026, in order. No list of preset times: a
- * 15-minute list ran 12 to 11 once for AM and again for PM, and could not make
- * 9:07. No browser time box: its picker scrolls the hours round past 12 and
- * the minutes past 59, and it draws the computer's region's clock. Keep that
- * box's look - "09:00 AM" and a clock - and open all three parts at once.
- * Each column is a plain list that ends; nothing wraps round.
+ * The owner's design, 30 Sep 2026, after lists and pickers were tried and
+ * turned down: nothing to scroll, the colon put in for you, the hour held to
+ * 12. The typing rules are typeTime() in utils/time.js.
  */
-const HOURS_12 = Array.from({ length: 12 }, (_, i) => String(i + 1));
-const MINUTES = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
-const PERIODS = ['AM', 'PM'];
-const TIME_PANEL_W = 212;
-
 function timeParts(value) {
   const m = /^(\d{1,2}):(\d{2})/.exec(value || '');
-  if (!m) return { hour: '', minute: '', period: '' };
+  if (!m) return { text: '', period: '' };
   const h = Number(m[1]);
-  return { hour: String(h % 12 || 12), minute: m[2], period: h < 12 ? 'AM' : 'PM' };
+  return { text: `${String(h % 12 || 12).padStart(2, '0')}:${m[2]}`, period: h < 12 ? 'AM' : 'PM' };
 }
 
 export function TimeInput({ value = '', onChange, id, disabled = false, style = {} }) {
-  const [parts, setParts] = useState(() => timeParts(value));
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState(null);
-  const [focused, setFocused] = useState(false);
-  const boxRef = useRef(null);
-  const panelRef = useRef(null);
-  const valueId = useId();
-  // A value set from outside (opening an edit) replaces what is on screen. A
-  // half-made time is never sent up, so it is left alone.
-  useEffect(() => { if (value) setParts(timeParts(value)); }, [value]);
-
-  const set = (patch) => {
-    const next = { ...parts, ...patch };
-    // An hour picked first reads as on the hour until a minute is picked.
-    if (patch.hour && !next.minute) next.minute = '00';
-    setParts(next);
-    if (next.hour && next.minute && next.period) {
-      const h = (Number(next.hour) % 12) + (next.period === 'PM' ? 12 : 0);
-      onChange?.(`${String(h).padStart(2, '0')}:${next.minute}`);
-    }
-  };
-
-  // In a portal with fixed coordinates, as Menu is, so the drawer's or the
-  // dialog's scrolling cannot clip it. Opens upward when there is no room.
-  useLayoutEffect(() => {
-    if (!open) return undefined;
-    const r = boxRef.current?.getBoundingClientRect();
-    if (r) {
-      const h = panelRef.current?.offsetHeight || 240;
-      const below = window.innerHeight - r.bottom;
-      setPos({
-        top: below < h + 8 && r.top > h + 8 ? r.top - h - 4 : r.bottom + 4,
-        left: Math.max(8, Math.min(window.innerWidth - TIME_PANEL_W - 8, r.left)),
-      });
-    }
-    // The page scrolling moves the box out from under the panel, so close.
-    // The panel's own columns scrolling is the point of it, so not those.
-    const onScroll = (e) => { if (!panelRef.current?.contains(e.target)) setOpen(false); };
-    const onResize = () => setOpen(false);
-    const onDown = (e) => {
-      if (!panelRef.current?.contains(e.target) && !boxRef.current?.contains(e.target)) setOpen(false);
-    };
-    // On window, in the capture phase: it runs before the dialog underneath
-    // hears the key, so Escape closes the panel and not the whole dialog.
-    const onEscape = (e) => {
-      if (e.key !== 'Escape') return;
-      e.preventDefault(); e.stopPropagation();
-      setOpen(false); boxRef.current?.focus();
-    };
-    window.addEventListener('scroll', onScroll, true);
-    window.addEventListener('resize', onResize);
-    window.addEventListener('keydown', onEscape, true);
-    document.addEventListener('mousedown', onDown);
-    return () => {
-      window.removeEventListener('scroll', onScroll, true);
-      window.removeEventListener('resize', onResize);
-      window.removeEventListener('keydown', onEscape, true);
-      document.removeEventListener('mousedown', onDown);
-    };
-  }, [open]);
-
-  // Each column opens on what is chosen, and focus lands on the hour.
+  const [text, setText] = useState(() => timeParts(value).text);
+  const [period, setPeriod] = useState(() => timeParts(value).period);
+  // What this field last sent up, so a value coming back down is told apart
+  // from one set from outside (opening an edit), which replaces the box.
+  const sent = useRef(value || '');
   useEffect(() => {
-    if (!open || !pos || !panelRef.current) return;
-    panelRef.current.querySelectorAll('[role=listbox]').forEach((col) => {
-      const on = col.querySelector('[aria-selected="true"]');
-      if (on) col.scrollTop = on.offsetTop - (col.clientHeight - on.offsetHeight) / 2;
-    });
-    const hours = panelRef.current.querySelector('[role=listbox]');
-    (hours?.querySelector('[aria-selected="true"]') || hours?.querySelector('button'))?.focus({ preventScroll: true });
-  }, [open, pos]);
+    const v = value || '';
+    if (v === sent.current) return;
+    sent.current = v;
+    const p = timeParts(v);
+    setText(p.text);
+    setPeriod(p.period);
+  }, [value]);
 
-  // Up and down within a column, left and right across. The ends are ends:
-  // after 12 or 59 there is nothing further, as asked.
-  const onPanelKey = (e) => {
-    if (e.key === 'Tab') { e.preventDefault(); setOpen(false); boxRef.current?.focus(); return; }
-    const btn = e.target.closest?.('button');
-    if (!btn) return;
-    const col = btn.parentElement;
-    const items = Array.from(col.querySelectorAll('button'));
-    const i = items.indexOf(btn);
-    if (e.key === 'ArrowDown' && i < items.length - 1) { e.preventDefault(); items[i + 1].focus(); }
-    if (e.key === 'ArrowUp' && i > 0) { e.preventDefault(); items[i - 1].focus(); }
-    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-      const cols = Array.from(panelRef.current.querySelectorAll('[role=listbox]'));
-      const to = cols[cols.indexOf(col) + (e.key === 'ArrowRight' ? 1 : -1)];
-      if (to) { e.preventDefault(); (to.querySelector('[aria-selected="true"]') || to.querySelector('button')).focus(); }
-    }
+  const push = (t, p) => {
+    const v = timeValue(t, p);
+    if (v === sent.current) return;
+    sent.current = v;
+    onChange?.(v);
   };
+  const type = (raw) => { const t = typeTime(raw); setText(t); push(t, period); };
+  const finish = () => { const t = finishTime(text); if (t !== text) { setText(t); push(t, period); } };
+  const pick = (p) => { setPeriod(p); push(text, p); };
 
-  const column = (label, items, current, pick, show = (x) => x, first = false) => (
-    <div
-      role="listbox" aria-label={label} className="racco-scroll"
-      style={{ position: 'relative', flex: 1, maxHeight: 224, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2, padding: '2px 4px', borderLeft: first ? 'none' : '1px solid var(--divider)' }}
-    >
-      {items.map((x) => {
-        const on = x === current;
-        return (
-          <button
-            key={x} type="button" role="option" aria-selected={on}
-            onClick={() => pick(x)}
-            onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = 'var(--ink-50)'; }}
-            onMouseLeave={(e) => { if (!on) e.currentTarget.style.background = 'transparent'; }}
-            style={{ flex: 'none', height: 30, border: 'none', borderRadius: 'var(--radius-sm)', background: on ? 'var(--blue-600)' : 'transparent', color: on ? '#fff' : 'var(--text-strong)', fontFamily: 'var(--font-sans)', fontSize: 14, fontWeight: on ? 700 : 500, fontVariantNumeric: 'tabular-nums', cursor: 'pointer' }}
-          >
-            {show(x)}
-          </button>
-        );
-      })}
-    </div>
-  );
-
-  const ring = open || focused;
+  const [focus, setFocus] = useState(null);
+  const frame = (on) => ({
+    height: 'var(--field-h)', background: disabled ? 'var(--ink-50)' : 'var(--surface)',
+    border: `1px solid ${on ? 'var(--blue-500)' : 'var(--border-strong)'}`, borderRadius: 'var(--radius-md)',
+    boxShadow: on ? 'var(--shadow-focus)' : 'none', outline: 'none',
+    transition: 'border-color var(--dur-fast), box-shadow var(--dur-fast)',
+    fontFamily: 'var(--font-sans)', fontSize: 15,
+  });
   return (
-    <>
-      <button
-        ref={boxRef} id={id} type="button" disabled={disabled}
-        aria-haspopup="listbox" aria-expanded={open} aria-describedby={valueId}
-        onClick={() => setOpen((v) => !v)}
-        onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 8, width: '100%', height: 'var(--field-h)', padding: '0 12px', background: disabled ? 'var(--ink-50)' : 'var(--surface)', border: `1px solid ${ring ? 'var(--blue-500)' : 'var(--border-strong)'}`, borderRadius: 'var(--radius-md)', boxShadow: ring ? 'var(--shadow-focus)' : 'none', outline: 'none', transition: 'border-color var(--dur-fast), box-shadow var(--dur-fast)', fontFamily: 'var(--font-sans)', fontSize: 15, color: 'var(--text-strong)', fontVariantNumeric: 'tabular-nums', textAlign: 'left', cursor: disabled ? 'not-allowed' : 'pointer', ...style }}
-      >
-        <span id={valueId} style={{ flex: 1 }}>
-          {parts.hour ? parts.hour.padStart(2, '0') : '--'}:{parts.minute || '--'} {parts.period || '--'}
-        </span>
-        <Icon name="clock" size={16} />
-      </button>
-      {open && createPortal(
-        <div
-          ref={panelRef} role="group" aria-label="Choose a time" onKeyDown={onPanelKey}
-          style={{ position: 'fixed', top: pos?.top ?? -9999, left: pos?.left ?? -9999, width: TIME_PANEL_W, display: 'flex', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-lg)', padding: 4, zIndex: 95, animation: 'racco-pop-in var(--dur-fast) var(--ease-out)' }}
+    <div style={{ display: 'flex', gap: 8, width: '100%', minWidth: 0, ...style }}>
+      {/* size=5: the box's natural width is the five characters it holds, so
+          two of these still fit side by side in a narrow drawer. */}
+      <input
+        id={id} type="text" value={text} placeholder="HH:MM" maxLength={5} size={5}
+        autoComplete="off" disabled={disabled}
+        onChange={(e) => type(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter on an unfinished time finishes it rather than submitting
+          // the form with the time still missing.
+          if (e.key === 'Enter' && finishTime(text) !== text) { e.preventDefault(); finish(); }
+        }}
+        onFocus={() => setFocus('time')}
+        onBlur={() => { setFocus(null); finish(); }}
+        style={{ ...frame(focus === 'time'), flex: 1, minWidth: 0, width: '100%', padding: '0 10px', color: 'var(--text-strong)', fontVariantNumeric: 'tabular-nums' }}
+      />
+      <div style={{ position: 'relative', flex: 'none', width: 86 }}>
+        <select
+          aria-label="AM or PM" value={period} disabled={disabled}
+          onChange={(e) => pick(e.target.value)}
+          onFocus={() => setFocus('period')} onBlur={() => setFocus(null)}
+          style={{ ...frame(focus === 'period'), appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none', width: '100%', padding: '0 26px 0 10px', color: period ? 'var(--text-strong)' : 'var(--text-faint)', cursor: disabled ? 'not-allowed' : 'pointer' }}
         >
-          {column('Hour', HOURS_12, parts.hour, (h) => set({ hour: h }), (h) => h.padStart(2, '0'), true)}
-          {column('Minutes', MINUTES, parts.minute, (m) => set({ minute: m }))}
-          {column('AM or PM', PERIODS, parts.period, (p) => set({ period: p }))}
-        </div>,
-        document.body,
-      )}
-    </>
+          {!period && <option value="" disabled>AM/PM</option>}
+          <option value="AM">AM</option>
+          <option value="PM">PM</option>
+        </select>
+        {/* Above the select even when it is focused: index.css lifts a
+            focus-visible control to z-index 1, which hid the arrow. */}
+        <Icon name="chevron-down" size={16} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 2, pointerEvents: 'none', color: 'var(--text-muted)' }} />
+      </div>
+    </div>
   );
 }
 

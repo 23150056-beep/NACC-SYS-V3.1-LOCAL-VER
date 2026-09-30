@@ -970,20 +970,21 @@ reads says "9:30 AM", never "09:30".
 - **Screens go through `clock()` / `clockRange()`** in `utils/time.js`, built
   by hand. `toLocaleTimeString` lets the browser's region pick the clock, so
   an en-GB machine printed 14:05 - and with `hour12: true`, "2:05 pm".
-- **A time is entered in three parts: hour 1-12, minute 00-59, AM/PM**
-  (`TimeInput` in `ui/index.jsx`; availability From/To and "Schedule now").
-  The owner's calls, 30 Sep 2026, in order: no list of preset times (a
-  15-minute list could not make 9:07, and counted 12 to 11 twice, AM then
-  PM); then no browser time box either (its picker scrolled the hours round
-  past 12 and the minutes past 59, and it draws the region's clock). Each
-  part is a plain list that ends; the hour appears once. No
-  `<input type="time">` anywhere. It still reads and writes "HH:MM".
-  **It LOOKS like the browser's box** - "09:00 AM" and a clock - and opens
-  ONE dropdown with all three columns side by side (the owner's two last
-  calls that day). The panel is a portal with fixed coordinates, as `Menu`
-  is, so a drawer's or dialog's scrolling cannot clip it; its Escape listener
-  sits on `window` in the capture phase so it closes the panel and not the
-  dialog underneath; a scroll inside its own columns does not close it.
+- **A time is TYPED: a box that says HH:MM, and AM/PM in a dropdown beside
+  it** (`TimeInput` in `ui/index.jsx`; availability From/To and "Schedule
+  now"). The owner's design, 30 Sep 2026, after a 15-minute list, the
+  browser's time box and two pickers were each tried and turned down. The
+  typing rules are `typeTime()` in `utils/time.js`: the colon is put in, never
+  typed; the hour stops at 12 (a 13th hour's digit is not taken); after 10,
+  11 or 12 the next digit starts the minutes; a space moves on after a
+  one-digit hour, so "3 00" is 03:00 and "12 30" is 12:30; minutes stop at
+  59. Leaving the box or pressing Enter finishes it ("3" -> 03:00). No
+  `<input type="time">` anywhere. It still reads and writes "HH:MM", and
+  sends '' while the box or AM/PM is unfinished.
+- **The AM/PM arrow carries `zIndex: 2`.** index.css lifts every
+  `:focus-visible` control to `position: relative; z-index: 1`, which paints
+  a focused select over an arrow drawn beside it - the shared `Select`'s own
+  arrow vanishes the same way.
 - **The calendar's formats are pinned** (`CAL_FORMATS` in `Schedule.jsx`); the
   localizer's defaults ask the locale.
 - **Server prose goes through `config/clock.py`**: booking refusals, the
