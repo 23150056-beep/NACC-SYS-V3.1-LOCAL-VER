@@ -978,6 +978,9 @@ reads says "9:30 AM", never "09:30".
   past 12 and the minutes past 59, and it draws the region's clock). Each
   part is a plain list that ends; the hour appears once. No
   `<input type="time">` anywhere. It still reads and writes "HH:MM".
+  **It LOOKS like the browser's box** - "09:00 AM", a clock at the end, no
+  arrows, the part being set shaded - the owner's call, same day: keep that
+  design, change only the lists behind it.
 - **The calendar's formats are pinned** (`CAL_FORMATS` in `Schedule.jsx`); the
   localizer's defaults ask the locale.
 - **Server prose goes through `config/clock.py`**: booking refusals, the

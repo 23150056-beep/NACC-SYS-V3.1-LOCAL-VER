@@ -454,7 +454,8 @@ function timeParts(value) {
 
 export function TimeInput({ value = '', onChange, id, disabled = false, style = {} }) {
   const [parts, setParts] = useState(() => timeParts(value));
-  const [focus, setFocus] = useState(false);
+  const [active, setActive] = useState(null);
+  const hourRef = useRef(null);
   // A value set from outside (opening an edit) replaces what is on screen. A
   // half-made time is never sent up, so it is left alone.
   useEffect(() => { if (value) setParts(timeParts(value)); }, [value]);
@@ -468,30 +469,44 @@ export function TimeInput({ value = '', onChange, id, disabled = false, style = 
       onChange?.(`${String(h).padStart(2, '0')}:${next.minute}`);
     }
   };
-  const part = {
-    border: 'none', outline: 'none', background: 'transparent', height: '100%', padding: '0 2px',
+  /* Drawn as the one box the browser's time field was - "09:00 AM", a clock
+     at the end, no arrows - with the part being set shaded as it shaded its
+     segments. Only the lists behind the parts differ. */
+  const part = (name) => ({
+    appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none',
+    border: 'none', outline: 'none', padding: '1px 1px', borderRadius: 3,
+    background: active === name ? 'var(--blue-100)' : 'transparent',
     fontFamily: 'var(--font-sans)', fontSize: 15, color: 'var(--text-strong)',
-    cursor: disabled ? 'not-allowed' : 'pointer',
+    fontVariantNumeric: 'tabular-nums', cursor: disabled ? 'not-allowed' : 'pointer',
+  });
+  const on = (name) => ({ onFocus: () => setActive(name), onBlur: () => setActive(null) });
+  const openHour = () => {
+    if (disabled || !hourRef.current) return;
+    hourRef.current.focus();
+    try { hourRef.current.showPicker?.(); } catch { /* focus is enough */ }
   };
   return (
     <div
-      role="group" onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
-      style={{ display: 'inline-flex', alignItems: 'center', gap: 2, width: '100%', height: 'var(--field-h)', padding: '0 8px', background: disabled ? 'var(--ink-50)' : 'var(--surface)', border: `1px solid ${focus ? 'var(--blue-500)' : 'var(--border-strong)'}`, borderRadius: 'var(--radius-md)', boxShadow: focus ? 'var(--shadow-focus)' : 'none', transition: 'border-color var(--dur-fast), box-shadow var(--dur-fast)', ...style }}
+      role="group"
+      style={{ display: 'inline-flex', alignItems: 'center', gap: 0, width: '100%', height: 'var(--field-h)', padding: '0 12px', background: disabled ? 'var(--ink-50)' : 'var(--surface)', border: `1px solid ${active ? 'var(--blue-500)' : 'var(--border-strong)'}`, borderRadius: 'var(--radius-md)', boxShadow: active ? 'var(--shadow-focus)' : 'none', transition: 'border-color var(--dur-fast), box-shadow var(--dur-fast)', ...style }}
     >
-      <select id={id} aria-label={id ? undefined : 'Hour'} value={parts.hour} disabled={disabled} onChange={(e) => set({ hour: e.target.value })} style={part}>
+      <select ref={hourRef} id={id} aria-label={id ? undefined : 'Hour'} value={parts.hour} disabled={disabled} onChange={(e) => set({ hour: e.target.value })} style={part('hour')} {...on('hour')}>
         {!parts.hour && <option value="" disabled>--</option>}
-        {HOURS_12.map((h) => <option key={h} value={h}>{h}</option>)}
+        {HOURS_12.map((h) => <option key={h} value={h}>{h.padStart(2, '0')}</option>)}
       </select>
-      <span aria-hidden="true" style={{ fontWeight: 700, color: 'var(--text-muted)' }}>:</span>
-      <select aria-label="Minutes" value={parts.minute} disabled={disabled} onChange={(e) => set({ minute: e.target.value })} style={part}>
+      <span aria-hidden="true" style={{ fontSize: 15, color: 'var(--text-strong)' }}>:</span>
+      <select aria-label="Minutes" value={parts.minute} disabled={disabled} onChange={(e) => set({ minute: e.target.value })} style={part('minute')} {...on('minute')}>
         {!parts.minute && <option value="" disabled>--</option>}
         {MINUTES.map((m) => <option key={m} value={m}>{m}</option>)}
       </select>
-      <select aria-label="AM or PM" value={parts.period} disabled={disabled} onChange={(e) => set({ period: e.target.value })} style={{ ...part, marginLeft: 4 }}>
-        {!parts.period && <option value="" disabled>AM/PM</option>}
+      <select aria-label="AM or PM" value={parts.period} disabled={disabled} onChange={(e) => set({ period: e.target.value })} style={{ ...part('period'), marginLeft: 4 }} {...on('period')}>
+        {!parts.period && <option value="" disabled>--</option>}
         <option value="AM">AM</option>
         <option value="PM">PM</option>
       </select>
+      <span aria-hidden="true" onClick={openHour} style={{ marginLeft: 'auto', display: 'inline-flex', color: 'var(--text-strong)', cursor: disabled ? 'not-allowed' : 'pointer' }}>
+        <Icon name="clock" size={16} />
+      </span>
     </div>
   );
 }
