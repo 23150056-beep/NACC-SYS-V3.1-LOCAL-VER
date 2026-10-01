@@ -980,6 +980,18 @@ is not a system user; see "The custodian and their texts".
 - `send_session_reminders` exits non-zero when any reminder was refused.
   The sign-up email code (`accounts/email_verification.py`) is still in the
   cache, with the same multi-worker weakness.
+- **"No active sender name found" does not mean the account has none.** The
+  owner's live account, sender name approved, answered with it under HTTP 500
+  on 1 Oct 2026. It means the name SENT is not an Active name on the key's
+  account: unset, misspelt (exact match, capitals included), still pending,
+  or another account's key. Check the key reads `account/sendernames` and
+  says which; a sender error at any HTTP status gets that hint.
+- **The ISA has a profile page too** (1 Oct 2026). The Settings test text
+  goes to the caller's own verified number, and `/profile` used to admit
+  only Staff and Psychologists, so an administrator could never verify one
+  and the button could never work. The ISA sees the personal column only:
+  the right-hand column reads `/children/`, `/appointments/` and
+  `/activity/`, which for an administrator are the whole agency's.
 
 ## Role names on screen
 

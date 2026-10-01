@@ -79,6 +79,11 @@ export default function MyProfile() {
   const confirm = useConfirm();
   const role = user?.role_name;
   const isPsych = role === 'Psychologist';
+  // The ISA sees the personal column only. The right-hand column is built
+  // from /children/, /appointments/ and /activity/, which for an
+  // administrator are the whole agency's - security audit trail included -
+  // and would read as "yours" under these headings.
+  const isAdmin = role === 'Administrator';
 
   const [form, setForm] = useState(EMPTY);
   const [saved, setSaved] = useState(null);   // null until the server answers
@@ -115,12 +120,13 @@ export default function MyProfile() {
   }, []);
 
   useEffect(() => {
+    if (isAdmin) return;
     // Each fails independently: a psychologist with no caseload yet should
     // still get their activity, and vice versa.
     api.get('/children/').then((r) => setChildren(r.data)).catch(() => setChildren([]));
     api.get('/appointments/').then((r) => setAppointments(r.data)).catch(() => setAppointments([]));
     api.get('/activity/').then((r) => setActivity(r.data)).catch(() => setActivity([]));
-  }, []);
+  }, [isAdmin]);
 
   const dirty = useMemo(
     () => !!saved && FIELDS.some(([k]) => (form[k] || '') !== (saved[k] || '')),
@@ -277,7 +283,8 @@ export default function MyProfile() {
       </div>
 
       {/* --------------------------- two columns -------------------------- */}
-      <div className="racco-profile-grid">
+      <div className="racco-profile-grid"
+           style={isAdmin ? { gridTemplateColumns: 'minmax(0, 560px)' } : undefined}>
 
         {/* ----------------------------- left ----------------------------- */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -438,6 +445,7 @@ export default function MyProfile() {
         </div>
 
         {/* ----------------------------- right ---------------------------- */}
+        {!isAdmin && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 0 }}>
 
           <div>
@@ -511,6 +519,7 @@ export default function MyProfile() {
             )}
           </Card>
         </div>
+        )}
       </div>
     </div>
   );

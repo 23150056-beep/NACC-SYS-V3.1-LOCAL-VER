@@ -170,7 +170,9 @@ export default function Settings() {
               Staff who have verified a mobile number get a text for a new case
               assignment, a temporary password, and the next day&rsquo;s sessions.
               This sends one message to <strong>your own</strong> verified number
-              and reports what the gateway replied.
+              and reports what the gateway replied. Verify yours first under
+              your profile: the account menu, top right, then <strong>See your
+              profile</strong> &rarr; Mobile number.
             </div>
             <Note icon="info">
               Check the key first. Gateways hand out only a handful of free

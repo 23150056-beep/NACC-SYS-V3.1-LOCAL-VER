@@ -418,9 +418,9 @@ export default function AppHeader() {
               </span>
             </div>
             <div style={{ padding: 6 }}>
-              {['Staff', 'Psychologist'].includes(role) && (
-                <MenuRow icon="user-circle" label="See your profile" sub="Name, contact number, signature" onClick={() => { setMenuOpen(false); navigate('/profile'); }} />
-              )}
+              <MenuRow icon="user-circle" label="See your profile"
+                       sub={role === 'Administrator' ? 'Contact details, mobile number for texts' : 'Name, contact number, signature'}
+                       onClick={() => { setMenuOpen(false); navigate('/profile'); }} />
               {role === 'Administrator' && (
                 <MenuRow icon="settings" label="Settings" sub="Agency, notifications, assistant" onClick={() => { setMenuOpen(false); navigate('/settings'); }} />
               )}

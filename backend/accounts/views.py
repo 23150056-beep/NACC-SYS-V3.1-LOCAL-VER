@@ -447,9 +447,10 @@ class SmsConfigTestView(generics.GenericAPIView):
         if not user.phone or not user.phone_verified:
             return Response(
                 {"ok": False,
-                 "detail": "Add and verify your own mobile number in My "
-                           "Profile first — this sends the test to you, not "
-                           "to anyone else."},
+                 "detail": "Add and verify your own mobile number first, "
+                           "under your profile (the account menu, top right "
+                           "> See your profile > Mobile number). This sends "
+                           "the test to you, not to anyone else."},
                 status=status.HTTP_400_BAD_REQUEST)
         # A different reference each time. The gateway's own guidance is that
         # repeatedly sending nearly identical text to one number is classified
