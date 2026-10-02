@@ -16,8 +16,10 @@ import { firstError } from '../utils/errors';
 import ChildForm from './children/ChildForm';
 import { EMPTY, formFromRecord } from './children/recordForm';
 import ChildDrawer, { TerminateModal } from './children/ChildDrawer';
+import CaseloadCard from './children/CaseloadCard';
 import { fmtDay, fmtTime, localDate } from './children/shared';
 import { ageFrom, ageGroup, caseRef } from '../utils/child';
+import { shortDate } from '../utils/time';
 import AssignmentRequests from '../components/AssignmentRequests';
 
 // Live "who else has this record open" chip — polls the presence heartbeat endpoint.
@@ -510,23 +512,38 @@ export default function Children() {
   const terminate = async (c, reason, note) => {
     try {
       await api.post(`/children/${c.id}/terminate/`, { reason_category: reason, note });
-      toast.success(`${c.fullname}'s case is now inactive`);
-      setTerminating(null);
-      setSel(null);
-      load();
-      refreshActivity();
     } catch (err) {
       const d = err.response?.data;
       toast.error(d?.note || d?.reason_category || d?.detail || 'Could not terminate the case.');
+      return;
     }
+    setTerminating(null);
+    setSel(null);
+    load();
+    refreshActivity();
+    // The end dialog (owner, 30 Sep 2026): what was closed, and with what
+    // reason, read back once it is done - a toast was gone before anyone read it.
+    await notice({
+      title: 'Case terminated',
+      icon: 'archive',
+      description: `${c.fullname}'s case is now inactive and moved to the archive. Every record is kept, `
+        + 'and a social worker or the ISA can reopen it if the child returns.',
+      details: [['Child', `${c.fullname} (${caseRef(c.id)})`], ['Reason', reason],
+        ['Closing summary', note.length > 160 ? `${note.slice(0, 157)}…` : note],
+        ['Closed on', shortDate(new Date())]],
+    });
   };
 
   const reopen = async () => {
     const c = reopening;
     setReopenBusy(true);
     try {
-      await api.post(`/children/${c.id}/reopen/`);
-      toast.success(`${c.fullname}'s case is active again — previous records retained`);
+      // A case taken over at intake is found again by the name typed there;
+      // the server will not hand over another worker's case by id alone.
+      await api.post(`/children/${c.id}/reopen/`, c.typed || {});
+      toast.success(c.takeover
+        ? `${c.fullname}'s case is active again and now in your records — previous records retained`
+        : `${c.fullname}'s case is active again — previous records retained`);
       setReopening(null);
       setSel(null);
       // Reopened from the Add Record duplicate warning: the old record is the
@@ -547,7 +564,15 @@ export default function Children() {
   // Through the same confirmation as every other reopen. It used to call
   // reopen() with the match as an argument reopen() never read, so it reopened
   // nothing and closed the form anyway.
-  const onDupReopen = (m) => setReopening({ id: m.id, fullname: m.fullname, fromForm: true });
+  const onDupReopen = (m) => setReopening({
+    id: m.id, fullname: m.fullname, fromForm: true,
+    // Another worker's closed case (or nobody's): reopening makes it this
+    // worker's, and the server wants the name it was found by.
+    ...(m.yours === false && {
+      takeover: true, heldBy: m.held_by,
+      typed: { first_name: form?.first_name || '', last_name: form?.last_name || '', birth_date: form?.birth_date || '' },
+    }),
+  });
   const onDupOpenExisting = (m) => { setForm(null); const c = rows.find((r) => r.id === m.id); if (c) setSel(c); };
 
   return (
@@ -700,19 +725,10 @@ export default function Children() {
           <span style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)' }}>
             Showing <strong style={{ color: 'var(--text-strong)' }}>{visible.length}</strong> of {rows.length} children
           </span>
-          {canManage && psychologists.length > 0 && (
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-              <span className="racco-eyebrow" style={{ fontSize: 'var(--text-3xs)' }}>Caseload</span>
-              {psychologists.map((p) => (
-                <span key={p.id} title={`${p.name}: ${p.caseload} active case${p.caseload === 1 ? '' : 's'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 'var(--radius-pill)', background: 'var(--surface)', border: '1px solid var(--border)', fontSize: 11.5 }}>
-                  <span style={{ fontWeight: 600, color: 'var(--text-body)' }}>{p.name}</span>
-                  <span className="racco-mono" style={{ fontWeight: 800, color: p.caseload >= 5 ? 'var(--red-700)' : 'var(--blue-600)' }}>{p.caseload}</span>
-                </span>
-              ))}
-            </span>
-          )}
         </div>
       </div>
+
+      {canManage && psychologists.length > 0 && <CaseloadCard psychologists={psychologists} />}
 
       {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} canReopen={canManage} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => setReopening(sel)} onClose={() => setSel(null)} />}
       {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} socialWorkers={isAdmin ? socialWorkers : null} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} fieldErrors={fieldErrors} refusedWith={refusedWith} onSubmit={save} onWithdraw={withdrawRequest} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
@@ -730,6 +746,11 @@ export default function Children() {
         >
           {/* The half people forget, and the half that needs doing next: the
               case comes back with nobody responsible for it. */}
+          {reopening.takeover && (
+            <Alert tone="info" icon={<Icon name="folder-input" size={18} />}>
+              It moves to your records{reopening.heldBy ? <> from <strong>{reopening.heldBy}</strong>, who is notified</> : ''}.
+            </Alert>
+          )}
           <Alert tone="warning" icon={<Icon name="user-x" size={18} />}>
             The psychologist assignment is cleared. Assign one fresh afterwards,
             or the case sits in nobody’s caseload.

@@ -199,7 +199,7 @@ reproduce a deployment problem.
 | `BREVO_SENDER_EMAIL` | `racco1nacc@gmail.com` | Must be a verified sender in the Brevo account. |
 | `SMS_PROVIDER` | unset | Unset = messages go to the log, nothing is sent. Set to `semaphore` or `philsms` to switch texts on. See §9b. |
 | `SMS_API_KEY` | — | The chosen gateway's API key. Required when SMS_PROVIDER is set. |
-| `SMS_SENDER_NAME` | unset | An approved Semaphore sender name, e.g. NACC. Unset uses their shared sender. |
+| `SMS_SENDER_NAME` | unset | An Active Semaphore sender name, e.g. NACC, spelt exactly. Unset, Semaphore can refuse every message with "No active sender name found". |
 | `SESSION_REMINDER_TOKEN` | unset | Lets a scheduler trigger the daily reminder. Unset = that endpoint 404s. See §9c. |
 | `BREVO_SENDER_NAME` | `NACC RACCO1` | |
 
@@ -827,12 +827,14 @@ appointment.
 Nothing in the code prefers any of them, and moving between them is the
 `SMS_PROVIDER` line and nothing else. That is why the interface exists.
 
-### Step 2 — Register a sender name (optional, recommended)
+### Step 2 — Register a sender name
 
-Without one, messages arrive from Semaphore's shared sender. With one they
-arrive from `NACC`. Register it in the dashboard under **Sender Names** — it
-needs their approval before it works, and an unapproved name is rejected at
-send time with a message the test button will show you verbatim.
+Treat it as required. On 1 Oct 2026 a live account answered a send without one
+with "No active sender name found" and sent nothing, so do not count on a
+shared default sender. Register `NACC` in the dashboard under **Sender Names**;
+it needs their approval, and it must be **Active** before it works. Check the
+key (Step 4) lists the account's names with their status and says whether
+`SMS_SENDER_NAME` matches an active one.
 
 ### Step 3 — Set four variables on the API service
 
@@ -859,8 +861,9 @@ for the same reason the mail has one.
    which is that gateway's real failure mode. On `semaphore` it fails when the
    account is inactive or has no credit, and its account route allows only
    one or two calls a minute.
-2. Sign in as an administrator → **My Profile** → add and verify your own
-   mobile number. You will receive a six-digit code.
+2. Sign in as an administrator → the account menu, top right → **See your
+   profile** → **Mobile number**; add and verify your own mobile number. You
+   will receive a six-digit code.
 3. **Settings** → **Text messages** → **Send a test text**.
 4. The screen prints what the gateway actually replied — a bad key, an
    unapproved sender name and an empty balance all say so in their own words.
@@ -874,7 +877,10 @@ If no code arrives at step 1, the gateway is refusing and step 2 will say why.
 - **`textbee`: the phone.** Switched off, out of signal, out of battery or
   unpaired all stop delivery while the API key stays perfectly valid. Check
   the key — it counts paired phones.
-- **Sender name not approved.** Rejected at send time, named in the error.
+- **Sender name not approved or not active.** Rejected at send time, named in
+  the error; Semaphore says "No active sender name found" whether the name is
+  missing, misspelt, pending, or on a different account from the key. Check
+  the key lists which.
 - **No credit.** Rejected with a balance message.
 - **The recipient never verified their number.** An unverified number is
   skipped silently by design — a number somebody typed may be a typo, and a

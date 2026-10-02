@@ -1,6 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
 
+from config.clock import clock
 from scheduling import visibility
 from scheduling.models import AvailabilityBlock, Appointment, Unavailability
 
@@ -67,7 +68,7 @@ class AvailabilityBlockSerializer(serializers.ModelSerializer):
                 day = clash.date or f"{dict(AvailabilityBlock.WEEKDAYS).get(clash.weekday, '')}s"
                 raise serializers.ValidationError({
                     "start_time": f"Overlaps an existing block ({day} "
-                                  f"{str(clash.start_time)[:5]}–{str(clash.end_time)[:5]}) — "
+                                  f"{clock(clash.start_time)}–{clock(clash.end_time)}) — "
                                   "edit that block instead."})
         return attrs
 

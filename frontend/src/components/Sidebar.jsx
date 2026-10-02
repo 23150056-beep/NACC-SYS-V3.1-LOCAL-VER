@@ -6,6 +6,7 @@ import { useCensus } from '../context/CensusContext';
 import { Icon, ROLE_META, roleLabel } from '../ui';
 import { railIsActive, railRowsFor, screenIdFor } from '../config/nav';
 import { initialsOf, PURPOSE_LABEL, scheduleName } from '../utils/child';
+import { clock } from '../utils/time';
 
 /* The left rail: every destination, labelled, in the order the work happens.
  *
@@ -73,7 +74,7 @@ export default function Sidebar() {
     // the schedule). child_name is null for those.
     (stats.today_schedule || []).forEach((a) => push(a.child_id, {
       id: a.child_id, name: scheduleName(a), initials: a.child_name ? initialsOf(a.child_name) : '#',
-      meta: `${a.time} · ${PURPOSE_LABEL[a.purpose] || a.purpose}`,
+      meta: `${clock(a.time)} · ${PURPOSE_LABEL[a.purpose] || a.purpose}`,
       dot: a.status === 'completed' ? 'var(--success-500)' : 'var(--amber-500)',
     }));
     (stats.care_gaps || []).forEach((g) => push(g.child_id, {

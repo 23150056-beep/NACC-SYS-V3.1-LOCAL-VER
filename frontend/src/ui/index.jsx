@@ -4,6 +4,7 @@ import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutE
 import { createPortal } from 'react-dom';
 import * as Lucide from 'lucide-react';
 import { initialsOf } from '../utils/child';
+import { finishTime, timeValue, typeTime } from '../utils/time';
 
 /* ----------------------------- Icon ----------------------------- */
 function toPascal(name) {
@@ -427,6 +428,92 @@ export function Select({ value, onChange, children, size = 'md', invalid = false
         {children}
       </select>
       <span style={{ position: 'absolute', right: 13, top: '50%', transform: 'translateY(-50%)', pointerEvents: 'none', color: 'var(--text-muted)', fontSize: 11 }}>▼</span>
+    </div>
+  );
+}
+
+/* ----------------------------- TimeInput ----------------------------- *
+ * A time on the 12-hour clock: typed into a box that says HH:MM until it is
+ * filled, with AM/PM in a dropdown beside it. Value in and out is "HH:MM"
+ * (24-hour), what the API speaks; onChange gets it once the box and AM/PM
+ * are both done, and '' while either is not.
+ *
+ * The owner's design, 30 Sep 2026, after lists and pickers were tried and
+ * turned down: nothing to scroll, the colon put in for you, the hour held to
+ * 12. The typing rules are typeTime() in utils/time.js.
+ */
+function timeParts(value) {
+  const m = /^(\d{1,2}):(\d{2})/.exec(value || '');
+  if (!m) return { text: '', period: '' };
+  const h = Number(m[1]);
+  return { text: `${String(h % 12 || 12).padStart(2, '0')}:${m[2]}`, period: h < 12 ? 'AM' : 'PM' };
+}
+
+export function TimeInput({ value = '', onChange, id, disabled = false, style = {} }) {
+  const [text, setText] = useState(() => timeParts(value).text);
+  const [period, setPeriod] = useState(() => timeParts(value).period);
+  // What this field last sent up, so a value coming back down is told apart
+  // from one set from outside (opening an edit), which replaces the box.
+  const sent = useRef(value || '');
+  useEffect(() => {
+    const v = value || '';
+    if (v === sent.current) return;
+    sent.current = v;
+    const p = timeParts(v);
+    setText(p.text);
+    setPeriod(p.period);
+  }, [value]);
+
+  const push = (t, p) => {
+    const v = timeValue(t, p);
+    if (v === sent.current) return;
+    sent.current = v;
+    onChange?.(v);
+  };
+  const type = (raw) => { const t = typeTime(raw); setText(t); push(t, period); };
+  const finish = () => { const t = finishTime(text); if (t !== text) { setText(t); push(t, period); } };
+  const pick = (p) => { setPeriod(p); push(text, p); };
+
+  const [focus, setFocus] = useState(null);
+  const frame = (on) => ({
+    height: 'var(--field-h)', background: disabled ? 'var(--ink-50)' : 'var(--surface)',
+    border: `1px solid ${on ? 'var(--blue-500)' : 'var(--border-strong)'}`, borderRadius: 'var(--radius-md)',
+    boxShadow: on ? 'var(--shadow-focus)' : 'none', outline: 'none',
+    transition: 'border-color var(--dur-fast), box-shadow var(--dur-fast)',
+    fontFamily: 'var(--font-sans)', fontSize: 15,
+  });
+  return (
+    <div style={{ display: 'flex', gap: 8, width: '100%', minWidth: 0, ...style }}>
+      {/* size=5: the box's natural width is the five characters it holds, so
+          two of these still fit side by side in a narrow drawer. */}
+      <input
+        id={id} type="text" value={text} placeholder="HH:MM" maxLength={5} size={5}
+        autoComplete="off" disabled={disabled}
+        onChange={(e) => type(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter on an unfinished time finishes it rather than submitting
+          // the form with the time still missing.
+          if (e.key === 'Enter' && finishTime(text) !== text) { e.preventDefault(); finish(); }
+        }}
+        onFocus={() => setFocus('time')}
+        onBlur={() => { setFocus(null); finish(); }}
+        style={{ ...frame(focus === 'time'), flex: 1, minWidth: 0, width: '100%', padding: '0 10px', color: 'var(--text-strong)', fontVariantNumeric: 'tabular-nums' }}
+      />
+      <div style={{ position: 'relative', flex: 'none', width: 86 }}>
+        <select
+          aria-label="AM or PM" value={period} disabled={disabled}
+          onChange={(e) => pick(e.target.value)}
+          onFocus={() => setFocus('period')} onBlur={() => setFocus(null)}
+          style={{ ...frame(focus === 'period'), appearance: 'none', WebkitAppearance: 'none', MozAppearance: 'none', width: '100%', padding: '0 26px 0 10px', color: period ? 'var(--text-strong)' : 'var(--text-faint)', cursor: disabled ? 'not-allowed' : 'pointer' }}
+        >
+          {!period && <option value="" disabled>AM/PM</option>}
+          <option value="AM">AM</option>
+          <option value="PM">PM</option>
+        </select>
+        {/* Above the select even when it is focused: index.css lifts a
+            focus-visible control to z-index 1, which hid the arrow. */}
+        <Icon name="chevron-down" size={16} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', zIndex: 2, pointerEvents: 'none', color: 'var(--text-muted)' }} />
+      </div>
     </div>
   );
 }

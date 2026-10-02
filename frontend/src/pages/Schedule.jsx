@@ -8,16 +8,27 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { loadAll } from '../utils/load';
-import { exactDate } from '../utils/time';
+import { clock, clockRange, exactDate } from '../utils/time';
 import { DURATIONS, scheduleName, shortName } from '../utils/child';
 import {
-  Alert, Avatar, Badge, Button, Card, ConfirmDialog, Drawer, FormField, hoverLift, Icon, iconBtn, Input, Modal, PAGE, PageHeader, Select,
+  Alert, Avatar, Badge, Button, Card, ConfirmDialog, Drawer, FormField, hoverLift, Icon, iconBtn, Input, Modal, PAGE, PageHeader, Select, TimeInput,
 } from '../ui';
 import { prefetchBriefs } from '../api/assistant';
 import { useOpenFromLink } from '../utils/links';
 import { firstError } from '../utils/errors';
 
 const localizer = dateFnsLocalizer({ format, parse, startOfWeek, getDay, locales: { 'en-US': enUS } });
+// Every time the calendar draws, on the 12-hour clock. The localizer's own
+// defaults ask the locale ('p'), which is 12-hour in en-US only by luck.
+const CAL_FORMATS = {
+  timeGutterFormat: (d) => clock(d),
+  agendaTimeFormat: (d) => clock(d),
+  eventTimeRangeFormat: ({ start, end }) => `${clock(start)} – ${clock(end)}`,
+  eventTimeRangeStartFormat: ({ start }) => `${clock(start)} – `,
+  eventTimeRangeEndFormat: ({ end }) => ` – ${clock(end)}`,
+  selectRangeFormat: ({ start, end }) => `${clock(start)} – ${clock(end)}`,
+  agendaTimeRangeFormat: ({ start, end }) => `${clock(start)} – ${clock(end)}`,
+};
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const PURPOSES = [
   { v: 'pre_assessment', label: 'Pre-Assessment' },
@@ -432,7 +443,7 @@ export default function Schedule() {
         ? `This moves ${who || 'the child'}'s appointment to the new time.`
         : `This books an appointment for ${who || 'the child'}.`,
       confirmLabel: booking.id ? 'Yes, move it' : 'Yes, book it',
-      details: [['Child', who], ['Date', booking.date], ['Time', booking.time],
+      details: [['Child', who], ['Date', booking.date], ['Time', clock(booking.time)],
         ['Purpose', PURPOSES.find((p) => p.v === booking.purpose)?.label]],
     }))) return;
     try {
@@ -525,7 +536,7 @@ export default function Schedule() {
         ? 'This saves the changed hours. Sessions already booked are kept as they are.'
         : 'This adds the hours to the calendar, where they can be booked straight away.',
       confirmLabel: 'Yes, save the hours',
-      details: [['Hours', `${blockForm.start_time}–${blockForm.end_time}`],
+      details: [['Hours', clockRange(blockForm.start_time, blockForm.end_time)],
         ['Sessions at a time', String(base.capacity)],
         ['Date', blockForm.mode === 'date' ? blockForm.date : null]],
     }))) return;
@@ -707,7 +718,7 @@ export default function Schedule() {
                         <div key={p.key} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '11px 14px', borderRadius: 'var(--radius-lg)', background: 'var(--ink-50)', border: '1px solid var(--border)', flexWrap: 'wrap' }}>
                           <Icon name="clock" size={16} style={{ color: 'var(--blue-600)', flex: 'none' }} />
                           <span style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)', flex: 'none' }}>
-                            {p.start}&ndash;{p.end}
+                            {clockRange(p.start, p.end)}
                           </span>
                           {/* The days it runs, as the week itself — the ones it
                               does not run are shown faint rather than omitted,
@@ -803,7 +814,7 @@ export default function Schedule() {
                         <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 'var(--radius-lg)', background: 'var(--ink-50)', border: '1px solid var(--border)' }}>
                           <Icon name="calendar" size={16} style={{ color: 'var(--blue-600)' }} />
                           <span style={{ flex: 1, fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>
-                            {b.date} · {String(b.start_time).slice(0, 5)}–{String(b.end_time).slice(0, 5)}
+                            {b.date} · {clockRange(b.start_time, b.end_time)}
                           </span>
                           <Badge tone="neutral" size="sm">{b.capacity} slot{b.capacity === 1 ? '' : 's'}</Badge>
                           {canRecordLeave && (
@@ -857,6 +868,7 @@ export default function Schedule() {
         <div style={{ height: 620 }}>
           <Calendar
             localizer={localizer}
+            formats={CAL_FORMATS}
             events={events}
             startAccessor="start"
             endAccessor="end"
@@ -911,7 +923,7 @@ export default function Schedule() {
                 <Icon name="clock" size={16} style={{ color: 'var(--blue-600)' }} />
                 <div style={{ flex: 1 }}>
                   <span style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>
-                    {blockDay(b)} · {String(b.start_time).slice(0, 5)}–{String(b.end_time).slice(0, 5)}
+                    {blockDay(b)} · {clockRange(b.start_time, b.end_time)}
                   </span>
                 </div>
                 <Badge tone="neutral" size="sm">{b.capacity} slot{b.capacity === 1 ? '' : 's'}</Badge>
@@ -1034,8 +1046,8 @@ export default function Schedule() {
           tone={removing.booked > 0 ? 'warning' : 'danger'}
           icon={<Icon name={removing.booked > 0 ? 'alert-triangle' : 'trash-2'} size={19} />}
           title={removing.blocks.length > 1
-            ? `Remove ${removing.start}–${removing.end} from ${removing.blocks.length} days?`
-            : `Remove ${removing.start}–${removing.end}?`}
+            ? `Remove ${clockRange(removing.start, removing.end)} from ${removing.blocks.length} days?`
+            : `Remove ${clockRange(removing.start, removing.end)}?`}
           description={removing.date
             ? `The one-off window on ${removing.date}.`
             : removing.days.length
@@ -1077,7 +1089,7 @@ export default function Schedule() {
                     : !booking.time ? 'Choose a time' : booking.id ? 'Move it' : 'Book it'}
               iconLeft={<Icon name="calendar" size={16} />}
             >
-              {booking.time ? `${booking.id ? 'Move to' : 'Book'} ${booking.time}` : (booking.id ? 'Move' : 'Book')}
+              {booking.time ? `${booking.id ? 'Move to' : 'Book'} ${clock(booking.time)}` : (booking.id ? 'Move' : 'Book')}
             </Button>
           )}
         >
@@ -1184,7 +1196,7 @@ export default function Schedule() {
                   return (
                     <button
                       key={s.start} type="button" aria-pressed={on}
-                      title={`${s.start} to ${s.end}`}
+                      title={`${clock(s.start)} to ${clock(s.end)}`}
                       onClick={() => setBooking({ ...booking, time: s.start })}
                       style={{
                         padding: '7px 12px', borderRadius: 'var(--radius-control)',
@@ -1195,7 +1207,7 @@ export default function Schedule() {
                         fontSize: 12.5, cursor: 'pointer', minWidth: 66,
                       }}
                     >
-                      {s.start}
+                      {clock(s.start)}
                     </button>
                   );
                 })}
@@ -1277,8 +1289,8 @@ export default function Schedule() {
             </FormField>
           )}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <FormField label="From"><Input type="time" value={blockForm.start_time} onChange={(e) => setBlockForm({ ...blockForm, start_time: e.target.value })} /></FormField>
-            <FormField label="To"><Input type="time" value={blockForm.end_time} onChange={(e) => setBlockForm({ ...blockForm, end_time: e.target.value })} /></FormField>
+            <FormField label="From"><TimeInput value={blockForm.start_time} onChange={(v) => setBlockForm({ ...blockForm, start_time: v })} /></FormField>
+            <FormField label="To"><TimeInput value={blockForm.end_time} onChange={(v) => setBlockForm({ ...blockForm, end_time: v })} /></FormField>
           </div>
           <FormField label="Capacity" hint="How many appointments fit in this block per day.">
             <Input type="number" min="1" value={blockForm.capacity} onChange={(e) => setBlockForm({ ...blockForm, capacity: e.target.value })} />

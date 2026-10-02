@@ -92,8 +92,10 @@ export default function App() {
           <Route path="/reports/summary" element={<ProtectedRoute roles={['Administrator', 'Staff']}><Shell><AgencySummary /></Shell></ProtectedRoute>} />
           <Route path="/users" element={<ProtectedRoute roles={['Administrator']}><Shell><Users /></Shell></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute roles={['Administrator']}><Shell><Settings /></Shell></ProtectedRoute>} />
-          {/* Demo-only profile prototype for Social Worker / Psychologist. */}
-          <Route path="/profile" element={<ProtectedRoute roles={['Staff', 'Psychologist']}><Shell><MyProfile /></Shell></ProtectedRoute>} />
+          {/* Your own profile. The ISA gets it too (1 Oct 2026): it holds the
+              mobile number the Settings test text goes to, and without it an
+              administrator could never verify one. */}
+          <Route path="/profile" element={<ProtectedRoute roles={['Staff', 'Psychologist', 'Administrator']}><Shell><MyProfile /></Shell></ProtectedRoute>} />
           {/* Anything unmatched — a stale bookmark, a typo, a link to a page a
               role cannot reach — lands on sign-in rather than rendering nothing. */}
           <Route path="*" element={<Navigate to="/login" replace />} />

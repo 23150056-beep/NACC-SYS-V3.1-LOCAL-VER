@@ -760,8 +760,13 @@ shared list. `Child.social_worker` says whose a record is, and
 narrows Staff to it. Administrators (the ISA) see everything; psychologists
 are unchanged (their assigned children).
 
+- **The ISA adds records too.** Taking Add record away from the ISA was
+  tried on 30 Sep 2026 and reverted the same day at the owner's request. An
+  ISA's new record belongs to the social worker picked in its Social Worker
+  field, or to nobody until one is assigned.
 - **A new record is its creator's** (`ChildViewSet.perform_create`), whatever
-  the request says. **Only the ISA moves one** - the record form's Social
+  the request says. **Only the ISA moves one** (a closed case taken over at
+  intake aside, below) - the record form's Social
   Worker field, shown to the ISA only; a SW sending a different one gets 400,
   sending the same one is fine because the edit form resends everything. It
   must be a Staff account.
@@ -778,9 +783,18 @@ are unchanged (their assigned children).
   activity feed, and report-check findings naming a child. A child-related
   query that is not built on `scope_to_visible` is the bug.
 - **The duplicate check still searches every record** - a second record for
-  the same child is the worse failure - but another SW's match says only that
-  it exists and who holds it ("held by R. Santos - ask the ISA"): no id, no
-  birth date, nothing from the record.
+  the same child is the worse failure - but another SW's ACTIVE match says
+  only that it exists and who holds it ("held by R. Santos - ask the ISA"):
+  no id, no birth date, nothing from the record.
+- **A CLOSED case found there can be reopened and taken over** (owner, 30 Sep
+  2026): a returning child arrives at whoever runs intake that day. Add
+  Record offers "Reopen it — it becomes yours" for another SW's (or nobody's)
+  terminated case; `reopen` moves `social_worker` to the one reopening and
+  tells the previous holder (an activity event addressed to them). Only by the
+  name typed at intake - the request carries it and `_intake_match()`, the
+  duplicate check's own rule, must match - so by id alone it is still a 404
+  and nobody can walk the ids collecting closed cases. The ISA's reopen moves
+  nobody. `children/tests/test_reopen_at_intake.py`.
 - **Dashboard is their own; Agency Summary stays agency-wide** (the owner's
   choice): the Summary holds counts with no names and mirrors the agency's own
   report form. The assistant answers a SW about their own records.
@@ -832,6 +846,15 @@ Rules in `children/assignment.py`; design in
   record form says so ("Request withdrawn … stays with …"). It used to be
   announced as asking the holder, because the form compared the pick with
   the pending psychologist rather than with who holds the child.
+- **The Assignment step's availability panel is a week grid**
+  (`pages/children/PsychologistPicker.jsx`, owner's request 30 Sep 2026): a
+  row per psychologist, their caseload beside the name (amber from 5), a
+  column per day with that day's windows in short 12-hour form
+  (`shortRange()`: "8 AM-12 PM", "1-5 PM"), today's column marked, weekend
+  columns only when somebody works them, one-off dates under the row. It
+  replaced a card of "Mon 08:00-12:00" chips per person, which could not be
+  compared across people without reading every chip. Each row is still the
+  button that picks the psychologist.
 - **The case referral chosen on the Assignment step stays in its box** when
   the step is left and reopened (each step unmounts), and has a Remove
   button; the box used to say "No file chosen" while the save still filed it.
@@ -868,6 +891,9 @@ record bears it out:
   `caseData.js` keeps both lists (for the archive filter) pinned by a test.
 - Neither role can use the other's list. Past closures keep what they were
   written with.
+- **Terminating ends with an end dialog** (`useNotice`, owner 30 Sep 2026):
+  "Case terminated", reading back the child and case number, the reason, the
+  closing summary and the date - it was a toast, gone before anyone read it.
 
 ## Interview templates by upload
 
@@ -989,6 +1015,18 @@ is not a system user; see "The custodian and their texts".
 - `send_session_reminders` exits non-zero when any reminder was refused.
   The sign-up email code (`accounts/email_verification.py`) is still in the
   cache, with the same multi-worker weakness.
+- **"No active sender name found" does not mean the account has none.** The
+  owner's live account, sender name approved, answered with it under HTTP 500
+  on 1 Oct 2026. It means the name SENT is not an Active name on the key's
+  account: unset, misspelt (exact match, capitals included), still pending,
+  or another account's key. Check the key reads `account/sendernames` and
+  says which; a sender error at any HTTP status gets that hint.
+- **The ISA has a profile page too** (1 Oct 2026). The Settings test text
+  goes to the caller's own verified number, and `/profile` used to admit
+  only Staff and Psychologists, so an administrator could never verify one
+  and the button could never work. The ISA sees the personal column only:
+  the right-hand column reads `/children/`, `/appointments/` and
+  `/activity/`, which for an administrator are the whole agency's.
 
 ## Role names on screen
 
@@ -996,6 +1034,38 @@ Administrator shows as **"ISA (Administrator)"** and Staff as **"SW (Staff)"**
 (24 Sep 2026), through `roleLabel()` in `ui/index.jsx`. Display only: the
 stored `role_name`, every permission check and every API answer still say
 "Administrator" and "Staff". Never compare anything against the label.
+
+## Times on screen: the 12-hour clock
+
+Owner's request, 29 Sep 2026: no military time anywhere. Every time a person
+reads says "9:30 AM", never "09:30".
+
+- **Screens go through `clock()` / `clockRange()`** in `utils/time.js`, built
+  by hand. `toLocaleTimeString` lets the browser's region pick the clock, so
+  an en-GB machine printed 14:05 - and with `hour12: true`, "2:05 pm".
+- **A time is TYPED: a box that says HH:MM, and AM/PM in a dropdown beside
+  it** (`TimeInput` in `ui/index.jsx`; availability From/To and "Schedule
+  now"). The owner's design, 30 Sep 2026, after a 15-minute list, the
+  browser's time box and two pickers were each tried and turned down. The
+  typing rules are `typeTime()` in `utils/time.js`: the colon is put in, never
+  typed; the hour stops at 12 (a 13th hour's digit is not taken); after 10,
+  11 or 12 the next digit starts the minutes; a space moves on after a
+  one-digit hour, so "3 00" is 03:00 and "12 30" is 12:30; minutes stop at
+  59. Leaving the box or pressing Enter finishes it ("3" -> 03:00). No
+  `<input type="time">` anywhere. It still reads and writes "HH:MM", and
+  sends '' while the box or AM/PM is unfinished.
+- **The AM/PM arrow carries `zIndex: 2`.** index.css lifts every
+  `:focus-visible` control to `position: relative; z-index: 1`, which paints
+  a focused select over an arrow drawn beside it - the shared `Select`'s own
+  arrow vanishes the same way.
+- **The calendar's formats are pinned** (`CAL_FORMATS` in `Schedule.jsx`); the
+  localizer's defaults ask the locale.
+- **Server prose goes through `config/clock.py`**: booking refusals, the
+  availability overlap, the assistant's schedule answers, Monitoring's next
+  session, custodian texts. `scheduling/tests/test_twelve_hour_clock.py`.
+- **Data stays "HH:MM".** A slot's `start`, `availability_today`, the Today
+  strip's `time`: the screen sends them back when booking and compares them as
+  strings, so it formats them, and the API does not.
 
 ## The demo deployment
 
@@ -1050,6 +1120,11 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   self-report detector missed 28%; both belong to `qwen2.5:3b` and transfer to
   nothing. Enforced in code since 27 Sep 2026 (`allow_hosted`, above); until
   then every drafting feature used the hosted model once the flag was on.
+- **The free API sleeps after ~15 minutes idle** and the first request then
+  takes about a minute (entrypoint.sh re-runs migrate and the PSGC steps on
+  every boot). A refresh in that minute used to show a bare "Loading…" that
+  read as broken; `ProtectedRoute`'s `WaitingForServer` now says the server is
+  waking after 3 s and offers "Try again" after 75 s. Not a fault to debug.
 - **Cloudflare retires models** — `llama-3.1-8b` returns 410. Check
   `/api/assistant/model-health/` before assuming the code broke.
 

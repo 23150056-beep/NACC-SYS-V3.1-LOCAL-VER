@@ -1,3 +1,4 @@
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLayout } from '../context/LayoutContext';
@@ -6,7 +7,7 @@ import { useActivity } from '../context/ActivityContext';
 import { Icon } from '../ui';
 import { ACTION_META, eventDestination, eventText } from '../utils/activity';
 import { PURPOSE_LABEL, scheduleName } from '../utils/child';
-import { timeAgo } from '../utils/time';
+import { clock, clockRange, shortRange, timeAgo } from '../utils/time';
 
 /* Ambient context: the numbers, the day and the stream, in a third column.
  *
@@ -103,6 +104,64 @@ export function CensusCard({ wide = false }) {
   );
 }
 
+/* Who is seeing children today, under the day's appointments.
+ *
+ * It was every window run together as one paragraph - "VINCENT ADRIAN CACDAC
+ * 8:00 AM-12:00 PM · Hinata 8:00 AM-12:00 PM · ..." - fourteen lines of it for
+ * seven people, the loudest thing in the rail (owner, 30 Sep 2026: "messy and
+ * hard to ignore"). Now it is one quiet line saying how many are on duty,
+ * opened on request into a list: the name on the left, their windows on the
+ * right in short 12-hour form, one under another, so the hours stay in one
+ * column however long the name. Folded by default; the choice is kept on the device. */
+const DUTY_KEY = 'nacc-on-duty-open';
+
+function OnDutyToday({ availability }) {
+  const [open, setOpen] = useState(() => {
+    try { return localStorage.getItem(DUTY_KEY) === 'true'; } catch { return false; }
+  });
+  const toggle = () => setOpen((v) => {
+    try { localStorage.setItem(DUTY_KEY, String(!v)); } catch { /* private browsing */ }
+    return !v;
+  });
+  const people = useMemo(() => {
+    const by = new Map();
+    availability.forEach((b) => { by.set(b.psychologist, [...(by.get(b.psychologist) || []), b]); });
+    return [...by.entries()]
+      .map(([name, windows]) => ({ name, windows: windows.sort((a, b) => String(a.start).localeCompare(String(b.start))) }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }, [availability]);
+  return (
+    <div style={{ background: 'var(--ink-25)', borderTop: '1px solid var(--divider)' }}>
+      <button
+        type="button" onClick={toggle} aria-expanded={open} aria-controls="on-duty-list"
+        style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 7, padding: '8px 13px', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: 'var(--font-sans)', textAlign: 'left' }}
+      >
+        <Icon name="clock" size={13} style={{ color: 'var(--success-600)', flex: 'none' }} />
+        <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 11.5, color: 'var(--text-body)' }}>
+          {people.length} psychologist{people.length === 1 ? '' : 's'} on duty
+        </span>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, fontWeight: 700, fontSize: 11, color: 'var(--blue-700)', flex: 'none' }}>
+          {open ? 'Hide' : 'Hours'}
+          <Icon name={open ? 'chevron-up' : 'chevron-down'} size={13} />
+        </span>
+      </button>
+      {open && (
+        <ul id="on-duty-list" style={{ listStyle: 'none', margin: 0, padding: '0 13px 9px' }}>
+          {people.map((p, i) => (
+            <li key={p.name} style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto', alignItems: 'start', columnGap: 10, padding: '5px 0', borderTop: i ? '1px solid var(--divider-row)' : 'none', fontSize: 11.5, lineHeight: 1.4 }}>
+              <span style={{ fontWeight: 600, color: 'var(--text-strong)', overflowWrap: 'anywhere' }}>{p.name}</span>
+              <span title={p.windows.map((b) => clockRange(b.start, b.end)).join(', ')}
+                style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', fontWeight: 700, color: 'var(--success-700)', whiteSpace: 'nowrap' }}>
+                {p.windows.map((b) => <span key={`${b.start}-${b.end}`}>{shortRange(b.start, b.end)}</span>)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function TodayCard() {
   const navigate = useNavigate();
   const { isPsych, today, availability } = useRailData();
@@ -111,14 +170,7 @@ export function TodayCard() {
       icon="calendar-check"
       title={isPsych ? 'My day' : 'Today'}
       meta={<span style={{ fontWeight: 600, fontSize: 11, color: 'var(--text-muted)' }}>{today.length} appt{today.length === 1 ? '' : 's'}</span>}
-      footer={availability.length > 0 && (
-        <div style={{ padding: '9px 13px', background: 'var(--ink-25)', display: 'flex', alignItems: 'flex-start', gap: 7 }}>
-          <Icon name="clock" size={14} style={{ color: 'var(--success-500)', marginTop: 1 }} />
-          <span style={{ fontWeight: 600, fontSize: 11, lineHeight: 1.5, color: 'var(--text-body)' }}>
-            {availability.map((b) => `${b.psychologist} ${b.start}–${b.end}`).join(' · ')}
-          </span>
-        </div>
-      )}
+      footer={availability.length > 0 && <OnDutyToday availability={availability} />}
     >
       {today.length === 0 ? (
         <p style={{ padding: '16px 13px', fontSize: 12, color: 'var(--text-muted)' }}>Nothing booked today.</p>
@@ -131,7 +183,7 @@ export function TodayCard() {
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--blue-50)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <span className="racco-mono" style={{ width: 44, flex: 'none', fontWeight: 600, fontSize: 12, color: t.time, paddingTop: 1 }}>{a.time}</span>
+            <span className="racco-mono" style={{ width: 62, flex: 'none', whiteSpace: 'nowrap', fontWeight: 600, fontSize: 12, color: t.time, paddingTop: 1 }}>{clock(a.time)}</span>
             <span style={{ flex: 1, minWidth: 0, borderLeft: `2px solid ${t.tone}`, paddingLeft: 10 }}>
               <span style={{ display: 'block', fontWeight: 700, fontSize: 12.5, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{scheduleName(a)}</span>
               <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>

@@ -25,6 +25,7 @@ from datetime import datetime, timedelta
 from django.utils import timezone
 
 from clinical.models import CaseReferral
+from config.clock import clock
 from scheduling.models import Appointment, Unavailability
 
 # How far either side of the new appointment to look for clashes. Comfortably
@@ -172,13 +173,13 @@ def errors_for(psychologist, child, start, duration_minutes,
         # may be a social worker who did not refer them (visibility.py).
         return {"start": f"{clash.psychologist.fullname or 'This psychologist'} is "
                          f"already booked (case C-{clash.child_id:04d}) from "
-                         f"{timezone.localtime(clash.start).strftime('%H:%M')}."}
+                         f"{clock(timezone.localtime(clash.start))}."}
 
     if child is not None:
         clash = _clashes(Appointment.objects.filter(child=child), start, end, exclude_id)
         if clash is not None:
             return {"child": f"{clash.child.fullname} already has an appointment at "
-                             f"{timezone.localtime(clash.start).strftime('%H:%M')} "
+                             f"{clock(timezone.localtime(clash.start))} "
                              f"that day. A child cannot be in two places at once."}
 
     return {}

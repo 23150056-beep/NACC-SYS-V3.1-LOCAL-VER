@@ -5,6 +5,7 @@ import {
 } from '../api/assistant';
 import { useAssistant } from '../context/AssistantContext';
 import { Icon, roleLabel } from '../ui';
+import { clockRange } from '../utils/time';
 
 /* The chatbot, docked on every protected screen.
  *
@@ -200,7 +201,7 @@ function Answer({ result }) {
       <Line key={i}>
         <strong>{s.psychologist}</strong>
         <span style={{ color: 'var(--text-muted)' }}>
-          {' '}· {s.weekday} {s.date} · {s.start}–{s.end}
+          {' '}· {s.weekday} {s.date} · {clockRange(s.start, s.end)}
         </span>
         {/* Places left, not just "free": a window with one place is a
             different answer from a window with four. */}

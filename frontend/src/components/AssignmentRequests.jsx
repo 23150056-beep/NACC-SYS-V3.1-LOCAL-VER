@@ -4,10 +4,10 @@ import { useAuth } from '../context/AuthContext';
 import { useActivity } from '../context/ActivityContext';
 import { useCensus } from '../context/CensusContext';
 import { useConfirm, useNotice } from '../context/ConfirmContext';
-import { Alert, Badge, Button, FormField, Icon, IconChip, Input, Modal, Select } from '../ui';
+import { Alert, Badge, Button, FormField, Icon, IconChip, Input, Modal, Select, TimeInput } from '../ui';
 import { DURATIONS, PURPOSE_LABEL, initialsOf } from '../utils/child';
 import { firstError } from '../utils/errors';
-import { timeAgo } from '../utils/time';
+import { clock, clockRange, timeAgo } from '../utils/time';
 
 /* "Waiting for your answer" - the children a psychologist has been asked to
  * take (owner's request, 28 Sep 2026).
@@ -121,7 +121,7 @@ export default function AssignmentRequests({ onChanged }) {
         title: 'All set',
         description: `${req.child_name} is now in your records, and the first session is booked.`,
         details: [['Child', `${req.child_name} (${req.child_ref})`],
-          ['First session', `${dayLabel(booked.date)}, ${booked.time}`],
+          ['First session', `${dayLabel(booked.date)}, ${clock(booked.time)}`],
           ['Length', DURATIONS.find((d) => d.v === booked.duration)?.label],
           ['Purpose', PURPOSE_LABEL[booked.purpose]]],
       });
@@ -298,7 +298,7 @@ function ScheduleFirstSession({ request, psychologistId, onDone }) {
       description: `This books ${request.child_name}'s first session on your calendar.`,
       confirmLabel: 'Yes, book it',
       details: [['Child', `${request.child_name} (${request.child_ref})`], ['Date', dayLabel(when.date)],
-        ['Time', when.time], ['Length', DURATIONS.find((d) => d.v === duration)?.label],
+        ['Time', clock(when.time)], ['Length', DURATIONS.find((d) => d.v === duration)?.label],
         ['Purpose', PURPOSE_LABEL[purpose]]],
     }))) return;
     setBusy(true);
@@ -385,7 +385,7 @@ function ScheduleFirstSession({ request, psychologistId, onDone }) {
               <Input type="date" value={date} min={localIsoDay()} onChange={(e) => setDate(e.target.value)} />
             </FormField>
             <FormField label="Time">
-              <Input type="time" value={time} step={900} onChange={(e) => setTime(e.target.value)} />
+              <TimeInput value={time} onChange={setTime} />
             </FormField>
           </div>
           <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 0', lineHeight: 1.5 }}>
@@ -416,7 +416,7 @@ function ScheduleFirstSession({ request, psychologistId, onDone }) {
                     style={{ padding: '8px 10px', borderRadius: 'var(--radius-control)', textAlign: 'left', cursor: 'pointer', fontFamily: 'var(--font-sans)', border: `1px solid ${on ? 'var(--blue-500)' : 'var(--border)'}`, background: on ? 'var(--blue-50)' : 'var(--surface)' }}
                   >
                     <span style={{ display: 'block', fontWeight: 800, fontSize: 13, color: on ? 'var(--blue-700)' : 'var(--text-strong)' }}>{dayLabel(o.date)}</span>
-                    <span className="racco-mono" style={{ fontSize: 12, color: 'var(--text-body)' }}>{o.start}–{o.end}</span>
+                    <span className="racco-mono" style={{ fontSize: 12, color: 'var(--text-body)' }}>{clockRange(o.start, o.end)}</span>
                   </button>
                 );
               })}
