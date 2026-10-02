@@ -63,7 +63,9 @@ class LeaveBlocksBookingTest(SchedulingBase):
         # "Not available" is what the availability window already says. This is
         # a different fact and should read like one.
         self._leave()
-        self.assertIn("Sep", str(self._book().data))
+        # The month the leave falls in, not a fixed one: this said "Sep" and
+        # went red on the first run after the month turned.
+        self.assertIn(f"{self.when.day} {self.when:%b}", str(self._book().data))
 
     def test_a_session_on_the_last_day_is_refused_too(self):
         # Inclusive at both ends: leave "12th to the 16th" includes the 16th,
@@ -204,6 +206,24 @@ class WhoMayDeclareItTest(SchedulingBase):
     def test_a_psychologist_may_declare_their_own(self):
         self._auth("p@racco1.gov.ph")
         self.assertEqual(201, self._declare().status_code)
+
+    def test_a_psychologist_need_not_name_themselves(self):
+        """The view settles whose leave it is; the serializer used to demand
+        the field first ("This field is required") for every role."""
+        self._auth("p@racco1.gov.ph")
+        res = self.client.post("/api/unavailability/", {
+            "starts_on": self.day.isoformat(), "ends_on": self.day.isoformat(),
+            "reason": "Training"}, format="json")
+        self.assertEqual(201, res.status_code, res.data)
+        self.assertEqual(self.psy.id, res.data["psychologist"])
+
+    def test_the_administrator_is_still_asked_whose_leave_it_is(self):
+        self._auth("a@racco1.gov.ph")
+        res = self.client.post("/api/unavailability/", {
+            "starts_on": self.day.isoformat(), "ends_on": self.day.isoformat(),
+            "reason": "Training"}, format="json")
+        self.assertEqual(400, res.status_code)
+        self.assertIn("Whose leave is this?", str(res.data["psychologist"]))
 
     def test_a_psychologist_may_not_declare_a_colleagues(self):
         self._auth("p@racco1.gov.ph")

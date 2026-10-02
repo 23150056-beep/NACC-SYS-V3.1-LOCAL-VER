@@ -335,6 +335,34 @@ Declaring leave never cancels what is booked inside it, and removing an
 availability window never does either. Those sessions were agreed with
 somebody; both screens report the count and change nothing.
 
+**The calendar screen** (`pages/Schedule.jsx`, tested in a browser as a SW, a
+psychologist and the ISA on 2 Oct 2026):
+
+- **Away days are shaded** (`dayPropGetter`), but only on ONE person's
+  calendar - a psychologist's own, or the one picked in "Show one
+  psychologist". With everyone showing, a day is not closed because one person
+  is away, so there it is only NAMED ("Away: M. Bulan") in the month cell. Only
+  upcoming leave is fetched (`?upcoming=true`), so past leave is not shaded.
+- **A psychologist records their own leave** from "Away & leave" on their
+  availability card, which opens the same page the ISA gets for them
+  (`canRecordLeave`: the ISA for anybody, a psychologist for themselves - the
+  server's rule). That page used to be admin-only, so they could not record
+  leave or see what the ISA had recorded for them. The leave serializer does
+  not require `psychologist`; the view fills in the psychologist's own and
+  asks anybody else "Whose leave is this?".
+- **The drawers and the appointment card are the shared `Drawer` and `Modal`**
+  from `ui`, so Escape, a close button, a focus trap and focus return come
+  with them. Hand-built overlays had none of those. The card closes when
+  Reschedule opens the drawer, or the first click only dismissed it.
+- **An edit says it is an edit.** A weekly pattern is edited with no block id
+  (`blockForm.byDay`), so "is there an id" read as "add": the title, button and
+  toast said "Add Availability". `editingBlock` covers both. The weekday
+  ticks still key off the id - editing a pattern needs them.
+- Refusals read as sentences (`firstError`), never `{"end_time": [...]}`.
+- axe-core on `/schedule`: one `aria-required-children` violation remains, on
+  react-big-calendar's own "+n more" button inside its row. It is identical on
+  the unmodified page; the drawers and the availability page audit clean.
+
 ## Removed: the adoption tracker and SAMD readiness
 
 Both were removed on 17 Sep 2026 at the owner's request — the `adoption` and

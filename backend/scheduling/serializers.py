@@ -144,6 +144,11 @@ class UnavailabilitySerializer(serializers.ModelSerializer):
         model = Unavailability
         fields = ["id", "psychologist", "psychologist_name", "starts_on",
                   "ends_on", "reason", "booked_during", "created_at"]
+        # Whose leave it is gets settled in the view: a psychologist's own
+        # when they name nobody, "Whose leave is this?" for anybody else.
+        # Required here, a psychologist who left it out was told "This field
+        # is required" about a field the server fills in itself.
+        extra_kwargs = {"psychologist": {"required": False}}
 
     def get_booked_during(self, obj):
         """Sessions still standing inside these dates.

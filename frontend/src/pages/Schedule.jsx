@@ -9,9 +9,9 @@ import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { loadAll } from '../utils/load';
 import { exactDate } from '../utils/time';
-import { DURATIONS, scheduleName } from '../utils/child';
+import { DURATIONS, scheduleName, shortName } from '../utils/child';
 import {
-  Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, hoverLift, Icon, iconBtn, Input, PAGE, PageHeader, Select,
+  Alert, Avatar, Badge, Button, Card, ConfirmDialog, Drawer, FormField, hoverLift, Icon, iconBtn, Input, Modal, PAGE, PageHeader, Select,
 } from '../ui';
 import { prefetchBriefs } from '../api/assistant';
 import { useOpenFromLink } from '../utils/links';
@@ -147,12 +147,38 @@ function nextWorkingDates(blocks, leave, psychologistId, count = 5) {
   return out;
 }
 
-const todayIso = () => {
-  // Local date. toISOString() converts to UTC and hands back yesterday for
-  // anybody east of Greenwich, which is all of the Philippines.
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+// Local date. toISOString() converts to UTC and hands back yesterday for
+// anybody east of Greenwich, which is all of the Philippines.
+const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const todayIso = () => isoOf(new Date());
+
+/* "Mondays", or "Sat 10 Oct 2026" for a window on one date. The list used to
+   add an "s" to whichever it had, and read "2026-10-10s". */
+const blockDay = (b) => {
+  if (!b.date) return `${WEEKDAYS[b.weekday]}s`;
+  const [y, m, d] = String(b.date).split('-').map(Number);
+  return format(new Date(y, m - 1, d), 'EEE d MMM yyyy');
 };
+
+/* Every day a leave row covers, inclusive at both ends - the server's own
+   rule (scheduling/models.py Unavailability). Capped so a mistyped year cannot
+   build a ten-thousand-day list. */
+function daysOfLeave(l) {
+  const [y, m, d] = String(l.starts_on).split('-').map(Number);
+  const [y2, m2, d2] = String(l.ends_on).split('-').map(Number);
+  const out = [];
+  const cursor = new Date(y, m - 1, d);
+  const last = new Date(y2, m2 - 1, d2);
+  for (let i = 0; i < 400 && cursor <= last; i += 1) {
+    out.push(isoOf(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return out;
+}
+
+/* Days somebody is away, shaded on the calendar. The one thing that tells the
+   people booking, before they try, that a day is closed. */
+const AWAY_STRIPES = 'repeating-linear-gradient(135deg, var(--amber-50), var(--amber-50) 7px, var(--amber-100) 7px, var(--amber-100) 14px)';
 
 const STATUS_COLOR = { scheduled: 'var(--blue-600)', completed: 'var(--success-600)', no_show: 'var(--amber-500)', cancelled: 'var(--text-faint)' };
 
@@ -197,11 +223,55 @@ export default function Schedule() {
   // around the month on screen covers the calendar plus a month either side,
   // so ordinary month-stepping never shows a gap.
   const range = useMemo(() => {
-    const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     const from = new Date(calDate.getFullYear(), calDate.getMonth() - 1, 1);
     const to = new Date(calDate.getFullYear(), calDate.getMonth() + 2, 0);
-    return { from: iso(from), to: iso(to) };
+    return { from: isoOf(from), to: isoOf(to) };
   }, [calDate]);
+
+  /* Who is away on which day, for the calendar. A psychologist's calendar is
+     their own, so only their own leave; with one psychologist picked it is
+     theirs; with everyone showing it is everybody's, and a day is not closed
+     because ONE person is away - so there it is only named, never shaded. */
+  const awayByDay = useMemo(() => {
+    const map = new Map();
+    const mine = isPsych ? String(user?.id) : calPsy;
+    for (const l of leave) {
+      if (mine && String(l.psychologist) !== String(mine)) continue;
+      for (const day of daysOfLeave(l)) {
+        if (!map.has(day)) map.set(day, []);
+        map.get(day).push({ name: l.psychologist_name || 'Someone', reason: l.reason });
+      }
+    }
+    return map;
+  }, [leave, isPsych, user?.id, calPsy]);
+  const shadeAway = isPsych || !!calPsy;
+  const dayPropGetter = useCallback((date) => (
+    shadeAway && awayByDay.has(isoOf(date)) ? { style: { background: AWAY_STRIPES } } : {}
+  ), [awayByDay, shadeAway]);
+  // react-big-calendar's own date number, plus who is away that day.
+  const calComponents = useMemo(() => ({
+    month: {
+      dateHeader: ({ label, date, drilldownView, onDrillDown }) => {
+        const away = awayByDay.get(isoOf(date));
+        const who = away ? [...new Set(away.map((a) => a.name))] : [];
+        return (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, padding: '0 3px' }}>
+            {who.length > 0 ? (
+              <span
+                title={`Away: ${who.join(', ')}${away[0].reason ? ` (${away[0].reason})` : ''}`}
+                style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--amber-700)', background: 'var(--amber-100)', borderRadius: 4, padding: '1px 5px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+              >
+                Away{shadeAway ? '' : `: ${who.length === 1 ? shortName(who[0]) : `${who.length} people`}`}
+              </span>
+            ) : <span />}
+            {drilldownView
+              ? <button type="button" className="rbc-button-link" onClick={onDrillDown}>{label}</button>
+              : <span>{label}</span>}
+          </div>
+        );
+      },
+    },
+  }), [awayByDay, shadeAway]);
 
   const load = useCallback(() => loadAll(toast, [
     () => api.get(`/appointments/?from=${range.from}&to=${range.to}`).then((r) => setAppointments(r.data)),
@@ -332,8 +402,12 @@ export default function Schedule() {
     [openPsy, blocks],
   );
   const openPsyPatterns = useMemo(() => patternsOf(openPsyBlocks), [openPsyBlocks]);
+  // The ISA for anybody, a psychologist for themselves - the server's own rule
+  // for both hours and leave. The page was admin-only, so a psychologist had
+  // nowhere to record their own leave.
   const canRecordLeave = openPsy && (role === 'Administrator'
     || (isPsych && String(openPsy.id) === String(user?.id)));
+  const myLeaveCount = isPsych ? leave.filter((l) => String(l.psychologist) === String(user?.id)).length : 0;
   const openPsyLeave = useMemo(
     () => (openPsy ? leave.filter((l) => String(l.psychologist) === String(openPsy.id)) : []),
     [openPsy, leave],
@@ -383,6 +457,9 @@ export default function Schedule() {
      the entire point. */
   const openReschedule = (appt) => {
     setError('');
+    // The card the button was on closes: it used to stay open over the drawer,
+    // so the first click anywhere only dismissed it.
+    setSel(null);
     const at = new Date(appt.start);
     const pad = (n) => String(n).padStart(2, '0');
     setBooking({
@@ -421,6 +498,10 @@ export default function Schedule() {
       psychologist_name: b.psychologist_name,
     });
   };
+
+  // One block being edited, or a whole weekly pattern: either way it is an
+  // edit, and the form said "Add Availability ... Availability added".
+  const editingBlock = !!(blockForm?.id || blockForm?.byDay);
 
   const saveBlock = async (e) => {
     e.preventDefault();
@@ -483,10 +564,10 @@ export default function Schedule() {
       } else {
         await api.post('/availability/', { ...base, weekday: null, date: blockForm.date });
       }
-      toast.success(blockForm.id ? 'Availability updated' : 'Availability added');
+      toast.success(editingBlock ? 'Availability updated' : 'Availability added');
       setBlockForm(null); load();
     } catch (err) {
-      setError(JSON.stringify(err.response?.data || 'Could not save availability.'));
+      setError(firstError(err.response?.data, 'Could not save availability.'));
     }
   };
 
@@ -569,6 +650,7 @@ export default function Schedule() {
       end_time: pattern.end,
       capacity: pattern.capacity,
       psychologist: String(pattern.blocks[0]?.psychologist ?? ''),
+      psychologist_name: pattern.blocks[0]?.psychologist_name,
     });
   };
 
@@ -577,7 +659,7 @@ export default function Schedule() {
     setStatusBusy(true);
     try {
       await api.post(`/appointments/${a.id}/${actionName}/`);
-      toast.success(`Appointment ${actionName === 'no_show' ? 'marked no-show' : actionName + 'd'}`);
+      toast.success(`Appointment ${{ complete: 'completed', cancel: 'cancelled', no_show: 'marked no-show' }[actionName]}`);
       setConfirmStatus(null); setSel(null); load();
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Could not update.');
@@ -592,7 +674,7 @@ export default function Schedule() {
           {/* Full-page availability view for one psychologist */}
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
             <Button variant="ghost" onClick={() => setOpenPsy(null)} iconLeft={<Icon name="arrow-left" size={17} />}>Back to Calendar</Button>
-            {role === 'Administrator' && (
+            {canRecordLeave && (
               <Button variant="secondary" iconLeft={<Icon name="clock" size={16} />}
                 onClick={() => { setError(''); setBlockForm({ mode: 'weekly', weekdays: [], date: '', start_time: '09:00', end_time: '12:00', capacity: 2, psychologist: openPsy.id }); }}>
                 Add Availability
@@ -651,7 +733,7 @@ export default function Schedule() {
                           {p.booked > 0 && (
                             <Badge tone="brand" size="sm">{p.booked} booked</Badge>
                           )}
-                          {role === 'Administrator' && (
+                          {canRecordLeave && (
                             <>
                               <button title="Edit this pattern" onClick={() => openEditPattern(p)} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={14} /></button>
                               <button title="Remove this pattern" onClick={() => setRemoving(p)} style={iconBtn('var(--red-700)')}><Icon name="trash-2" size={14} /></button>
@@ -724,7 +806,7 @@ export default function Schedule() {
                             {b.date} · {String(b.start_time).slice(0, 5)}–{String(b.end_time).slice(0, 5)}
                           </span>
                           <Badge tone="neutral" size="sm">{b.capacity} slot{b.capacity === 1 ? '' : 's'}</Badge>
-                          {role === 'Administrator' && (
+                          {canRecordLeave && (
                             <>
                               <button title="Edit" onClick={() => openEditBlock(b)} style={iconBtn('var(--blue-600)')}><Icon name="pencil" size={14} /></button>
                               <button title="Remove" onClick={() => askRemoveBlock(b)} style={iconBtn('var(--red-700)')}><Icon name="trash-2" size={14} /></button>
@@ -748,6 +830,9 @@ export default function Schedule() {
               <span style={{ width: 9, height: 9, borderRadius: 3, background: color }} />{k.replace('_', '-')}
             </span>
           ))}
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 11.5, color: 'var(--text-body)' }}>
+            <span style={{ width: 9, height: 9, borderRadius: 3, background: AWAY_STRIPES, border: '1px solid var(--amber-500)' }} />away
+          </span>
         </div>
         {/* Four psychologists' diaries drawn on top of each other is not a
             calendar anybody can read. A psychologist already sees only their
@@ -778,6 +863,8 @@ export default function Schedule() {
             views={['month', 'week', 'day']}
             popup
             eventPropGetter={eventStyleGetter}
+            dayPropGetter={dayPropGetter}
+            components={calComponents}
             onSelectEvent={(ev) => setSel(ev.resource)}
             selectable
             date={calDate}
@@ -802,7 +889,17 @@ export default function Schedule() {
         </div>
       </div>
 
-      <Card eyebrow={isPsych ? 'Your availability' : 'Psychologist availability'} title="Availability blocks" padding="20px">
+      <Card
+        eyebrow={isPsych ? 'Your availability' : 'Psychologist availability'} title="Availability blocks" padding="20px"
+        actions={isPsych ? (
+          // Leave lives on the availability page, which only the ISA could
+          // open: a psychologist could not record, or even see, their own.
+          <Button variant="secondary" size="sm" iconLeft={<Icon name="plane" size={15} />}
+            onClick={() => setOpenPsy({ id: user.id, name: user.fullname || 'You' })}>
+            Away &amp; leave{myLeaveCount ? ` (${myLeaveCount})` : ''}
+          </Button>
+        ) : null}
+      >
         {myBlocks.length === 0 ? (
           <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>
             {isPsych ? 'No availability yet — add the times you accept bookings.' : 'No availability blocks defined yet.'}
@@ -814,7 +911,7 @@ export default function Schedule() {
                 <Icon name="clock" size={16} style={{ color: 'var(--blue-600)' }} />
                 <div style={{ flex: 1 }}>
                   <span style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>
-                    {b.date || WEEKDAYS[b.weekday]}s · {String(b.start_time).slice(0, 5)}–{String(b.end_time).slice(0, 5)}
+                    {blockDay(b)} · {String(b.start_time).slice(0, 5)}–{String(b.end_time).slice(0, 5)}
                   </span>
                 </div>
                 <Badge tone="neutral" size="sm">{b.capacity} slot{b.capacity === 1 ? '' : 's'}</Badge>
@@ -852,42 +949,39 @@ export default function Schedule() {
       </>
       )}
 
-      {/* Booking drawer */}
+      {/* Leave drawer */}
       {leaveForm && (
-        <div onClick={() => setLeaveForm(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.32)', display: 'flex', justifyContent: 'flex-end', zIndex: 70 }}>
-          <form onSubmit={saveLeave} onClick={(e) => e.stopPropagation()} style={{ width: 400, maxWidth: '92%', height: '100%', background: 'var(--surface)', boxShadow: 'var(--shadow-xl)', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--border)', background: 'var(--ink-50)', fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>
-              Record leave
-            </div>
-            <div className="racco-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{String(error)}</Alert>}
-              <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-muted)' }}>
-                Nothing can be booked into these dates. Sessions already booked
-                are <strong>not</strong> cancelled &mdash; they stay on the
-                calendar and are counted for you.
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <FormField label="First day" required>
-                  <Input type="date" value={leaveForm.starts_on}
-                         onChange={(e) => setLeaveForm({ ...leaveForm, starts_on: e.target.value, ends_on: leaveForm.ends_on < e.target.value ? e.target.value : leaveForm.ends_on })} />
-                </FormField>
-                <FormField label="Last day" required hint="Inclusive.">
-                  <Input type="date" value={leaveForm.ends_on} min={leaveForm.starts_on}
-                         onChange={(e) => setLeaveForm({ ...leaveForm, ends_on: e.target.value })} />
-                </FormField>
-              </div>
-              <FormField label="Reason" hint="Leave, training, court &mdash; whatever it is.">
-                <Input value={leaveForm.reason} placeholder="Annual leave"
-                       onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })} />
-              </FormField>
-            </div>
-            <div style={{ padding: 16, borderTop: '1px solid var(--border)' }}>
-              <Button type="submit" variant="primary" fullWidth iconLeft={<Icon name="plane" size={16} />}>
-                Record it
-              </Button>
-            </div>
-          </form>
-        </div>
+        <Drawer
+          as="form" onSubmit={saveLeave} width={400}
+          title="Record leave"
+          onClose={() => setLeaveForm(null)}
+          footer={(
+            <Button type="submit" variant="primary" fullWidth iconLeft={<Icon name="plane" size={16} />}>
+              Record it
+            </Button>
+          )}
+        >
+          {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{String(error)}</Alert>}
+          <div style={{ fontSize: 13, lineHeight: 1.6, color: 'var(--text-muted)' }}>
+            Nothing can be booked into these dates. Sessions already booked
+            are <strong>not</strong> cancelled &mdash; they stay on the
+            calendar and are counted for you.
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <FormField label="First day" required>
+              <Input type="date" value={leaveForm.starts_on}
+                     onChange={(e) => setLeaveForm({ ...leaveForm, starts_on: e.target.value, ends_on: leaveForm.ends_on < e.target.value ? e.target.value : leaveForm.ends_on })} />
+            </FormField>
+            <FormField label="Last day" required hint="Inclusive.">
+              <Input type="date" value={leaveForm.ends_on} min={leaveForm.starts_on}
+                     onChange={(e) => setLeaveForm({ ...leaveForm, ends_on: e.target.value })} />
+            </FormField>
+          </div>
+          <FormField label="Reason" hint="Leave, training, court &mdash; whatever it is.">
+            <Input value={leaveForm.reason} placeholder="Annual leave"
+                   onChange={(e) => setLeaveForm({ ...leaveForm, reason: e.target.value })} />
+          </FormField>
+        </Drawer>
       )}
 
       {removingLeave && (
@@ -966,299 +1060,291 @@ export default function Schedule() {
         </ConfirmDialog>
       )}
 
+      {/* Booking drawer */}
       {booking && (
-        <div onClick={() => setBooking(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.32)', display: 'flex', justifyContent: 'flex-end', zIndex: 70 }}>
-          <form onSubmit={book} onClick={(e) => e.stopPropagation()} style={{ width: 420, maxWidth: '92%', height: '100%', background: 'var(--surface)', boxShadow: 'var(--shadow-xl)', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--border)', background: 'var(--ink-50)', fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>
-              {booking.id ? 'Move appointment' : 'Book appointment'}
-            </div>
-            <div className="racco-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{String(error)}</Alert>}
-              {booking.id ? (
-                <FormField label="Child">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 13px', borderRadius: 'var(--radius-md)', background: 'var(--ink-50)', border: '1px solid var(--border)', color: 'var(--text-strong)', fontWeight: 700, fontSize: 14 }}>
-                    {booking.label}
-                    <Icon name="lock" size={13} style={{ color: 'var(--text-faint)', marginLeft: 'auto' }} />
-                  </div>
-                </FormField>
-              ) : (
-              <FormField label="Child" required>
-                <Select value={booking.child} onChange={(e) => {
-                  const childId = e.target.value;
-                  const c = children.find((x) => String(x.id) === childId);
-                  setBooking({ ...booking, child: childId, psychologist: booking.psychologist || (c?.psychologist ?? '') });
-                }}>
-                  <option value="">— Select child —</option>
-                  {children.map((c) => <option key={c.id} value={c.id}>{c.fullname}</option>)}
-                </Select>
-              </FormField>
-              )}
-              {!isPsych && (
-                <FormField label="Psychologist" required hint="Bookings must fall inside their availability.">
-                  <Select value={booking.psychologist} onChange={(e) => setBooking({ ...booking, psychologist: e.target.value })}>
-                    <option value="">— Select psychologist —</option>
-                    {psychologists.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </Select>
-                </FormField>
-              )}
-              {/* Purpose and length come BEFORE the day, because both change
-                  which times are free. Asking for a time first and letting the
-                  length invalidate it afterwards is how the old form produced
-                  a refusal only once you pressed Book. */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <FormField label="Purpose">
-                  <Select value={booking.purpose} onChange={(e) => setBooking({ ...booking, purpose: e.target.value })}>
-                    {PURPOSES.map((p) => <option key={p.v} value={p.v}>{p.label}</option>)}
-                  </Select>
-                </FormField>
-                <FormField label="Length">
-                  <Select
-                    value={booking.duration}
-                    onChange={(e) => setBooking({ ...booking, duration: Number(e.target.value), time: '' })}
-                  >
-                    {DURATIONS.map((d) => <option key={d.v} value={d.v}>{d.label}</option>)}
-                  </Select>
-                </FormField>
+        <Drawer
+          as="form" onSubmit={book} width={420}
+          title={booking.id ? 'Move appointment' : 'Book appointment'}
+          onClose={() => setBooking(null)}
+          footer={(
+            // Says what is still missing rather than sitting there grey.
+            <Button
+              type="submit" variant="primary" fullWidth
+              disabled={!booking.child || !booking.date || !booking.time || (!isPsych && !booking.psychologist)}
+              title={!booking.child ? 'Choose a child'
+                : (!isPsych && !booking.psychologist) ? 'Choose a psychologist'
+                  : !booking.date ? 'Choose a day'
+                    : !booking.time ? 'Choose a time' : booking.id ? 'Move it' : 'Book it'}
+              iconLeft={<Icon name="calendar" size={16} />}
+            >
+              {booking.time ? `${booking.id ? 'Move to' : 'Book'} ${booking.time}` : (booking.id ? 'Move' : 'Book')}
+            </Button>
+          )}
+        >
+          {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{String(error)}</Alert>}
+          {booking.id ? (
+            <FormField label="Child">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 13px', borderRadius: 'var(--radius-md)', background: 'var(--ink-50)', border: '1px solid var(--border)', color: 'var(--text-strong)', fontWeight: 700, fontSize: 14 }}>
+                {booking.label}
+                <Icon name="lock" size={13} style={{ color: 'var(--text-faint)', marginLeft: 'auto' }} />
               </div>
-              <FormField
-                label="Day" required
-                hint={bookingPsy && bookingWorkingDays.length
-                  ? `Works ${spokenDays(bookingWorkingDays)}. Any other day has nothing to offer.`
-                  : undefined}
+            </FormField>
+          ) : (
+          <FormField label="Child" required>
+            <Select value={booking.child} onChange={(e) => {
+              const childId = e.target.value;
+              const c = children.find((x) => String(x.id) === childId);
+              setBooking({ ...booking, child: childId, psychologist: booking.psychologist || (c?.psychologist ?? '') });
+            }}>
+              <option value="">— Select child —</option>
+              {children.map((c) => <option key={c.id} value={c.id}>{c.fullname}</option>)}
+            </Select>
+          </FormField>
+          )}
+          {!isPsych && (
+            <FormField label="Psychologist" required hint="Bookings must fall inside their availability.">
+              <Select value={booking.psychologist} onChange={(e) => setBooking({ ...booking, psychologist: e.target.value })}>
+                <option value="">— Select psychologist —</option>
+                {psychologists.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </Select>
+            </FormField>
+          )}
+          {/* Purpose and length come BEFORE the day, because both change
+              which times are free. Asking for a time first and letting the
+              length invalidate it afterwards is how the old form produced
+              a refusal only once you pressed Book. */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <FormField label="Purpose">
+              <Select value={booking.purpose} onChange={(e) => setBooking({ ...booking, purpose: e.target.value })}>
+                {PURPOSES.map((p) => <option key={p.v} value={p.v}>{p.label}</option>)}
+              </Select>
+            </FormField>
+            <FormField label="Length">
+              <Select
+                value={booking.duration}
+                onChange={(e) => setBooking({ ...booking, duration: Number(e.target.value), time: '' })}
               >
-                <Input
-                  type="date" value={booking.date} min={todayIso()}
-                  onChange={(e) => setBooking({ ...booking, date: e.target.value, time: '' })}
-                />
-                {/* The days they can actually be booked on. A native date input
-                    cannot grey out a weekday, so the alternative was letting
-                    somebody try days one at a time and read an empty panel
-                    each time. Leave is excluded here too. */}
-                {bookingNextDays.length > 0 && (
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-                    {bookingNextDays.map((d) => {
-                      const on = booking.date === d.iso;
-                      return (
-                        <button
-                          key={d.iso} type="button" aria-pressed={on}
-                          onClick={() => setBooking({ ...booking, date: d.iso, time: '' })}
-                          style={{
-                            padding: '5px 10px', borderRadius: 'var(--radius-pill)',
-                            border: `1px solid ${on ? 'var(--blue-600)' : 'var(--border)'}`,
-                            background: on ? 'var(--blue-600)' : 'var(--surface)',
-                            color: on ? '#fff' : 'var(--text-body)',
-                            fontFamily: 'var(--font-sans)', fontWeight: 700,
-                            fontSize: 11.5, cursor: 'pointer',
-                          }}
-                        >
-                          {d.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
-              </FormField>
+                {DURATIONS.map((d) => <option key={d.v} value={d.v}>{d.label}</option>)}
+              </Select>
+            </FormField>
+          </div>
+          <FormField
+            label="Day" required htmlFor="booking-day"
+            hint={bookingPsy && bookingWorkingDays.length
+              ? `Works ${spokenDays(bookingWorkingDays)}. Any other day has nothing to offer.`
+              : undefined}
+          >
+            <Input
+              id="booking-day" type="date" value={booking.date} min={todayIso()}
+              onChange={(e) => setBooking({ ...booking, date: e.target.value, time: '' })}
+            />
+            {/* The days they can actually be booked on. A native date input
+                cannot grey out a weekday, so the alternative was letting
+                somebody try days one at a time and read an empty panel
+                each time. Leave is excluded here too. */}
+            {bookingNextDays.length > 0 && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+                {bookingNextDays.map((d) => {
+                  const on = booking.date === d.iso;
+                  return (
+                    <button
+                      key={d.iso} type="button" aria-pressed={on}
+                      onClick={() => setBooking({ ...booking, date: d.iso, time: '' })}
+                      style={{
+                        padding: '5px 10px', borderRadius: 'var(--radius-pill)',
+                        border: `1px solid ${on ? 'var(--blue-600)' : 'var(--border)'}`,
+                        background: on ? 'var(--blue-600)' : 'var(--surface)',
+                        color: on ? '#fff' : 'var(--text-body)',
+                        fontFamily: 'var(--font-sans)', fontWeight: 700,
+                        fontSize: 11.5, cursor: 'pointer',
+                      }}
+                    >
+                      {d.label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </FormField>
 
-              {/* The time is chosen, not typed. Every option here has been put
-                  through the same check the booking endpoint runs, so a slot
-                  on this grid cannot come back refused. */}
-              <FormField label="Time" required>
-                {(!bookingPsy || !booking.date) ? (
-                  <div style={SLOT_EMPTY}>
-                    Choose {isPsych ? 'a day' : 'a psychologist and a day'} to see open times.
-                  </div>
-                ) : slotsBusy ? (
-                  <div style={SLOT_EMPTY}>Checking that day&hellip;</div>
-                ) : daySlots?.slots?.length ? (
-                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    {daySlots.slots.map((s) => {
-                      const on = booking.time === s.start;
-                      return (
-                        <button
-                          key={s.start} type="button" aria-pressed={on}
-                          title={`${s.start} to ${s.end}`}
-                          onClick={() => setBooking({ ...booking, time: s.start })}
-                          style={{
-                            padding: '7px 12px', borderRadius: 'var(--radius-control)',
-                            border: `1px solid ${on ? 'var(--blue-600)' : 'var(--border)'}`,
-                            background: on ? 'var(--blue-600)' : 'var(--surface)',
-                            color: on ? '#fff' : 'var(--text-strong)',
-                            fontFamily: 'var(--font-sans)', fontWeight: 700,
-                            fontSize: 12.5, cursor: 'pointer', minWidth: 66,
-                          }}
-                        >
-                          {s.start}
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  /* Never a blank panel. "They do not work Wednesdays", "the
-                     day is full" and "that length does not fit" send somebody
-                     to three different next actions. */
-                  <Alert tone="amber" icon={<Icon name="calendar" size={17} />}>
-                    {daySlots?.reason || 'No open times that day.'}
-                  </Alert>
-                )}
-              </FormField>
-              <FormField label="Notes">
-                <Input value={booking.notes} onChange={(e) => setBooking({ ...booking, notes: e.target.value })} />
-              </FormField>
-            </div>
-            <div style={{ padding: 16, borderTop: '1px solid var(--border)' }}>
-              {/* Says what is still missing rather than sitting there grey. */}
-              <Button
-                type="submit" variant="primary" fullWidth
-                disabled={!booking.child || !booking.date || !booking.time || (!isPsych && !booking.psychologist)}
-                title={!booking.child ? 'Choose a child'
-                  : (!isPsych && !booking.psychologist) ? 'Choose a psychologist'
-                    : !booking.date ? 'Choose a day'
-                      : !booking.time ? 'Choose a time' : 'Book it'}
-                iconLeft={<Icon name="calendar" size={16} />}
-              >
-                {booking.time ? `Book ${booking.time}` : 'Book'}
-              </Button>
-            </div>
-          </form>
-        </div>
+          {/* The time is chosen, not typed. Every option here has been put
+              through the same check the booking endpoint runs, so a slot
+              on this grid cannot come back refused. */}
+          <FormField label="Time" required>
+            {(!bookingPsy || !booking.date) ? (
+              <div style={SLOT_EMPTY}>
+                Choose {isPsych ? 'a day' : 'a psychologist and a day'} to see open times.
+              </div>
+            ) : slotsBusy ? (
+              <div style={SLOT_EMPTY}>Checking that day&hellip;</div>
+            ) : daySlots?.slots?.length ? (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {daySlots.slots.map((s) => {
+                  const on = booking.time === s.start;
+                  return (
+                    <button
+                      key={s.start} type="button" aria-pressed={on}
+                      title={`${s.start} to ${s.end}`}
+                      onClick={() => setBooking({ ...booking, time: s.start })}
+                      style={{
+                        padding: '7px 12px', borderRadius: 'var(--radius-control)',
+                        border: `1px solid ${on ? 'var(--blue-600)' : 'var(--border)'}`,
+                        background: on ? 'var(--blue-600)' : 'var(--surface)',
+                        color: on ? '#fff' : 'var(--text-strong)',
+                        fontFamily: 'var(--font-sans)', fontWeight: 700,
+                        fontSize: 12.5, cursor: 'pointer', minWidth: 66,
+                      }}
+                    >
+                      {s.start}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              /* Never a blank panel. "They do not work Wednesdays", "the
+                 day is full" and "that length does not fit" send somebody
+                 to three different next actions. */
+              <Alert tone="amber" icon={<Icon name="calendar" size={17} />}>
+                {daySlots?.reason || 'No open times that day.'}
+              </Alert>
+            )}
+          </FormField>
+          <FormField label="Notes">
+            <Input value={booking.notes} onChange={(e) => setBooking({ ...booking, notes: e.target.value })} />
+          </FormField>
+        </Drawer>
       )}
 
       {/* Availability drawer */}
       {blockForm && (
-        <div onClick={() => setBlockForm(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.32)', display: 'flex', justifyContent: 'flex-end', zIndex: 70 }}>
-          <form onSubmit={saveBlock} onClick={(e) => e.stopPropagation()} style={{ width: 400, maxWidth: '92%', height: '100%', background: 'var(--surface)', boxShadow: 'var(--shadow-xl)', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ padding: '18px 20px', borderBottom: '1px solid var(--border)', background: 'var(--ink-50)', fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>
-              {blockForm.id ? 'Edit Availability' : 'Add Availability'}
-            </div>
-            <div className="racco-scroll" style={{ flex: 1, overflowY: 'auto', padding: 20, display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{String(error)}</Alert>}
-              {!isPsych && (
-                blockForm.id ? (
-                  <FormField label="Psychologist">
-                    <Input value={blockForm.psychologist_name || ''} disabled />
-                  </FormField>
-                ) : (
-                  <FormField label="Psychologist" required hint="Who this availability belongs to.">
-                    <Select value={blockForm.psychologist} onChange={(e) => setBlockForm({ ...blockForm, psychologist: e.target.value })}>
-                      <option value="">— Select psychologist —</option>
-                      {psychologists.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </Select>
-                  </FormField>
-                )
-              )}
-              <FormField label="Repeat">
-                <Select value={blockForm.mode} onChange={(e) => setBlockForm({ ...blockForm, mode: e.target.value })}>
-                  <option value="weekly">Every week</option>
-                  <option value="date">Single date</option>
+        <Drawer
+          as="form" onSubmit={saveBlock} width={400}
+          title={editingBlock ? 'Edit Availability' : 'Add Availability'}
+          onClose={() => setBlockForm(null)}
+          footer={(
+            <Button type="submit" variant="primary" fullWidth
+              disabled={!isPsych && !blockForm.id && !blockForm.psychologist}
+              iconLeft={<Icon name="save" size={16} />}>
+              {editingBlock ? 'Save Changes' : 'Save Availability'}
+            </Button>
+          )}
+        >
+          {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{String(error)}</Alert>}
+          {!isPsych && (
+            editingBlock ? (
+              <FormField label="Psychologist">
+                <Input value={blockForm.psychologist_name || ''} disabled />
+              </FormField>
+            ) : (
+              <FormField label="Psychologist" required hint="Who this availability belongs to.">
+                <Select value={blockForm.psychologist} onChange={(e) => setBlockForm({ ...blockForm, psychologist: e.target.value })}>
+                  <option value="">— Select psychologist —</option>
+                  {psychologists.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </Select>
               </FormField>
-              {blockForm.mode === 'weekly' && !blockForm.id ? (
-                <FormField label="Weekdays" required hint="Tick every day this window repeats — one block is created per day.">
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                    {WEEKDAYS.map((d, i) => {
-                      const on = blockForm.weekdays.includes(i);
-                      return (
-                        <label key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 'var(--radius-pill)', border: `1px solid ${on ? 'var(--blue-500)' : 'var(--border)'}`, background: on ? 'var(--blue-50)' : 'var(--surface)', fontSize: 12.5, fontWeight: 700, color: on ? 'var(--blue-700)' : 'var(--text-body)', cursor: 'pointer' }}>
-                          <input type="checkbox" checked={on} style={{ accentColor: 'var(--blue-600)' }}
-                            onChange={() => setBlockForm((f) => ({ ...f, weekdays: on ? f.weekdays.filter((x) => x !== i) : [...f.weekdays, i] }))} />
-                          {d.slice(0, 3)}
-                        </label>
-                      );
-                    })}
-                  </div>
-                </FormField>
-              ) : blockForm.mode === 'weekly' ? (
-                <FormField label="Weekday">
-                  <Select value={blockForm.weekday} onChange={(e) => setBlockForm({ ...blockForm, weekday: e.target.value })}>
-                    {WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
-                  </Select>
-                </FormField>
-              ) : (
-                <FormField label="Date">
-                  <Input type="date" value={blockForm.date} onChange={(e) => setBlockForm({ ...blockForm, date: e.target.value })} />
-                </FormField>
-              )}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <FormField label="From"><Input type="time" value={blockForm.start_time} onChange={(e) => setBlockForm({ ...blockForm, start_time: e.target.value })} /></FormField>
-                <FormField label="To"><Input type="time" value={blockForm.end_time} onChange={(e) => setBlockForm({ ...blockForm, end_time: e.target.value })} /></FormField>
+            )
+          )}
+          <FormField label="Repeat">
+            <Select value={blockForm.mode} onChange={(e) => setBlockForm({ ...blockForm, mode: e.target.value })}>
+              <option value="weekly">Every week</option>
+              <option value="date">Single date</option>
+            </Select>
+          </FormField>
+          {blockForm.mode === 'weekly' && !blockForm.id ? (
+            <FormField label="Weekdays" required hint="Tick every day this window repeats — one block is created per day.">
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {WEEKDAYS.map((d, i) => {
+                  const on = blockForm.weekdays.includes(i);
+                  return (
+                    <label key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 'var(--radius-pill)', border: `1px solid ${on ? 'var(--blue-500)' : 'var(--border)'}`, background: on ? 'var(--blue-50)' : 'var(--surface)', fontSize: 12.5, fontWeight: 700, color: on ? 'var(--blue-700)' : 'var(--text-body)', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={on} style={{ accentColor: 'var(--blue-600)' }}
+                        onChange={() => setBlockForm((f) => ({ ...f, weekdays: on ? f.weekdays.filter((x) => x !== i) : [...f.weekdays, i] }))} />
+                      {d.slice(0, 3)}
+                    </label>
+                  );
+                })}
               </div>
-              <FormField label="Capacity" hint="How many appointments fit in this block per day.">
-                <Input type="number" min="1" value={blockForm.capacity} onChange={(e) => setBlockForm({ ...blockForm, capacity: e.target.value })} />
-              </FormField>
-            </div>
-            <div style={{ padding: 16, borderTop: '1px solid var(--border)' }}>
-              <Button type="submit" variant="primary" fullWidth
-                disabled={!isPsych && !blockForm.id && !blockForm.psychologist}
-                iconLeft={<Icon name="save" size={16} />}>
-                {blockForm.id ? 'Save Changes' : 'Save Availability'}
-              </Button>
-            </div>
-          </form>
-        </div>
+            </FormField>
+          ) : blockForm.mode === 'weekly' ? (
+            <FormField label="Weekday">
+              <Select value={blockForm.weekday} onChange={(e) => setBlockForm({ ...blockForm, weekday: e.target.value })}>
+                {WEEKDAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+              </Select>
+            </FormField>
+          ) : (
+            <FormField label="Date">
+              <Input type="date" value={blockForm.date} onChange={(e) => setBlockForm({ ...blockForm, date: e.target.value })} />
+            </FormField>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <FormField label="From"><Input type="time" value={blockForm.start_time} onChange={(e) => setBlockForm({ ...blockForm, start_time: e.target.value })} /></FormField>
+            <FormField label="To"><Input type="time" value={blockForm.end_time} onChange={(e) => setBlockForm({ ...blockForm, end_time: e.target.value })} /></FormField>
+          </div>
+          <FormField label="Capacity" hint="How many appointments fit in this block per day.">
+            <Input type="number" min="1" value={blockForm.capacity} onChange={(e) => setBlockForm({ ...blockForm, capacity: e.target.value })} />
+          </FormField>
+        </Drawer>
       )}
 
       {/* Appointment detail */}
-      {sel && (
-        <div onClick={() => setSel(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 80 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ width: 420, maxWidth: '92%', background: 'var(--surface)', borderRadius: 'var(--radius-xl)', boxShadow: 'var(--shadow-xl)', padding: 22, display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>{sel.child_name || `Case ${sel.case_ref}`}</div>
-                <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>{new Date(sel.start).toLocaleString()} · {sel.duration_minutes} min</div>
-                <div style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                  {sel.child_name ? `${sel.case_ref} · ` : ''}
-                  {sel.referred_by_name ? `Referred by ${sel.referred_by_name}` : 'No social worker yet'}
-                </div>
-              </div>
+      {sel && (() => {
+        // An outcome is a claim about something that happened, so the server
+        // refuses one ahead of time. Offer it disabled with the reason rather
+        // than letting the click earn an error.
+        const started = new Date(sel.start) <= new Date();
+        const outcomeTitle = started ? undefined : 'This session has not happened yet.';
+        const scheduled = sel.status === 'scheduled';
+        return (
+          <Modal
+            onClose={() => setSel(null)} width={420}
+            title={sel.child_name || `Case ${sel.case_ref}`}
+            subtitle={`${exactDate(sel.start)} · ${sel.duration_minutes} min`}
+            footer={scheduled && !sel.name_hidden ? (
+              <>
+                {(isPsych || role === 'Administrator') && (
+                  <Button variant="primary" disabled={!started} title={outcomeTitle}
+                    onClick={() => setConfirmStatus({ appointment: sel, action: 'complete' })} iconLeft={<Icon name="check" size={15} />}>
+                    Completed
+                  </Button>
+                )}
+                {(isPsych || role === 'Administrator') && (
+                  <Button variant="secondary" disabled={!started} title={outcomeTitle}
+                    onClick={() => setConfirmStatus({ appointment: sel, action: 'no_show' })} iconLeft={<Icon name="alert-triangle" size={15} />}>
+                    No-show
+                  </Button>
+                )}
+                {canBook && (
+                  <Button variant="secondary" onClick={() => openReschedule(sel)}
+                    iconLeft={<Icon name="calendar" size={15} />}>
+                    Reschedule
+                  </Button>
+                )}
+                <Button variant="danger" onClick={() => setConfirmStatus({ appointment: sel, action: 'cancel' })} iconLeft={<Icon name="x" size={15} />}>Cancel</Button>
+              </>
+            ) : null}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
               <Badge tone={STATUS_TONE[sel.status]} dot>{sel.status.replace('_', '-')}</Badge>
+              <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                {sel.child_name ? `${sel.case_ref} · ` : ''}
+                {sel.referred_by_name ? `Referred by ${sel.referred_by_name}` : 'No social worker yet'}
+              </span>
             </div>
             <div style={{ fontSize: 13, color: 'var(--text-body)' }}>
               {PURPOSES.find((p) => p.v === sel.purpose)?.label || sel.purpose} with {sel.psychologist_name || '—'}
               {sel.notes ? ` · ${sel.notes}` : ''}
             </div>
-            {sel.status === 'scheduled' && (() => {
-              // An outcome is a claim about something that happened, so the
-              // server refuses one ahead of time. Offer it disabled with the
-              // reason rather than letting the click earn an error.
-              const started = new Date(sel.start) <= new Date();
-              const outcomeTitle = started ? undefined : 'This session has not happened yet.';
-              return (
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  {(isPsych || role === 'Administrator') && (
-                    <Button variant="primary" disabled={!started} title={outcomeTitle}
-                      onClick={() => setConfirmStatus({ appointment: sel, action: 'complete' })} iconLeft={<Icon name="check" size={15} />}>
-                      Completed
-                    </Button>
-                  )}
-                  {(isPsych || role === 'Administrator') && (
-                    <Button variant="secondary" disabled={!started} title={outcomeTitle}
-                      onClick={() => setConfirmStatus({ appointment: sel, action: 'no_show' })} iconLeft={<Icon name="alert-triangle" size={15} />}>
-                      No-show
-                    </Button>
-                  )}
-                  {/* Another social worker's child: seen, not handled - the
-                      server refuses a move or a cancel from anyone but the
-                      child's own SW or the ISA (scheduling/views.py). */}
-                  {canBook && !sel.name_hidden && (
-                    <Button variant="secondary" onClick={() => openReschedule(sel)}
-                      iconLeft={<Icon name="calendar" size={15} />}>
-                      Reschedule
-                    </Button>
-                  )}
-                  {!sel.name_hidden && (
-                    <Button variant="danger" onClick={() => setConfirmStatus({ appointment: sel, action: 'cancel' })} iconLeft={<Icon name="x" size={15} />}>Cancel</Button>
-                  )}
-                  {sel.name_hidden && (
-                    <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
-                      Another social worker&apos;s child. Only they or the ISA can move or cancel this session.
-                    </span>
-                  )}
-                </div>
-              );
-            })()}
-          </div>
-        </div>
-      )}
+            {/* Another social worker's child: seen, not handled - the server
+                refuses a move or a cancel from anyone but the child's own SW or
+                the ISA (scheduling/views.py). */}
+            {scheduled && sel.name_hidden && (
+              <span style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>
+                Another social worker&apos;s child. Only they or the ISA can move or cancel this session.
+              </span>
+            )}
+          </Modal>
+        );
+      })()}
 
     </div>
   );
