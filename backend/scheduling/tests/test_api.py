@@ -99,6 +99,25 @@ class AvailabilityTest(SchedulingBase):
         resp = self.client.patch(f"/api/availability/{self.block.id}/", {"capacity": 5}, format="json")
         self.assertEqual(resp.status_code, 403)
 
+    def test_psychologist_cannot_hand_their_block_to_a_colleague(self):
+        """The edit checked whose block it WAS, never whose it was being
+        made: a PATCH naming a colleague moved the window onto their calendar."""
+        self._auth("p@racco1.gov.ph")
+        resp = self.client.patch(f"/api/availability/{self.block.id}/",
+                                 {"psychologist": self.other.id}, format="json")
+        self.assertEqual(resp.status_code, 403)
+        self.block.refresh_from_db()
+        self.assertEqual(self.block.psychologist_id, self.psy.id)
+
+    def test_psychologist_may_resend_themselves_in_an_edit(self):
+        # The pattern editor resends the owner with every block it saves.
+        self._auth("p@racco1.gov.ph")
+        resp = self.client.patch(f"/api/availability/{self.block.id}/",
+                                 {"psychologist": self.psy.id, "capacity": 3}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.block.refresh_from_db()
+        self.assertEqual(self.block.capacity, 3)
+
     def test_staff_can_list(self):
         self._auth("s@racco1.gov.ph")
         resp = self.client.get(f"/api/availability/?psychologist={self.psy.id}")

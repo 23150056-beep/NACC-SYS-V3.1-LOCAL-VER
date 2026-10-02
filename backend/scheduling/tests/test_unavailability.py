@@ -229,6 +229,30 @@ class WhoMayDeclareItTest(SchedulingBase):
         self._auth("p@racco1.gov.ph")
         self.assertEqual(403, self._declare(psychologist=self.other).status_code)
 
+    def test_a_psychologist_cannot_hand_their_leave_to_a_colleague(self):
+        """Editing checked whose leave it WAS, never whose it was being made:
+        a PATCH naming a colleague marked THEM as away."""
+        self._auth("p@racco1.gov.ph")
+        leave = Unavailability.objects.create(
+            psychologist=self.psy, starts_on=self.day, ends_on=self.day, reason="Leave")
+        res = self.client.patch(f"/api/unavailability/{leave.id}/",
+                                {"psychologist": self.other.id}, format="json")
+        self.assertEqual(403, res.status_code)
+        leave.refresh_from_db()
+        self.assertEqual(self.psy.id, leave.psychologist_id)
+
+    def test_a_psychologist_may_change_the_dates_of_their_own(self):
+        self._auth("p@racco1.gov.ph")
+        leave = Unavailability.objects.create(
+            psychologist=self.psy, starts_on=self.day, ends_on=self.day, reason="Leave")
+        later = self.day + timedelta(days=2)
+        res = self.client.patch(f"/api/unavailability/{leave.id}/",
+                                {"psychologist": self.psy.id, "ends_on": later.isoformat()},
+                                format="json")
+        self.assertEqual(200, res.status_code, res.data)
+        leave.refresh_from_db()
+        self.assertEqual(later, leave.ends_on)
+
     def test_an_administrator_may_declare_anybodys(self):
         self._auth("a@racco1.gov.ph")
         self.assertEqual(201, self._declare().status_code)

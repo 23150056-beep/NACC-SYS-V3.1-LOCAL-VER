@@ -964,6 +964,12 @@ input::-ms-clear {
 .racco-case-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px 24px; align-items: start; }
 @media (max-width: 760px) { .racco-case-grid { grid-template-columns: 1fr; } }
 
+/* The "Away" tag in a calendar month cell (pages/Schedule.jsx). On a phone the
+   cell is about 50px wide and the word showed as a lone "A"; the stripes
+   already say it, so the tag becomes a dot. The text stays for screen readers. */
+.racco-away-tag { font-size: 10.5px; font-weight: 800; color: var(--amber-700); background: var(--amber-100); border-radius: 4px; padding: 1px 5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) { .racco-away-tag { font-size: 0; width: 8px; height: 8px; padding: 0; border-radius: 50%; background: var(--amber-500); flex: none; } }
+
 /* First / middle / last name on the Add Record form: three across, stacked
    on a phone. */
 .racco-name-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }

@@ -358,6 +358,13 @@ psychologist and the ISA on 2 Oct 2026):
   (`blockForm.byDay`), so "is there an id" read as "add": the title, button and
   toast said "Add Availability". `editingBlock` covers both. The weekday
   ticks still key off the id - editing a pattern needs them.
+- **An edit is checked against whose it is BEING MADE, not only whose it
+  was** (`perform_update` on availability and leave). It checked the current
+  owner only, so a psychologist could PATCH their own window or leave onto a
+  colleague - and mark THEM as away. Naming themselves again stays fine: the
+  pattern editor resends the owner with every block.
+- The "Away" tag in a month cell becomes a dot under 640px (`.racco-away-tag`):
+  the cell is ~50px wide and the word showed as a lone "A".
 - Refusals read as sentences (`firstError`), never `{"end_time": [...]}`.
 - axe-core on `/schedule`: one `aria-required-children` violation remains, on
   react-big-calendar's own "+n more" button inside its row. It is identical on

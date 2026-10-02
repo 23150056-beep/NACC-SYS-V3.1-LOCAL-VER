@@ -258,8 +258,8 @@ export default function Schedule() {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4, padding: '0 3px' }}>
             {who.length > 0 ? (
               <span
+                className="racco-away-tag"
                 title={`Away: ${who.join(', ')}${away[0].reason ? ` (${away[0].reason})` : ''}`}
-                style={{ fontSize: 10.5, fontWeight: 800, color: 'var(--amber-700)', background: 'var(--amber-100)', borderRadius: 4, padding: '1px 5px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
               >
                 Away{shadeAway ? '' : `: ${who.length === 1 ? shortName(who[0]) : `${who.length} people`}`}
               </span>

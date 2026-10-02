@@ -62,6 +62,13 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         self._assert_can_write(serializer.instance.psychologist_id)
+        # Whose calendar it ends up on is checked too, not only whose it was:
+        # a psychologist could otherwise PATCH their own window onto a
+        # colleague. Naming themselves again is fine - the pattern editor
+        # resends the owner with every block it saves.
+        named = serializer.validated_data.get("psychologist")
+        if named is not None:
+            self._assert_can_write(named.id)
         serializer.save()
 
     def perform_destroy(self, instance):
@@ -262,6 +269,11 @@ class UnavailabilityViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         self._assert_can_write(serializer.instance.psychologist_id)
+        # As for availability: checked against whose leave it is being MADE.
+        # Naming a colleague here marked them as away.
+        named = serializer.validated_data.get("psychologist")
+        if named is not None:
+            self._assert_can_write(named.id)
         serializer.save()
 
     def perform_destroy(self, instance):
