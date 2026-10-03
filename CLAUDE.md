@@ -52,14 +52,24 @@ plans, Sonnet 5.5 executes**, and ultracode is on by default.
   directing workers. That is what keeps the planner planning and the workers
   on the code.
 
-**`.claude/settings.json` is what makes it happen**, because a line in this
-file cannot pick a model. It sets `model` to Opus 5.5, `ultracode: true`, and
-`CLAUDE_CODE_SUBAGENT_MODEL` to Sonnet 5.5, which every subagent and workflow
-worker gets unless its spawn names a model itself. A planning subagent that
-should think in Opus says `model: "opus"` explicitly (the Agent tool takes
-only the alias). In the settings file the IDs are pinned, not
-the `opus`/`sonnet` aliases: an alias follows whatever is newest, and the owner
-asked for 5.5.
+**Name the model on every spawn: `model: "sonnet"`.** That goes on the Agent
+tool and on a workflow's `agent()` alike. Nothing else is reliable. A worker
+with no model given inherits the main session's, so it runs on Opus and the
+split silently does not happen. Measured on 3 Oct in a cloud session, by
+reading the `"model"` field in each subagent's transcript under
+`~/.claude/projects/<project>/<session>/subagents/`: a probe with no model ran
+on `claude-opus-5-5`, and the same probe with `model: "sonnet"` ran on
+`claude-sonnet-5-5`. A planning subagent that should think in Opus says
+`model: "opus"`.
+
+**`.claude/settings.json` holds the defaults**: `model` is Opus 5.5,
+`ultracode: true`, and `CLAUDE_CODE_SUBAGENT_MODEL` is Sonnet 5.5. That last
+one did NOT reach the cloud session. The variable was unset there, and the
+probe above ran on Opus. It may work in the local CLI, but nobody has checked,
+so the named model above is the rule and the variable is only a backstop. The
+file pins IDs, not the `opus`/`sonnet` aliases, because an alias follows
+whatever is newest. The Agent tool takes only the alias, and on 3 Oct
+`sonnet` meant 5.5. Check that again when a new Sonnet ships.
 
 - **Ultracode needs Workflows enabled and a model that supports it**, and
   where either is missing it stays off without complaint. `enableWorkflows`
