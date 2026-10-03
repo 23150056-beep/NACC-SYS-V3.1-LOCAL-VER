@@ -32,6 +32,49 @@ model name anywhere in a commit message, PR body, or code comment. If a hook
 asks for the commits to be reauthored, decline — this rule is the owner's and
 it stands.
 
+## Two models a session, ultracode on
+
+Owner's decision, 3 Oct 2026, for every session from then on: **Opus 5.5
+plans, Sonnet 5.5 executes**, and ultracode is on by default.
+
+- **Opus 5.5 (`claude-opus-5-5`) is the main session.** Talking with the
+  owner, brainstorming, reading the code to decide what should change, the
+  plan, the design notes under `docs/superpowers/specs/`, and reading what a
+  worker hands back before anything is committed.
+- **Sonnet 5.5 (`claude-sonnet-5-5`) does everything that executes.** Writing
+  and editing code, migrations, running the tests, lint and build, and the
+  mechanical end of a commit. The main session hands this to a subagent or a
+  workflow worker rather than doing it itself, and does not wait to be asked
+  each time; this is the standing request. A worker starts cold, so the
+  hand-over carries the plan written out: the files, the rule being enforced,
+  and what done looks like.
+- **Ultracode is standing multi-agent orchestration**, the main session
+  directing workers. That is what keeps the planner planning and the workers
+  on the code.
+
+**`.claude/settings.json` is what makes it happen**, because a line in this
+file cannot pick a model. It sets `model` to Opus 5.5, `ultracode: true`, and
+`CLAUDE_CODE_SUBAGENT_MODEL` to Sonnet 5.5, which every subagent and workflow
+worker gets unless its spawn names a model itself. A planning subagent that
+should think in Opus says `model: "opus"` explicitly (the Agent tool takes
+only the alias). In the settings file the IDs are pinned, not
+the `opus`/`sonnet` aliases: an alias follows whatever is newest, and the owner
+asked for 5.5.
+
+- **Ultracode needs Workflows enabled and a model that supports it**, and
+  where either is missing it stays off without complaint. `enableWorkflows`
+  is in the settings file too, but a plan that does not include Workflows
+  cannot be switched on from a repo. `/effort` offers `ultracode` only where
+  it can run; `/config` → Dynamic workflows is the switch. On 3 Oct the file
+  turned Workflows on in the cloud session that wrote it, mid-session, but
+  ultracode is read when a session STARTS - it applies from the next one.
+- **Check the model rather than assume it.** `/model` names the main
+  session's. Runtime fallbacks exist, so when output looks off, ask which
+  model produced it.
+- The model names belong here and in the settings file only. The authorship
+  rule above still keeps them out of every commit message, PR body and code
+  comment.
+
 ## Getting changes onto GitHub
 
 **What is safe is the REPOSITORY, not the remote name.** Corrected 20 Sep
