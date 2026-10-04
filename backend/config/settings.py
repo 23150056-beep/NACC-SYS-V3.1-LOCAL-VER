@@ -319,6 +319,7 @@ LOGIN_LOCKOUT_MINUTES = 15   # both the rolling counting window and the lock dur
 SIGNUP_MAX_PER_IP = 5        # new access requests from one IP per window
 SIGNUP_WINDOW_MINUTES = 60
 SIGNUP_MAX_PENDING = 50      # global ceiling on outstanding requests (DB-counted)
+SIGNUP_RESEND_MAX_PER_IP = 20  # requests for a new email code from one IP per window
 
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"

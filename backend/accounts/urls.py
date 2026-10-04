@@ -4,7 +4,7 @@ from accounts.token_auth import PasswordBoundTokenRefreshView
 from accounts.views import (
     LoginView, MeView, ChangePasswordView, UserViewSet, RoleListView, PsychologistListView,
     GoogleLoginView, EmailConfigTestView, GoogleAuthConfigView, SignupView,
-    VerifySignupEmailView,
+    VerifySignupEmailView, ResendSignupEmailCodeView,
     MyProfileView, MyPhoneView, SmsConfigTestView,
 )
 
@@ -16,6 +16,8 @@ urlpatterns = [
     path("auth/signup/", SignupView.as_view(), name="signup"),
     path("auth/signup/verify-email/", VerifySignupEmailView.as_view(),
          name="signup-verify-email"),
+    path("auth/signup/verify-email/resend/", ResendSignupEmailCodeView.as_view(),
+         name="signup-verify-email-resend"),
     # Google Sign-In (staff and psychologists only — see accounts/google_auth.py)
     path("auth/google/", GoogleLoginView.as_view(), name="google-login"),
     path("auth/google/config/", GoogleAuthConfigView.as_view(), name="google-config"),

@@ -183,13 +183,13 @@ class SignupReachesTheApprovalQueueTest(APITestCase):
         self.assertEqual(mine[0]["status"], User.PENDING)
 
     def _confirm_email(self, email):
-        from django.core.cache import cache
-        from accounts import email_verification
+        from accounts.models import EmailVerification
 
-        entry = cache.get(email_verification.code_key(email))
-        self.assertIsNotNone(entry, "signing up should have issued a code")
+        row = EmailVerification.objects.filter(user__email=email).first()
+        self.assertIsNotNone(row, "signing up should have issued a code")
+        self.assertNotEqual("", row.code, "signing up should have issued a code")
         return self.client.post("/api/auth/signup/verify-email/",
-                                {"email": email, "code": entry["code"]},
+                                {"email": email, "code": row.code},
                                 format="json")
 
     def test_approval_turns_it_into_an_account_that_can_sign_in(self):

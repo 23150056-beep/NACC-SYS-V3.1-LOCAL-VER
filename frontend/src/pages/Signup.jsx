@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button, Input, PasswordInput, FormField, Alert, Icon, ROLE_META, roleLabel } from '../ui';
 import AuthLayout, { AuthLink } from '../components/AuthLayout';
@@ -24,6 +24,11 @@ import api from '../api/client';
 // administrator, so a public queue for it is not a queue but a target. The
 // server refuses it too — this list is the explanation, not the enforcement.
 const REQUESTABLE = ['Staff', 'Psychologist'];
+
+// How long "Send a new code" stays disabled. The server allows one a minute
+// (accounts/email_verification.py RESEND_SECONDS), and the sign-up's own mail
+// counts as the first, so asking sooner would only be told it had been sent.
+const RESEND_WAIT_SECONDS = 60;
 
 // Mirrors Django's default validators so the form can say what is wrong
 // before a round trip. The server remains the authority; this only spares
@@ -74,6 +79,20 @@ export default function Signup() {
   const [codeError, setCodeError] = useState('');
   const [verified, setVerified] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  // Only the typed route mails a code. A Google request arrives verified, so
+  // it must not be shown the confirm step - there is no code for it.
+  const [needsCode, setNeedsCode] = useState(false);
+  const [resendNote, setResendNote] = useState('');
+  const [resending, setResending] = useState(false);
+  const [resendWait, setResendWait] = useState(0);
+
+  // Counts the "Send a new code" lock down once a second. Above every early
+  // return below, as a hook has to be.
+  useEffect(() => {
+    if (resendWait <= 0) return undefined;
+    const t = setTimeout(() => setResendWait((n) => n - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendWait]);
 
   const set = (k) => (e) => {
     const value = k === 'password' ? e.target.value.replace(/\s/g, '') : e.target.value;
@@ -102,6 +121,8 @@ export default function Signup() {
       // requested_role is optional server-side. An unanswered question is
       // sent as blank and recorded as "none stated" rather than guessed at.
       await api.post('/auth/signup/', { ...form, requested_role: role || '' });
+      setNeedsCode(true);
+      setResendWait(RESEND_WAIT_SECONDS);
       setDone(true);
     } catch (err) {
       const data = err.response?.data;
@@ -159,7 +180,27 @@ export default function Signup() {
     }
   };
 
-  if (done && !verified) {
+  // Asks for another code. The server answers 202 with one sentence whatever
+  // the address and whatever it did - it will not say whether this address has
+  // applied - so that sentence is shown as it comes, and the button waits out
+  // the minute either way.
+  const resend = async () => {
+    if (resending || resendWait > 0) return;
+    setCodeError('');
+    setResendNote('');
+    setResending(true);
+    try {
+      const { data } = await api.post('/auth/signup/verify-email/resend/', { email: form.email });
+      setResendNote(data?.detail || 'If that address has a request waiting to be confirmed, a new code has been sent to it.');
+    } catch (err) {
+      setResendNote(err.response?.data?.detail || 'Could not ask for a new code. Please try again in a minute.');
+    } finally {
+      setResending(false);
+      setResendWait(RESEND_WAIT_SECONDS);
+    }
+  };
+
+  if (needsCode && !verified) {
     return (
       <AuthLayout
         title="Confirm your email"
@@ -187,6 +228,16 @@ export default function Signup() {
           <Button type="submit" variant="primary" fullWidth disabled={verifying || code.length < 6}>
             {verifying ? 'Checking…' : 'Confirm my email'}
           </Button>
+          <Button type="button" variant="secondary" fullWidth
+                  disabled={resending || resendWait > 0} onClick={resend}>
+            {resending ? 'Sending…'
+              : resendWait > 0 ? `Send a new code (${resendWait}s)` : 'Send a new code'}
+          </Button>
+          {resendNote && (
+            <div role="status" aria-live="polite">
+              <Alert tone="info" icon={<Icon name="mail" size={18} />}>{resendNote}</Alert>
+            </div>
+          )}
         </form>
       </AuthLayout>
     );

@@ -920,13 +920,23 @@ class AvailabilityResolverTest(ResolverTestBase):
     endpoint would then refuse, which is why the arithmetic is shared."""
 
     def setUp(self):
+        # The clock is pinned to a Wednesday morning (Manila), so the class
+        # means the same at any hour of any day. free_windows skips a window
+        # that has already begun today and the chatbot's week runs Sunday to
+        # Saturday: on the real clock a window starting at 23:00 had begun by
+        # the last hour of the day, and late on a Saturday there was nothing
+        # left of the week to offer.
+        self.now = timezone.make_aware(datetime(2026, 10, 7, 10, 0))
+        clock = patch("django.utils.timezone.now", return_value=self.now)
+        clock.start()
+        self.addCleanup(clock.stop)
         super().setUp()
         from scheduling.models import AvailabilityBlock
-        # Every weekday, so the window exists whichever day the suite runs.
+        # Every weekday, so the window exists whichever day it is asked about.
         for weekday in range(7):
             AvailabilityBlock.objects.create(
                 psychologist=self.psy, weekday=weekday,
-                start_time=time(23, 0), end_time=time(23, 59), capacity=2)
+                start_time=time(13, 0), end_time=time(17, 0), capacity=2)
 
     def test_lists_who_is_free(self):
         out = self._resolve(self.admin, "find_availability", {"when": "this_week"})
@@ -939,7 +949,7 @@ class AvailabilityResolverTest(ResolverTestBase):
         for weekday in range(7):
             AvailabilityBlock.objects.create(
                 psychologist=self.other, weekday=weekday,
-                start_time=time(23, 0), end_time=time(23, 59), capacity=1)
+                start_time=time(13, 0), end_time=time(17, 0), capacity=1)
         out = self._resolve(self.psy, "find_availability", {"when": "this_week"})
         self.assertEqual({i["email"] for i in out["items"]}, {"p@racco1.gov.ph"})
 
@@ -949,7 +959,7 @@ class AvailabilityResolverTest(ResolverTestBase):
         for _ in range(2):                       # capacity is 2
             Appointment.objects.create(
                 child=self.mine, psychologist=self.psy,
-                start=timezone.make_aware(datetime.combine(day, time(23, 30))),
+                start=timezone.make_aware(datetime.combine(day, time(14, 30))),
                 status=Appointment.SCHEDULED)
         out = self._resolve(self.admin, "find_availability", {"when": "tomorrow"})
         self.assertEqual(out["items"], [])
@@ -960,7 +970,7 @@ class AvailabilityResolverTest(ResolverTestBase):
         for _ in range(2):
             Appointment.objects.create(
                 child=self.mine, psychologist=self.psy,
-                start=timezone.make_aware(datetime.combine(day, time(23, 30))),
+                start=timezone.make_aware(datetime.combine(day, time(14, 30))),
                 status=Appointment.CANCELLED)
         out = self._resolve(self.admin, "find_availability", {"when": "tomorrow"})
         self.assertTrue(out["items"])
