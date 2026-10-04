@@ -14,14 +14,19 @@ User = get_user_model()
 
 
 def next_weekday(weekday, hour):
-    """The next future datetime falling on `weekday` at `hour`:00 local."""
+    """A future datetime falling on `weekday` at `hour`:00 local - on the next
+    such day AFTER today, whatever the time now.
+
+    It used to be the next one still ahead of now, which put two calls for the
+    same weekday on different dates when the suite ran on that weekday between
+    their hours: next_weekday(2, 9) is next Wednesday once 09:00 has passed,
+    next_weekday(2, 11) is still today. A test pairing them (a booking and the
+    slot grid for its day, a move into somebody's leave) then failed on
+    Wednesday mornings for a reason that had nothing to do with the code."""
     now = timezone.localtime()
-    days_ahead = (weekday - now.weekday()) % 7
-    candidate = (now + timedelta(days=days_ahead)).replace(
+    days_ahead = (weekday - now.weekday()) % 7 or 7
+    return (now + timedelta(days=days_ahead)).replace(
         hour=hour, minute=0, second=0, microsecond=0)
-    if candidate <= now:
-        candidate += timedelta(days=7)
-    return candidate
 
 
 def give_referral(child, uploaded_by=None):
