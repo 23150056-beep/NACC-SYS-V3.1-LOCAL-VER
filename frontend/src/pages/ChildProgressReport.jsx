@@ -15,6 +15,7 @@ import { loadAll } from '../utils/load';
 import { useOpenFromLink } from '../utils/links';
 import { clock } from '../utils/time';
 import { polishRemark, sendFeedback, getLatestBrief, generateBrief, getBriefFacts, summarizeDocument, confirmSummary } from '../api/assistant';
+import AssistantAccessLog from '../components/AssistantAccessLog';
 import BriefFacts from '../components/BriefFacts';
 import ReportCheckNote from '../components/ReportCheckNote';
 import UploadDrawer from '../components/UploadDrawer';
@@ -94,6 +95,8 @@ export default function ChildProgressReport() {
   const [upload, setUpload] = useState(null); // 'report' | 'case_referral'
   const [viewing, setViewing] = useState(null); // the report being read on screen
   const isStaffOrAdmin = ['Administrator', 'Staff'].includes(user?.role_name);
+  // The ISA's log of who had the assistant read this record; nobody else sees it.
+  const isAdmin = user?.role_name === 'Administrator';
   // Mirrors INSTRUMENT_MANAGER_ROLES on the server (accounts/permissions.py).
   const canReadTemplates = ['Administrator', 'Psychologist'].includes(user?.role_name);
 
@@ -174,6 +177,7 @@ export default function ChildProgressReport() {
     { id: 'remarks', label: 'Remarks', count: (data.remarks || []).length || undefined },
     { id: 'voice', label: "Child's voice", count: (data.opinionnaires || []).length || undefined },
     { id: 'casework', label: 'Casework', count: (data.case_referrals || []).length || undefined },
+    ...(isAdmin ? [{ id: 'assistant', label: 'Assistant log' }] : []),
   ];
 
   const facts = [
@@ -912,6 +916,12 @@ export default function ChildProgressReport() {
       </Card>
 
       </div>
+
+      {isAdmin && (
+        <div className="racco-stack racco-tabpanel" hidden={tab !== 'assistant'}>
+          <AssistantAccessLog childId={child.id} active={tab === 'assistant'} />
+        </div>
+      )}
 
       <Alert disclaimer title="Note.">All clinical findings are the licensed psychologist&apos;s own professional judgment.</Alert>
 

@@ -72,14 +72,16 @@ def run_model_check(invite_id):
                 job_type="self_report", input_ref=f"invite:{invite.pk}",
                 ok=False, error=str(exc)[:255],
                 model_used=getattr(client, "model", ""),
-                latency_ms=int((time.monotonic() - started) * 1000))
+                latency_ms=int((time.monotonic() - started) * 1000),
+                child=invite.child)
             return
 
         reason = _parse(reply)
         AssistantJob.objects.create(
             job_type="self_report", input_ref=f"invite:{invite.pk}",
             output_text=str(reply)[:2000], model_used=client.model, ok=True,
-            latency_ms=int((time.monotonic() - started) * 1000))
+            latency_ms=int((time.monotonic() - started) * 1000),
+            child=invite.child)
 
         if reason:
             SelfReportFlag.objects.get_or_create(

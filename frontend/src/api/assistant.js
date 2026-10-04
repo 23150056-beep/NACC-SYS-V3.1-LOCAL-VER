@@ -57,6 +57,10 @@ export const getAssistantMetrics = () =>
 export const getUnansweredQuestions = () =>
   api.get('/assistant/unanswered/').then((r) => r.data);
 
+// Who had the model read this child's record. Administrators only.
+export const getChildAssistantLog = (childId) =>
+  api.get(`/assistant/access-log/child/${childId}/`).then((r) => r.data);
+
 export const checkAssistant = () =>
   api.post('/assistant/check/').then((r) => r.data);
 
