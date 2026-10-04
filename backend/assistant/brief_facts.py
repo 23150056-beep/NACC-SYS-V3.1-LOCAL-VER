@@ -12,11 +12,11 @@ never more than the screen, and never a different number from it.
 from django.utils import timezone
 
 from accounts.scoping import hide_earlier_history, scope_to_visible, visible_children
-from clinical.care_gaps import compute_alerts
+from clinical.care_gaps import alerts_for
 from clinical.models import ProblemEntry, SelfReportFlag, TreatmentPlan
 from scheduling.models import Appointment
 
-# compute_alerts' self-report line is the same count as `unreviewed_self_reports`;
+# The care-gap lists' self-report line is the same count as `unreviewed_self_reports`;
 # showing it twice is noise.
 _SAID_ELSEWHERE = {"self_report_concern"}
 
@@ -57,8 +57,10 @@ def brief_facts(request, child):
     # The child's own words: exempt from carry-history. COUNTED, never quoted.
     waiting = scope_to_visible(SelfReportFlag.objects.filter(
         child=child, reviewed_at__isnull=True), request).count()
-    # The Dashboard's alerts for this one child. All pre-assessments on purpose (CLAUDE.md).
-    gaps = compute_alerts(visible_children(request).filter(pk=child.pk))
+    # The Dashboard's alerts for this one child, by the reader's role (alerts_for):
+    # a social worker's brief lists their rules, not the psychologist's. All
+    # pre-assessments on purpose (CLAUDE.md).
+    gaps = alerts_for(request, visible_children(request).filter(pk=child.pk))
     return {
         "next_session": ({"start": _when(nxt.start), "purpose": nxt.get_purpose_display()}
                          if nxt else None),

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { askAssistant, runFollowup, sendFeedback } from '../api/assistant';
 import { useAssistant } from '../context/AssistantContext';
 import { Icon, roleLabel } from '../ui';
+import { gapMeta, gapTarget } from '../config/careGaps';
 import { clockRange } from '../utils/time';
 
 /* The chatbot, docked on every protected screen.
@@ -297,14 +298,27 @@ function Answer({ result }) {
   }
 
   if (kind === 'care_gaps') {
-    if (!result.items.length) return <Line muted>Nobody is overdue.</Line>;
-    return result.items.map((g, i) => (
-      <Line key={i}>
-        <strong>{g.child}</strong>
-        {/* The sentence the Monitoring screen shows, not the internal slug. */}
-        <span style={{ color: 'var(--text-muted)' }}> · {g.message || g.type}</span>
-      </Line>
-    ));
+    // A social worker's answer brings its own empty sentence: their rules are not about anything being overdue.
+    if (!result.items.length) return <Line muted>{result.empty || 'Nobody is overdue.'}</Line>;
+    return result.items.map((g, i) => {
+      const meta = gapMeta(g.type, g.severity);
+      return (
+        <Line key={i}>
+          {g.child_id
+            ? <Link to={`/report/child/${g.child_id}`} style={{ fontWeight: 700, color: 'var(--text-strong)' }}>{g.child}</Link>
+            : <strong>{g.child}</strong>}
+          {/* The sentence the Dashboard shows, not the internal slug. */}
+          <span style={{ color: 'var(--text-muted)' }}> · {g.message || g.type}</span>
+          {g.child_id && meta.to && (
+            <>
+              <span style={{ color: 'var(--text-muted)' }}> · </span>
+              <Link to={gapTarget(g)} aria-label={`${meta.action}: ${g.child}`}
+                    style={{ fontSize: 12, fontWeight: 600, color: 'var(--brand)' }}>{meta.action}</Link>
+            </>
+          )}
+        </Line>
+      );
+    });
   }
 
   if (kind === 'summary') {
@@ -325,7 +339,7 @@ function Answer({ result }) {
           <span style={{ color: 'var(--text-muted)' }}> · {result.child.status}</span>
         </Line>
         {result.gaps?.length > 0 && (
-          <Line muted>Needs attention: {result.gaps.join(', ')}</Line>
+          <Line muted>Needs attention: {result.gaps.map((t) => gapMeta(t).chip).join(', ')}</Line>
         )}
         {result.remarks?.length > 0 && (
           <div style={{ marginTop: 6 }}>

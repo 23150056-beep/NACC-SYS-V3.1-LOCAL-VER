@@ -274,3 +274,26 @@ class RecordFactsTest(FactsFixture):
         types = {g["type"] for g in facts["care_gaps"]}
         self.assertIn("no_upcoming_appointment", types)
         self.assertNotIn("self_report_concern", types)
+
+    def test_a_social_workers_care_gaps_are_their_own_rules(self):
+        # The same child, thirty days in: the psychologist's list calls the
+        # pre-assessment stalled, which is not the social worker's to start.
+        Child.objects.filter(pk=self.child.pk).update(
+            created_at=timezone.now() - timedelta(days=30))
+        self._flag()
+        mine = self._facts(self.sw).data
+        theirs = self._facts(self.psy).data
+        self.assertEqual(
+            {"no_case_referral", "no_signed_consent", "no_upcoming_appointment"},
+            {g["type"] for g in mine["care_gaps"]})
+        self.assertIn("pre_assessment_overdue", {g["type"] for g in theirs["care_gaps"]})
+        self.assertNotIn("no_case_referral", {g["type"] for g in theirs["care_gaps"]})
+        # And it agrees with their own Dashboard, less the line said elsewhere.
+        self.client.force_authenticate(self.sw)
+        dashboard = [a for a in self.client.get("/api/reports/dashboard/").data["care_gaps"]
+                     if a["child_id"] == self.child.id]
+        self.assertIn("self_report_concern", {a["type"] for a in dashboard})
+        self.assertEqual(
+            [(g["type"], g["message"]) for g in mine["care_gaps"]],
+            [(a["type"], a["message"]) for a in dashboard
+             if a["type"] != "self_report_concern"])

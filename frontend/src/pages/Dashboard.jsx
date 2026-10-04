@@ -7,6 +7,7 @@ import { Alert, Icon, IconChip, MiniBar, PAGE, Segmented } from '../ui';
 import { ActivityCard, CensusCard, TodayCard } from '../components/RightRail';
 import AssignmentRequests from '../components/AssignmentRequests';
 import { caseRef, initialsOf } from '../utils/child';
+import { gapMeta, gapTarget } from '../config/careGaps';
 
 /* One prioritised stream, not eleven equal tiles.
  *
@@ -30,17 +31,6 @@ const RANGES = [
   { value: 'yearly', label: 'Annual' },
 ];
 
-/* Each deterministic care-gap rule, in the words the person acting on it would
- * use, plus where that action happens. The rules themselves live in
- * backend/clinical/care_gaps.py — this only names them. */
-const GAP_META = {
-  consent_missing: { chip: 'No consent', action: 'Attach', to: '/pre-assessment', tone: 'danger' },
-  pre_assessment_overdue: { chip: 'Stalled', action: 'Start', to: '/pre-assessment', tone: 'warning' },
-  report_missing: { chip: 'Report due', action: 'Upload', to: '/reports', tone: 'warning' },
-  follow_up_overdue: { chip: 'Overdue', action: 'Book', to: '/schedule', tone: 'danger' },
-  no_upcoming_appointment: { chip: 'Unbooked', action: 'Book', to: '/schedule', tone: 'info' },
-  self_report_concern: { chip: 'Unread words', action: 'Read', to: null, tone: 'danger' },
-};
 const GAP_CHIP = {
   danger: ['var(--red-50)', 'var(--red-700)'],
   warning: ['var(--warning-50)', 'var(--warning-700)'],
@@ -258,7 +248,7 @@ export default function Dashboard() {
             )}
           </div>
           {shownGaps.map((g, i) => {
-            const meta = GAP_META[g.type] || { chip: 'Follow up', action: 'Open', to: null, tone: g.severity };
+            const meta = gapMeta(g.type, g.severity);
             const [chipBg, chipFg] = GAP_CHIP[meta.tone] || GAP_CHIP.info;
             return (
               <div
@@ -285,7 +275,7 @@ export default function Dashboard() {
                 </span>
                 <button
                   type="button"
-                  onClick={() => navigate(meta.to || `/report/child/${g.child_id}`)}
+                  onClick={() => navigate(gapTarget(g))}
                   style={{ height: 30, padding: '0 12px', border: '1px solid var(--blue-200)', borderRadius: 'var(--radius-sm)', background: 'var(--surface)', color: 'var(--blue-700)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12, cursor: 'pointer', flex: 'none' }}
                 >
                   {meta.action}

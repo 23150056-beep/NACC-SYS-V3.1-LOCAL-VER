@@ -12,6 +12,7 @@ import {
 } from '../ui';
 import { PA_STATUS_TONES, caseDate, reportTypeLabel } from '../config/caseData';
 import { loadAll } from '../utils/load';
+import { useOpenFromLink } from '../utils/links';
 import { clock } from '../utils/time';
 import { polishRemark, sendFeedback, getLatestBrief, generateBrief, getBriefFacts, summarizeDocument, confirmSummary } from '../api/assistant';
 import BriefFacts from '../components/BriefFacts';
@@ -53,6 +54,9 @@ export default function ChildProgressReport() {
   // Which section of the chart is showing. Every panel stays mounted — see
   // .racco-tabpanel in index.css for why the report still prints whole.
   const [tab, setTab] = useState('overview');
+  // `?tab=voice` opens the survey tab, which is where a care gap's Resend link
+  // leads. Above the early returns, with the other hooks.
+  useOpenFromLink('tab', 'voice', () => setTab('voice'));
   const [ackBusy, setAckBusy] = useState(null);
   const [remarkText, setRemarkText] = useState('');
   const [result, setResult] = useState(null); // add-result drawer
