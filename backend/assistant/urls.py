@@ -6,7 +6,7 @@ from assistant.views import (
     AssistantCheckView, AssistantJobFeedbackView, AssistantMetricsView,
     AssistantSettingView, AssistantUnansweredView, CensusNarrativeView,
     ConfirmSummaryView,
-    DocumentSummaryView, LatestBriefView, PreSessionBriefView,
+    BriefFactsView, DocumentSummaryView, LatestBriefView, PreSessionBriefView,
     PrefetchBriefsView, RemarkPolishView,
 )
 
@@ -30,6 +30,8 @@ urlpatterns = [
          name="assistant-brief"),
     path("assistant/brief/child/<int:child_id>/latest/", LatestBriefView.as_view(),
          name="assistant-brief-latest"),
+    path("assistant/brief/child/<int:child_id>/facts/", BriefFactsView.as_view(),
+         name="assistant-brief-facts"),
     path("assistant/prefetch-briefs/", PrefetchBriefsView.as_view(),
          name="assistant-prefetch-briefs"),
     path("assistant/summarize-report/<int:doc_id>/",

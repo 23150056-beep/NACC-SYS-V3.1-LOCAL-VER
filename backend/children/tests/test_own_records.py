@@ -89,6 +89,10 @@ class OwnRecordsTest(TestCase):
                                            {"medical_notes": "x"}, format="json").status_code)
         self.assertEqual(404, client.get(f"/api/reports/child/{self.ben.id}/").status_code)
         self.assertEqual(200, client.get(f"/api/reports/child/{self.ana.id}/").status_code)
+        self.assertEqual(404, client.get(
+            f"/api/assistant/brief/child/{self.ben.id}/facts/").status_code)
+        self.assertEqual(200, client.get(
+            f"/api/assistant/brief/child/{self.ana.id}/facts/").status_code)
 
     def test_a_new_record_belongs_to_whoever_added_it(self):
         # Even when the request names somebody else.

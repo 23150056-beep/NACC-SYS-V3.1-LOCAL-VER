@@ -16,6 +16,7 @@ from accounts.scoping import (role_of as _role, role_of_user as _role_of,
 from accounts.permissions import (IsAdministrator, IsAdminOrStaff, is_admin_or_assignee,
                                   writes_case_referrals)
 from assistant import evaluation, prompts, tools
+from assistant.brief_facts import brief_facts
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.serializers import AssistantSettingSerializer
 from assistant.services import (AIUnavailable, DISCLAIMER, OpenAICompatibleClient,
@@ -213,6 +214,29 @@ class LatestBriefView(AssistantBaseView):
         return Response({"draft": job.output_text, "job_id": job.id,
                          "generated_at": job.created_at,
                          "disclaimer": DISCLAIMER})
+
+
+class BriefFactsView(AssistantBaseView):
+    """The facts shown above a brief, from plain queries (assistant/brief_facts.py).
+
+    Their own endpoint rather than part of the brief's response: the brief
+    answers 503 when the assistant is off or the model is hosted, 404 when
+    nothing was drafted today, is throttled, and takes up to a minute -
+    and these must show in all of those cases, at once. Nor are they stored
+    with the brief: LatestBriefView serves this morning's prose, and a
+    session booked or a self-report read since then must not be stale.
+
+    Not gated, not throttled, and writes no AssistantJob: no model is
+    involved, so there is nothing to switch off or audit.
+    """
+
+    def get(self, request, child_id):
+        try:
+            child = visible_children(request).get(pk=child_id)
+        except Child.DoesNotExist:
+            return Response({"detail": "Not found."},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response(brief_facts(request, child))
 
 
 # (user id, child id) pairs currently being briefed, so two page loads cannot

@@ -7,12 +7,13 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
 import {
-  Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, Modal, PAGE, Select, Tabs,
+  Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, Modal, Note, PAGE, Select, Tabs,
 } from '../ui';
 import { PA_STATUS_TONES, caseDate, reportTypeLabel } from '../config/caseData';
 import { loadAll } from '../utils/load';
 import { clock } from '../utils/time';
-import { polishRemark, sendFeedback, getLatestBrief, generateBrief, summarizeDocument, confirmSummary } from '../api/assistant';
+import { polishRemark, sendFeedback, getLatestBrief, generateBrief, getBriefFacts, summarizeDocument, confirmSummary } from '../api/assistant';
+import BriefFacts from '../components/BriefFacts';
 import ReportCheckNote from '../components/ReportCheckNote';
 import UploadDrawer from '../components/UploadDrawer';
 import PsychReportPrint from '../components/PsychReportPrint';
@@ -66,7 +67,8 @@ export default function ChildProgressReport() {
   // psychologist has a way back to their own words if the draft is worse.
   // Cleared once the remark is saved or the draft is reverted.
   const [preRemarkText, setPreRemarkText] = useState(null);
-  const [brief, setBrief] = useState(null);   // { draft, generatedAt, jobId }
+  // { facts, factsFailed, prose: 'loading'|'ready'|'unavailable'|'failed', draft, generatedAt, jobId }
+  const [brief, setBrief] = useState(null);
   const [briefBusy, setBriefBusy] = useState(false);
   const [summary, setSummary] = useState(null); // { kind, id, text, confirmed }
   const [summaryBusy, setSummaryBusy] = useState(false);
@@ -247,6 +249,13 @@ export default function ChildProgressReport() {
 
   const openBrief = async ({ regenerate = false } = {}) => {
     setBriefBusy(true);
+    // Opens at once with the facts: they are queries and arrive in well under
+    // a second, while the prose can take a minute or not come at all (the
+    // assistant off, or a hosted deployment, where drafting is refused).
+    if (!regenerate) setBrief((b) => ({ facts: b?.facts ?? null, factsFailed: false, prose: 'loading' }));
+    getBriefFacts(id)
+      .then((facts) => setBrief((b) => (b ? { ...b, facts, factsFailed: false } : b)))
+      .catch(() => setBrief((b) => (b ? { ...b, factsFailed: !b.facts } : b)));
     try {
       const data = regenerate
         ? await generateBrief(id)
@@ -255,11 +264,16 @@ export default function ChildProgressReport() {
             if (err.response?.status === 404) return generateBrief(id);
             throw err;
           });
-      setBrief({ draft: data.draft, generatedAt: data.generated_at, jobId: data.job_id });
+      // `b ?` throughout: closed while the prose was drafting stays closed.
+      setBrief((b) => (b ? { ...b, prose: 'ready', draft: data.draft, generatedAt: data.generated_at, jobId: data.job_id } : b));
     } catch (err) {
-      toast.error(err.response?.status === 503
-        ? 'The assistant is unavailable right now.'
-        : 'Could not prepare the brief.');
+      const unavailable = err.response?.status === 503;
+      if (regenerate) {
+        // The draft already on screen stays, as it always did.
+        toast.error(unavailable ? 'The assistant is unavailable right now.' : 'Could not prepare the brief.');
+      } else {
+        setBrief((b) => (b ? { ...b, prose: unavailable ? 'unavailable' : 'failed' } : b));
+      }
     } finally {
       setBriefBusy(false);
     }
@@ -1009,23 +1023,53 @@ export default function ChildProgressReport() {
       {/* Pre-session brief modal */}
       {brief && (
         <Modal open onClose={() => setBrief(null)} title="Pre-session brief"
-               subtitle={`Drafted ${clock(brief.generatedAt)}`}
+               subtitle={brief.prose === 'ready' ? `Drafted ${clock(brief.generatedAt)}` : null}
                width={560}>
-          <Alert tone="info" disclaimer style={{ marginBottom: 12 }}>
-            AI-drafted decision support, not a diagnosis. The licensed psychologist
-            reviews, edits, and approves all content.
-          </Alert>
-          <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6 }}>{brief.draft}</div>
+          <BriefFacts facts={brief.facts} failed={brief.factsFailed} />
+          <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0 12px' }} />
+          {brief.prose === 'loading' && (
+            <p role="status" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              Drafting the written brief… this can take up to a minute.
+            </p>
+          )}
+          {brief.prose === 'unavailable' && (
+            <Note icon="info">
+              The written brief is unavailable right now. The facts above come straight from the record.
+            </Note>
+          )}
+          {brief.prose === 'failed' && (
+            <Note tone="warning" icon="alert-triangle">Could not prepare the written brief.</Note>
+          )}
+          {brief.prose === 'ready' && (
+            <>
+              <Alert tone="info" disclaimer style={{ marginBottom: 12 }}>
+                AI-drafted decision support, not a diagnosis. The licensed psychologist
+                reviews, edits, and approves all content.
+              </Alert>
+              <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6 }}>{brief.draft}</div>
+            </>
+          )}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-            <Button variant="ghost" onClick={() => { sendFeedback(brief.jobId, 'discarded').catch(() => {}); setBrief(null); }}>
-              Not useful
-            </Button>
-            <Button variant="ghost" onClick={() => openBrief({ regenerate: true })} disabled={briefBusy}>
-              Regenerate (slow)
-            </Button>
-            <Button variant="primary" onClick={() => { sendFeedback(brief.jobId, 'accepted').catch(() => {}); setBrief(null); }}>
-              Useful
-            </Button>
+            {brief.prose === 'ready' ? (
+              <>
+                <Button variant="ghost" onClick={() => { sendFeedback(brief.jobId, 'discarded').catch(() => {}); setBrief(null); }}>
+                  Not useful
+                </Button>
+                <Button variant="ghost" onClick={() => openBrief({ regenerate: true })} disabled={briefBusy}>
+                  {briefBusy ? 'Drafting…' : 'Regenerate (slow)'}
+                </Button>
+                <Button variant="primary" onClick={() => { sendFeedback(brief.jobId, 'accepted').catch(() => {}); setBrief(null); }}>
+                  Useful
+                </Button>
+              </>
+            ) : (
+              <>
+                {brief.prose === 'failed' && (
+                  <Button variant="ghost" onClick={() => openBrief()} disabled={briefBusy}>Try again</Button>
+                )}
+                <Button variant="primary" onClick={() => setBrief(null)}>Close</Button>
+              </>
+            )}
           </div>
         </Modal>
       )}
