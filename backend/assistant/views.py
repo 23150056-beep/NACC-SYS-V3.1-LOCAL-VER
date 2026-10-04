@@ -19,7 +19,8 @@ from assistant import evaluation, prompts, tools
 from assistant.brief_facts import brief_facts
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.serializers import AssistantSettingSerializer
-from assistant.services import (AIUnavailable, DISCLAIMER, OpenAICompatibleClient,
+from assistant.services import (AIUnavailable, DISCLAIMER, HOSTED_DRAFTING_REFUSED,
+                                OpenAICompatibleClient, drafting_available,
                                 gate, get_ai_client, run_job, services_lock)
 from children.models import Child
 from clinical.models import CaseReferral, PsychologicalReport
@@ -293,6 +294,12 @@ class PrefetchBriefsView(AssistantBaseView):
 
     def post(self, request):
         gate()
+        if not drafting_available():
+            # Every brief queued below would be refused by get_ai_client() and
+            # audited as a failure - a row per child per schedule visit, in a
+            # background thread, for nobody. prefetchBriefs() on the schedule
+            # screen already swallows the 503.
+            raise AIUnavailable(HOSTED_DRAFTING_REFUSED)
         today = timezone.localdate()
         visible = visible_children(request)
         appts = Appointment.objects.filter(
@@ -649,12 +656,20 @@ class AssistantCapabilitiesView(AssistantBaseView):
     fixed sentence, needs no model, and an empty panel with no hint is worse
     than one that explains itself. It reads the same source as the refusal
     text, so the two cannot drift apart.
+
+    `drafting` is False where the model is hosted, because get_ai_client()
+    refuses every caller without allow_hosted. A brief's prose, polish, summary
+    or census narrative there can only answer 503, so the screens hide those
+    buttons (the brief's facts stay: they need no model). It follows the
+    deployment, not the administrator's switch. It stays authenticated because
+    the deploy probe in CLAUDE.md reads its 401.
     """
 
     def get(self, request):
         role = _role(request)
         return Response({"can_ask": tools.capability_text(role),
-                         "examples": tools.capability_examples(role)})
+                         "examples": tools.capability_examples(role),
+                         "drafting": drafting_available()})
 
 
 # answer_directly's `reason` defaults to "unsupported" in its resolver, so it

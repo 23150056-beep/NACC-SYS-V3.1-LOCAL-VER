@@ -6,6 +6,7 @@ import { ageFrom, caseRef } from '../utils/child';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
+import { useAssistant } from '../context/AssistantContext';
 import {
   Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, Modal, Note, PAGE, Select, Tabs,
 } from '../ui';
@@ -43,6 +44,10 @@ export default function ChildProgressReport() {
   const { user } = useAuth();
   const toast = useToast();
   const confirm = useConfirm();
+  // False on a hosted deployment, where the server refuses every drafting
+  // feature (the chatbot is unaffected). Above the early returns below: a hook
+  // under `if (!data) return` crashed this page once already.
+  const { drafting } = useAssistant();
   const isPsych = user?.role_name === 'Psychologist';
   const [data, setData] = useState(null);
   // Which section of the chart is showing. Every panel stays mounted — see
@@ -142,9 +147,9 @@ export default function ChildProgressReport() {
   // write rule (assistant/views.py _DOC_KINDS): a report is its psychologist's
   // or an administrator's, a referral a social worker's or an administrator's.
   // Offered to anyone else, "Re-summarise" replaced another person's confirmed
-  // summary for good.
-  const canSummariseReport = canAdvance;
-  const canSummariseReferral = isStaffOrAdmin;
+  // summary for good. And only where this deployment drafts at all.
+  const canSummariseReport = canAdvance && drafting;
+  const canSummariseReferral = isStaffOrAdmin && drafting;
   const activePlan = (data.treatment_plans || []).find((p) => p.status === 'active') || (data.treatment_plans || [])[0];
   const csMeta = CASE_STATUS_META[child.case_status] || CASE_STATUS_META.pre_assessment;
 
@@ -248,14 +253,20 @@ export default function ChildProgressReport() {
   };
 
   const openBrief = async ({ regenerate = false } = {}) => {
-    setBriefBusy(true);
     // Opens at once with the facts: they are queries and arrive in well under
     // a second, while the prose can take a minute or not come at all (the
     // assistant off, or a hosted deployment, where drafting is refused).
-    if (!regenerate) setBrief((b) => ({ facts: b?.facts ?? null, factsFailed: false, prose: 'loading' }));
+    if (!regenerate) {
+      setBrief((b) => ({ facts: b?.facts ?? null, factsFailed: false, prose: drafting ? 'loading' : 'not_offered' }));
+    }
     getBriefFacts(id)
       .then((facts) => setBrief((b) => (b ? { ...b, facts, factsFailed: false } : b)))
       .catch(() => setBrief((b) => (b ? { ...b, factsFailed: !b.facts } : b)));
+    // Where the deployment does not draft, the facts are all there is: the
+    // prose is not requested at all, so nothing is refused and nothing is
+    // audited as a failed job.
+    if (!drafting) return;
+    setBriefBusy(true);
     try {
       const data = regenerate
         ? await generateBrief(id)
@@ -420,6 +431,7 @@ export default function ChildProgressReport() {
             </div>
           </div>
           <div className="racco-no-print" style={{ display: 'flex', gap: 8, flex: 'none', flexWrap: 'wrap' }}>
+            {/* Stays where drafting is off: the facts need no model. */}
             <Button variant="secondary" onClick={() => openBrief()} disabled={briefBusy} iconLeft={<Icon name="sparkles" size={17} />}>
               {briefBusy ? 'Preparing…' : 'Pre-session brief'}
             </Button>
@@ -742,11 +754,13 @@ export default function ChildProgressReport() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: data.remarks.length ? 18 : 0 }} className="racco-no-print">
             <textarea value={remarkText} onChange={(e) => setRemarkText(e.target.value)} rows={3} placeholder="Add a dated remark for this child…" style={textarea} />
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <Button variant="ghost" onClick={polish}
-                      disabled={!remarkText.trim() || polishing}
-                      iconLeft={<Icon name="sparkles" size={16} />}>
-                {polishing ? 'Polishing…' : 'Polish writing'}
-              </Button>
+              {drafting && (
+                <Button variant="ghost" onClick={polish}
+                        disabled={!remarkText.trim() || polishing}
+                        iconLeft={<Icon name="sparkles" size={16} />}>
+                  {polishing ? 'Polishing…' : 'Polish writing'}
+                </Button>
+              )}
               <Button variant="primary" onClick={addRemark} iconLeft={<Icon name="plus" size={16} />} disabled={!remarkText.trim()}>Add remark</Button>
             </div>
             {polishJob && (
@@ -1031,6 +1045,9 @@ export default function ChildProgressReport() {
             <p role="status" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
               Drafting the written brief… this can take up to a minute.
             </p>
+          )}
+          {brief.prose === 'not_offered' && (
+            <Note icon="info">A written brief is not available on this deployment.</Note>
           )}
           {brief.prose === 'unavailable' && (
             <Note icon="info">

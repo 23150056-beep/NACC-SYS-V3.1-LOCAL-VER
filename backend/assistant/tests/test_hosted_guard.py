@@ -9,7 +9,8 @@ from django.test import TestCase, override_settings
 
 from assistant.models import AssistantSetting
 from assistant.services import (NullClient, OllamaClient,
-                                OpenAICompatibleClient, get_ai_client)
+                                OpenAICompatibleClient, drafting_available,
+                                get_ai_client)
 
 HOSTED = {
     "ASSISTANT_MODEL_URL": "https://api.example.invalid/v1",
@@ -89,3 +90,22 @@ class HostedGuardTest(TestCase):
         self.assertIn("llama-4-scout", joined)
         self.assertIn("api.example.invalid", joined)
         self.assertNotIn("a-token", joined)
+
+    def test_drafting_available_says_what_get_ai_client_does(self):
+        # The screens hide their drafting buttons on drafting_available(), and
+        # get_ai_client() is what refuses them. Tying the two together means
+        # changing one without the other fails here instead of in a browser.
+        for label, cfg in (
+            ("no settings", {}),
+            ("credentials without the flag",
+             dict(ASSISTANT_ALLOW_HOSTED_MODEL=False, **HOSTED)),
+            ("flag and credentials",
+             dict(ASSISTANT_ALLOW_HOSTED_MODEL=True, **HOSTED)),
+            ("flag with an empty token",
+             dict(ASSISTANT_ALLOW_HOSTED_MODEL=True, **{**HOSTED, "ASSISTANT_MODEL_TOKEN": ""})),
+            ("flag with an empty URL",
+             dict(ASSISTANT_ALLOW_HOSTED_MODEL=True, **{**HOSTED, "ASSISTANT_MODEL_URL": ""})),
+        ):
+            with self.subTest(label), override_settings(**cfg):
+                self.assertEqual(drafting_available(),
+                                 not isinstance(get_ai_client(), NullClient))

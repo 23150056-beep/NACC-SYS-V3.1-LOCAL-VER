@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import {
-  askAssistant, getAssistantCapabilities, runFollowup, sendFeedback,
-} from '../api/assistant';
+import { askAssistant, runFollowup, sendFeedback } from '../api/assistant';
 import { useAssistant } from '../context/AssistantContext';
 import { Icon, roleLabel } from '../ui';
 import { clockRange } from '../utils/time';
@@ -22,9 +20,10 @@ import { clockRange } from '../utils/time';
  */
 
 /* Fallback only. The real list is served per role by
- * /api/assistant/capabilities/, from the same source as the assistant's own
- * refusal text; these are what shows if that request fails, and they are
- * deliberately the psychologist's, who is the majority of users. */
+ * /api/assistant/capabilities/ (fetched once per user in AssistantContext),
+ * from the same source as the assistant's own refusal text; these are what
+ * shows if that request fails, and they are deliberately the psychologist's,
+ * who is the majority of users. */
 const SUGGESTIONS = [
   'Who am I seeing tomorrow?',
   'How many children am I handling?',
@@ -388,22 +387,16 @@ function Answer({ result }) {
 export default function AssistantPanel() {
   // Open state lives in the context so a quick action can open this panel;
   // nothing outside the component could reach a useState here.
-  const { open, openAssistant, closeAssistant } = useAssistant();
+  const { open, openAssistant, closeAssistant, caps } = useAssistant();
   const [question, setQuestion] = useState('');
   const [busy, setBusy] = useState(false);
   const [turns, setTurns] = useState([]);
-  const [caps, setCaps] = useState(null);
   const scroller = useRef(null);
   const input = useRef(null);
 
-  // Fetched once, on first open. Someone who arrived by clicking a button has
-  // typed nothing and needs a starting point.
-  // Silent on purpose: without these the panel simply opens without its
-  // suggestions, which is the same thing it does when the assistant is
-  // switched off. Every other part of it still works.
-  useEffect(() => {
-    if (open && !caps) getAssistantCapabilities().then(setCaps).catch(() => {});
-  }, [open, caps]);
+  // `caps` (what this user can ask, plus examples) comes from AssistantContext,
+  // fetched once per user and silent on failure: without it the panel simply
+  // opens without its suggestions.
 
   const toBottom = useCallback(() => {
     requestAnimationFrame(() => {
