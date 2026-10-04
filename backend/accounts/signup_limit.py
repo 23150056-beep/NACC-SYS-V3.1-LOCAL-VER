@@ -76,3 +76,39 @@ def queue_is_full():
 
     return (User.objects.filter(status=User.PENDING).count()
             >= settings.SIGNUP_MAX_PENDING)
+
+
+# --------------------------------------------------------------------------
+# Asking for the sign-up email code again
+# --------------------------------------------------------------------------
+#
+# A third open door, and it writes no request, so the two limits above do not
+# fit it as they stand. The creation counter is for creations: charging a
+# resend to it would let an applicant who asked for a few new codes use up the
+# allowance for signing up a colleague from the same office address, and five
+# sign-ups from one address would stop every one of them asking for a code.
+# The ceiling on outstanding requests counts rows, and a resend adds none.
+#
+# So this is the same kind of limit - per IP, in the cache, the same window -
+# kept apart under its own key. The per-request limits (once a minute, five an
+# hour, in the database) are what protect any one address; this is the speed
+# bump for one source working through many.
+
+def _resend_key(ip):
+    return f"{_PREFIX}resend:{ip or 'unknown'}"
+
+
+def resend_is_throttled(ip):
+    """Whether this address has already used its allowance of code requests."""
+    return (cache.get(_resend_key(ip)) or 0) >= settings.SIGNUP_RESEND_MAX_PER_IP
+
+
+def register_resend(ip):
+    """Count one request for a new code against this address.
+
+    Counted whatever came of it - an unknown address, a confirmed one - so
+    that what a request costs does not depend on whether the address applied.
+    """
+    count = (cache.get(_resend_key(ip)) or 0) + 1
+    cache.set(_resend_key(ip), count, timeout=_window_seconds())
+    return count

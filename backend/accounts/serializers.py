@@ -152,8 +152,19 @@ class UserWriteSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         previous_role = instance.role
         new_role = validated_data.get("role", previous_role)
+        # Correcting the address of a request still waiting for approval
+        # leaves nothing proved about the new one: the code was mailed to the
+        # old one, and approval emails a temporary password to whatever is
+        # here. Judged on the status it HAD, so an account that is already
+        # active is not touched. A change of letter case is not a new address.
+        new_email = validated_data.get("email")
+        address_changed = (
+            instance.status == User.PENDING and bool(new_email)
+            and new_email.strip().lower() != (instance.email or "").strip().lower())
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+        if address_changed:
+            instance.email_verified = False
         # Keep username in sync with email (email is the username).
         if validated_data.get("email"):
             instance.username = validated_data["email"]

@@ -200,3 +200,43 @@ class PhoneVerification(models.Model):
 
     def __str__(self):
         return f"Phone verification for {self.user.email}"
+
+
+class EmailVerification(models.Model):
+    """The code mailed to a typed sign-up address and waiting to be typed
+    back, and how often this request has asked for one. One row per access
+    request (accounts/email_verification.py).
+
+    In the database for the reason PhoneVerification is: the default cache
+    lives in one process's memory, so under gunicorn a code stored by the
+    worker that sent it was "expired" to the worker that took the reply, and
+    each worker kept its own count of guesses.
+
+    Tied to the request's User row rather than keyed by address alone, so it
+    goes when the account does and no address outlives the request it was
+    collected for. `email` is the address the code was mailed to: a code
+    counts only while that is still the request's address, so a code mailed
+    to a typo that an administrator has since corrected cannot vouch for the
+    corrected one.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="email_verification")
+    # Lower-cased, as accounts.email_verification.normalise writes it.
+    email = models.EmailField(db_index=True)
+    # Blank means no code is outstanding.
+    code = models.CharField(max_length=12, blank=True, default="")
+    tries = models.PositiveSmallIntegerField(default=0)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    # The resend limits, counted here for the reason PhoneVerification counts
+    # its own: a cache counter is per worker and multiplies the allowance.
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    window_started_at = models.DateTimeField(null=True, blank=True)
+    sent_in_window = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "tbl_email_verification"
+
+    def __str__(self):
+        return f"Email verification for {self.user.email}"
