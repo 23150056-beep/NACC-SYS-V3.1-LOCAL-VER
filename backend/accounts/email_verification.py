@@ -52,7 +52,7 @@ CONFIRMED = "Address confirmed. An administrator will review your request."
 # Google one and a limit being hit - anything else is a way to ask whether
 # somebody has applied.
 RESEND_REPLY = ("If that address has a request waiting to be confirmed, a "
-                "new code has been sent to it. A new code can be asked for "
+                "code has been sent to it. A new code can be asked for "
                 "once a minute, five times an hour; asking sooner changes "
                 "nothing.")
 

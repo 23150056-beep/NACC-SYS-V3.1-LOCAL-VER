@@ -200,7 +200,7 @@ export default function Signup() {
     setResending(true);
     try {
       const { data } = await api.post('/auth/signup/verify-email/resend/', { email: form.email });
-      setResendNote(data?.detail || 'If that address has a request waiting to be confirmed, a new code has been sent to it.');
+      setResendNote(data?.detail || 'If that address has a request waiting to be confirmed, a code has been sent to it.');
     } catch (err) {
       setResendNote(err.response?.data?.detail || 'Could not ask for a new code. Please try again in a minute.');
     } finally {
