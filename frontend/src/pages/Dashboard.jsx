@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useCensus } from '../context/CensusContext';
@@ -89,7 +89,11 @@ export default function Dashboard() {
   );
 
   const dueToday = gaps.filter((g) => g.severity === 'danger').length;
-  const shownGaps = gaps.slice(0, 4);
+  // The card shows the first few; the rest open in place rather than sending
+  // the reader to Monitoring, which lists children and not these gaps.
+  const GAP_PREVIEW = 4;
+  const [allGaps, setAllGaps] = useState(false);
+  const shownGaps = allGaps ? gaps : gaps.slice(0, GAP_PREVIEW);
 
   /* Quick actions. Every one of these OPENS something — the form, the booking
    * drawer, the upload drawer, the queue.
@@ -238,17 +242,17 @@ export default function Dashboard() {
                 Deterministic care-gap rules over dates and case state &mdash; no model involved.
               </span>
             </span>
-            {gaps.length > shownGaps.length && (
+            {gaps.length > GAP_PREVIEW && (
               <button
-                type="button" onClick={() => navigate('/monitoring')}
+                type="button" onClick={() => setAllGaps((v) => !v)} aria-expanded={allGaps}
                 style={{ height: 32, padding: '0 13px', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-sm)', background: 'var(--surface)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12.5, color: 'var(--text-body)', cursor: 'pointer', flex: 'none' }}
               >
-                View all {gaps.length}
+                {allGaps ? 'Show fewer' : `Show all ${gaps.length}`}
               </button>
             )}
           </div>
           {shownGaps.map((g, i) => {
-            const meta = gapMeta(g.type, g.severity);
+            const meta = gapMeta(g.type, g.severity, role);
             const [chipBg, chipFg] = GAP_CHIP[meta.tone] || GAP_CHIP.info;
             return (
               <div
@@ -275,7 +279,7 @@ export default function Dashboard() {
                 </span>
                 <button
                   type="button"
-                  onClick={() => navigate(gapTarget(g))}
+                  onClick={() => navigate(gapTarget(g, role))}
                   style={{ height: 30, padding: '0 12px', border: '1px solid var(--blue-200)', borderRadius: 'var(--radius-sm)', background: 'var(--surface)', color: 'var(--blue-700)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12, cursor: 'pointer', flex: 'none' }}
                 >
                   {meta.action}

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { askAssistant, runFollowup, sendFeedback } from '../api/assistant';
 import { useAssistant } from '../context/AssistantContext';
+import { useAuth } from '../context/AuthContext';
 import { Icon, roleLabel } from '../ui';
 import { gapMeta, gapTarget } from '../config/careGaps';
 import { clockRange } from '../utils/time';
@@ -127,6 +128,9 @@ function Feedback({ rated, onRate }) {
 
 function Answer({ result }) {
   const { kind } = result || {};
+  // The viewer's role decides where a care gap's action goes (config/careGaps.js).
+  const { user } = useAuth();
+  const role = user?.role_name;
 
   if (kind === 'breakdown') {
     // get_statistics. A plain total is a figure, styled like the headcount
@@ -301,7 +305,7 @@ function Answer({ result }) {
     // A social worker's answer brings its own empty sentence: their rules are not about anything being overdue.
     if (!result.items.length) return <Line muted>{result.empty || 'Nobody is overdue.'}</Line>;
     return result.items.map((g, i) => {
-      const meta = gapMeta(g.type, g.severity);
+      const meta = gapMeta(g.type, g.severity, role);
       return (
         <Line key={i}>
           {g.child_id
@@ -312,7 +316,7 @@ function Answer({ result }) {
           {g.child_id && meta.to && (
             <>
               <span style={{ color: 'var(--text-muted)' }}> · </span>
-              <Link to={gapTarget(g)} aria-label={`${meta.action}: ${g.child}`}
+              <Link to={gapTarget(g, role)} aria-label={`${meta.action}: ${g.child}`}
                     style={{ fontSize: 12, fontWeight: 600, color: 'var(--brand)' }}>{meta.action}</Link>
             </>
           )}
@@ -339,7 +343,7 @@ function Answer({ result }) {
           <span style={{ color: 'var(--text-muted)' }}> · {result.child.status}</span>
         </Line>
         {result.gaps?.length > 0 && (
-          <Line muted>Needs attention: {result.gaps.map((t) => gapMeta(t).chip).join(', ')}</Line>
+          <Line muted>Needs attention: {result.gaps.map((t) => gapMeta(t, undefined, role).chip).join(', ')}</Line>
         )}
         {result.remarks?.length > 0 && (
           <div style={{ marginTop: 6 }}>

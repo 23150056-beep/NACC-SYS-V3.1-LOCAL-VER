@@ -55,8 +55,10 @@ export default function ChildProgressReport() {
   // Which section of the chart is showing. Every panel stays mounted — see
   // .racco-tabpanel in index.css for why the report still prints whole.
   const [tab, setTab] = useState('overview');
-  // `?tab=voice` opens the survey tab, which is where a care gap's Resend link
-  // leads. Above the early returns, with the other hooks.
+  // `?tab=voice` opens the survey tab, for a link that points at it. (The
+  // social worker's "survey waiting" care gap used to; it was removed because
+  // a social worker cannot start a survey.) Above the early returns, with the
+  // other hooks.
   useOpenFromLink('tab', 'voice', () => setTab('voice'));
   const [ackBusy, setAckBusy] = useState(null);
   const [remarkText, setRemarkText] = useState('');

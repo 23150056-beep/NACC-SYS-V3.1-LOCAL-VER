@@ -208,6 +208,18 @@ class StaffCareGapTest(StaffGapFixture, TestCase):
         self.assertEqual(1, len(gap))
         self.assertIn("asked", gap[0]["message"])
 
+    def test_the_week_is_pinned_at_both_edges(self):
+        # ASSIGNMENT_ANSWER_DAYS: six days and twenty-three hours is still
+        # waiting; seven days is not.
+        Child.objects.filter(pk=self.ana.pk).update(assigned_psychologist=None)
+        asked = self._ask()
+        AssignmentRequest.objects.filter(pk=asked.pk).update(
+            created_at=timezone.now() - timedelta(days=6, hours=23))
+        self.assertNotIn("no_psychologist", self._types())
+        AssignmentRequest.objects.filter(pk=asked.pk).update(
+            created_at=timezone.now() - timedelta(days=7))
+        self.assertIn("no_psychologist", self._types())
+
     def test_a_declined_request_is_a_gap_at_once(self):
         Child.objects.filter(pk=self.ana.pk).update(assigned_psychologist=None)
         self._ask(AssignmentRequest.DECLINED)
@@ -241,26 +253,13 @@ class StaffCareGapTest(StaffGapFixture, TestCase):
             created_at=timezone.now() - timedelta(days=days_ago))
         return invite
 
-    def test_no_link_and_a_fresh_link_are_not_gaps(self):
-        self.assertNotIn("survey_unanswered", self._types())
-        self._invite(0)
-        self.assertNotIn("survey_unanswered", self._types())
-
-    def test_an_old_unanswered_link_is_a_gap(self):
+    def test_a_survey_link_left_unanswered_is_not_a_gap(self):
+        # It used to be one. A social worker cannot start a QR survey (they
+        # cannot read the self-report templates), so the gap named something
+        # only a psychologist could close and was taken out of this list.
+        self._invite(30)
+        self.assertEqual(set(), self._types())
         self._invite(8)
-        self.assertEqual(self._types(), {"survey_unanswered"})
-        self.assertEqual("info", self._alerts()[0]["severity"])
-
-    def test_an_answered_link_is_not_a_gap(self):
-        self._invite(8, OpinionnaireInvite.SUBMITTED)
-        self.assertNotIn("survey_unanswered", self._types())
-
-    def test_only_the_newest_link_counts(self):
-        self._invite(10)
-        self._invite(1)
-        self.assertNotIn("survey_unanswered", self._types())
-        # And the other way round: a newer answered link supersedes an old open one.
-        self._invite(0, OpinionnaireInvite.SUBMITTED)
         self.assertNotIn("survey_unanswered", self._types())
 
     def _flag(self):

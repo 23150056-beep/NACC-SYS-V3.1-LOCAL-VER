@@ -75,10 +75,20 @@ function ScheduleChip({ appts = [] }) {
  * records only when they accept - so between the pick and the answer the row
  * has to say so, or it reads as "nobody" and gets picked again. A decline
  * shows until someone else is asked, with the reason on hover. */
+// How long a psychologist may sit on a request before it counts as unanswered:
+// ASSIGNMENT_ANSWER_DAYS in backend/clinical/care_gaps.py, which lists the
+// child as a care gap from that moment. The row offers someone else to the
+// same people from the same moment.
+const ASSIGNMENT_ANSWER_MS = 7 * 24 * 60 * 60 * 1000;
+
 function PsychologistCell({ child: c, canManage, onAssign }) {
   const pending = c.pending_assignment;
   const declined = !pending && !c.psychologist ? c.declined_assignment : null;
-  const assign = canManage && c.status === 'active' && !c.psychologist && !pending;
+  const unanswered = Boolean(pending?.created_at)
+    && Date.now() - new Date(pending.created_at).getTime() >= ASSIGNMENT_ANSWER_MS;
+  // Also when the request has gone unanswered for a week: the care gap says to
+  // ask someone else, and without a button here that is a dead end.
+  const assign = canManage && c.status === 'active' && !c.psychologist && (!pending || unanswered);
   return (
     <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3 }}>
       {c.psychologist_name && <span>{c.psychologist_name}</span>}
@@ -93,10 +103,11 @@ function PsychologistCell({ child: c, canManage, onAssign }) {
         </span>
       )}
       {assign && (
-        <button title={`Assign a psychologist to ${c.fullname}`} aria-label={`Assign psychologist to ${c.fullname}`}
+        <button title={pending ? `${pending.psychologist_name} has not answered - ask someone else for ${c.fullname}` : `Assign a psychologist to ${c.fullname}`}
+          aria-label={pending ? `Ask another psychologist about ${c.fullname}` : `Assign psychologist to ${c.fullname}`}
           onClick={(e) => { e.stopPropagation(); onAssign(); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 'var(--radius-pill)', border: '1px dashed var(--blue-300)', background: 'var(--blue-50)', color: 'var(--blue-700)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 11.5, cursor: 'pointer' }}>
-          <Icon name="user-plus" size={13} /> Assign
+          <Icon name="user-plus" size={13} /> {pending ? 'Ask someone else' : 'Assign'}
         </button>
       )}
       {!c.psychologist_name && !pending && !declined && !assign && '—'}

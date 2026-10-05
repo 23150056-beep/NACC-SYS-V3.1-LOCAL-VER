@@ -21,16 +21,26 @@ export const GAP_META = {
   no_case_referral: { chip: 'No referral', action: 'Upload', to: (id) => `/reports?upload=1&child=${id}`, tone: 'danger' },
   no_psychologist: { chip: 'Unassigned', action: 'Assign', to: (id) => `/children?q=${caseRef(id)}`, tone: 'warning' },
   no_signed_consent: { chip: 'No consent', action: 'Open', to: null, tone: 'warning' },
-  survey_unanswered: { chip: 'Survey waiting', action: 'Resend', to: (id) => `/report/child/${id}?tab=voice`, tone: 'info' },
 };
 
-export function gapMeta(type, severity) {
-  return GAP_META[type] || { chip: 'Follow up', action: 'Open', to: null, tone: severity };
+// Gaps whose action is a Psychologist-only screen (/pre-assessment). The ISA
+// reads the same gap but cannot work in that screen, so for the ISA the
+// action is the child's own page, where the consent and the pre-assessment
+// can be seen.
+const PSYCHOLOGIST_ONLY = new Set(['consent_missing', 'pre_assessment_overdue']);
+
+/* `role` is the viewer's role_name. */
+export function gapMeta(type, severity, role) {
+  const meta = GAP_META[type] || { chip: 'Follow up', action: 'Open', to: null, tone: severity };
+  if (role === 'Administrator' && PSYCHOLOGIST_ONLY.has(type)) {
+    return { ...meta, action: 'Open', to: null };
+  }
+  return meta;
 }
 
 /* Where a gap's action goes: its own screen, else the child's page. */
-export function gapTarget(g) {
-  const { to } = gapMeta(g.type, g.severity);
+export function gapTarget(g, role) {
+  const { to } = gapMeta(g.type, g.severity, role);
   const path = typeof to === 'function' ? to(g.child_id) : to;
   return path || `/report/child/${g.child_id}`;
 }
