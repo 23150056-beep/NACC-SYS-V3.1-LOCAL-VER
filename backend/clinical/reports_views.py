@@ -355,7 +355,7 @@ class DashboardView(generics.GenericAPIView):
 
     def get(self, request):
         from django.utils import timezone as tz
-        from clinical.care_gaps import compute_alerts
+        from clinical.care_gaps import alerts_for
         from scheduling.models import Appointment, AvailabilityBlock
 
         role = _role(request)
@@ -473,5 +473,5 @@ class DashboardView(generics.GenericAPIView):
             "trend": agg["trend"][-6:],
             "per_psychologist": agg["per_psychologist"],
             "by_case_type": agg["by_case_type"],
-            "care_gaps": compute_alerts(scoped_children),
+            "care_gaps": alerts_for(request, scoped_children),
         })

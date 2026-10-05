@@ -6,8 +6,8 @@ from assistant.views import (
     AssistantCheckView, AssistantJobFeedbackView, AssistantMetricsView,
     AssistantSettingView, AssistantUnansweredView, CensusNarrativeView,
     ConfirmSummaryView,
-    DocumentSummaryView, LatestBriefView, PreSessionBriefView,
-    PrefetchBriefsView, RemarkPolishView,
+    BriefFactsView, ChildAccessLogView, DocumentSummaryView, LatestBriefView,
+    PreSessionBriefView, PrefetchBriefsView, RemarkPolishView,
 )
 
 urlpatterns = [
@@ -26,10 +26,14 @@ urlpatterns = [
          name="assistant-polish-remark"),
     path("assistant/jobs/<int:job_id>/feedback/",
          AssistantJobFeedbackView.as_view(), name="assistant-job-feedback"),
+    path("assistant/access-log/child/<int:child_id>/", ChildAccessLogView.as_view(),
+         name="assistant-access-log"),
     path("assistant/brief/child/<int:child_id>/", PreSessionBriefView.as_view(),
          name="assistant-brief"),
     path("assistant/brief/child/<int:child_id>/latest/", LatestBriefView.as_view(),
          name="assistant-brief-latest"),
+    path("assistant/brief/child/<int:child_id>/facts/", BriefFactsView.as_view(),
+         name="assistant-brief-facts"),
     path("assistant/prefetch-briefs/", PrefetchBriefsView.as_view(),
          name="assistant-prefetch-briefs"),
     path("assistant/summarize-report/<int:doc_id>/",

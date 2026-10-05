@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import api from '../api/client';
@@ -6,13 +6,17 @@ import { ageFrom, caseRef } from '../utils/child';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
+import { useAssistant } from '../context/AssistantContext';
 import {
-  Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, Modal, PAGE, Select, Tabs,
+  Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, Modal, Note, PAGE, Select, Tabs,
 } from '../ui';
 import { PA_STATUS_TONES, caseDate, reportTypeLabel } from '../config/caseData';
 import { loadAll } from '../utils/load';
+import { useOpenFromLink } from '../utils/links';
 import { clock } from '../utils/time';
-import { polishRemark, sendFeedback, getLatestBrief, generateBrief, summarizeDocument, confirmSummary } from '../api/assistant';
+import { polishRemark, sendFeedback, getLatestBrief, generateBrief, getBriefFacts, summarizeDocument, confirmSummary } from '../api/assistant';
+import AssistantAccessLog from '../components/AssistantAccessLog';
+import BriefFacts from '../components/BriefFacts';
 import ReportCheckNote from '../components/ReportCheckNote';
 import UploadDrawer from '../components/UploadDrawer';
 import PsychReportPrint from '../components/PsychReportPrint';
@@ -42,11 +46,20 @@ export default function ChildProgressReport() {
   const { user } = useAuth();
   const toast = useToast();
   const confirm = useConfirm();
+  // False on a hosted deployment, where the server refuses every drafting
+  // feature (the chatbot is unaffected). Above the early returns below: a hook
+  // under `if (!data) return` crashed this page once already.
+  const { drafting } = useAssistant();
   const isPsych = user?.role_name === 'Psychologist';
   const [data, setData] = useState(null);
   // Which section of the chart is showing. Every panel stays mounted — see
   // .racco-tabpanel in index.css for why the report still prints whole.
   const [tab, setTab] = useState('overview');
+  // `?tab=voice` opens the survey tab, for a link that points at it. (The
+  // social worker's "survey waiting" care gap used to; it was removed because
+  // a social worker cannot start a survey.) Above the early returns, with the
+  // other hooks.
+  useOpenFromLink('tab', 'voice', () => setTab('voice'));
   const [ackBusy, setAckBusy] = useState(null);
   const [remarkText, setRemarkText] = useState('');
   const [result, setResult] = useState(null); // add-result drawer
@@ -66,8 +79,27 @@ export default function ChildProgressReport() {
   // psychologist has a way back to their own words if the draft is worse.
   // Cleared once the remark is saved or the draft is reverted.
   const [preRemarkText, setPreRemarkText] = useState(null);
-  const [brief, setBrief] = useState(null);   // { draft, generatedAt, jobId }
+  // { childId, facts, factsFailed, prose: 'loading'|'ready'|'unavailable'|'failed'|'not_offered', draft, generatedAt, jobId }
+  // childId is the child it was opened for: a reply for any other child is
+  // dropped, so a slow request cannot fill another child's modal.
+  const [brief, setBrief] = useState(null);
   const [briefBusy, setBriefBusy] = useState(false);
+  // The child this page is on, for replies to compare against when they land;
+  // the request counter, so a finished request can tell it is no longer the
+  // latest one; and the prose request still running, if any, so reopening the
+  // modal mid-draft waits for it instead of asking the model a second time.
+  const currentChild = useRef(id);
+  const briefSeq = useRef(0);
+  const briefFlight = useRef(null); // { childId, seq }
+  // Another child's route re-uses this component. Everything about the last
+  // child's brief goes, and any request still out for it is orphaned.
+  useEffect(() => {
+    currentChild.current = id;
+    briefSeq.current += 1;
+    briefFlight.current = null;
+    setBrief(null);
+    setBriefBusy(false);
+  }, [id]);
   const [summary, setSummary] = useState(null); // { kind, id, text, confirmed }
   const [summaryBusy, setSummaryBusy] = useState(false);
   // Re-summarising an already-confirmed document destroys the psychologist's
@@ -83,6 +115,8 @@ export default function ChildProgressReport() {
   const [upload, setUpload] = useState(null); // 'report' | 'case_referral'
   const [viewing, setViewing] = useState(null); // the report being read on screen
   const isStaffOrAdmin = ['Administrator', 'Staff'].includes(user?.role_name);
+  // The ISA's log of who had the assistant read this record; nobody else sees it.
+  const isAdmin = user?.role_name === 'Administrator';
   // Mirrors INSTRUMENT_MANAGER_ROLES on the server (accounts/permissions.py).
   const canReadTemplates = ['Administrator', 'Psychologist'].includes(user?.role_name);
 
@@ -140,9 +174,9 @@ export default function ChildProgressReport() {
   // write rule (assistant/views.py _DOC_KINDS): a report is its psychologist's
   // or an administrator's, a referral a social worker's or an administrator's.
   // Offered to anyone else, "Re-summarise" replaced another person's confirmed
-  // summary for good.
-  const canSummariseReport = canAdvance;
-  const canSummariseReferral = isStaffOrAdmin;
+  // summary for good. And only where this deployment drafts at all.
+  const canSummariseReport = canAdvance && drafting;
+  const canSummariseReferral = isStaffOrAdmin && drafting;
   const activePlan = (data.treatment_plans || []).find((p) => p.status === 'active') || (data.treatment_plans || [])[0];
   const csMeta = CASE_STATUS_META[child.case_status] || CASE_STATUS_META.pre_assessment;
 
@@ -163,6 +197,7 @@ export default function ChildProgressReport() {
     { id: 'remarks', label: 'Remarks', count: (data.remarks || []).length || undefined },
     { id: 'voice', label: "Child's voice", count: (data.opinionnaires || []).length || undefined },
     { id: 'casework', label: 'Casework', count: (data.case_referrals || []).length || undefined },
+    ...(isAdmin ? [{ id: 'assistant', label: 'Assistant log' }] : []),
   ];
 
   const facts = [
@@ -246,22 +281,67 @@ export default function ChildProgressReport() {
   };
 
   const openBrief = async ({ regenerate = false } = {}) => {
+    const childId = id;
+    // Replies below belong to this child only.
+    const mine = (b) => (b && b.childId === childId ? b : null);
+    const stale = () => currentChild.current !== childId;
+    const flying = briefFlight.current && briefFlight.current.childId === childId;
+    // Opens at once with the facts: they are queries and arrive in well under
+    // a second, while the prose can take a minute or not come at all (the
+    // assistant off, or a hosted deployment, where drafting is refused).
+    if (!regenerate) {
+      setBrief((b) => ({
+        childId,
+        facts: mine(b)?.facts ?? null,
+        factsFailed: false,
+        // A draft still being written for this child fills the modal when it
+        // lands; nothing else is asked of the model.
+        prose: drafting ? 'loading' : 'not_offered',
+      }));
+    }
+    getBriefFacts(childId)
+      .then((facts) => setBrief((b) => (mine(b) ? { ...b, facts, factsFailed: false } : b)))
+      .catch(() => setBrief((b) => (mine(b) ? { ...b, factsFailed: !b.facts } : b)));
+    // Where the deployment does not draft, the facts are all there is: the
+    // prose is not requested at all, so nothing is refused and nothing is
+    // audited as a failed job.
+    if (!drafting) return;
+    if (!regenerate && flying) return;
+    const seq = briefSeq.current + 1;
+    briefSeq.current = seq;
+    briefFlight.current = { childId, seq };
     setBriefBusy(true);
     try {
       const data = regenerate
-        ? await generateBrief(id)
-        : await getLatestBrief(id).catch((err) => {
+        ? await generateBrief(childId)
+        : await getLatestBrief(childId).catch((err) => {
             // 404 just means nothing was drafted today — fall back to the slow path.
-            if (err.response?.status === 404) return generateBrief(id);
+            if (err.response?.status === 404) return generateBrief(childId);
             throw err;
           });
-      setBrief({ draft: data.draft, generatedAt: data.generated_at, jobId: data.job_id });
+      // `mine` throughout: closed while the prose was drafting stays closed,
+      // and a draft for another child is never shown.
+      setBrief((b) => (mine(b) ? { ...b, prose: 'ready', draft: data.draft, generatedAt: data.generated_at, jobId: data.job_id } : b));
     } catch (err) {
-      toast.error(err.response?.status === 503
-        ? 'The assistant is unavailable right now.'
-        : 'Could not prepare the brief.');
+      if (stale()) return;
+      const unavailable = err.response?.status === 503;
+      if (regenerate) {
+        // The draft already on screen stays, as it always did.
+        toast.error(unavailable ? 'The assistant is unavailable right now.' : 'Could not prepare the brief.');
+        // Unless the modal was closed and reopened meanwhile: it is waiting on
+        // this very request, and must not be left saying "drafting".
+        setBrief((b) => (mine(b) && b.prose === 'loading'
+          ? { ...b, prose: unavailable ? 'unavailable' : 'failed' } : b));
+      } else {
+        setBrief((b) => (mine(b) ? { ...b, prose: unavailable ? 'unavailable' : 'failed' } : b));
+      }
     } finally {
-      setBriefBusy(false);
+      // Only the latest request may clear these: an old one finishing must
+      // not unlock the button, or forget a newer draft, for a newer request.
+      if (briefSeq.current === seq) {
+        briefFlight.current = null;
+        setBriefBusy(false);
+      }
     }
   };
 
@@ -406,7 +486,8 @@ export default function ChildProgressReport() {
             </div>
           </div>
           <div className="racco-no-print" style={{ display: 'flex', gap: 8, flex: 'none', flexWrap: 'wrap' }}>
-            <Button variant="secondary" onClick={() => openBrief()} disabled={briefBusy} iconLeft={<Icon name="sparkles" size={17} />}>
+            {/* Stays where drafting is off: the facts need no model. */}
+            <Button variant="secondary" onClick={() => openBrief()} iconLeft={<Icon name="sparkles" size={17} />}>
               {briefBusy ? 'Preparing…' : 'Pre-session brief'}
             </Button>
             <Button variant="secondary" onClick={() => window.print()} title="Print this child's psychological report" iconLeft={<Icon name="printer" size={17} />}>Print</Button>
@@ -728,11 +809,13 @@ export default function ChildProgressReport() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: data.remarks.length ? 18 : 0 }} className="racco-no-print">
             <textarea value={remarkText} onChange={(e) => setRemarkText(e.target.value)} rows={3} placeholder="Add a dated remark for this child…" style={textarea} />
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <Button variant="ghost" onClick={polish}
-                      disabled={!remarkText.trim() || polishing}
-                      iconLeft={<Icon name="sparkles" size={16} />}>
-                {polishing ? 'Polishing…' : 'Polish writing'}
-              </Button>
+              {drafting && (
+                <Button variant="ghost" onClick={polish}
+                        disabled={!remarkText.trim() || polishing}
+                        iconLeft={<Icon name="sparkles" size={16} />}>
+                  {polishing ? 'Polishing…' : 'Polish writing'}
+                </Button>
+              )}
               <Button variant="primary" onClick={addRemark} iconLeft={<Icon name="plus" size={16} />} disabled={!remarkText.trim()}>Add remark</Button>
             </div>
             {polishJob && (
@@ -881,6 +964,12 @@ export default function ChildProgressReport() {
 
       </div>
 
+      {isAdmin && (
+        <div className="racco-stack racco-tabpanel" hidden={tab !== 'assistant'}>
+          <AssistantAccessLog childId={child.id} active={tab === 'assistant'} />
+        </div>
+      )}
+
       <Alert disclaimer title="Note.">All clinical findings are the licensed psychologist&apos;s own professional judgment.</Alert>
 
       {/* Add-result drawer */}
@@ -1009,23 +1098,56 @@ export default function ChildProgressReport() {
       {/* Pre-session brief modal */}
       {brief && (
         <Modal open onClose={() => setBrief(null)} title="Pre-session brief"
-               subtitle={`Drafted ${clock(brief.generatedAt)}`}
+               subtitle={brief.prose === 'ready' ? `Drafted ${clock(brief.generatedAt)}` : null}
                width={560}>
-          <Alert tone="info" disclaimer style={{ marginBottom: 12 }}>
-            AI-drafted decision support, not a diagnosis. The licensed psychologist
-            reviews, edits, and approves all content.
-          </Alert>
-          <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6 }}>{brief.draft}</div>
+          <BriefFacts facts={brief.facts} failed={brief.factsFailed} />
+          <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0 12px' }} />
+          {brief.prose === 'loading' && (
+            <p role="status" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              Drafting the written brief… this can take up to a minute.
+            </p>
+          )}
+          {brief.prose === 'not_offered' && (
+            <Note icon="info">A written brief is not available on this deployment.</Note>
+          )}
+          {brief.prose === 'unavailable' && (
+            <Note icon="info">
+              The written brief is unavailable right now. The facts above come straight from the record.
+            </Note>
+          )}
+          {brief.prose === 'failed' && (
+            <Note tone="warning" icon="alert-triangle">Could not prepare the written brief.</Note>
+          )}
+          {brief.prose === 'ready' && (
+            <>
+              <Alert tone="info" disclaimer style={{ marginBottom: 12 }}>
+                AI-drafted decision support, not a diagnosis. The licensed psychologist
+                reviews, edits, and approves all content.
+              </Alert>
+              <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6 }}>{brief.draft}</div>
+            </>
+          )}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-            <Button variant="ghost" onClick={() => { sendFeedback(brief.jobId, 'discarded').catch(() => {}); setBrief(null); }}>
-              Not useful
-            </Button>
-            <Button variant="ghost" onClick={() => openBrief({ regenerate: true })} disabled={briefBusy}>
-              Regenerate (slow)
-            </Button>
-            <Button variant="primary" onClick={() => { sendFeedback(brief.jobId, 'accepted').catch(() => {}); setBrief(null); }}>
-              Useful
-            </Button>
+            {brief.prose === 'ready' ? (
+              <>
+                <Button variant="ghost" onClick={() => { sendFeedback(brief.jobId, 'discarded').catch(() => {}); setBrief(null); }}>
+                  Not useful
+                </Button>
+                <Button variant="ghost" onClick={() => openBrief({ regenerate: true })} disabled={briefBusy}>
+                  {briefBusy ? 'Drafting…' : 'Regenerate (slow)'}
+                </Button>
+                <Button variant="primary" onClick={() => { sendFeedback(brief.jobId, 'accepted').catch(() => {}); setBrief(null); }}>
+                  Useful
+                </Button>
+              </>
+            ) : (
+              <>
+                {brief.prose === 'failed' && (
+                  <Button variant="ghost" onClick={() => openBrief()} disabled={briefBusy}>Try again</Button>
+                )}
+                <Button variant="primary" onClick={() => setBrief(null)}>Close</Button>
+              </>
+            )}
           </div>
         </Modal>
       )}

@@ -89,6 +89,16 @@ class AssistantJob(models.Model):
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="assistant_jobs")
+    # Whose record the model read - set by the three features that read one
+    # (briefs, document summaries, the self-report check), for the ISA's access
+    # log on the child's page. Kept on the row rather than worked out from
+    # input_ref because a summary's input_ref names the DOCUMENT, and replacing
+    # a referral deletes it, which would take the read out of the log. SET_NULL
+    # rather than CASCADE: an audit row outlives what it describes, and the
+    # usage metrics count it.
+    child = models.ForeignKey(
+        "children.Child", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="assistant_jobs")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

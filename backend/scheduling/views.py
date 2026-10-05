@@ -15,7 +15,7 @@ from accounts.scoping import role_of as _role, scope_to_visible
 from activity.models import ActivityLog
 from activity.services import log_activity
 from children.models import Child
-from scheduling import booking, visibility
+from scheduling import booking
 from scheduling.availability import free_windows
 from scheduling.models import AvailabilityBlock, Appointment, Unavailability
 from scheduling.serializers import (

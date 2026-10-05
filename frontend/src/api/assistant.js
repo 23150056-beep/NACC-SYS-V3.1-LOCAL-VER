@@ -27,6 +27,11 @@ export const getLatestBrief = (childId) =>
 export const generateBrief = (childId) =>
   api.post(`/assistant/brief/child/${childId}/`).then((r) => r.data);
 
+// The facts above a brief: plain queries, no model. Answers when the
+// assistant is off or hosted, where the brief itself is a 503.
+export const getBriefFacts = (childId) =>
+  api.get(`/assistant/brief/child/${childId}/facts/`).then((r) => r.data);
+
 // Fire and forget. Failures here are invisible on purpose: a schedule screen
 // must not report that a background convenience did not happen.
 export const prefetchBriefs = () =>
@@ -51,6 +56,10 @@ export const getAssistantMetrics = () =>
 // Administrators only, like the metrics.
 export const getUnansweredQuestions = () =>
   api.get('/assistant/unanswered/').then((r) => r.data);
+
+// Who had the model read this child's record. Administrators only.
+export const getChildAssistantLog = (childId) =>
+  api.get(`/assistant/access-log/child/${childId}/`).then((r) => r.data);
 
 export const checkAssistant = () =>
   api.post('/assistant/check/').then((r) => r.data);

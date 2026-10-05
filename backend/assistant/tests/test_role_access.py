@@ -290,6 +290,32 @@ class OnlyTheChatbotIsHostedTest(RoleFixture):
         self.assertIn("chatbot", res.data["detail"])
         self.sent.assert_not_called()
 
+    def test_capabilities_say_drafting_is_off_for_every_role(self):
+        # The screens hide the brief's prose, polish, summary and narrative
+        # buttons on this one answer; the chatbot is still described.
+        for user in (self.psy, self.sw, self.admin):
+            with self.subTest(user=user.email):
+                self.client.force_authenticate(user)
+                res = self.client.get("/api/assistant/capabilities/")
+                self.assertEqual(res.status_code, 200)
+                self.assertIs(res.data["drafting"], False)
+                self.assertTrue(res.data["examples"])
+
+    def test_prefetch_is_refused_rather_than_queued(self):
+        # Every brief it queued would be refused by get_ai_client() and
+        # audited as a failure: a row per child per visit to the schedule.
+        Appointment.objects.create(
+            child=self.child, psychologist=self.psy, status=Appointment.SCHEDULED,
+            start=timezone.make_aware(datetime.combine(timezone.localdate(), time(12, 0))))
+        self.client.force_authenticate(self.psy)
+        with patch.object(views, "_start_prefetch_thread") as spawn:
+            res = self.client.post("/api/assistant/prefetch-briefs/")
+        self.assertEqual(res.status_code, 503)
+        self.assertIn("chatbot", res.data["detail"])
+        spawn.assert_not_called()
+        self.assertFalse(AssistantJob.objects.exists())
+        self.sent.assert_not_called()
+
     def test_a_report_summary_is_refused_rather_than_sent(self):
         report = PsychologicalReport.objects.create(
             child=self.child, author=self.psy, extracted_text="Whole report.")

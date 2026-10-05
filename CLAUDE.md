@@ -32,6 +32,59 @@ model name anywhere in a commit message, PR body, or code comment. If a hook
 asks for the commits to be reauthored, decline — this rule is the owner's and
 it stands.
 
+## Two models a session, ultracode on
+
+Owner's decision, 3 Oct 2026, for every session from then on: **Opus 5.5
+plans, Sonnet 5.5 executes**, and ultracode is on by default.
+
+- **Opus 5.5 (`claude-opus-5-5`) is the main session.** Talking with the
+  owner, brainstorming, reading the code to decide what should change, the
+  plan, the design notes under `docs/superpowers/specs/`, and reading what a
+  worker hands back before anything is committed.
+- **Sonnet 5.5 (`claude-sonnet-5-5`) does everything that executes.** Writing
+  and editing code, migrations, running the tests, lint and build, and the
+  mechanical end of a commit. The main session hands this to a subagent or a
+  workflow worker rather than doing it itself, and does not wait to be asked
+  each time; this is the standing request. A worker starts cold, so the
+  hand-over carries the plan written out: the files, the rule being enforced,
+  and what done looks like.
+- **Ultracode is standing multi-agent orchestration**, the main session
+  directing workers. That is what keeps the planner planning and the workers
+  on the code.
+
+**Name the model on every spawn: `model: "sonnet"`.** That goes on the Agent
+tool and on a workflow's `agent()` alike. Nothing else is reliable. A worker
+with no model given inherits the main session's, so it runs on Opus and the
+split silently does not happen. Measured on 3 Oct in a cloud session, by
+reading the `"model"` field in each subagent's transcript under
+`~/.claude/projects/<project>/<session>/subagents/`: a probe with no model ran
+on `claude-opus-5-5`, and the same probe with `model: "sonnet"` ran on
+`claude-sonnet-5-5`. A planning subagent that should think in Opus says
+`model: "opus"`.
+
+**`.claude/settings.json` holds the defaults**: `model` is Opus 5.5,
+`ultracode: true`, and `CLAUDE_CODE_SUBAGENT_MODEL` is Sonnet 5.5. That last
+one did NOT reach the cloud session. The variable was unset there, and the
+probe above ran on Opus. It may work in the local CLI, but nobody has checked,
+so the named model above is the rule and the variable is only a backstop. The
+file pins IDs, not the `opus`/`sonnet` aliases, because an alias follows
+whatever is newest. The Agent tool takes only the alias, and on 3 Oct
+`sonnet` meant 5.5. Check that again when a new Sonnet ships.
+
+- **Ultracode needs Workflows enabled and a model that supports it**, and
+  where either is missing it stays off without complaint. `enableWorkflows`
+  is in the settings file too, but a plan that does not include Workflows
+  cannot be switched on from a repo. `/effort` offers `ultracode` only where
+  it can run; `/config` → Dynamic workflows is the switch. On 3 Oct the file
+  turned Workflows on in the cloud session that wrote it, mid-session, but
+  ultracode is read when a session STARTS - it applies from the next one.
+- **Check the model rather than assume it.** `/model` names the main
+  session's. Runtime fallbacks exist, so when output looks off, ask which
+  model produced it.
+- The model names belong here and in the settings file only. The authorship
+  rule above still keeps them out of every commit message, PR body and code
+  comment.
+
 ## Getting changes onto GitHub
 
 **What is safe is the REPOSITORY, not the remote name.** Corrected 20 Sep
@@ -422,13 +475,32 @@ the only access control the system has.
 - **Both doors share one abuse budget** (`accounts/signup_limit.py`): a per-IP
   cache counter plus a durable ceiling on outstanding PENDING rows. Two doors
   with separate budgets just means the cheaper one is what an abuser uses.
+  Asking for a new email code and typing one in write no request, so each has
+  its own per-IP counter beside it (`resend_is_throttled`,
+  `confirm_is_throttled`; 4 Oct 2026). Charging them to the creation counter
+  would let a few resends use up a colleague's sign-up from the same office.
 - **Declining archives rather than deletes.** An archived address cannot
   register again, so a refused applicant cannot loop until a distracted
   administrator approves them.
-- **The form verifies nothing.** No confirmation mail is sent, so a typed
-  address is only what someone typed — unlike a Google one, which Google
+- **A typed address is proved by a six-digit code** (`accounts/email_verification.py`).
+  Until it is, it is only what someone typed, unlike a Google one, which Google
   verified. The queue says which door each request came through for exactly
   that reason.
+- **The code is an `EmailVerification` row** (4 Oct 2026, accounts 0012), not
+  a cache entry, for the reason the phone code is: a code stored by one
+  gunicorn worker was "expired" to the next. One row per request, gone with
+  the account. It vouches only for the address it was mailed to, only while
+  the request is pending. Five guesses, fifteen minutes, and a wrong guess no
+  longer extends them. Every refusal reads the same.
+- **An applicant can ask for a new code** (`POST /api/auth/signup/verify-email/resend/`).
+  It always answers 202 with one fixed sentence, mails only a pending typed
+  request, and holds the phone code's limits per request: a minute apart, five
+  an hour. A resend while a code is outstanding re-mails THAT code, so a
+  stranger asking for one cannot void the code the applicant holds. The way
+  back is "Already asked for access? Confirm your email" on `/signup`, linked
+  from `/login`; the confirm step used to exist only in the tab that signed
+  up. Accepted, not fixed: a resend for a real pending address takes the mail
+  gateway's time, so timing can tell one apart. The limits bound the probing.
 
 ## Signing in
 
@@ -448,6 +520,12 @@ the only access control the system has.
   password and a mistyped address sends it to whoever owns the typo. Google
   requests arrive verified; typed ones confirm a six-digit code. Migration 0010
   backfilled the Google accounts already in the queue.
+- **Approval is the only way in** (4 Oct 2026, `UserWriteSerializer.validate`):
+  an edit cannot move an account from PENDING to ACTIVE ("Approve it from
+  Access Requests"). An edit that changes a pending typed request's address
+  clears `email_verified`, so the new address must be proved too. A pending
+  Google request's address cannot be edited at all: it is the Google
+  account's, and with no code door it could never be proved again.
 
 ## The assistant app
 
@@ -485,6 +563,29 @@ Settings, no per-feature flags.
 - **`manage.py ai_eval` measures all of that**; `manage.py ai_check` says
   whether the runtime is reachable. Neither runs in the test suite — both need
   a live Ollama. Never claim the output is fine without running `ai_eval`.
+  `ai_eval` sends real notes and reports to the model and writes no
+  `AssistantJob`, so its reads are not in the access log below.
+- **A brief opens with facts from plain queries** (4 Oct 2026,
+  `assistant/brief_facts.py`, `GET /api/assistant/brief/child/<id>/facts/`,
+  shown by `components/BriefFacts.jsx` above the prose): next session and
+  purpose, days since the last completed one, open problems, the active plan's
+  objectives, the COUNT of unreviewed self-report answers (never their words),
+  and the child's care gaps by the viewer's role. Not gated, not throttled, no
+  model, so they show when the assistant is off, hosted or slow. The prompt is
+  unchanged; feeding these facts INTO it is next step 5 and needs `ai_eval`.
+  The modal keys every reply to the child it was opened for: a page that stays
+  mounted across children once showed one child's facts on another's page.
+- **The ISA can see who had the model read a child**: the Assistant log tab
+  on the child's page, administrators only (`ChildAccessLogView`). Briefs,
+  report and referral summaries, the self-report check; who, when, what kind,
+  status, never the text. `AssistantJob.child` (assistant 0006, nullable,
+  backfilled from `input_ref`) says whose record it was, because a summary's
+  `input_ref` names a document and documents are hard-deleted. **A new feature
+  that sends a child's record to the model must pass `run_job(..., child=)`**,
+  or its reads silently stay out of the log; nothing checks this
+  automatically. A check refused before anything was sent (hosted, or the
+  assistant switched off) is not attributed: a read that never happened is
+  not a read.
 - **A brief belongs to whoever drafted it** (27 Sep 2026). It is written from
   what its requester may see, so `LatestBriefView` and prefetch look up
   today's brief by user AND child. Keyed by child alone it handed an ISA's
@@ -500,7 +601,13 @@ Settings, no per-feature flags.
 - **`get_ai_client()` refuses a hosted model unless the caller passes
   `allow_hosted=True`.** Only the chatbot, the two administrator probes,
   `ai_check` and `ai_eval` do. Everything else drafts from case records and
-  answers 503 on a hosted deployment. Audit and next steps:
+  answers 503 on a hosted deployment. There `/api/assistant/capabilities/`
+  says `drafting: false` (`services.drafting_available()`, the same
+  condition), and the screens hide Polish, both AI summary buttons and the
+  census narrative card (`useAssistant().drafting`). The brief button stays and
+  shows its facts with one line saying a written brief is not available. The
+  flag fails open until the answer arrives; the server stays the authority.
+  Audit and next steps:
   `docs/superpowers/specs/2026-09-27-assistant-role-access-design.md`.
 
 ## The chatbot
@@ -798,6 +905,19 @@ are unchanged (their assigned children).
 - **Dashboard is their own; Agency Summary stays agency-wide** (the owner's
   choice): the Summary holds counts with no names and mirrors the agency's own
   report form. The assistant answers a SW about their own records.
+- **Care gaps follow the role** (4 Oct 2026, `clinical/care_gaps.alerts_for`,
+  used by the Dashboard, `list_care_gaps`, the one-child summary and the brief
+  facts, so all four agree). A SW's: no case referral, no psychologist (a
+  pending request counts as asked for 7 days, then is a gap again; declined
+  or withdrawn is a gap at once), no signed consent, unread self-report
+  answers, and the two booking gaps, because booking is a SW's job. Not the
+  stalled pre-assessment or report due, which they cannot act on. "Survey
+  unanswered" was built and taken out the same day: Staff cannot read the
+  self-report templates, so "New QR Survey" always fails for them (the KNOWN
+  GAP comment in ChildProgressReport.jsx), and a gap nobody can close is
+  noise. Psychologists and the ISA keep `compute_alerts` unchanged; the ISA's
+  consent and pre-assessment gaps link to the child's page, not the
+  psychologist-only `/pre-assessment`.
 - **The calendar still shows every session**, other SWs' children as "C-0042 ·
   Ref. E. Pascua" (`scheduling/visibility.py`): booking needs the
   psychologist's real day. A SW acts only on their own children's sessions;
@@ -1013,8 +1133,8 @@ is not a system user; see "The custodian and their texts".
   gunicorn each worker had its own cache, so a code stored by one worker was
   "expired" to the next and the limits multiplied by the worker count.
 - `send_session_reminders` exits non-zero when any reminder was refused.
-  The sign-up email code (`accounts/email_verification.py`) is still in the
-  cache, with the same multi-worker weakness.
+  The sign-up email code moved to a database row for the same reason on
+  4 Oct 2026 (see "Getting an account").
 - **"No active sender name found" does not mean the account has none.** The
   owner's live account, sender name approved, answered with it under HTTP 500
   on 1 Oct 2026. It means the name SENT is not an Active name on the key's
@@ -1157,9 +1277,19 @@ react-big-calendar's own `role="rowgroup"` markup rather than ours.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 855 tests, ~16 min
+cd backend && .venv/Scripts/python.exe manage.py test   # 1,825 tests, ~18 min
 cd frontend && npm run lint && npm run build
 ```
+
+**A test never reads the wall clock** (4 Oct 2026). Three failed only between
+11 PM and midnight, Manila time (`TIME_ZONE`), and a run that straddles that
+window fails them. A late-evening availability window, "now minus five
+minutes" as today, and `next_weekday()` disagreeing with itself across one
+morning. A test that needs a time pins `django.utils.timezone.now` with
+`patch` (`localtime`/`localdate` follow it). To prove a test does not depend
+on the clock, run it with the clock faked to Sat 23:58, Sun 00:02 and Wed
+09:30. A faked-clock runner must keep "test" in `sys.argv`, or settings.py
+turns throttling on and ~43 unrelated assistant tests fail.
 
 **`npm run build` is not enough on its own.** Vite only reports syntax errors —
 a reference to a deleted variable, or a hook left below an early return, builds

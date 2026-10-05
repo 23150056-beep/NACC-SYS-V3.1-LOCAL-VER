@@ -168,6 +168,26 @@ cheapest ideas are the ones that **add no tool and change no prompt**.
    them on the child's page answers "who had the model read this child's notes"
    without a new table.
 
+**Built 4 Oct 2026: items 1-4.**
+1. `assistant/brief_facts.py` and `GET /api/assistant/brief/child/<id>/facts/`,
+   shown above the prose by `components/BriefFacts.jsx`. Facts are counted the
+   way the screen that already shows each one counts it. The prompt is
+   unchanged, so item 5 still needs its own `ai_eval` run.
+2. `clinical/care_gaps.alerts_for` is used by the Dashboard, `list_care_gaps`,
+   the one-child summary and the brief facts. A social worker gets: no
+   referral, no psychologist (a pending request is not a gap until it has gone
+   7 days unanswered), no signed consent, self-report concerns and the two
+   booking gaps. "Survey unanswered" was dropped, because Staff cannot start a
+   QR survey: they cannot read the self-report templates. The tool's name,
+   description and schema are unchanged.
+3. `/assistant/capabilities/` reports `drafting`. Polish, both summary buttons
+   and the census narrative hide on a hosted deployment. The brief button
+   stays and shows only its facts.
+4. The ISA's "Assistant log" tab on the child's page. This needed one nullable
+   column after all (`AssistantJob.child`, assistant 0006, backfilled),
+   because a summary's job names a document, and replacing a referral deletes
+   that document.
+
 ### A prompt change — each needs its own `ai_eval` run
 
 5. **Brief from more than remarks.** Feed the deterministic facts from (1) into

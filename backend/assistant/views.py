@@ -4,7 +4,7 @@ import time
 from datetime import timedelta
 
 from django.db import connection
-from django.db.models import Avg, Count, Q
+from django.db.models import Avg, Count, Max, Q
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
@@ -16,12 +16,14 @@ from accounts.scoping import (role_of as _role, role_of_user as _role_of,
 from accounts.permissions import (IsAdministrator, IsAdminOrStaff, is_admin_or_assignee,
                                   writes_case_referrals)
 from assistant import evaluation, prompts, tools
+from assistant.brief_facts import brief_facts
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.serializers import AssistantSettingSerializer
-from assistant.services import (AIUnavailable, DISCLAIMER, OpenAICompatibleClient,
+from assistant.services import (AIUnavailable, DISCLAIMER, HOSTED_DRAFTING_REFUSED,
+                                OpenAICompatibleClient, drafting_available,
                                 gate, get_ai_client, run_job, services_lock)
 from children.models import Child
-from clinical.models import CaseReferral, PsychologicalReport
+from clinical.models import CaseReferral, OpinionnaireInvite, PsychologicalReport
 from clinical.services import ensure_text
 from scheduling.models import Appointment
 
@@ -155,7 +157,7 @@ class PreSessionBriefView(AssistantBaseView):
             prompts.build_brief_prompt(child, only_author=only_author),
             system=prompts.BRIEF_SYSTEM,
             input_ref=f"child:{child.id}",
-            user=request.user)
+            user=request.user, child=child)
         return Response({"draft": draft, "job_id": job.id,
                          "generated_at": job.created_at,
                          "disclaimer": DISCLAIMER})
@@ -215,6 +217,29 @@ class LatestBriefView(AssistantBaseView):
                          "disclaimer": DISCLAIMER})
 
 
+class BriefFactsView(AssistantBaseView):
+    """The facts shown above a brief, from plain queries (assistant/brief_facts.py).
+
+    Their own endpoint rather than part of the brief's response: the brief
+    answers 503 when the assistant is off or the model is hosted, 404 when
+    nothing was drafted today, is throttled, and takes up to a minute -
+    and these must show in all of those cases, at once. Nor are they stored
+    with the brief: LatestBriefView serves this morning's prose, and a
+    session booked or a self-report read since then must not be stale.
+
+    Not gated, not throttled, and writes no AssistantJob: no model is
+    involved, so there is nothing to switch off or audit.
+    """
+
+    def get(self, request, child_id):
+        try:
+            child = visible_children(request).get(pk=child_id)
+        except Child.DoesNotExist:
+            return Response({"detail": "Not found."},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response(brief_facts(request, child))
+
+
 # (user id, child id) pairs currently being briefed, so two page loads cannot
 # queue the same brief twice. Per user, like the briefs themselves. Guarded by
 # its own lock; the generation lock lives in services.
@@ -238,7 +263,7 @@ def _generate_briefs_now(child_ids, user):
             try:
                 run_job("brief", prompts.build_brief_prompt(child, only_author=only_author),
                         system=prompts.BRIEF_SYSTEM,
-                        input_ref=f"child:{child.id}", user=user)
+                        input_ref=f"child:{child.id}", user=user, child=child)
             except AIUnavailable:
                 # Already audited by run_job. A runtime that is down must not
                 # abandon the rest of the queue.
@@ -269,6 +294,12 @@ class PrefetchBriefsView(AssistantBaseView):
 
     def post(self, request):
         gate()
+        if not drafting_available():
+            # Every brief queued below would be refused by get_ai_client() and
+            # audited as a failure - a row per child per schedule visit, in a
+            # background thread, for nobody. prefetchBriefs() on the schedule
+            # screen already swallows the 503.
+            raise AIUnavailable(HOSTED_DRAFTING_REFUSED)
         today = timezone.localdate()
         visible = visible_children(request)
         appts = Appointment.objects.filter(
@@ -383,7 +414,7 @@ class DocumentSummaryView(AssistantBaseView):
             prompts.build_summary_prompt(doc.extracted_text, label),
             system=prompts.SUMMARY_SYSTEM,
             input_ref=f"{prefix}:{doc.id}",
-            user=request.user)
+            user=request.user, child=doc.child)
         doc.ai_summary = draft
         doc.ai_summary_confirmed = False
         doc.save(update_fields=["ai_summary", "ai_summary_confirmed"])
@@ -588,6 +619,86 @@ class AssistantUnansweredView(AssistantBaseView):
                          "questions": ordered[:self.LIST_LIMIT]})
 
 
+# input_ref prefix -> what the access log calls the read.
+_ACCESS_KINDS = {"child": "brief", "report": "report_summary",
+                 "casereferral": "referral_summary", "invite": "survey_check"}
+
+
+def _who(user):
+    if user is None:
+        return None
+    return {"name": user.fullname or user.email, "role": _role_of(user)}
+
+
+class ChildAccessLogView(AssistantBaseView):
+    """Who had the model read this child's record: the ISA's question, answered
+    for one child.
+
+    Lists every pre-session brief, every report and referral summary and the
+    automatic self-report check, with when, who, what kind and how it ended.
+    Metadata only - never `output_text` - so it shows who and when, not what
+    was drafted.
+
+    Administrators only, like the metrics beside it, and not gated for the
+    same reason: reading history has to keep working while the assistant is
+    switched off. `hide_earlier_history` does not apply because only an
+    administrator reaches this view.
+
+    Not listed, on purpose. Chat: the chatbot's model only picks a lookup and
+    never reads a record - the results come from the database. Remark polish:
+    it reads only the words being typed, and the request names no child. The
+    census narrative: agency figures, not a record.
+    """
+    permission_classes = [IsAdministrator]
+    LIMIT = 100
+
+    def get(self, request, child_id):
+        child = visible_children(request).filter(pk=child_id).first()
+        if child is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        jobs = AssistantJob.objects.filter(child=child)
+        drafts = (jobs.filter(job_type__in=("brief", "doc_intelligence"))
+                  .select_related("created_by__role").order_by("-created_at"))
+        # One row per answer checked; one entry per survey on screen.
+        surveys = (jobs.filter(job_type="self_report").values("input_ref")
+                   .annotate(at=Max("created_at"),
+                             reads=Count("id", filter=Q(ok=True)),
+                             failed=Count("id", filter=Q(ok=False)))
+                   .order_by("-at"))
+        names = {
+            "report": dict(PsychologicalReport.objects.filter(child=child)
+                           .values_list("id", "original_filename")),
+            "casereferral": dict(CaseReferral.objects.filter(child=child)
+                                 .values_list("id", "original_filename")),
+            "invite": dict(OpinionnaireInvite.objects.filter(child=child)
+                           .values_list("id", "template__title")),
+        }
+
+        def described(ref):
+            prefix, _, pk = ref.partition(":")
+            kept = names.get(prefix)
+            doc_id = int(pk) if pk.isdigit() else None
+            return {"kind": _ACCESS_KINDS.get(prefix, "other"),
+                    "document": kept.get(doc_id) if kept is not None else None,
+                    "document_deleted": kept is not None and doc_id not in kept}
+
+        entries = [{"key": f"job:{job.id}", "at": job.created_at, **described(job.input_ref),
+                    "by": _who(job.created_by),
+                    "status": job.outcome if job.ok else "failed"}
+                   for job in drafts[:self.LIMIT]]
+        entries += [{"key": s["input_ref"], "at": s["at"], **described(s["input_ref"]),
+                     "by": None, "reads": s["reads"],
+                     # Some answers read and the check then stopped is neither
+                     # a clean read nor a failure to read.
+                     "status": (("partly_read" if s["failed"] else "read")
+                                if s["reads"] else "failed")}
+                    for s in surveys[:self.LIMIT]]
+        entries.sort(key=lambda e: e["at"], reverse=True)
+        return Response({"entries": entries[:self.LIMIT],
+                         "total": drafts.count() + surveys.count(),
+                         "limit": self.LIMIT})
+
+
 class AssistantCheckView(AssistantBaseView):
     """Probe the runtime and describe what happened.
 
@@ -625,12 +736,20 @@ class AssistantCapabilitiesView(AssistantBaseView):
     fixed sentence, needs no model, and an empty panel with no hint is worse
     than one that explains itself. It reads the same source as the refusal
     text, so the two cannot drift apart.
+
+    `drafting` is False where the model is hosted, because get_ai_client()
+    refuses every caller without allow_hosted. A brief's prose, polish, summary
+    or census narrative there can only answer 503, so the screens hide those
+    buttons (the brief's facts stay: they need no model). It follows the
+    deployment, not the administrator's switch. It stays authenticated because
+    the deploy probe in CLAUDE.md reads its 401.
     """
 
     def get(self, request):
         role = _role(request)
         return Response({"can_ask": tools.capability_text(role),
-                         "examples": tools.capability_examples(role)})
+                         "examples": tools.capability_examples(role),
+                         "drafting": drafting_available()})
 
 
 # answer_directly's `reason` defaults to "unsupported" in its resolver, so it

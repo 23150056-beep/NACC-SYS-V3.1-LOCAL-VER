@@ -130,6 +130,21 @@ def hosted_model_configured():
                 and settings.ASSISTANT_MODEL_NAME)
 
 
+def drafting_available():
+    """Whether a drafting feature (brief, remark polish, document summary,
+    census narrative, the self-report model check) can run on this deployment
+    at all.
+
+    get_ai_client() refuses every caller that does not pass allow_hosted=True
+    once a hosted model is configured, so this is exactly that condition.
+    Deliberately not the administrator's switch: that is runtime state that
+    already answers 503 per click, and a brief drafted before it was turned off
+    stays readable (LatestBriefView). /assistant/capabilities/ reports this so
+    the screens can hide buttons that could only fail.
+    """
+    return not hosted_model_configured()
+
+
 def get_ai_client(*, allow_hosted=False):
     """The one place that decides which model answers.
 
@@ -204,11 +219,14 @@ def _normalize_output(text):
     return text
 
 
-def run_job(job_type, prompt, *, system=None, input_ref="", user=None):
+def run_job(job_type, prompt, *, system=None, input_ref="", user=None, child=None):
     """Run one generation and audit it. Returns (text, AssistantJob).
 
     Writes an AssistantJob row on failure as well as success, so "it stopped
     working on Tuesday" is answerable from data rather than from memory.
+
+    Pass `child` whenever the prompt is built from a child's record, or the
+    ISA's access log on that child's page will not show the read.
     """
     client = get_ai_client()
     creator = user if getattr(user, "is_authenticated", False) else None
@@ -222,7 +240,7 @@ def run_job(job_type, prompt, *, system=None, input_ref="", user=None):
             job_type=job_type, input_ref=input_ref, ok=False,
             error=str(exc)[:255], model_used=getattr(client, "model", ""),
             latency_ms=int((time.monotonic() - started) * 1000),
-            created_by=creator)
+            created_by=creator, child=child)
         raise
 
     text = _normalize_output(raw)
@@ -230,7 +248,7 @@ def run_job(job_type, prompt, *, system=None, input_ref="", user=None):
         job_type=job_type, input_ref=input_ref, output_text=text,
         model_used=client.model, ok=True,
         latency_ms=int((time.monotonic() - started) * 1000),
-        created_by=creator)
+        created_by=creator, child=child)
     return text, job
 
 

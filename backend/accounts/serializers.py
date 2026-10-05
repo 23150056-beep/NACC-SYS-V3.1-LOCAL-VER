@@ -96,6 +96,23 @@ class UserWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"role": "Removing the role would lock this account out. "
                          "Deactivate the account instead."})
+        if self.instance is not None and self.instance.status == User.PENDING:
+            # A request is let in by approve/ and nowhere else: it asks for a
+            # role, refuses an unconfirmed address and refuses Administrator.
+            # Flipping the status here would skip all three.
+            if attrs.get("status") == User.ACTIVE:
+                raise serializers.ValidationError(
+                    {"status": "Approve it from Access Requests."})
+            # A Google request's address is the one Google verified, and
+            # resend never serves it, so a corrected address could not be
+            # confirmed again and the request could never be approved.
+            new_email = attrs.get("email")
+            if (self.instance.google_sub and new_email
+                    and new_email.strip().lower()
+                    != (self.instance.email or "").strip().lower()):
+                raise serializers.ValidationError(
+                    {"email": "A Google request's address is the Google "
+                              "account's. Decline it and ask them to apply again."})
         # `status` is writable here, so this endpoint is a second way to
         # deactivate the last administrator — the one account the system
         # cannot replace. Any move off ACTIVE counts: is_active follows
@@ -152,8 +169,19 @@ class UserWriteSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         previous_role = instance.role
         new_role = validated_data.get("role", previous_role)
+        # Correcting the address of a request still waiting for approval
+        # leaves nothing proved about the new one: the code was mailed to the
+        # old one, and approval emails a temporary password to whatever is
+        # here. Judged on the status it HAD, so an account that is already
+        # active is not touched. A change of letter case is not a new address.
+        new_email = validated_data.get("email")
+        address_changed = (
+            instance.status == User.PENDING and bool(new_email)
+            and new_email.strip().lower() != (instance.email or "").strip().lower())
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+        if address_changed:
+            instance.email_verified = False
         # Keep username in sync with email (email is the username).
         if validated_data.get("email"):
             instance.username = validated_data["email"]
