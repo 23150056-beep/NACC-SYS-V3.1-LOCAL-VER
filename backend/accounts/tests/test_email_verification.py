@@ -290,10 +290,28 @@ class ResendingTheCodeTest(APITestCase):
         self.assertEqual(200, self._confirm(self._code()).status_code)
         self.assertTrue(User.objects.get(email=self.ADDRESS).email_verified)
 
-    def test_the_old_code_stops_working_when_a_new_one_is_issued(self):
+    def test_a_resend_while_a_code_is_outstanding_sends_the_same_code(self):
+        with patch("accounts.email_verification.secrets.randbelow",
+                   side_effect=[111111, 222222]), patch(MAILER, return_value=True) as sent:
+            self._signup()
+            before = self._row()
+            self._a_minute_passes()
+            self._resend()
+        self.assertEqual("111111", self._code())
+        self.assertEqual(2, sent.call_count)
+        self.assertEqual("111111", sent.call_args[0][1])
+        after = self._row()
+        # Asking again does not lengthen the code's life or refresh its guesses.
+        self.assertEqual(before.expires_at, after.expires_at)
+        self.assertEqual(before.tries, after.tries)
+        self.assertEqual(200, self._confirm("111111").status_code)
+
+    def test_after_expiry_a_new_code_is_issued_and_the_old_one_stops_working(self):
         with patch("accounts.email_verification.secrets.randbelow",
                    side_effect=[111111, 222222]), patch(MAILER, return_value=True):
             self._signup()
+            EmailVerification.objects.filter(user__email=self.ADDRESS).update(
+                expires_at=timezone.now() - timedelta(seconds=1))
             self._a_minute_passes()
             self._resend()
         self.assertEqual("222222", self._code())
@@ -301,13 +319,35 @@ class ResendingTheCodeTest(APITestCase):
         self.assertFalse(User.objects.get(email=self.ADDRESS).email_verified)
         self.assertEqual(200, self._confirm("222222").status_code)
 
+    def test_after_the_code_is_burned_a_new_one_is_issued(self):
+        with patch("accounts.email_verification.secrets.randbelow",
+                   side_effect=[111111, 222222]), patch(MAILER, return_value=True):
+            self._signup()
+            for _ in range(email_verification.MAX_ATTEMPTS + 1):
+                self._confirm("000000")
+            self.assertEqual("", self._code())
+            self._a_minute_passes()
+            self._resend()
+        self.assertEqual("222222", self._code())
+        self.assertEqual(0, self._row().tries)
+
+    def test_a_refused_resend_keeps_the_code_the_applicant_holds(self):
+        with patch(MAILER, return_value=True):
+            self._signup()
+        held = self._code()
+        self._a_minute_passes()
+        with patch(MAILER, return_value=False):
+            self._resend()
+        self.assertEqual(held, self._code())
+        self.assertEqual(200, self._confirm(held).status_code)
+
     def test_a_new_code_starts_the_guesses_and_the_clock_again(self):
         with patch(MAILER, return_value=True):
             self._signup()
             for _ in range(3):
                 self._confirm("000000" if self._code() != "000000" else "000001")
             EmailVerification.objects.filter(user__email=self.ADDRESS).update(
-                expires_at=timezone.now() + timedelta(seconds=5))
+                expires_at=timezone.now() - timedelta(seconds=5))
             self._a_minute_passes()
             self._resend()
         row = self._row()
@@ -368,6 +408,9 @@ class ResendingTheCodeTest(APITestCase):
     def test_a_refused_send_does_not_count_against_the_limits(self):
         with patch(MAILER, return_value=True):
             self._signup()
+        # An expired code, so a NEW one is what the resend would issue.
+        EmailVerification.objects.filter(user__email=self.ADDRESS).update(
+            expires_at=timezone.now() - timedelta(seconds=1))
         self._a_minute_passes()
         before = self._row()
         with patch(MAILER, return_value=False):
@@ -573,3 +616,178 @@ class CorrectingAPendingAddressTest(APITestCase):
         colleague.refresh_from_db()
         self.assertEqual("colleague.new@racco1.gov.ph", colleague.email)
         self.assertTrue(colleague.email_verified)
+
+
+class GuessingFromOneAddressIsLimitedTest(APITestCase):
+    ADDRESS = "applicant@racco1.gov.ph"
+
+    def setUp(self):
+        cache.clear()
+        Role.objects.create(role_name=Role.STAFF)
+        with patch(MAILER, return_value=True):
+            self.client.post("/api/auth/signup/", {
+                "email": self.ADDRESS, "password": "Str0ngPass!2026",
+                "first_name": "Ana", "last_name": "Lopez",
+                "requested_role": "Staff"}, format="json")
+        self.code = EmailVerification.objects.get(user__email=self.ADDRESS).code
+
+    def _confirm(self, code):
+        return self.client.post(
+            VERIFY, {"email": self.ADDRESS, "code": code}, format="json")
+
+    @override_settings(SIGNUP_CONFIRM_MAX_PER_IP=3)
+    def test_over_the_allowance_even_the_right_code_is_refused_unchecked(self):
+        wrong = "111111" if self.code != "111111" else "222222"
+        for _ in range(3):
+            self.assertEqual(400, self._confirm(wrong).status_code)
+        response = self._confirm(self.code)
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(email_verification.REFUSAL, response.data["detail"])
+        self.assertFalse(User.objects.get(email=self.ADDRESS).email_verified)
+        # It was not even looked at: no guess was spent on the row.
+        self.assertEqual(3, EmailVerification.objects.get(user__email=self.ADDRESS).tries)
+
+    @override_settings(SIGNUP_CONFIRM_MAX_PER_IP=3)
+    def test_only_wrong_codes_count(self):
+        # A right code is never charged, so an applicant is not locked out by
+        # having confirmed.
+        self.assertEqual(200, self._confirm(self.code).status_code)
+        self.assertEqual(0, cache.get(signup_limit._confirm_key("127.0.0.1")) or 0)
+
+    @override_settings(SIGNUP_CONFIRM_MAX_PER_IP=3)
+    def test_another_address_is_not_held_back(self):
+        wrong = "111111" if self.code != "111111" else "222222"
+        for _ in range(3):
+            self._confirm(wrong)
+        self.assertTrue(signup_limit.confirm_is_throttled("127.0.0.1"))
+        self.assertFalse(signup_limit.confirm_is_throttled("10.0.0.9"))
+
+    def test_the_default_allowance_is_thirty_an_hour(self):
+        from django.conf import settings
+        self.assertEqual(30, settings.SIGNUP_CONFIRM_MAX_PER_IP)
+
+
+class ALockedDatabaseIsAnsweredLikeAnyOtherRefusalTest(APITestCase):
+    """On the local SQLite copy two requests at once can find the file locked.
+    That must not turn into a 500, which would tell a stranger the address
+    has a request."""
+
+    def setUp(self):
+        cache.clear()
+
+    def test_confirm_answers_the_usual_refusal(self):
+        from django.db import OperationalError
+        with patch("accounts.email_verification.confirm",
+                   side_effect=OperationalError("database is locked")):
+            response = self.client.post(
+                VERIFY, {"email": "a@racco1.gov.ph", "code": "123456"}, format="json")
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(email_verification.REFUSAL, response.data["detail"])
+
+    def test_resend_answers_the_usual_reply(self):
+        from django.db import OperationalError
+        with patch("accounts.email_verification.resend",
+                   side_effect=OperationalError("database is locked")):
+            response = self.client.post(
+                RESEND, {"email": "a@racco1.gov.ph"}, format="json")
+        self.assertEqual(202, response.status_code)
+        self.assertEqual(email_verification.RESEND_REPLY, response.data["detail"])
+
+    def test_the_local_database_takes_its_write_lock_up_front(self):
+        from django.conf import settings
+        if "sqlite" not in settings.DATABASES["default"]["ENGINE"]:
+            self.skipTest("only the SQLite copy")
+        self.assertEqual(
+            "IMMEDIATE",
+            settings.DATABASES["default"]["OPTIONS"]["transaction_mode"])
+
+
+class ApprovingIsTheOnlyWayInTest(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.staff_role = Role.objects.create(role_name=Role.STAFF)
+        self.admin = User.objects.create_user(
+            email="admin@racco1.gov.ph", username="admin", password="admin1234",
+            role=Role.objects.create(role_name=Role.ADMINISTRATOR))
+        self.applicant = User.objects.create_user(
+            email="applicant@racco1.gov.ph", username="applicant@racco1.gov.ph",
+            password="pass1234", status=User.PENDING, email_verified=True,
+            first_name="Ana", last_name="Lopez")
+        self.applicant.role = None
+        self.applicant.save()
+        token = self.client.post("/api/auth/login/", {
+            "email": "admin@racco1.gov.ph", "password": "admin1234"}).data["access"]
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
+
+    def _url(self):
+        return f"/api/users/{self.applicant.id}/"
+
+    def test_a_patch_cannot_make_a_pending_account_active(self):
+        response = self.client.patch(
+            self._url(), {"status": User.ACTIVE, "role": self.staff_role.id},
+            format="json")
+        self.assertEqual(400, response.status_code)
+        self.assertIn("Approve it from Access Requests.", str(response.data))
+        self.assertEqual(User.PENDING, User.objects.get(pk=self.applicant.pk).status)
+
+    def test_a_put_cannot_either(self):
+        response = self.client.put(self._url(), {
+            "email": self.applicant.email, "first_name": "Ana", "last_name": "Lopez",
+            "role": self.staff_role.id, "status": User.ACTIVE}, format="json")
+        self.assertEqual(400, response.status_code)
+        self.assertEqual(User.PENDING, User.objects.get(pk=self.applicant.pk).status)
+
+    def test_approving_still_works(self):
+        response = self.client.post(f"{self._url()}approve/",
+                                    {"role": self.staff_role.id}, format="json")
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(User.ACTIVE, User.objects.get(pk=self.applicant.pk).status)
+
+    def test_other_edits_to_a_pending_account_still_work(self):
+        response = self.client.patch(self._url(), {"first_name": "Anna"}, format="json")
+        self.assertEqual(200, response.status_code, response.data)
+        # Resending the status it already has, as the edit form does.
+        response = self.client.patch(self._url(), {"status": User.PENDING}, format="json")
+        self.assertEqual(200, response.status_code, response.data)
+
+    def test_an_archived_account_is_not_caught_by_it(self):
+        User.objects.filter(pk=self.applicant.pk).update(status=User.ARCHIVED)
+        response = self.client.patch(self._url(), {"first_name": "Anna"}, format="json")
+        self.assertEqual(200, response.status_code, response.data)
+
+
+class ACorrectedGoogleAddressTest(APITestCase):
+    def setUp(self):
+        cache.clear()
+        self.admin = User.objects.create_user(
+            email="admin@racco1.gov.ph", username="admin", password="admin1234",
+            role=Role.objects.create(role_name=Role.ADMINISTRATOR))
+        self.google = User.objects.create_user(
+            email="g@gmail.com", username="g@gmail.com", password="x",
+            status=User.PENDING, google_sub="sub-1", email_verified=True)
+        self.google.role = None
+        self.google.save()
+        token = self.client.post("/api/auth/login/", {
+            "email": "admin@racco1.gov.ph", "password": "admin1234"}).data["access"]
+        self.client.credentials(HTTP_AUTHORIZATION="Bearer " + token)
+
+    def test_the_address_of_a_pending_google_request_cannot_be_changed(self):
+        response = self.client.patch(
+            f"/api/users/{self.google.id}/", {"email": "other@gmail.com"}, format="json")
+        self.assertEqual(400, response.status_code)
+        self.assertIn("A Google request's address is the Google account's. "
+                      "Decline it and ask them to apply again.", str(response.data))
+        self.google.refresh_from_db()
+        self.assertEqual("g@gmail.com", self.google.email)
+        self.assertTrue(self.google.email_verified)
+
+    def test_naming_the_same_address_again_is_fine(self):
+        response = self.client.patch(
+            f"/api/users/{self.google.id}/", {"email": "G@gmail.com"}, format="json")
+        self.assertEqual(200, response.status_code, response.data)
+
+    def test_an_active_google_account_can_still_be_edited(self):
+        User.objects.filter(pk=self.google.pk).update(status=User.ACTIVE)
+        response = self.client.patch(
+            f"/api/users/{self.google.id}/", {"email": "new@gmail.com"}, format="json")
+        self.assertEqual(200, response.status_code, response.data)

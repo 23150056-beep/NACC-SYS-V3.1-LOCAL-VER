@@ -146,6 +146,12 @@ else:
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": BASE_DIR / "db.sqlite3",
+            # Take the write lock when a transaction BEGINS. The default
+            # starts deferred and upgrades on the first write, and SQLite
+            # refuses an upgrade while another connection holds the lock
+            # ("database is locked", at once, with no wait) - which is how
+            # two quick requests turned into a 500 on the local copy.
+            "OPTIONS": {"transaction_mode": "IMMEDIATE"},
         }
     }
 
@@ -320,6 +326,7 @@ SIGNUP_MAX_PER_IP = 5        # new access requests from one IP per window
 SIGNUP_WINDOW_MINUTES = 60
 SIGNUP_MAX_PENDING = 50      # global ceiling on outstanding requests (DB-counted)
 SIGNUP_RESEND_MAX_PER_IP = 20  # requests for a new email code from one IP per window
+SIGNUP_CONFIRM_MAX_PER_IP = 30  # wrong email codes from one IP per window
 
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"

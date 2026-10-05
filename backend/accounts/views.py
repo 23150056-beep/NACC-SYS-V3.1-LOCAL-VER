@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import DatabaseError
 from django.db.models import Count, Q
 
 from accounts.google_auth import (
@@ -174,8 +175,23 @@ class VerifySignupEmailView(generics.GenericAPIView):
     serializer_class = None
 
     def post(self, request):
-        ok, message = email_verification.confirm(
-            _posted(request, "email"), _posted(request, "code"))
+        ip = client_ip(request)
+        if signup_limit.confirm_is_throttled(ip):
+            # Over this address's allowance of wrong codes: the same refusal,
+            # without looking at the code.
+            return Response({"detail": email_verification.REFUSAL},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            ok, message = email_verification.confirm(
+                _posted(request, "email"), _posted(request, "code"))
+        except DatabaseError:
+            # A locked or briefly unreachable database must not read
+            # differently from any other refusal - a 500 here would tell a
+            # stranger that the address has a request.
+            logger.exception("Could not check a sign-up email code")
+            ok, message = False, email_verification.REFUSAL
+        if not ok:
+            signup_limit.register_confirm_failure(ip)
         return Response({"detail": message},
                         status=status.HTTP_200_OK if ok
                         else status.HTTP_400_BAD_REQUEST)
@@ -207,7 +223,12 @@ class ResendSignupEmailCodeView(generics.GenericAPIView):
         ip = client_ip(request)
         if not signup_limit.resend_is_throttled(ip):
             signup_limit.register_resend(ip)
-            email_verification.resend(_posted(request, "email"))
+            try:
+                email_verification.resend(_posted(request, "email"))
+            except DatabaseError:
+                # Answered as ever: a 500 would give away that the address
+                # has a request waiting.
+                logger.exception("Could not send a sign-up email code")
         return Response({"detail": email_verification.RESEND_REPLY},
                         status=status.HTTP_202_ACCEPTED)
 
@@ -699,7 +720,8 @@ class UserViewSet(viewsets.ModelViewSet):
                 {"detail": "This applicant has not confirmed their email "
                            "address yet, and approving would send a temporary "
                            "password to an address nobody has verified. Ask "
-                           "them to enter the code sent when they registered."},
+                           "them to confirm their address from the sign-up "
+                           "page; they can ask for a new code there."},
                 status=status.HTTP_400_BAD_REQUEST)
 
         role_id = request.data.get("role")

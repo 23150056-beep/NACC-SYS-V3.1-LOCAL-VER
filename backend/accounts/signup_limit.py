@@ -112,3 +112,30 @@ def register_resend(ip):
     count = (cache.get(_resend_key(ip)) or 0) + 1
     cache.set(_resend_key(ip), count, timeout=_window_seconds())
     return count
+
+
+# --------------------------------------------------------------------------
+# Guessing at the sign-up email code
+# --------------------------------------------------------------------------
+#
+# Each request's code has its own five guesses, and that is exactly what a
+# stranger can spend: five wrong guesses at somebody else's address burn their
+# code. So wrong guesses are counted per source too, in the cache, under their
+# own key. Over the allowance the view answers the usual refusal without
+# looking at the code at all. Counted on failures only, so an applicant who
+# types the right code is never charged.
+
+def _confirm_key(ip):
+    return f"{_PREFIX}confirm:{ip or 'unknown'}"
+
+
+def confirm_is_throttled(ip):
+    """Whether this address has already used its allowance of wrong codes."""
+    return (cache.get(_confirm_key(ip)) or 0) >= settings.SIGNUP_CONFIRM_MAX_PER_IP
+
+
+def register_confirm_failure(ip):
+    """Count one wrong code (or one refusal) against this address."""
+    count = (cache.get(_confirm_key(ip)) or 0) + 1
+    cache.set(_confirm_key(ip), count, timeout=_window_seconds())
+    return count

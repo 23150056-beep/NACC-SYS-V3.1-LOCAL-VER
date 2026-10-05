@@ -84,7 +84,8 @@ def start(user):
     existing one, so both count against the same limits.
 
     A code issued too soon after the last one, or beyond five an hour, is
-    not issued and nothing is mailed. A refused send leaves no code
+    not issued and nothing is mailed. While one is outstanding it is mailed
+    again, not replaced; a new one is issued only when none is. A refused send leaves no code
     outstanding and does not count against either limit.
     """
     now = timezone.now()
@@ -105,9 +106,21 @@ def start(user):
             logger.info("Email verification code for %s not sent: asked for "
                         "too often", user.email)
             return False
-        code = f"{secrets.randbelow(1_000_000):06d}"
-        row.email, row.code, row.tries = address, code, 0
-        row.expires_at = now + timedelta(seconds=TTL_SECONDS)
+        # A code that is still outstanding - mailed to this address, not burned,
+        # not expired - is mailed again rather than replaced. A stranger who
+        # knows an address can otherwise keep issuing new codes for it, and
+        # each one throws away the one the applicant is holding. Its guesses
+        # and its expiry stay as they were: asking again must not give the
+        # code a longer life or a fresh set of guesses.
+        reused = bool(row.code and row.email == address
+                      and row.expires_at is not None and row.expires_at > now
+                      and row.tries <= MAX_ATTEMPTS)
+        if reused:
+            code = row.code
+        else:
+            code = f"{secrets.randbelow(1_000_000):06d}"
+            row.email, row.code, row.tries = address, code, 0
+            row.expires_at = now + timedelta(seconds=TTL_SECONDS)
         row.last_sent_at = now
         row.sent_in_window += 1
         row.save()
@@ -116,8 +129,10 @@ def start(user):
     # database for a write and a gateway can take seconds.
     ok = send_verification_email(user.email, code)
     if not ok:
-        EmailVerification.objects.filter(pk=row.pk, code=code).update(
-            code="", **before)
+        # A refused send leaves no NEW code outstanding. A code that was
+        # already there is the applicant's, and stays.
+        undo = dict(before) if reused else {"code": "", **before}
+        EmailVerification.objects.filter(pk=row.pk, code=code).update(**undo)
         logger.warning("Could not send an email verification code to %s", user.email)
     return ok
 

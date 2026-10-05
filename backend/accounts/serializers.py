@@ -96,6 +96,23 @@ class UserWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"role": "Removing the role would lock this account out. "
                          "Deactivate the account instead."})
+        if self.instance is not None and self.instance.status == User.PENDING:
+            # A request is let in by approve/ and nowhere else: it asks for a
+            # role, refuses an unconfirmed address and refuses Administrator.
+            # Flipping the status here would skip all three.
+            if attrs.get("status") == User.ACTIVE:
+                raise serializers.ValidationError(
+                    {"status": "Approve it from Access Requests."})
+            # A Google request's address is the one Google verified, and
+            # resend never serves it, so a corrected address could not be
+            # confirmed again and the request could never be approved.
+            new_email = attrs.get("email")
+            if (self.instance.google_sub and new_email
+                    and new_email.strip().lower()
+                    != (self.instance.email or "").strip().lower()):
+                raise serializers.ValidationError(
+                    {"email": "A Google request's address is the Google "
+                              "account's. Decline it and ask them to apply again."})
         # `status` is writable here, so this endpoint is a second way to
         # deactivate the last administrator — the one account the system
         # cannot replace. Any move off ACTIVE counts: is_active follows

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, Input, PasswordInput, FormField, Alert, Icon, ROLE_META, roleLabel } from '../ui';
 import AuthLayout, { AuthLink } from '../components/AuthLayout';
 import GoogleSignInButton from '../components/GoogleSignInButton';
@@ -57,6 +57,7 @@ export default function Signup() {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const { loginWithGoogle } = useAuth();
+  const [searchParams] = useSearchParams();
   const [form, setForm] = useState({
     first_name: '', last_name: '', email: '', password: '',
   });
@@ -85,6 +86,11 @@ export default function Signup() {
   const [resendNote, setResendNote] = useState('');
   const [resending, setResending] = useState(false);
   const [resendWait, setResendWait] = useState(0);
+  // The way back to the confirm step for somebody who is not in the tab that
+  // signed up: they closed it, or an administrator corrected their address.
+  // The confirm step above is otherwise reached only from this tab's own
+  // memory of having just applied. /login links here with ?confirm=1.
+  const [recovering, setRecovering] = useState(searchParams.get('confirm') === '1');
 
   // Counts the "Send a new code" lock down once a second. Above every early
   // return below, as a hook has to be.
@@ -172,6 +178,9 @@ export default function Signup() {
     try {
       await api.post('/auth/signup/verify-email/', { email: form.email, code });
       setVerified(true);
+      // Somebody who came back through "Confirm your email" never saw the
+      // sent-and-waiting screen, which is where a confirmed address belongs.
+      setDone(true);
     } catch (err) {
       setCodeError(err.response?.data?.detail
         || 'That code is not right, or it has expired.');
@@ -199,6 +208,38 @@ export default function Signup() {
       setResendWait(RESEND_WAIT_SECONDS);
     }
   };
+
+  // Already applied, and asking for the confirm step by address. The server
+  // never says whether an address has applied, so this only moves on; a wrong
+  // address shows up as codes that never work.
+  if (recovering && !needsCode) {
+    return (
+      <AuthLayout
+        title="Confirm your email"
+        heading="Confirm your email"
+        subheading="Already asked for access? Enter the address you used."
+        footer={<button type="button" onClick={() => setRecovering(false)}
+                        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                                 fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 700,
+                                 color: 'var(--blue-600)' }}>
+          &larr; Back to request access
+        </button>}
+      >
+        <form onSubmit={(e) => { e.preventDefault(); if (form.email.trim()) { setCodeError(''); setNeedsCode(true); } }}
+              className="racco-auth-stack"
+              style={{ marginTop: 'clamp(12px, 2vh, 22px)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <FormField label="Email you applied with">
+            <Input type="email" value={form.email} onChange={set('email')}
+                   placeholder="you@racco1.gov.ph" autoComplete="email"
+                   leading={<Icon name="mail" size={16} />} required />
+          </FormField>
+          <Button type="submit" variant="primary" fullWidth disabled={!form.email.trim()}>
+            Continue
+          </Button>
+        </form>
+      </AuthLayout>
+    );
+  }
 
   if (needsCode && !verified) {
     return (
@@ -238,6 +279,13 @@ export default function Signup() {
               <Alert tone="info" icon={<Icon name="mail" size={18} />}>{resendNote}</Alert>
             </div>
           )}
+          <button type="button"
+                  onClick={() => { setNeedsCode(false); setRecovering(true); setCode(''); setCodeError(''); setResendNote(''); }}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                           fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 700,
+                           color: 'var(--blue-600)', alignSelf: 'center' }}>
+            Not your address? Change it
+          </button>
         </form>
       </AuthLayout>
     );
@@ -420,6 +468,12 @@ export default function Signup() {
           This system holds children&rsquo;s records. Requests are reviewed before
           any access is granted.
         </div>
+        <button type="button" onClick={() => setRecovering(true)}
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                         fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 700,
+                         color: 'var(--blue-600)', alignSelf: 'center' }}>
+          Already asked for access? Confirm your email
+        </button>
       </div>
     </AuthLayout>
   );
