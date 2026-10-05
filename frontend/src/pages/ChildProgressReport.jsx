@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import api from '../api/client';
@@ -77,9 +77,27 @@ export default function ChildProgressReport() {
   // psychologist has a way back to their own words if the draft is worse.
   // Cleared once the remark is saved or the draft is reverted.
   const [preRemarkText, setPreRemarkText] = useState(null);
-  // { facts, factsFailed, prose: 'loading'|'ready'|'unavailable'|'failed', draft, generatedAt, jobId }
+  // { childId, facts, factsFailed, prose: 'loading'|'ready'|'unavailable'|'failed'|'not_offered', draft, generatedAt, jobId }
+  // childId is the child it was opened for: a reply for any other child is
+  // dropped, so a slow request cannot fill another child's modal.
   const [brief, setBrief] = useState(null);
   const [briefBusy, setBriefBusy] = useState(false);
+  // The child this page is on, for replies to compare against when they land;
+  // the request counter, so a finished request can tell it is no longer the
+  // latest one; and the prose request still running, if any, so reopening the
+  // modal mid-draft waits for it instead of asking the model a second time.
+  const currentChild = useRef(id);
+  const briefSeq = useRef(0);
+  const briefFlight = useRef(null); // { childId, seq }
+  // Another child's route re-uses this component. Everything about the last
+  // child's brief goes, and any request still out for it is orphaned.
+  useEffect(() => {
+    currentChild.current = id;
+    briefSeq.current += 1;
+    briefFlight.current = null;
+    setBrief(null);
+    setBriefBusy(false);
+  }, [id]);
   const [summary, setSummary] = useState(null); // { kind, id, text, confirmed }
   const [summaryBusy, setSummaryBusy] = useState(false);
   // Re-summarising an already-confirmed document destroys the psychologist's
@@ -261,40 +279,67 @@ export default function ChildProgressReport() {
   };
 
   const openBrief = async ({ regenerate = false } = {}) => {
+    const childId = id;
+    // Replies below belong to this child only.
+    const mine = (b) => (b && b.childId === childId ? b : null);
+    const stale = () => currentChild.current !== childId;
+    const flying = briefFlight.current && briefFlight.current.childId === childId;
     // Opens at once with the facts: they are queries and arrive in well under
     // a second, while the prose can take a minute or not come at all (the
     // assistant off, or a hosted deployment, where drafting is refused).
     if (!regenerate) {
-      setBrief((b) => ({ facts: b?.facts ?? null, factsFailed: false, prose: drafting ? 'loading' : 'not_offered' }));
+      setBrief((b) => ({
+        childId,
+        facts: mine(b)?.facts ?? null,
+        factsFailed: false,
+        // A draft still being written for this child fills the modal when it
+        // lands; nothing else is asked of the model.
+        prose: drafting ? 'loading' : 'not_offered',
+      }));
     }
-    getBriefFacts(id)
-      .then((facts) => setBrief((b) => (b ? { ...b, facts, factsFailed: false } : b)))
-      .catch(() => setBrief((b) => (b ? { ...b, factsFailed: !b.facts } : b)));
+    getBriefFacts(childId)
+      .then((facts) => setBrief((b) => (mine(b) ? { ...b, facts, factsFailed: false } : b)))
+      .catch(() => setBrief((b) => (mine(b) ? { ...b, factsFailed: !b.facts } : b)));
     // Where the deployment does not draft, the facts are all there is: the
     // prose is not requested at all, so nothing is refused and nothing is
     // audited as a failed job.
     if (!drafting) return;
+    if (!regenerate && flying) return;
+    const seq = briefSeq.current + 1;
+    briefSeq.current = seq;
+    briefFlight.current = { childId, seq };
     setBriefBusy(true);
     try {
       const data = regenerate
-        ? await generateBrief(id)
-        : await getLatestBrief(id).catch((err) => {
+        ? await generateBrief(childId)
+        : await getLatestBrief(childId).catch((err) => {
             // 404 just means nothing was drafted today — fall back to the slow path.
-            if (err.response?.status === 404) return generateBrief(id);
+            if (err.response?.status === 404) return generateBrief(childId);
             throw err;
           });
-      // `b ?` throughout: closed while the prose was drafting stays closed.
-      setBrief((b) => (b ? { ...b, prose: 'ready', draft: data.draft, generatedAt: data.generated_at, jobId: data.job_id } : b));
+      // `mine` throughout: closed while the prose was drafting stays closed,
+      // and a draft for another child is never shown.
+      setBrief((b) => (mine(b) ? { ...b, prose: 'ready', draft: data.draft, generatedAt: data.generated_at, jobId: data.job_id } : b));
     } catch (err) {
+      if (stale()) return;
       const unavailable = err.response?.status === 503;
       if (regenerate) {
         // The draft already on screen stays, as it always did.
         toast.error(unavailable ? 'The assistant is unavailable right now.' : 'Could not prepare the brief.');
+        // Unless the modal was closed and reopened meanwhile: it is waiting on
+        // this very request, and must not be left saying "drafting".
+        setBrief((b) => (mine(b) && b.prose === 'loading'
+          ? { ...b, prose: unavailable ? 'unavailable' : 'failed' } : b));
       } else {
-        setBrief((b) => (b ? { ...b, prose: unavailable ? 'unavailable' : 'failed' } : b));
+        setBrief((b) => (mine(b) ? { ...b, prose: unavailable ? 'unavailable' : 'failed' } : b));
       }
     } finally {
-      setBriefBusy(false);
+      // Only the latest request may clear these: an old one finishing must
+      // not unlock the button, or forget a newer draft, for a newer request.
+      if (briefSeq.current === seq) {
+        briefFlight.current = null;
+        setBriefBusy(false);
+      }
     }
   };
 
@@ -440,7 +485,7 @@ export default function ChildProgressReport() {
           </div>
           <div className="racco-no-print" style={{ display: 'flex', gap: 8, flex: 'none', flexWrap: 'wrap' }}>
             {/* Stays where drafting is off: the facts need no model. */}
-            <Button variant="secondary" onClick={() => openBrief()} disabled={briefBusy} iconLeft={<Icon name="sparkles" size={17} />}>
+            <Button variant="secondary" onClick={() => openBrief()} iconLeft={<Icon name="sparkles" size={17} />}>
               {briefBusy ? 'Preparing…' : 'Pre-session brief'}
             </Button>
             <Button variant="secondary" onClick={() => window.print()} title="Print this child's psychological report" iconLeft={<Icon name="printer" size={17} />}>Print</Button>

@@ -32,6 +32,10 @@ const muted = { color: 'var(--text-muted)' };
 export default function AssistantAccessLog({ childId, active }) {
   const [log, setLog] = useState(null); // null while loading, 'error', or the response
 
+  // Another child's page re-uses this component. The last child's rows go at
+  // once, so they are never shown under this one while the new log loads.
+  useEffect(() => { setLog(null); }, [childId]);
+
   useEffect(() => {
     if (!active) return undefined;
     let live = true;

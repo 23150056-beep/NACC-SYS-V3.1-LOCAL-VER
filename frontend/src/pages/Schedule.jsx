@@ -14,6 +14,7 @@ import {
   Alert, Avatar, Badge, Button, Card, ConfirmDialog, Drawer, FormField, hoverLift, Icon, iconBtn, Input, Modal, PAGE, PageHeader, Select, TimeInput,
 } from '../ui';
 import { prefetchBriefs } from '../api/assistant';
+import { useAssistant } from '../context/AssistantContext';
 import { useOpenFromLink } from '../utils/links';
 import { firstError } from '../utils/errors';
 
@@ -336,8 +337,12 @@ export default function Schedule() {
   // Quietly warms today's brief cache in the background. prefetchBriefs()
   // already swallows its own errors (including a 503 when the assistant is
   // off) — this screen must never know or care whether it succeeded.
+  // Skipped where drafting is off (a hosted deployment): there is nothing to
+  // warm, and the server would only refuse. Until the capabilities answer
+  // arrives `drafting` reads true, as it does for the buttons.
+  const { drafting } = useAssistant();
   useEffect(() => {
-    prefetchBriefs();
+    if (drafting) prefetchBriefs();
     /* eslint-disable-next-line */
   }, []);
 

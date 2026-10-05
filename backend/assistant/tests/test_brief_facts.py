@@ -120,10 +120,17 @@ class ScopeTest(FactsFixture):
         self.assertIn(res.status_code, (401, 403))
 
     def test_the_answer_names_nobody(self):
+        # Names, not only addresses: the psychologist's own and the colleague
+        # who held the child before, whose session is in the answer.
+        for user, first, last in ((self.psy, "Pilar", "Quezon"),
+                                  (self.previous, "Quirino", "Bautista")):
+            user.first_name, user.last_name = first, last
+            user.save()
         self._appt(2, psychologist=self.previous)
         self._flag()
         body = json.dumps(self._facts(self.psy).json())
-        for name in ("Maria", "Santos", self.previous.email, self.psy.email):
+        for name in ("Maria", "Santos", "Pilar", "Quezon", "Quirino", "Bautista",
+                     self.previous.email, self.psy.email):
             self.assertNotIn(name, body)
 
 

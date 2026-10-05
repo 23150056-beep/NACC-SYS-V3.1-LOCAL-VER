@@ -34,9 +34,11 @@ export function AssistantProvider({ children }) {
   // Once per user, and again on each panel open while there is still no
   // answer (the panel's old retry). Silent on purpose: without it the panel
   // opens without its suggestions and every drafting button stays, which is
-  // what happens when the assistant is switched off. The fetch also re-runs
-  // after updateUser() replaces the user object, which covers the
-  // forced-password-change case where the first call is refused.
+  // what happens when the assistant is switched off. Under a forced password
+  // change the first call is refused (401) and caps stays null; changing the
+  // password signs the person out (PasswordChangeGate calls logout(), never
+  // updateUser), so the answer is fetched again at their next sign-in, when
+  // `user` and the access token are set afresh.
   useEffect(() => {
     if (!user || caps || !getAccess()) return undefined;
     let live = true;
