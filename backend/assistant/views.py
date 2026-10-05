@@ -661,7 +661,9 @@ class ChildAccessLogView(AssistantBaseView):
                   .select_related("created_by__role").order_by("-created_at"))
         # One row per answer checked; one entry per survey on screen.
         surveys = (jobs.filter(job_type="self_report").values("input_ref")
-                   .annotate(at=Max("created_at"), reads=Count("id", filter=Q(ok=True)))
+                   .annotate(at=Max("created_at"),
+                             reads=Count("id", filter=Q(ok=True)),
+                             failed=Count("id", filter=Q(ok=False)))
                    .order_by("-at"))
         names = {
             "report": dict(PsychologicalReport.objects.filter(child=child)
@@ -686,7 +688,10 @@ class ChildAccessLogView(AssistantBaseView):
                    for job in drafts[:self.LIMIT]]
         entries += [{"key": s["input_ref"], "at": s["at"], **described(s["input_ref"]),
                      "by": None, "reads": s["reads"],
-                     "status": "read" if s["reads"] else "failed"}
+                     # Some answers read and the check then stopped is neither
+                     # a clean read nor a failure to read.
+                     "status": (("partly_read" if s["failed"] else "read")
+                                if s["reads"] else "failed")}
                     for s in surveys[:self.LIMIT]]
         entries.sort(key=lambda e: e["at"], reverse=True)
         return Response({"entries": entries[:self.LIMIT],

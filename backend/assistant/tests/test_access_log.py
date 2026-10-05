@@ -10,12 +10,14 @@ from unittest.mock import patch
 
 from django.apps import apps
 from django.contrib.auth import get_user_model
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from accounts.models import Role
 from assistant import services, views
 from assistant.models import AssistantJob, AssistantSetting
+from assistant.tests.test_role_access import HOSTED
 from children.models import Child
 from clinical.models import (
     AgencyFormTemplate, CaseReferral, OpinionnaireInvite, PsychologicalReport)
@@ -94,7 +96,7 @@ class WhoMayReadItTest(AccessLogBase):
 
     def test_anonymous_is_refused(self):
         self.client.force_authenticate(None)
-        self.assertIn(self.client.get(URL.format(self.child.id)).status_code, (401, 403))
+        self.assertEqual(401, self.client.get(URL.format(self.child.id)).status_code)
 
     def test_an_unknown_child_is_404(self):
         self.client.force_authenticate(self.admin)
@@ -189,6 +191,62 @@ class WhatIsListedTest(AccessLogBase):
         self.assertIsNone(entry["by"])
         self.assertEqual("Self-report", entry["document"])
         self.assertEqual("read", entry["status"])
+
+    def _survey(self, answers):
+        template = AgencyFormTemplate.objects.create(
+            title="Self-report", fields=[{"label": q} for q in answers])
+        return OpinionnaireInvite.objects.create(
+            child=self.child, template=template,
+            status=OpinionnaireInvite.SUBMITTED, submitted_at=timezone.now(),
+            answers=answers, expires_at=timezone.now() + timedelta(days=7))
+
+    def test_a_check_that_stopped_part_way_is_partly_read(self):
+        invite = self._survey({"Q1": "Okay lang.", "Q2": "Masaya ako."})
+        with patch("assistant.services.OllamaClient.generate",
+                   side_effect=["NO - settled", services.AIUnavailable("dropped")]):
+            run_model_check(invite.pk)
+        entries = self._log()["entries"]
+        self.assertEqual(1, len(entries))
+        self.assertEqual("survey_check", entries[0]["kind"])
+        self.assertEqual("partly_read", entries[0]["status"])
+        self.assertEqual(1, entries[0]["reads"])
+
+    def test_a_check_that_read_nothing_is_failed(self):
+        invite = self._survey({"Q1": "Okay lang."})
+        with patch("assistant.services.OllamaClient.generate",
+                   side_effect=services.AIUnavailable("down")):
+            run_model_check(invite.pk)
+        entries = self._log()["entries"]
+        self.assertEqual(["failed"], [e["status"] for e in entries])
+
+    def test_a_failed_check_is_still_attributed_to_the_child(self):
+        """Where a read was attempted, the row must carry the child: remove
+        child= from the failure path and this is the test that notices."""
+        invite = self._survey({"Q1": "Okay lang."})
+        with patch("assistant.services.OllamaClient.generate",
+                   side_effect=services.AIUnavailable("down")):
+            run_model_check(invite.pk)
+        job = AssistantJob.objects.get(job_type="self_report")
+        self.assertFalse(job.ok)
+        self.assertEqual(self.child.id, job.child_id)
+        self.assertEqual(1, len(self._log()["entries"]))
+
+    @override_settings(**HOSTED)
+    def test_a_hosted_deployment_logs_no_read_that_never_happened(self):
+        """Drafting from a child's answers is refused before anything is sent,
+        so the child's log must not list it - the row stays for the figures."""
+        invite = self._survey({"Q1": "Okay lang."})
+        with patch.object(services.OllamaClient, "generate") as local, \
+                patch.object(services.OpenAICompatibleClient, "generate") as hosted:
+            run_model_check(invite.pk)
+        local.assert_not_called()
+        hosted.assert_not_called()
+        job = AssistantJob.objects.get(job_type="self_report")
+        self.assertFalse(job.ok)
+        self.assertIsNone(job.child_id)
+        data = self._log()
+        self.assertEqual([], data["entries"])
+        self.assertEqual(0, data["total"])
 
     def test_another_childs_reads_are_not_listed(self):
         self._brief(self.psy, child=self.other)

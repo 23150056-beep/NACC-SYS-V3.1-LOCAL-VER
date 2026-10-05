@@ -68,12 +68,17 @@ def run_model_check(invite_id):
                     system=prompts.SELF_REPORT_SYSTEM)
         except AIUnavailable as exc:
             # Expected, not exceptional. The lexicon has already run.
+            # The row is kept for the usage figures, but it names the child
+            # only when a read was attempted. A deployment that refuses to
+            # draft from case records (a hosted model) or has the assistant
+            # switched off hands back a client that never sends anything, and
+            # the child's access log must not list a read that never happened.
             AssistantJob.objects.create(
                 job_type="self_report", input_ref=f"invite:{invite.pk}",
                 ok=False, error=str(exc)[:255],
                 model_used=getattr(client, "model", ""),
                 latency_ms=int((time.monotonic() - started) * 1000),
-                child=invite.child)
+                child=invite.child if getattr(client, "available", True) else None)
             return
 
         reason = _parse(reply)

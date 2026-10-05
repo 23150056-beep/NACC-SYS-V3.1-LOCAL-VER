@@ -20,6 +20,7 @@ const STATUS = {
   edited: ['Edited, then used', 'success'],
   discarded: ['Discarded', 'neutral'],
   read: ['Read', 'neutral'],
+  partly_read: ['Partly read', 'warning'],
 };
 
 const muted = { color: 'var(--text-muted)' };
@@ -116,7 +117,8 @@ export default function AssistantAccessLog({ childId, active }) {
       )}
       <p style={{ margin: '12px 0 0', fontSize: 12, lineHeight: 1.5, ...muted }}>
         Every time the assistant&apos;s model was given this child&apos;s notes, documents or
-        survey answers. Chatbot questions are not listed: the chatbot&apos;s model only picks
+        survey answers through the app: briefs, summaries and the self-report check.
+        Developer commands such as ai_eval are not listed. Chatbot questions are not listed: the chatbot&apos;s model only picks
         which lookup to run and never reads a record. Remark polishing is not listed: it reads
         only the words being typed, which are not tied to a child. A summary of a document
         that was deleted before this log existed cannot be traced and is not listed.
