@@ -253,13 +253,40 @@ class StaffCareGapTest(StaffGapFixture, TestCase):
             created_at=timezone.now() - timedelta(days=days_ago))
         return invite
 
-    def test_a_survey_link_left_unanswered_is_not_a_gap(self):
-        # It used to be one. A social worker cannot start a QR survey (they
-        # cannot read the self-report templates), so the gap named something
-        # only a psychologist could close and was taken out of this list.
-        self._invite(30)
-        self.assertEqual(set(), self._types())
+    def test_no_link_and_a_fresh_link_are_not_gaps(self):
+        self.assertNotIn("survey_unanswered", self._types())
+        self._invite(0)
+        self.assertNotIn("survey_unanswered", self._types())
+
+    def test_an_old_unanswered_link_is_a_gap(self):
         self._invite(8)
+        self.assertEqual(self._types(), {"survey_unanswered"})
+        self.assertEqual("info", self._alerts()[0]["severity"])
+
+    def test_the_week_is_pinned_at_both_edges_for_a_survey_link(self):
+        # SURVEY_UNANSWERED_DAYS: six days and twenty-three hours is still
+        # inside the wait; seven days is a gap.
+        invite = self._invite(0)
+        OpinionnaireInvite.objects.filter(pk=invite.pk).update(
+            created_at=timezone.now() - timedelta(days=6, hours=23))
+        self.assertNotIn("survey_unanswered", self._types())
+        OpinionnaireInvite.objects.filter(pk=invite.pk).update(
+            created_at=timezone.now() - timedelta(days=7))
+        self.assertIn("survey_unanswered", self._types())
+
+    def test_an_answered_link_is_not_a_gap(self):
+        self._invite(8, OpinionnaireInvite.SUBMITTED)
+        self.assertNotIn("survey_unanswered", self._types())
+
+    def test_a_newer_link_supersedes_an_older_unanswered_one(self):
+        self._invite(10)
+        self._invite(1)
+        self.assertNotIn("survey_unanswered", self._types())
+
+    def test_a_newer_answered_link_supersedes_an_older_unanswered_one(self):
+        self._invite(10)
+        self.assertIn("survey_unanswered", self._types())
+        self._invite(2, OpinionnaireInvite.SUBMITTED)
         self.assertNotIn("survey_unanswered", self._types())
 
     def _flag(self):

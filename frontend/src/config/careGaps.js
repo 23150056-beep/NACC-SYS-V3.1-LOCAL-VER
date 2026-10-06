@@ -21,6 +21,7 @@ export const GAP_META = {
   no_case_referral: { chip: 'No referral', action: 'Upload', to: (id) => `/reports?upload=1&child=${id}`, tone: 'danger' },
   no_psychologist: { chip: 'Unassigned', action: 'Assign', to: (id) => `/children?q=${caseRef(id)}`, tone: 'warning' },
   no_signed_consent: { chip: 'No consent', action: 'Open', to: null, tone: 'warning' },
+  survey_unanswered: { chip: 'Survey waiting', action: 'Resend', to: (id) => `/report/child/${id}?tab=voice`, tone: 'info' },
 };
 
 // Gaps whose action is a Psychologist-only screen (/pre-assessment). The ISA

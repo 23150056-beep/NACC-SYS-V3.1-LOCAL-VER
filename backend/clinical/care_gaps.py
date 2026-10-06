@@ -16,14 +16,15 @@ from django.utils import timezone
 from accounts.models import Role
 from accounts.scoping import role_of
 from children.models import AssignmentRequest, Child
-from clinical.models import (CaseReferral, ConsentRecord, PreAssessment,
-                             PsychologicalReport, SelfReportFlag)
+from clinical.models import (CaseReferral, ConsentRecord, OpinionnaireInvite,
+                             PreAssessment, PsychologicalReport, SelfReportFlag)
 from scheduling.models import Appointment
 
 # Thresholds — confirm with RACCO I; kept here so they are easy to tune.
 FOLLOW_UP_OVERDUE_DAYS = 30      # no completed session in this long
 PRE_ASSESSMENT_LAG_DAYS = 14     # intake without a completed pre-assessment
 REPORT_LAG_DAYS = 14             # completed pre-assessment without a report
+SURVEY_UNANSWERED_DAYS = 7       # a survey link sent and not answered this long (links expire after 7, clinical/views.py)
 ASSIGNMENT_ANSWER_DAYS = 7       # a psychologist asked and silent this long
 
 SEVERITY_RANK = {"danger": 0, "warning": 1, "info": 2}
@@ -169,6 +170,12 @@ def compute_staff_alerts(children_qs):
     asked_at = dict(AssignmentRequest.objects.filter(
         child_id__in=ids, status=AssignmentRequest.PENDING
     ).values_list("child_id", "created_at"))
+    # Values only, so the answers JSON is never loaded: this runs on every app load.
+    latest_survey = {}
+    for child_id, state, sent in (OpinionnaireInvite.objects.filter(child_id__in=ids)
+                                  .order_by("created_at", "id")
+                                  .values_list("child_id", "status", "created_at")):
+        latest_survey[child_id] = (state, sent)   # oldest first, so the newest stays
     last_completed_appt, has_upcoming = _booking_state(ids, now)
     flagged = _unreviewed_flags(ids)
 
@@ -204,6 +211,15 @@ def compute_staff_alerts(children_qs):
         # Booking is a social worker's job, so they keep the two booking rules
         # exactly as the psychologist's list has them.
         alerts.extend(_booking_gaps(c, last_completed_appt, has_upcoming, now))
+
+        # Only the newest survey link counts: a newer one, open or answered,
+        # supersedes an old unanswered one.
+        survey = latest_survey.get(c.id)
+        if survey and survey[0] != OpinionnaireInvite.SUBMITTED \
+                and (now - survey[1]).days >= SURVEY_UNANSWERED_DAYS:
+            alerts.append(_alert(
+                c, "survey_unanswered",
+                f"Survey link not answered after {SURVEY_UNANSWERED_DAYS} days.", "info"))
 
         # Kept because they are the child's own words, not a psychologist's
         # process. A social worker can acknowledge them
