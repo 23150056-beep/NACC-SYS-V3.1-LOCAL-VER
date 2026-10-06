@@ -911,13 +911,23 @@ are unchanged (their assigned children).
   pending request counts as asked for 7 days, then is a gap again; declined
   or withdrawn is a gap at once), no signed consent, unread self-report
   answers, and the two booking gaps, because booking is a SW's job. Not the
-  stalled pre-assessment or report due, which they cannot act on. "Survey
-  unanswered" was built and taken out the same day: Staff cannot read the
-  self-report templates, so "New QR Survey" always fails for them (the KNOWN
-  GAP comment in ChildProgressReport.jsx), and a gap nobody can close is
-  noise. Psychologists and the ISA keep `compute_alerts` unchanged; the ISA's
+  stalled pre-assessment or report due, which they cannot act on. Survey
+  unanswered (link sent, unanswered 7+ days, newest link only,
+  `SURVEY_UNANSWERED_DAYS`) was taken out on 4 Oct while a SW could not start
+  a survey, and is back since 5 Oct, when they can (next bullet). A gap
+  nobody can close is noise. Psychologists and the ISA keep `compute_alerts` unchanged; the ISA's
   consent and pre-assessment gaps link to the child's page, not the
   psychologist-only `/pre-assessment`.
+- **A SW starts a QR survey from their own child's page** (5 Oct 2026). The
+  self-report forms come from `GET /api/opinionnaire-invites/templates/?child=<id>`
+  (`clinical/views.py survey_templates_for`), NOT `/form-templates/`, which
+  stays Administrator/Psychologist-only because it shows every psychologist's
+  private templates. The list: active Self-Report (Government Form) templates
+  that are shared, the child's psychologist's, or the requester's own (the
+  ISA: any). Id and title only, for a child the requester can see and write.
+  Invite create refuses any template outside that same list, so the picker
+  and the refusal cannot drift. With none set up, a SW is told to ask the
+  ISA. `clinical/tests/test_survey_templates.py`.
 - **The calendar still shows every session**, other SWs' children as "C-0042 ·
   Ref. E. Pascua" (`scheduling/visibility.py`): booking needs the
   psychologist's real day. A SW acts only on their own children's sessions;
@@ -1245,6 +1255,13 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   every boot). A refresh in that minute used to show a bare "Loading…" that
   read as broken; `ProtectedRoute`'s `WaitingForServer` now says the server is
   waking after 3 s and offers "Try again" after 75 s. Not a fault to debug.
+- **A deploy that times out on the health check is usually Render, not the
+  code.** It happened on 24 Sep and again on 5 Oct, both times on a deploy
+  that carried new migrations; each time a manual redeploy of the same commit
+  went through. The free instance runs migrate, `seed_psgc` and
+  `backfill_psgc` before Gunicorn answers, and that is close to the limit.
+  Redeploy once before debugging; if it fails again, the deploy log's last
+  `==>` line says which step is too slow.
 - **Cloudflare retires models** — `llama-3.1-8b` returns 410. Check
   `/api/assistant/model-health/` before assuming the code broke.
 
