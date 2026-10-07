@@ -832,9 +832,10 @@ middle name, a date found, and every question that applies made mandatory.
   kept as written so no existing name changes shape on its next save.
 - **Renamed values were migrated** (children 0021): Orphan -> Orphaned, N/A ->
   Unknown, and the demo seeder's misspelt "Stepparent" -> "Step-parent".
-  **Retired values were not**: birth status "Child", SIBRA, ICA Relative, and
-  the seeder's "Domestic"/"Relative" stay on the records that hold them, shown
-  as "(no longer offered)". The serializer accepts them unchanged and refuses
+  **Retired values were not**: the seeder's "Domestic"/"Relative" stay on the
+  records that hold them, shown as "(no longer offered)". (Birth status
+  "Child", SIBRA and ICA Relative were retired the same way on 24 Sep and are
+  offered again since 7 Oct - see the SCSR bullet below.) The serializer accepts them unchanged and refuses
   them as a new pick - the same change-only rule as the old categories. The
   record's own value stays in its list for the whole edit (`withRetired` is
   passed `form._record`'s), so a different pick can be taken back; it used to
@@ -849,8 +850,34 @@ middle name, a date found, and every question that applies made mandatory.
 - **Educational Placement moved to Child's Profile and is required** there
   ("Not in school" is an answer); **Referral Source is a pick** from RACCO /
   LGU / CCA / RCF (children 0023), with typed text on older records kept by
-  the same change-only rule; **Current Whereabouts left the form and every
-  screen** (owner, 24 Sep 2026) - the column and what it holds are kept.
+  the same change-only rule. Current Whereabouts left the form on 24 Sep and
+  came back on 7 Oct (below).
+- **Part I of the Social Case Study Report is the model for the form**
+  (owner, 7 Oct 2026; the blank NACC template is
+  `docs/agency-forms/SCSR_Non-Relative_Regular_Placement.docx`). The SCSR is
+  the adoption case report written after the PAPA or supervised trial
+  custody; only its Part I (Identifying Information) is intake. Parts II-V
+  (background, family, the prospective adoptive parents, placement,
+  assessment) are a separate module still to be designed, not form fields.
+  - Birth status "Child" and adoption types SIBRA and ICA Relative are
+    offered again, in the SCSR's order, with "Relative (Without 2-yr
+    custody)" kept and "Orphaned" kept as written (owner's choice). Only a
+    Regular adoption records the Date of Admission, so SIBRA and ICA
+    Relative take the Date of Placement.
+  - **Current Whereabouts** (`current_placement`) is back on Child's Profile,
+    the record drawer and the child's page, and always asked.
+  - **Health Condition** (Healthy / With special needs) is always asked;
+    "Specify the special needs" is required only for special needs
+    (`intake.required_fields(..., health_condition)`, mirrored in
+    `requiredFields`), and the server blanks it for any other answer.
+  - Both are new questions, so records from before keep their blanks through
+    an unrelated edit, by the usual edit rule.
+  - **Alias** is optional and shown only for the Without Known Parents
+    category (the SCSR: "the given first and last name and alias"). Changing
+    the category hides it, never deletes it; the server never clears it.
+  - Children 0029 is additive. `children/demo_profiles.py` gives demo
+    children a health condition and whereabouts, from `seed_demo_data` and
+    `import_demo_data` only.
 - **A rename cannot ride along with a deploy the old release survives.** On
   24 Sep the demo API's first deploy of 0020 failed on Render's side after the
   web had gone live; had the migration run first, the old API - still serving
@@ -1294,7 +1321,7 @@ react-big-calendar's own `role="rowgroup"` markup rather than ours.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 1,825 tests, ~18 min
+cd backend && .venv/Scripts/python.exe manage.py test   # 1,854 tests, ~20 min
 cd frontend && npm run lint && npm run build
 ```
 
