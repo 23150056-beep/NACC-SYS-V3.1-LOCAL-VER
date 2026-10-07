@@ -816,7 +816,7 @@ middle name, a date found, and every question that applies made mandatory.
   server's own rule (`refusedIfBlank` mirrors `_require`; `DYNAMIC` is pinned
   in test_intake). The custodian is never asked of a psychologist, who cannot
   record one. The fullname-only create path the older tests use stays exempt.
-- **The form checks what the server checks, as it is typed**: the 5-17 age,
+- **The form checks what the server checks, as it is typed**: the age,
   dates not in the future or before the birth, the category pairing. A moved
   birth date is checked against the dates already recorded that the case
   shows - server and form alike - but not against a hidden older date nobody
@@ -875,6 +875,21 @@ middle name, a date found, and every question that applies made mandatory.
   - **Alias** is optional and shown only for the Without Known Parents
     category (the SCSR: "the given first and last name and alias"). Changing
     the category hides it, never deletes it; the server never clears it.
+  - **Age follows the adoption type** (7 Oct 2026): 5-17 for every record
+    except an Adoption of type Adult, which is 18 or older with no upper
+    limit. One rule, `intake.age_range(case_type, type_of_adoption)`,
+    mirrored in `caseData.js ageRange` and pinned by `TheAgeRuleTest`. It is
+    judged where the birth date is set and again where the case type or
+    adoption type changes (`ChildSerializer._check_age`); an unchanged birth
+    date on an unrelated edit is not. The refusal sits on `birth_date`, and
+    `CHECKED_AGAINST` clears it when either type changes.
+  - **Legal Status has an optional "Date Issued"** (`legal_status_date`,
+    children 0030; the SCSR asks for the CDCLAA issuance date). It is shown
+    only once a status is picked, refused in the future or before the birth
+    (moving the birth date past it is refused too), and cleared by the server
+    when the status is blank.
+  - The birth date reads "Date of Birth or Given Date of Birth", the SCSR's
+    words, on the form and the printed reports.
   - Children 0029 is additive. `children/demo_profiles.py` gives demo
     children a health condition and whereabouts, from `seed_demo_data` and
     `import_demo_data` only.
@@ -1321,7 +1336,7 @@ react-big-calendar's own `role="rowgroup"` markup rather than ours.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 1,854 tests, ~20 min
+cd backend && .venv/Scripts/python.exe manage.py test   # 1,866 tests, ~21 min
 cd frontend && npm run lint && npm run build
 ```
 
