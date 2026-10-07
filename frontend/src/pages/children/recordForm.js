@@ -10,6 +10,7 @@ export const EMPTY = {
   case_type: '', case_category: '', custodian_name: '', psychologist: '', assignee_sees_history: true,
   custodian_contact: '', custodian_sms_consent: false,
   place_of_birth_or_found: '', birth_status: '', legal_status: '',
+  health_condition: '', special_needs: '', alias: '',
   date_of_admission: '', date_of_placement_to_custodian: '', type_of_adoption: '',
   referral_source: '', referral_reason: '', education_level: '', current_placement: '', medical_notes: '',
   recommendation: '',

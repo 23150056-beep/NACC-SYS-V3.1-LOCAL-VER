@@ -10,7 +10,7 @@ import { useAssistant } from '../context/AssistantContext';
 import {
   Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, Modal, Note, PAGE, Select, Tabs,
 } from '../ui';
-import { PA_STATUS_TONES, caseDate, reportTypeLabel } from '../config/caseData';
+import { PA_STATUS_TONES, SPECIAL_NEEDS, caseDate, reportTypeLabel } from '../config/caseData';
 import { loadAll } from '../utils/load';
 import { useOpenFromLink } from '../utils/links';
 import { clock } from '../utils/time';
@@ -204,10 +204,13 @@ export default function ChildProgressReport() {
   const facts = [
     { k: 'Case reference', v: caseRef(child.id) },
     { k: 'Age / date of birth', v: [age != null ? `${age} years` : null, child.birth_date].filter(Boolean).join(' · ') },
+    ...(child.alias ? [{ k: 'Alias', v: child.alias }] : []),
     { k: 'Gender', v: child.gender },
     { k: 'Case type', v: child.case_type },
     { k: 'Category', v: child.case_category },
     { k: 'Legal status', v: child.legal_status },
+    { k: 'Health condition', v: child.health_condition === SPECIAL_NEEDS && child.special_needs ? `${child.health_condition}: ${child.special_needs}` : child.health_condition },
+    { k: 'Current whereabouts', v: child.current_placement },
     { k: 'Address', v: [[child.house_number, child.street].filter(Boolean).join(' '), child.barangay, child.municipality, child.province].filter(Boolean).join(', ') },
     { k: 'Assigned psychologist', v: child.psychologist_name },
     { k: caseDate(child)[0], v: caseDate(child)[1] },

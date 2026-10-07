@@ -5,7 +5,7 @@ import { useToast } from '../../context/ToastContext';
 import {
   Alert, Avatar, Badge, Button, ConfirmDialog, FormField, Icon, iconBtn, hoverLift, Select, roleLabel,
 } from '../../ui';
-import { ADMISSION, CASE_TYPE_FIELDS, PLACEMENT, dateFieldFor } from '../../config/caseData';
+import { ADMISSION, CASE_TYPE_FIELDS, PLACEMENT, SPECIAL_NEEDS, dateFieldFor } from '../../config/caseData';
 import { PURPOSE_LABEL, StatusChip, fmtDay, fmtTime, localDate } from './shared';
 import { clock, clockRange } from '../../utils/time';
 
@@ -153,11 +153,15 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
   const fields = [
     ['Category', child.case_category || '—'],
     ['Middle Name', child.middle_name || '—'],
+    ...(child.alias ? [['Alias', child.alias]] : []),
     ['Sex', child.gender || '—'],
     ...(child.date_found ? [['Date Found', child.date_found]] : []),
     ['Place of Birth or Place Found', child.place_of_birth_or_found || '—'],
     ['Birth Status', child.birth_status || '—'],
     ['Legal Status', child.legal_status || '—'],
+    ['Health Condition', child.health_condition
+      ? `${child.health_condition}${child.health_condition === SPECIAL_NEEDS && child.special_needs ? `: ${child.special_needs}` : ''}` : '—'],
+    ['Current Whereabouts', child.current_placement || '—'],
     ['Educational Placement', child.education_level || '—'],
     ['Assigned Psychologist', child.psychologist_name || '—'],
     // Asked, not yet accepted (backend children/assignment.py) - and the last

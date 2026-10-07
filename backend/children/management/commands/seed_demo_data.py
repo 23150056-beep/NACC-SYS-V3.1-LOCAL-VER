@@ -38,7 +38,7 @@ from django.utils import timezone
 from accounts.models import Role, User
 from config.demo_guard import refuse_if_not_local
 from children import intake as intake_rules
-from children import demo_custodians, demo_owners
+from children import demo_custodians, demo_owners, demo_profiles
 from children.models import Child
 from clinical.models import (
     AgencyFormTemplate, ConsentRecord, InstrumentCatalog, OpinionnaireInvite,
@@ -224,6 +224,7 @@ class Command(BaseCommand):
         # is one no staff account can see (children/demo_owners.py).
         demo_owners.assign_social_workers(list(Child.objects.order_by("pk")))
         demo_custodians.fill_custodians(list(Child.objects.order_by("pk")))
+        demo_profiles.fill_profiles(list(Child.objects.order_by("pk")))
         referrals = demo_referrals.install_referrals(
             list(Child.objects.filter(status=Child.ACTIVE).select_related("social_worker")),
             uploaded_by=User.objects.filter(role__role_name=Role.STAFF).first())

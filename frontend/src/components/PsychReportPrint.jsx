@@ -1,5 +1,5 @@
 import { ageFrom, caseRef } from '../utils/child';
-import { caseDate } from '../config/caseData';
+import { SPECIAL_NEEDS, caseDate } from '../config/caseData';
 
 /* What the child record's Print button puts on paper (owner's request,
  * 24 Sep 2026): a psychological report in the standard layout, filled from
@@ -84,6 +84,7 @@ export default function PsychReportPrint({ data, className = 'racco-print-only' 
 
   const identifying = [
     ['Name', child.fullname],
+    ...(child.alias ? [['Alias', child.alias]] : []),
     ['Case reference', child.id ? caseRef(child.id) : ''],
     ['Date of birth / Age', [longDate(child.birth_date), age != null ? `${age} years old` : ''].filter(Boolean).join(' · ')],
     ['Sex', child.gender],
@@ -94,6 +95,9 @@ export default function PsychReportPrint({ data, className = 'racco-print-only' 
     ['Address', address || child.address],
     ['Category / Case type', [child.case_category, child.case_type].filter(Boolean).join(' · ')],
     ['Legal status', child.legal_status],
+    ['Health condition', child.health_condition === SPECIAL_NEEDS && child.special_needs
+      ? `${child.health_condition}: ${child.special_needs}` : child.health_condition],
+    ['Current whereabouts', child.current_placement],
     ...(child.custodian_name ? [['Custodian', child.custodian_name]] : []),
     [dateLabel, longDate(dateValue)],
     ['Referral source', child.referral_source],

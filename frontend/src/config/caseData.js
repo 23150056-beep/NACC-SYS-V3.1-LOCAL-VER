@@ -115,12 +115,17 @@ export const caseDate = (child) => {
 export const ALWAYS_REQUIRED = [
   'case_category', 'case_type',
   'first_name', 'last_name', 'birth_date', 'gender',
-  'place_of_birth_or_found', 'birth_status', 'education_level',
+  'place_of_birth_or_found', 'birth_status', 'health_condition',
+  'education_level', 'current_placement',
   'house_number', 'street', 'province', 'municipality', 'barangay',
 ];
-export const requiredFields = (caseType, typeOfAdoption) => {
+export const requiredFields = (caseType, typeOfAdoption, healthCondition) => {
   const date = dateFieldFor(caseType, typeOfAdoption);
-  return [...ALWAYS_REQUIRED, ...(CASE_TYPE_FIELDS[caseType] || []), ...(date ? [date] : [])];
+  return [
+    ...ALWAYS_REQUIRED, ...(CASE_TYPE_FIELDS[caseType] || []), ...(date ? [date] : []),
+    // What the special needs are, once "With special needs" is the answer.
+    ...(healthCondition === SPECIAL_NEEDS ? ['special_needs'] : []),
+  ];
 };
 
 /* Answered by the case type, so asked again whenever the case type or the type
@@ -171,9 +176,19 @@ export const unaskedAnswers = (form, record) => {
   return Object.fromEntries(Object.keys(blanked).map((k) => [k, record[k] ?? blanked[k]]));
 };
 
-// New fields from the same official intake form. "N/A" became "Unknown" and
-// "Child" was retired on 24 Sep 2026.
-export const BIRTH_STATUSES = ['Marital', 'Non-Marital', 'Unknown'];
+// New fields from the same official intake form, which the SCSR repeats as its
+// Part I. "N/A" became "Unknown" on 24 Sep 2026; "Child" was retired that day
+// and offered again on 7 Oct 2026 (owner).
+export const BIRTH_STATUSES = ['Marital', 'Non-Marital', 'Child', 'Unknown'];
+
+// The SCSR's Health Condition. "With special needs" asks what they are
+// (special_needs); any other answer takes none. Mirrors children/intake.py.
+export const HEALTH_CONDITIONS = ['Healthy', 'With special needs'];
+export const SPECIAL_NEEDS = 'With special needs';
+
+// The Alias is asked of a child without known parents only (SCSR Part I). The
+// form hides it for any other category and never deletes what was saved.
+export const ALIAS_CATEGORY = 'Without Known Parents';
 
 export const LEGAL_STATUSES = [
   'With Issued CDCLAA',
@@ -185,14 +200,17 @@ export const LEGAL_STATUSES = [
 // Child.REFERRAL_SOURCE_CHOICES; a record still holding typed text keeps it.
 export const REFERRAL_SOURCES = ['RACCO', 'LGU', 'CCA', 'RCF'];
 
-// SIBRA and ICA Relative were retired on 24 Sep 2026. A record that holds one
-// keeps it, and the form still shows it on that record.
+// The SCSR's order. SIBRA and ICA Relative were retired on 24 Sep 2026 and are
+// offered again since 7 Oct 2026 (owner); only a Regular adoption records the
+// date of admission, every other type the date of placement.
 export const TYPES_OF_ADOPTION = [
   'Regular',
   'Domestic Relative',
   'Relative (Without 2-yr custody)',
   'Step-parent',
   'Adult',
+  'SIBRA',
+  'ICA Relative',
   'IP',
   'Foster-Adopt',
 ];

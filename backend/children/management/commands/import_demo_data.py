@@ -30,7 +30,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from accounts.models import Role
-from children import demo_custodians, demo_owners
+from children import demo_custodians, demo_owners, demo_profiles
 from children.models import Child
 from clinical import demo_referrals, demo_reports
 from scheduling import demo_schedule
@@ -227,6 +227,8 @@ class Command(BaseCommand):
         demo_owners.assign_social_workers(list(Child.objects.order_by("pk")))
         custodians = demo_custodians.fill_custodians(list(Child.objects.order_by("pk")))
         self.stdout.write(f"  custodians: {custodians} filled in")
+        profiles = demo_profiles.fill_profiles(list(Child.objects.order_by("pk")))
+        self.stdout.write(f"  health condition and whereabouts: {profiles} filled in")
         referrals = demo_referrals.install_referrals(
             list(Child.objects.filter(status=Child.ACTIVE).select_related("social_worker")),
             uploaded_by=User.objects.filter(role__role_name=Role.STAFF).first())

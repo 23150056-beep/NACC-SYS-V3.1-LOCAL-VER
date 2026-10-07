@@ -5,8 +5,8 @@ import {
 } from '../../ui';
 import { PROCEED, useConfirm } from '../../context/ConfirmContext';
 import {
-  ADMISSION, BIRTH_STATUSES, CASE_CATEGORIES, CASE_CATEGORY_OPTIONS, CASE_TYPES, CASE_TYPE_FIELDS,
-  DYNAMIC, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, TYPES_OF_ADOPTION, caseChanged, caseTypesFor,
+  ADMISSION, ALIAS_CATEGORY, BIRTH_STATUSES, CASE_CATEGORIES, CASE_CATEGORY_OPTIONS, CASE_TYPES, CASE_TYPE_FIELDS,
+  DYNAMIC, HEALTH_CONDITIONS, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, SPECIAL_NEEDS, TYPES_OF_ADOPTION, caseChanged, caseTypesFor,
   dateFieldFor, requiredFields, unaskedAnswers,
 } from '../../config/caseData';
 import { shortDate, timeAgo } from '../../utils/time';
@@ -47,6 +47,8 @@ const FIELD_INFO = {
   birth_date: [1, 'date of birth'], date_found: [1, 'date found'], gender: [1, 'sex'],
   place_of_birth_or_found: [1, 'place of birth or found'], birth_status: [1, 'birth status'],
   legal_status: [1, 'legal status'],
+  health_condition: [1, 'health condition'], special_needs: [1, 'special needs'],
+  current_placement: [1, 'current whereabouts'], alias: [1, 'alias'],
   custodian_name: [2, 'custodian'], custodian_contact: [2, 'contact number'],
   custodian_sms_consent: [2, 'consent to texts'],
   type_of_adoption: [1, 'type of adoption'],
@@ -68,6 +70,7 @@ const NAME_FIELDS = ['first_name', 'middle_name', 'last_name'];
 const SHOWS_ERROR = [
   'case_category', 'case_type', 'first_name', 'middle_name', 'last_name', 'birth_date', 'date_found',
   'gender', 'place_of_birth_or_found', 'birth_status', 'legal_status', 'education_level',
+  'health_condition', 'special_needs', 'current_placement', 'alias',
   'type_of_adoption', ADMISSION, PLACEMENT, 'custodian_name', 'custodian_contact',
   'house_number', 'street', 'province', 'municipality', 'barangay', 'landmark', 'referral_source',
 ];
@@ -79,6 +82,7 @@ const CHECKED_AGAINST = {
   date_found: ['birth_date'],
   [ADMISSION]: ['birth_date', 'case_type', 'type_of_adoption'],
   [PLACEMENT]: ['birth_date', 'case_type', 'type_of_adoption'],
+  special_needs: ['health_condition'],
   case_category: ['case_type'], case_type: ['case_category'], type_of_adoption: ['case_type'],
   custodian_name: ['custodian_contact', 'custodian_sms_consent', 'case_type'],
   custodian_contact: ['custodian_name', 'custodian_sms_consent', 'case_type'],
@@ -324,10 +328,13 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   const refusedIfBlank = (f) => {
     if (f === 'custodian_name' && isPsych) return false;
     if (!isEdit) return true;
+    // No record held a health condition before it was asked, so special needs
+    // typed for "With special needs" are never an older blank.
+    if (f === 'special_needs') return true;
     if (!original || legacyRecord) return false;
     return !!String(original[f] ?? '').trim() || (retyped && DYNAMIC.includes(f));
   };
-  const missingFields = requiredFields(form.case_type, form.type_of_adoption)
+  const missingFields = requiredFields(form.case_type, form.type_of_adoption, form.health_condition)
     .filter((f) => !String(form[f] ?? '').trim())
     .filter((f) => !(isEdit && NAME_FIELDS.includes(f)));
   const needed = missingFields.filter(refusedIfBlank);
@@ -527,6 +534,15 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   </FormField>
                 </div>
               )}
+              {/* The SCSR: "For Child Without Known Parents, indicate the given
+                  first and last name and alias, if applicable". Shown for that
+                  category only; an alias already saved stays when the category
+                  changes - hidden, never deleted - and is sent with the save. */}
+              {form.case_category === ALIAS_CATEGORY && (
+                <FormField label="Alias" hint="Optional — if the child is known by another name." error={fieldError('alias')}>
+                  <Input value={form.alias || ''} maxLength={150} onChange={(e) => setForm({ ...form, alias: e.target.value })} />
+                </FormField>
+              )}
               {!isEdit && dupes.length > 0 && (
                 <Alert tone="warning" icon={<Icon name="alert-triangle" size={18} />} title="A similar record already exists" style={{ gridColumn: '1 / -1' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
@@ -599,12 +615,32 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   {withRetired(LEGAL_STATUSES, form.legal_status, form._record?.legal_status).map((v) => <option key={v} value={v}>{optionLabel(LEGAL_STATUSES, v)}</option>)}
                 </Select>
               </FormField>
+              <FormField label="Health Condition" required error={fieldError('health_condition')}>
+                <Select value={form.health_condition || ''} onChange={(e) => setForm({ ...form, health_condition: e.target.value })}>
+                  <option value="">— Select —</option>
+                  {withRetired(HEALTH_CONDITIONS, form.health_condition, form._record?.health_condition).map((v) => <option key={v} value={v}>{optionLabel(HEALTH_CONDITIONS, v)}</option>)}
+                </Select>
+              </FormField>
+              {/* Kept, hidden, when the answer changes; the server drops it
+                  for anything but "With special needs". */}
+              {form.health_condition === SPECIAL_NEEDS && (
+                <FormField label="Specify the special needs" required error={fieldError('special_needs')}>
+                  <Input value={form.special_needs || ''} maxLength={300} placeholder="e.g. Hearing loss, in therapy"
+                    onChange={(e) => setForm({ ...form, special_needs: e.target.value })} />
+                </FormField>
+              )}
               {/* Moved here from Recommendation (24 Sep 2026): every child has
                   an answer, even if the answer is that they are not in school. */}
               <FormField label="Educational Placement" required error={fieldError('education_level')}
                 hint="The grade level, or “Not in school”.">
                 <Input value={form.education_level || ''} maxLength={100} placeholder="e.g. Grade 4"
                   onChange={(e) => setForm({ ...form, education_level: e.target.value })} />
+              </FormField>
+              {/* Taken off on 24 Sep 2026 and asked again on 7 Oct (owner): the
+                  SCSR's Part I lists it. */}
+              <FormField label="Current Whereabouts" required error={fieldError('current_placement')}>
+                <Input value={form.current_placement || ''} maxLength={150} placeholder="e.g. Foster family, residential facility"
+                  onChange={(e) => setForm({ ...form, current_placement: e.target.value })} />
               </FormField>
               {asksFor('type_of_adoption') && (
                 <FormField label="Type of Adoption" required error={fieldError('type_of_adoption')}>
@@ -703,8 +739,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 4 }}>Recommendation</div>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 10 }}>Details beyond the agency&apos;s intake interview.</div>
             <div className="racco-case-grid">
-              {/* A pick since 24 Sep 2026. Current Whereabouts, which sat
-                  beside it, was taken off the form the same day. */}
+              {/* A pick since 24 Sep 2026. */}
               <FormField label="Referral Source" error={fieldError('referral_source')}
                 hint="RACCO · LGU (local government unit) · CCA (child caring agency) · RCF (residential care facility)">
                 <Select value={form.referral_source || ''} onChange={(e) => setForm({ ...form, referral_source: e.target.value })}>

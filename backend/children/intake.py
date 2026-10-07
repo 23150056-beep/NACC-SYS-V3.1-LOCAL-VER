@@ -8,6 +8,11 @@ from the same map. frontend/src/config/caseData.js holds the browser's copy;
 children/tests/test_intake.py pins the two together.
 """
 
+HEALTH_CONDITIONS = ["Healthy", "With special needs"]
+SPECIAL_NEEDS = "With special needs"
+# Alias is asked of a child without known parents only (the SCSR, Part I).
+ALIAS_CATEGORY = "Without Known Parents"
+
 ADMISSION = "date_of_admission"
 PLACEMENT = "date_of_placement_to_custodian"
 
@@ -83,7 +88,8 @@ def intake_date(child):
 ALWAYS_REQUIRED = [
     "case_category", "case_type",
     "first_name", "last_name", "birth_date", "gender",
-    "place_of_birth_or_found", "birth_status", "education_level",
+    "place_of_birth_or_found", "birth_status", "health_condition",
+    "education_level", "current_placement",
     # In the form's order, which is what the "Still needed" line lists them in:
     # province first, because the municipality and barangay lists follow it.
     "house_number", "street", "province", "municipality", "barangay",
@@ -94,8 +100,11 @@ ALWAYS_REQUIRED = [
 DYNAMIC = {"custodian_name", "type_of_adoption", ADMISSION, PLACEMENT}
 
 
-def required_fields(case_type, type_of_adoption=""):
+def required_fields(case_type, type_of_adoption="", health_condition=""):
     fields = list(ALWAYS_REQUIRED) + list(CASE_TYPE_FIELDS.get(case_type, []))
+    # What the special needs are, once "With special needs" is the answer.
+    if health_condition == SPECIAL_NEEDS:
+        fields.append("special_needs")
     date = date_field_for(case_type, type_of_adoption)
     if date:
         fields.append(date)

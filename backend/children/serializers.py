@@ -36,8 +36,9 @@ class ChildSerializer(serializers.ModelSerializer):
     # future edit before validate_case_category ever got a chance to apply
     # its change-only exemption.
     case_category = serializers.CharField(required=False, allow_blank=True)
-    # The same, for the two lists that retired values on 24 Sep 2026: birth
-    # status "Child", adoption types "SIBRA" and "ICA Relative".
+    # The same, for the two lists that retired values on 24 Sep 2026 (birth
+    # status "Child", adoption types "SIBRA" and "ICA Relative", offered again
+    # since 7 Oct): a value a later change retires must keep its record valid.
     birth_status = serializers.CharField(required=False, allow_blank=True)
     type_of_adoption = serializers.CharField(required=False, allow_blank=True)
     # And for Referral Source, which was free text until it became a list.
@@ -78,7 +79,8 @@ class ChildSerializer(serializers.ModelSerializer):
             "place_of_birth_or_found", "birth_status", "legal_status",
             "date_of_admission", "date_of_placement_to_custodian", "type_of_adoption",
             "photo", "referral_source", "referral_reason",
-            "education_level", "current_placement", "medical_notes", "recommendation",
+            "education_level", "current_placement", "health_condition", "special_needs", "alias",
+            "medical_notes", "recommendation",
             "psychologist", "psychologist_name", "social_worker", "social_worker_name",
             "termination", "terminations",
             "pre_assessment_status", "instruments_used", "has_case_referral",
@@ -378,6 +380,7 @@ class ChildSerializer(serializers.ModelSerializer):
         self._check_case(attrs)
         self._check_dates(attrs)
         self._check_address(attrs)
+        self._check_health(attrs)
         refused = custodian.apply(attrs, self.instance, getattr(request, "user", None), role)
         if refused:
             raise serializers.ValidationError(refused)
@@ -410,20 +413,35 @@ class ChildSerializer(serializers.ModelSerializer):
         blank = lambda v: not str(v or "").strip()  # noqa: E731
         case_type = self._after(attrs, "case_type")
         adoption = self._after(attrs, "type_of_adoption")
+        health = self._after(attrs, "health_condition")
         reasked = not creating and any(
             f in attrs and attrs[f] != getattr(self.instance, f)
             for f in ("case_type", "type_of_adoption"))
         missing = {}
-        for f in intake.required_fields(case_type, adoption):
+        for f in intake.required_fields(case_type, adoption, health):
             if f == "custodian_name" and role == Role.PSYCHOLOGIST:
                 continue
             if not blank(self._after(attrs, f)):
                 continue
+            # What the special needs are is never an older blank: no record
+            # held a health condition before this one was asked.
             if (creating or not blank(getattr(self.instance, f))
-                    or (reasked and f in intake.DYNAMIC)):
+                    or (reasked and f in intake.DYNAMIC) or f == "special_needs"):
                 missing[f] = "This field is required."
         if missing:
             raise serializers.ValidationError(missing)
+
+    def _check_health(self, attrs):
+        """"With special needs" says what they are; any other answer has none,
+        so whatever was typed beside it is dropped rather than kept against a
+        child who is healthy. Only when the request touches either answer."""
+        if "health_condition" not in attrs and "special_needs" not in attrs:
+            return
+        if self._after(attrs, "health_condition") == intake.SPECIAL_NEEDS:
+            if not str(self._after(attrs, "special_needs") or "").strip():
+                raise serializers.ValidationError({"special_needs": "This field is required."})
+        else:
+            attrs["special_needs"] = ""
 
     def _check_case(self, attrs):
         """The category has to be one this track offers - checked when either
