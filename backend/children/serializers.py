@@ -76,7 +76,7 @@ class ChildSerializer(serializers.ModelSerializer):
             "custodian_contact", "custodian_contact_display", "custodian_sms_consent",
             "custodian_sms_consent_at", "custodian_sms_consent_by_name",
             "custodian_contact_verified", "custodian_texts",
-            "place_of_birth_or_found", "birth_status", "legal_status",
+            "place_of_birth_or_found", "birth_status", "legal_status", "legal_status_date",
             "date_of_admission", "date_of_placement_to_custodian", "type_of_adoption",
             "photo", "referral_source", "referral_reason",
             "education_level", "current_placement", "health_condition", "special_needs", "alias",
@@ -253,29 +253,6 @@ class ChildSerializer(serializers.ModelSerializer):
         legacy_fullname = (self.initial_data or {}).get("fullname")
         return str(legacy_fullname).split() if legacy_fullname else []
 
-    def validate_birth_date(self, value):
-        # The agency only serves children aged 5-17 (inclusive); this uses
-        # an exact-birthday-aware age calculation, not a floor(days/365).
-        # Re-validation is CHANGE-only (Task 13 lock: "edits stay
-        # partial-friendly"): the frontend's edit form always resends the
-        # existing birth_date on PUT (full-object update pattern), so
-        # re-checking an UNCHANGED birth_date on every update would
-        # permanently lock out ANY field edit on a child whose age has
-        # since drifted outside 5-17 (e.g. a long-running case where the
-        # child turned 18, or a legacy record with an unusual birth_date).
-        # But a deliberate edit that actually changes birth_date must still
-        # be range-checked - only pass unchanged values through untouched.
-        if value is None:
-            return value
-        if self.instance is not None and value == self.instance.birth_date:
-            return value
-        today = timezone.localdate()
-        age = today.year - value.year - ((today.month, today.day) < (value.month, value.day))
-        if not (5 <= age <= 17):
-            raise serializers.ValidationError(
-                "The child must be between 5 and 17 years old.")
-        return value
-
     def _current_or_unchanged(self, field, value, choices):
         """A value from the current list, or the one the record already holds.
         A record keeps a retired value until somebody changes it; nobody can
@@ -378,7 +355,9 @@ class ChildSerializer(serializers.ModelSerializer):
         if self.instance is not None and not self._is_legacy_record():
             self._require(attrs, creating=False, role=role)
         self._check_case(attrs)
+        self._check_age(attrs)
         self._check_dates(attrs)
+        self._check_legal_status_date(attrs)
         self._check_address(attrs)
         self._check_health(attrs)
         refused = custodian.apply(attrs, self.instance, getattr(request, "user", None), role)
@@ -499,6 +478,52 @@ class ChildSerializer(serializers.ModelSerializer):
                              ("barangay", barangay)):
             if place is not None:
                 attrs[field] = place.name
+
+    def _check_age(self, attrs):
+        """The age rule (children/intake.py age_range): 5-17, or 18 and over
+        for an Adult adoption. Judged where the birth date is being set, and
+        again where the case type or type of adoption changes, since that
+        changes the rule - the edit form resends an unchanged birth date, and
+        a record whose child has since turned 18 must stay editable."""
+        born = self._after(attrs, "birth_date")
+        if born is None:
+            return
+        case_type = self._after(attrs, "case_type")
+        adoption = self._after(attrs, "type_of_adoption")
+        if self.instance is not None:
+            moved = any(f in attrs and attrs[f] != getattr(self.instance, f)
+                        for f in ("birth_date", "case_type", "type_of_adoption"))
+            if not moved:
+                return
+        today = timezone.localdate()
+        age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+        low, high = intake.age_range(case_type, adoption)
+        if age < low or (high is not None and age > high):
+            raise serializers.ValidationError(
+                {"birth_date": intake.age_refusal(case_type, adoption)})
+
+    def _check_legal_status_date(self, attrs):
+        """The date the legal status was issued: optional, never in the future
+        or before the birth, and gone when there is no legal status."""
+        if not self._after(attrs, "legal_status"):
+            if self._after(attrs, "legal_status_date") is not None:
+                attrs["legal_status_date"] = None
+            return
+        value = self._after(attrs, "legal_status_date")
+        if value is None:
+            return
+        born = self._after(attrs, "birth_date")
+        born_moved = (self.instance is not None and "birth_date" in attrs
+                      and attrs["birth_date"] != self.instance.birth_date)
+        unchanged = self.instance is not None and value == self.instance.legal_status_date
+        if unchanged and not born_moved:
+            return
+        if not unchanged and value > timezone.localdate():
+            raise serializers.ValidationError(
+                {"legal_status_date": "The date issued cannot be in the future."})
+        if born and value < born:
+            raise serializers.ValidationError(
+                {"legal_status_date": "The date issued cannot be before the date of birth."})
 
     def _check_dates(self, attrs):
         """None of the case dates is in the future or before the child was

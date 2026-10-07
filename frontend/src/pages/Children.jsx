@@ -359,7 +359,7 @@ export default function Children() {
         ? [['Asks to take the case', asking ? assignee : null], ['Withdraws the request to', withdrawing ? wasAsked : null],
            ['Stays with', withdrawing ? holderName : null], ['Psychologist', clearing ? 'Unassigned' : null]]
         : [['Category', form.case_category], ['Case type', form.case_type],
-           ['Date of birth', form.birth_date], ['Psychologist', asking ? `${assignee} (asked to accept)` : 'Unassigned'],
+           ['Date of birth or given date of birth', form.birth_date], ['Psychologist', asking ? `${assignee} (asked to accept)` : 'Unassigned'],
            ['Case referral', form.referralFile?.name]],
     });
     if (!ok) return;
@@ -396,9 +396,11 @@ export default function Children() {
     if (!payload.birth_date) delete payload.birth_date;
     // Sent as null, not left out: the form clears the date a case no longer
     // asks for, and leaving it out of the request would keep it on the record.
-    for (const f of ['date_of_admission', 'date_of_placement_to_custodian', 'date_found']) {
+    for (const f of ['date_of_admission', 'date_of_placement_to_custodian', 'date_found', 'legal_status_date']) {
       if (!payload[f]) payload[f] = null;
     }
+    // The date issued goes with the legal status.
+    if (!payload.legal_status) payload.legal_status_date = null;
     if (form.id) delete payload.fullname;
     try {
       let saved;

@@ -159,6 +159,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
     ['Place of Birth or Place Found', child.place_of_birth_or_found || '—'],
     ['Birth Status', child.birth_status || '—'],
     ['Legal Status', child.legal_status || '—'],
+    ...(child.legal_status && child.legal_status_date ? [['Date Issued', child.legal_status_date]] : []),
     ['Health Condition', child.health_condition
       ? `${child.health_condition}${child.health_condition === SPECIAL_NEEDS && child.special_needs ? `: ${child.special_needs}` : ''}` : '—'],
     ['Current Whereabouts', child.current_placement || '—'],

@@ -203,12 +203,13 @@ export default function ChildProgressReport() {
 
   const facts = [
     { k: 'Case reference', v: caseRef(child.id) },
-    { k: 'Age / date of birth', v: [age != null ? `${age} years` : null, child.birth_date].filter(Boolean).join(' · ') },
+    { k: 'Age / date of birth or given date of birth', v: [age != null ? `${age} years` : null, child.birth_date].filter(Boolean).join(' · ') },
     ...(child.alias ? [{ k: 'Alias', v: child.alias }] : []),
     { k: 'Gender', v: child.gender },
     { k: 'Case type', v: child.case_type },
     { k: 'Category', v: child.case_category },
     { k: 'Legal status', v: child.legal_status },
+    ...(child.legal_status && child.legal_status_date ? [{ k: 'Date issued', v: child.legal_status_date }] : []),
     { k: 'Health condition', v: child.health_condition === SPECIAL_NEEDS && child.special_needs ? `${child.health_condition}: ${child.special_needs}` : child.health_condition },
     { k: 'Current whereabouts', v: child.current_placement },
     { k: 'Address', v: [[child.house_number, child.street].filter(Boolean).join(' '), child.barangay, child.municipality, child.province].filter(Boolean).join(', ') },

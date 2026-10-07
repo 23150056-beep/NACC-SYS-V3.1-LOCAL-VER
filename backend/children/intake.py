@@ -13,6 +13,27 @@ SPECIAL_NEEDS = "With special needs"
 # Alias is asked of a child without known parents only (the SCSR, Part I).
 ALIAS_CATEGORY = "Without Known Parents"
 
+# The age the agency serves. A child is 5-17; an Adult adoption (the SCSR
+# covers it) is for a person of 18 or older, with no upper limit.
+ADULT_ADOPTION = "Adult"
+CHILD_AGES = (5, 17)
+ADULT_AGES = (18, None)
+
+
+def age_range(case_type, type_of_adoption=""):
+    """(youngest, oldest) a record may be born into; oldest is None for no limit."""
+    if case_type == "Adoption" and type_of_adoption == ADULT_ADOPTION:
+        return ADULT_AGES
+    return CHILD_AGES
+
+
+def age_refusal(case_type, type_of_adoption=""):
+    low, high = age_range(case_type, type_of_adoption)
+    if high is None:
+        return f"The person must be {low} or older for an Adult adoption."
+    return f"The child must be between {low} and {high} years old."
+
+
 ADMISSION = "date_of_admission"
 PLACEMENT = "date_of_placement_to_custodian"
 

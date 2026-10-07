@@ -128,6 +128,39 @@ class TheFormAndTheServerAgreeTest(SimpleTestCase):
         self.assertIn("typeOfAdoption === 'Regular' ? ADMISSION : PLACEMENT", self.js)
 
 
+class TheAgeRuleTest(SimpleTestCase):
+    def test_the_form_and_the_server_hold_the_same_rule(self):
+        js = CASE_DATA_JS.read_text(encoding="utf-8")
+        self.assertIn("export const CHILD_AGES = [5, 17];", js)
+        self.assertIn("export const ADULT_AGES = [18, null];", js)
+        self.assertIn("export const ADULT_ADOPTION = 'Adult';", js)
+        self.assertIn("caseType === 'Adoption' && typeOfAdoption === ADULT_ADOPTION ? ADULT_AGES : CHILD_AGES", js)
+        self.assertEqual((5, 17), intake.CHILD_AGES)
+        self.assertEqual((18, None), intake.ADULT_AGES)
+        self.assertEqual("Adult", intake.ADULT_ADOPTION)
+        self.assertIn("The person must be ${low} or older for an Adult adoption.", js)
+        self.assertIn("The child must be between ${low} and ${high} years old.", js)
+
+    def test_only_an_adult_adoption_is_18_and_over(self):
+        self.assertEqual((18, None), intake.age_range("Adoption", "Adult"))
+        for case_type, adoption in (("Adoption", "Regular"), ("Adoption", ""),
+                                    ("Foster Care", "Adult"), ("Residential Care", "")):
+            self.assertEqual((5, 17), intake.age_range(case_type, adoption))
+        self.assertEqual("The person must be 18 or older for an Adult adoption.",
+                         intake.age_refusal("Adoption", "Adult"))
+        self.assertEqual("The child must be between 5 and 17 years old.",
+                         intake.age_refusal("Foster Care"))
+
+
+def _born(years, extra_days=0):
+    """The birth date of somebody who is `years` old today (plus extra_days
+    short of the next birthday), by the same arithmetic the server uses."""
+    today = timezone.localdate()
+    born = date(today.year - years, today.month, 1) if today.day == 29 and today.month == 2 \
+        else date(today.year - years, today.month, today.day)
+    return (born - timedelta(days=extra_days)).isoformat()
+
+
 class TheDateRuleTest(SimpleTestCase):
     def test_adoption_goes_by_the_type_of_adoption(self):
         self.assertEqual(intake.ADMISSION, intake.date_field_for("Adoption", "Regular"))
@@ -490,6 +523,112 @@ class EditingARecordTest(_Staff):
                               {"middle_name": "Reyes"}, format="json")
         self.assertEqual(400, r.status_code)
         self.assertIn("middle_name", r.data)
+
+
+class TheAgeRuleByAdoptionTypeTest(_Staff):
+    def adult(self, **over):
+        return self.post(case_type="Adoption", type_of_adoption="Adult", **over)
+
+    def test_an_adult_adoption_takes_18_and_over_with_no_upper_limit(self):
+        for years in (18, 30, 75):
+            r = self.adult(birth_date=_born(years))
+            self.assertEqual(201, r.status_code, f"{years}: {r.data}")
+
+    def test_an_adult_adoption_refuses_17(self):
+        r = self.adult(birth_date=_born(17))
+        self.assertEqual(400, r.status_code)
+        self.assertEqual(["The person must be 18 or older for an Adult adoption."],
+                         [str(e) for e in r.data["birth_date"]])
+
+    def test_every_other_case_is_still_5_to_17(self):
+        for kwargs in ({}, {"case_type": "Adoption", "type_of_adoption": "Regular",
+                        "date_of_admission": "2026-03-01", "date_of_placement_to_custodian": None},
+                       {"case_type": "Adoption", "type_of_adoption": "Step-parent"},
+                       {"case_type": "Residential Care", "custodian_name": "",
+                        "date_of_placement_to_custodian": None,
+                        "date_of_admission": "2026-03-01"}):
+            for years, ok in ((4, False), (5, True), (17, True), (18, False), (30, False)):
+                r = self.post(birth_date=_born(years), **kwargs)
+                self.assertEqual(201 if ok else 400, r.status_code, f"{kwargs} {years}: {r.data}")
+                if not ok:
+                    self.assertEqual("The child must be between 5 and 17 years old.",
+                                     str(r.data["birth_date"][0]), f"{kwargs} {years}: {r.data}")
+
+    def test_changing_the_type_re_judges_the_birth_date(self):
+        adult = Child.objects.get(pk=self.adult(birth_date=_born(30)).data["id"])
+        body = complete(case_type="Adoption", type_of_adoption="Regular", birth_date=_born(30),
+                        date_of_admission="2026-03-01", date_of_placement_to_custodian=None)
+        for f in ("first_name", "middle_name", "last_name"):
+            body.pop(f)
+        url = f"/api/children/{adult.id}/"
+        r = self.client.put(url, body, format="json")
+        self.assertEqual(400, r.status_code)
+        self.assertIn("birth_date", r.data)
+        # The other way round: a child's record turned into an Adult adoption.
+        body["birth_date"] = _born(10)
+        self.assertEqual(200, self.client.put(url, body, format="json").status_code)
+        body.update(type_of_adoption="Adult", date_of_admission=None,
+                    date_of_placement_to_custodian="2026-03-01")
+        r = self.client.put(url, body, format="json")
+        self.assertEqual(400, r.status_code)
+        self.assertIn("birth_date", r.data)
+
+    def test_an_unchanged_birth_date_on_an_old_record_is_not_re_judged(self):
+        old = Child.objects.create(
+            social_worker=self.staff, first_name="Old", last_name="Teen",
+            birth_date=date(2000, 1, 1), gender="Male", case_type="Foster Care",
+            case_category="Dependent")
+        r = self.client.put(f"/api/children/{old.id}/", {
+            "birth_date": "2000-01-01", "case_type": "Foster Care",
+            "case_category": "Dependent", "medical_notes": "Seen."}, format="json")
+        self.assertEqual(200, r.status_code, r.data)
+
+
+class TheLegalStatusDateTest(_Staff):
+    def test_a_date_issued_is_optional_and_saved(self):
+        r = self.post(legal_status="With IVC")
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertIsNone(r.data["legal_status_date"])
+        r = self.post(legal_status="With IVC", legal_status_date="2024-05-06")
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertEqual("2024-05-06", r.data["legal_status_date"])
+
+    def test_not_in_the_future_and_not_before_the_birth(self):
+        tomorrow = (timezone.localdate() + timedelta(days=1)).isoformat()
+        for bad in (tomorrow, "2015-12-31"):
+            r = self.post(legal_status="With IVC", legal_status_date=bad)
+            self.assertEqual(400, r.status_code, bad)
+            self.assertIn("legal_status_date", r.data)
+
+    def test_it_goes_with_the_legal_status(self):
+        r = self.post(legal_status="", legal_status_date="2024-05-06")
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertIsNone(r.data["legal_status_date"])
+        child = Child.objects.get(pk=self.post(
+            legal_status="With IVC", legal_status_date="2024-05-06").data["id"])
+        body = complete(legal_status="", legal_status_date="2024-05-06")
+        for f in ("first_name", "middle_name", "last_name"):
+            body.pop(f)
+        r = self.client.put(f"/api/children/{child.id}/", body, format="json")
+        self.assertEqual(200, r.status_code, r.data)
+        child.refresh_from_db()
+        self.assertEqual("", child.legal_status)
+        self.assertIsNone(child.legal_status_date)
+
+    def test_clearing_the_status_with_a_patch_clears_the_date(self):
+        child = Child.objects.get(pk=self.post(
+            legal_status="With IVC", legal_status_date="2024-05-06").data["id"])
+        r = self.client.patch(f"/api/children/{child.id}/", {"legal_status": ""}, format="json")
+        self.assertEqual(200, r.status_code, r.data)
+        child.refresh_from_db()
+        self.assertIsNone(child.legal_status_date)
+
+    def test_moving_the_birth_date_past_the_date_issued_is_refused(self):
+        child = Child.objects.get(pk=self.post(
+            legal_status="With IVC", legal_status_date="2016-06-01").data["id"])
+        r = self.client.patch(f"/api/children/{child.id}/", {"birth_date": "2017-01-01"}, format="json")
+        self.assertEqual(400, r.status_code)
+        self.assertIn("legal_status_date", r.data)
 
 
 class RenamingMigrationTest(TestCase):

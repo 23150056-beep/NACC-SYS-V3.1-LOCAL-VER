@@ -6,7 +6,7 @@ import {
 import { PROCEED, useConfirm } from '../../context/ConfirmContext';
 import {
   ADMISSION, ALIAS_CATEGORY, BIRTH_STATUSES, CASE_CATEGORIES, CASE_CATEGORY_OPTIONS, CASE_TYPES, CASE_TYPE_FIELDS,
-  DYNAMIC, HEALTH_CONDITIONS, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, SPECIAL_NEEDS, TYPES_OF_ADOPTION, caseChanged, caseTypesFor,
+  DYNAMIC, HEALTH_CONDITIONS, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, SPECIAL_NEEDS, TYPES_OF_ADOPTION, ageRange, ageRefusal, caseChanged, caseTypesFor,
   dateFieldFor, requiredFields, unaskedAnswers,
 } from '../../config/caseData';
 import { shortDate, timeAgo } from '../../utils/time';
@@ -44,9 +44,9 @@ const FORM_STEPS = ['Child\u2019s Profile', 'Present Environment', 'Recommendati
 const FIELD_INFO = {
   case_category: [1, 'category'], case_type: [1, 'case type'],
   first_name: [1, 'first name'], middle_name: [1, 'middle name'], last_name: [1, 'last name'],
-  birth_date: [1, 'date of birth'], date_found: [1, 'date found'], gender: [1, 'sex'],
+  birth_date: [1, 'date of birth or given date of birth'], date_found: [1, 'date found'], gender: [1, 'sex'],
   place_of_birth_or_found: [1, 'place of birth or found'], birth_status: [1, 'birth status'],
-  legal_status: [1, 'legal status'],
+  legal_status: [1, 'legal status'], legal_status_date: [1, 'date legal status issued'],
   health_condition: [1, 'health condition'], special_needs: [1, 'special needs'],
   current_placement: [1, 'current whereabouts'], alias: [1, 'alias'],
   custodian_name: [2, 'custodian'], custodian_contact: [2, 'contact number'],
@@ -69,7 +69,7 @@ const NAME_FIELDS = ['first_name', 'middle_name', 'last_name'];
  * instead, so "they are marked below" is never said over nothing marked. */
 const SHOWS_ERROR = [
   'case_category', 'case_type', 'first_name', 'middle_name', 'last_name', 'birth_date', 'date_found',
-  'gender', 'place_of_birth_or_found', 'birth_status', 'legal_status', 'education_level',
+  'gender', 'place_of_birth_or_found', 'birth_status', 'legal_status', 'legal_status_date', 'education_level',
   'health_condition', 'special_needs', 'current_placement', 'alias',
   'type_of_adoption', ADMISSION, PLACEMENT, 'custodian_name', 'custodian_contact',
   'house_number', 'street', 'province', 'municipality', 'barangay', 'landmark', 'referral_source',
@@ -79,7 +79,9 @@ const SHOWS_ERROR = [
  * it was checked against - changes, its message goes, rather than staying
  * beside a corrected date until the next save. */
 const CHECKED_AGAINST = {
+  birth_date: ['case_type', 'type_of_adoption'],
   date_found: ['birth_date'],
+  legal_status_date: ['birth_date', 'legal_status'],
   [ADMISSION]: ['birth_date', 'case_type', 'type_of_adoption'],
   [PLACEMENT]: ['birth_date', 'case_type', 'type_of_adoption'],
   special_needs: ['health_condition'],
@@ -256,24 +258,24 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   };
   const fieldLabel = { fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 };
   const textarea = { width: '100%', resize: 'vertical', padding: '10px 13px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', fontFamily: 'var(--font-sans)', fontSize: 14, lineHeight: 1.5 };
-  // Agency only serves children aged 5-17, by exact birthday - the rule the
-  // backend's validate_birth_date applies, and the authoritative check. The
-  // picker offers exactly the dates it accepts: worked out with the same age
-  // arithmetic, from local dates. It used to be today minus 18 and minus 5
-  // years through toISOString(), which in Manila is the day before - so it
-  // offered two birth dates of a child already 18 and refused the day a child
-  // turns 5, and the hint named no dates at all.
+  // The age rule is the backend's (children/intake.py age_range, mirrored in
+  // caseData.js): 5-17, or 18 and over for an Adult adoption. By exact
+  // birthday, and the picker offers exactly the dates it accepts, worked out
+  // with the same age arithmetic from local dates (not toISOString, which in
+  // Manila is the day before).
   const today = new Date();
   const ageOn = (born) => today.getFullYear() - born.getFullYear()
     - ((today.getMonth() < born.getMonth()
       || (today.getMonth() === born.getMonth() && today.getDate() < born.getDate())) ? 1 : 0);
+  const [youngestAge, oldestAge] = ageRange(form.case_type, form.type_of_adoption);
   // Stepped rather than computed so 29 February lands where the server's rule
   // puts it; neither loop runs more than twice.
-  const earliestBirth = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
-  while (ageOn(earliestBirth) > 17) earliestBirth.setDate(earliestBirth.getDate() + 1);
-  const latestBirth = new Date(today.getFullYear() - 5, today.getMonth(), today.getDate());
-  while (ageOn(latestBirth) < 5) latestBirth.setDate(latestBirth.getDate() - 1);
-  const minBirthDate = localIsoDay(earliestBirth);
+  const earliestBirth = oldestAge == null ? null
+    : new Date(today.getFullYear() - oldestAge - 1, today.getMonth(), today.getDate());
+  while (earliestBirth && ageOn(earliestBirth) > oldestAge) earliestBirth.setDate(earliestBirth.getDate() + 1);
+  const latestBirth = new Date(today.getFullYear() - youngestAge, today.getMonth(), today.getDate());
+  while (ageOn(latestBirth) < youngestAge) latestBirth.setDate(latestBirth.getDate() - 1);
+  const minBirthDate = earliestBirth ? localIsoDay(earliestBirth) : undefined;
   const maxBirthDate = localIsoDay(latestBirth);
   /* The profile asks different questions per track — a Type of Adoption on a
    * reunification case is a question nobody can answer, and one more thing to
@@ -347,10 +349,21 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   const sent = { ...form, ...unaskedAnswers(form, original) };
   const wholeDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') && Number(String(v).slice(0, 4)) >= 1900;
   const problems = {};
-  if (wholeDate(form.birth_date) && changed('birth_date')) {
+  // Judged again when the case type or the type of adoption changes: that
+  // changes the rule (the server does the same).
+  if (wholeDate(form.birth_date) && (changed('birth_date') || changed('case_type') || changed('type_of_adoption'))) {
     const [y, m, d] = form.birth_date.split('-').map(Number);
     const age = ageOn(new Date(y, m - 1, d));
-    if (age < 5 || age > 17) problems.birth_date = 'The child must be between 5 and 17 years old.';
+    if (age < youngestAge || (oldestAge != null && age > oldestAge)) {
+      problems.birth_date = ageRefusal(form.case_type, form.type_of_adoption);
+    }
+  }
+  if (form.legal_status && wholeDate(form.legal_status_date)
+    && (changed('legal_status_date') || (isEdit && changed('birth_date')))) {
+    if (form.legal_status_date > todayIso) problems.legal_status_date = 'The date issued cannot be in the future.';
+    else if (wholeDate(form.birth_date) && form.legal_status_date < form.birth_date) {
+      problems.legal_status_date = 'The date issued cannot be before the date of birth.';
+    }
   }
   const bornMoved = isEdit && changed('birth_date');
   for (const [f, label] of [['date_found', 'The date found'], [ADMISSION, 'The date of admission'],
@@ -586,9 +599,11 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   </div>
                 </Alert>
               )}
-              <FormField label="Date of Birth" required error={fieldError('birth_date')}
+              <FormField label="Date of Birth or Given Date of Birth" required error={fieldError('birth_date')}
                 hint={!isEdit
-                  ? `The child must be 5 to 17 today: born ${shortDate(earliestBirth)} to ${shortDate(latestBirth)}. For a foundling, the estimated date.`
+                  ? (oldestAge == null
+                    ? `Must be 18 or older for an Adult adoption: born ${shortDate(latestBirth)} or earlier. For a foundling, the given date.`
+                    : `The child must be ${youngestAge} to ${oldestAge} today: born ${shortDate(earliestBirth)} to ${shortDate(latestBirth)}. For a foundling, the given date.`)
                   : undefined}>
                 <Input type="date" value={form.birth_date || ''} min={!isEdit ? minBirthDate : undefined} max={!isEdit ? maxBirthDate : undefined} onChange={(e) => setForm({ ...form, birth_date: e.target.value })} />
               </FormField>
@@ -615,6 +630,12 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   {withRetired(LEGAL_STATUSES, form.legal_status, form._record?.legal_status).map((v) => <option key={v} value={v}>{optionLabel(LEGAL_STATUSES, v)}</option>)}
                 </Select>
               </FormField>
+              {form.legal_status && (
+                <FormField label="Date Issued" hint="Optional: when the legal status was issued." error={fieldError('legal_status_date')}>
+                  <Input type="date" value={form.legal_status_date || ''} min={form.birth_date || undefined} max={todayIso}
+                    onChange={(e) => setForm({ ...form, legal_status_date: e.target.value })} />
+                </FormField>
+              )}
               <FormField label="Health Condition" required error={fieldError('health_condition')}>
                 <Select value={form.health_condition || ''} onChange={(e) => setForm({ ...form, health_condition: e.target.value })}>
                   <option value="">— Select —</option>

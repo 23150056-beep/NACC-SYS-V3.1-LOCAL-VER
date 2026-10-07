@@ -181,6 +181,9 @@ class Child(models.Model):
     place_of_birth_or_found = models.CharField(max_length=150, blank=True)
     birth_status = models.CharField(max_length=20, blank=True, choices=BIRTH_STATUS_CHOICES)
     legal_status = models.CharField(max_length=50, blank=True, choices=LEGAL_STATUS_CHOICES)
+    # When that status was issued (the SCSR asks for the CDCLAA's date).
+    # Optional, and blank whenever there is no legal status.
+    legal_status_date = models.DateField(null=True, blank=True)
     date_of_admission = models.DateField(null=True, blank=True)
     date_of_placement_to_custodian = models.DateField(null=True, blank=True)
     type_of_adoption = models.CharField(max_length=50, blank=True, choices=TYPE_OF_ADOPTION_CHOICES)

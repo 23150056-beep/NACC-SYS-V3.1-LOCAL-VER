@@ -86,7 +86,7 @@ export default function PsychReportPrint({ data, className = 'racco-print-only' 
     ['Name', child.fullname],
     ...(child.alias ? [['Alias', child.alias]] : []),
     ['Case reference', child.id ? caseRef(child.id) : ''],
-    ['Date of birth / Age', [longDate(child.birth_date), age != null ? `${age} years old` : ''].filter(Boolean).join(' · ')],
+    ['Date of birth or given date of birth / Age', [longDate(child.birth_date), age != null ? `${age} years old` : ''].filter(Boolean).join(' · ')],
     ['Sex', child.gender],
     ['Place of birth or place found', child.place_of_birth_or_found],
     ...(child.date_found ? [['Date found', longDate(child.date_found)]] : []),
@@ -95,6 +95,7 @@ export default function PsychReportPrint({ data, className = 'racco-print-only' 
     ['Address', address || child.address],
     ['Category / Case type', [child.case_category, child.case_type].filter(Boolean).join(' · ')],
     ['Legal status', child.legal_status],
+    ...(child.legal_status && child.legal_status_date ? [['Date issued', longDate(child.legal_status_date)]] : []),
     ['Health condition', child.health_condition === SPECIAL_NEEDS && child.special_needs
       ? `${child.health_condition}: ${child.special_needs}` : child.health_condition],
     ['Current whereabouts', child.current_placement],

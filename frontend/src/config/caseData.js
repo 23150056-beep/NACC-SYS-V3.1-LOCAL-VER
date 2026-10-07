@@ -81,6 +81,20 @@ export const CASE_TYPE_FIELDS = {
  * placement. Within Adoption only a Regular adoption is an admission, so the
  * date waits for the Type of Adoption. Mirrors date_field_for in
  * backend/children/intake.py. */
+export const ADULT_ADOPTION = 'Adult';
+export const CHILD_AGES = [5, 17];
+export const ADULT_AGES = [18, null];
+/* [youngest, oldest or null for no limit]. Mirrors age_range in
+ * backend/children/intake.py: 5-17, or 18 and over for an Adult adoption. */
+export const ageRange = (caseType, typeOfAdoption) => (
+  caseType === 'Adoption' && typeOfAdoption === ADULT_ADOPTION ? ADULT_AGES : CHILD_AGES);
+export const ageRefusal = (caseType, typeOfAdoption) => {
+  const [low, high] = ageRange(caseType, typeOfAdoption);
+  return high == null
+    ? `The person must be ${low} or older for an Adult adoption.`
+    : `The child must be between ${low} and ${high} years old.`;
+};
+
 export const ADMISSION = 'date_of_admission';
 export const PLACEMENT = 'date_of_placement_to_custodian';
 export const dateFieldFor = (caseType, typeOfAdoption) => {
