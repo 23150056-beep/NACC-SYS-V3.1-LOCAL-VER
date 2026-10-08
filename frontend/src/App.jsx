@@ -44,9 +44,9 @@ import Survey from './pages/Survey';
 function Shell({ children }) {
   const layout = useLayout();
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-app)', overflow: 'hidden' }}>
+    <div className="racco-shell" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-app)', overflow: 'hidden' }}>
       <AppHeader />
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: layout.gap, padding: layout.pad, overflow: 'hidden' }}>
+      <div className="racco-shell-row" style={{ flex: 1, minHeight: 0, display: 'flex', gap: layout.gap, padding: layout.pad, overflow: 'hidden' }}>
         {layout.leftRailOn && <Sidebar />}
         <main className="racco-scroll" style={{ flex: 1, minWidth: 0, overflowX: 'hidden', overflowY: 'auto', paddingRight: 2 }}>
           {children}

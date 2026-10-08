@@ -780,6 +780,22 @@ tr:focus-visible {
   main {
     overflow: visible !important;
   }
+  /* The screen is a fixed-height shell (#root is 100vh, and the shell and its
+     row hide their overflow so only <main> scrolls). On paper that clips
+     everything past the first page: a printed document of any length came out
+     one page long. The shell lets go of its height when printing. */
+  #root,
+  .racco-shell,
+  .racco-shell-row,
+  main {
+    height: auto !important;
+    overflow: visible !important;
+  }
+  .racco-shell,
+  .racco-shell-row {
+    display: block !important;
+    padding: 0 !important;
+  }
   .racco-print-area {
     padding: 0 !important;
   }
