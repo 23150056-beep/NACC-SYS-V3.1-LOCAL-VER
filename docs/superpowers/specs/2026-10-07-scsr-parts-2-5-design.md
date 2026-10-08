@@ -1,6 +1,6 @@
 # Social Case Study Report on the child's record — design
 
-**Status:** agreed with the owner on 8 Oct 2026; built in phases (below).
+**Status:** agreed with the owner on 8 Oct 2026; P0-P2 built on 8 Oct, P3 waits on `ai_eval`.
 **Source:** `docs/agency-forms/SCSR_Non-Relative_Regular_Placement.docx`, the
 blank NACC template. Its Part I (Identifying Information) has been the record
 form since 7 Oct 2026; see CLAUDE.md "The record form". This document covers

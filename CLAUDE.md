@@ -834,17 +834,31 @@ App `case_study` (never `adoption`, see "Removed").
   date; unknown when there is none); a yes hides Placement History, as for
   Adult.
 - **Nobody in the system approves.** The ISA is IT support, not the Head of
-  Office; the SW finalizes (Final and Reopen are phase P2, not built as of
-  8 Oct), and the printed copy is signed on paper. The Head of
-  Office's name comes from `AgencyProfile` (Settings, ISA-edited - the card
-  that used to be a fake "RCPC" field) and the SW's PRC license number and
-  validity from their own profile (`UserProfile`, Staff and Psychologists; an
-  administrator has none). Both are to be copied into each `CaseStudyFinal`
-  so a reprint shows what was true that day.
-- **Demo data**: about a third of the active Adoption children get a draft
-  (`case_study/demo_case_studies.py`); the import re-homes its user fields to
-  the child's SW and blanks every phone, email and employer address in the
-  PAP table.
+  Office. The SW marks the case study **Final** and the printed copy is signed
+  on paper. The Head of Office's name comes from `AgencyProfile` (Settings,
+  ISA-edited - the card that used to be a fake "RCPC" field) and the SW's PRC
+  license number and validity from their own profile (`UserProfile`, Staff and
+  Psychologists; an administrator has none).
+- **Final writes an immutable copy** (`case_study/finalize.py`, the one path
+  the endpoint AND the demo seeder use, so a seeded final can only exist if it
+  passed `missing_sections()`): Part I as of Date prepared, every section that
+  applies, the preparer's license and the agency details OF THAT DAY. A
+  reprint shows what was signed even after a license renewal or a record edit.
+  A ticked Not applicable box is copied without its hidden text. Final is a
+  conditional update on `status=draft` AND the `updated_at` the screen saw, so
+  a double click or another tab's newer save is a 409, never a final of text
+  nobody reviewed; a box save that loses that race is rolled back. The box-save
+  response carries `case_study_updated_at` for that reason.
+- **Reopen** puts it back to draft; every final stays on file ("Finals on
+  file", each printable). A closed or non-Adoption case cannot be reopened -
+  its finals still print. Finalized is addressed to the ASSIGNED psychologist
+  (a pending one is told nothing); Reopened to nobody; neither carries text.
+- **Demo data**: about a third of the active Adoption children get a draft and
+  a few others a final (`case_study/demo_case_studies.py`). The export blanks
+  the preparer's license and every phone, email and employer address in the
+  PAP table, live and in snapshots, so the fixture file never carries them;
+  the import re-homes user fields and the snapshot's preparer to the child's
+  SW and takes the agency block from the importing machine's `AgencyProfile`.
 - **The screen** (`components/caseStudy/`): one editor per section kind, so
   all three blocks are editable. Each box saves with `useConfirm()`; "Save
   all" confirms once and stops at the first refusal. Unsaved typing is kept in
@@ -852,8 +866,9 @@ App `case_study` (never `adoption`, see "Removed").
   back; logout clears the `nacc-draft:` prefix. On a 409 the SW chooses "Load
   the saved version" or "Keep mine" - neither text is lost without a choice.
 - **Print follows the tab**: on the Case study tab the page's Print button
-  prints the SCSR (`ScsrPrint`), saved values only, and asks first when
-  something is unsaved; anywhere else it prints the psychological report.
+  prints the SCSR (`ScsrPrint`) - the newest final's copy when the case study
+  is final, the saved draft marked DRAFT otherwise (asking first when
+  something is unsaved); anywhere else it prints the psychological report.
   Only the SW gets it.
 - **Every print used to come out ONE PAGE long** (found 8 Oct 2026). The app
   shell is a fixed 100vh with hidden overflow so only `<main>` scrolls, and on
@@ -863,8 +878,8 @@ App `case_study` (never `adoption`, see "Removed").
   Check a printed page COUNT, not just the first page.
 - `/children?edit=<id>` opens the record form for that child ("Edit on the
   record" from Part I). Activity reads "Started a case study for X" and opens
-  `?tab=casestudy`; P2's events must use the actions `finalized` and
-  `reopened`, which `utils/activity.js` already words.
+  `?tab=casestudy`; "Finalized ..." and "Reopened ..." the same way
+  (`ActivityLog` actions `finalized` and `reopened`, activity 0005).
 
 ## The record form (Add Record)
 
