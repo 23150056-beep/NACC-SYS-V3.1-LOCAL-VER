@@ -23,7 +23,7 @@ import PsychReportPrint from '../components/PsychReportPrint';
 import ReportViewer from '../components/ReportViewer';
 import CaseStudyTab from '../components/caseStudy/CaseStudyTab';
 import ScsrPrint from '../components/caseStudy/ScsrPrint';
-import { useCaseStudy, usePrintExtras } from '../components/caseStudy/useCaseStudy';
+import { useCaseStudy, usePrintExtras, useScsrPrint } from '../components/caseStudy/useCaseStudy';
 
 // "In her own words" reads better than a label, but gender is blank=True on
 // the model and must never render as an empty string.
@@ -148,7 +148,12 @@ export default function ChildProgressReport() {
   // there is a case study to put them on.
   const printsCaseStudy = tab === 'casestudy' && user?.role_name === 'Staff'
     && caseStudy.phase === 'ready' && !!caseStudy.study?.exists;
-  const printExtras = usePrintExtras(printsCaseStudy);
+  // What the print element holds: the newest FINAL copy once the case study is
+  // final (it carries its own preparer, license and agency, so nothing live is
+  // read for it), the saved draft otherwise - whose agency header and license
+  // are read only then.
+  const printTarget = useScsrPrint(id, caseStudy.study, printsCaseStudy);
+  const printExtras = usePrintExtras(printsCaseStudy && printTarget.mode === 'draft');
   // Landed on the tab by a link, or left on it by a record that has none.
   const caseStudyGone = caseStudy.phase === 'none' || (dataIsThisChild && !isAdoption);
   useEffect(() => {
@@ -456,14 +461,15 @@ export default function ChildProgressReport() {
     } catch (err) { toast.error(JSON.stringify(err.response?.data || 'Could not save.')); }
   };
 
-  // The case study prints what is saved. Say so before printing over typing
-  // that has not been saved yet.
+  // A draft prints what is saved. Say so before printing over typing that has
+  // not been saved yet. A final prints its newest final copy.
   const printPage = async () => {
-    if (printsCaseStudy && caseStudy.unsaved > 0 && !(await confirm({
+    if (!printsCaseStudy) { window.print(); return; }
+    if (printTarget.mode === 'draft' && caseStudy.unsaved > 0 && !(await confirm({
       description: 'Some boxes have changes that are not saved. The printed case study shows what is saved, not what is in the boxes.',
       confirmLabel: 'Yes, print what is saved',
     }))) return;
-    window.print();
+    await printTarget.printDefault();
   };
 
   const download = async (f) => {
@@ -481,7 +487,10 @@ export default function ChildProgressReport() {
       {/* What Print puts on paper: the psychological report, not this screen
           (index.css hides the page's other children when printing). */}
       {printsCaseStudy
-        ? <ScsrPrint child={child} study={caseStudy.study} agency={printExtras.agency} license={printExtras.license} preparedBy={user?.fullname} />
+        ? (printTarget.mode === 'final' && !printTarget.copy
+          // The final copy is on its way; nothing live stands in for it.
+          ? <div className="racco-print-only" />
+          : <ScsrPrint child={child} study={caseStudy.study} copy={printTarget.copy} agency={printExtras.agency} license={printExtras.license} preparedBy={user?.fullname} />)
         : <PsychReportPrint data={data} />}
       {/* Hero. Back out to Records, who this child is, and the three things
           you came here to do — above the tab strip, so they stay put whichever
@@ -538,9 +547,13 @@ export default function ChildProgressReport() {
               {briefBusy ? 'Preparing…' : caseBrief ? 'Case brief' : 'Pre-session brief'}
             </Button>
             <Button variant="secondary" onClick={printPage}
-              title={printsCaseStudy ? "Print this child's social case study report" : "Print this child's psychological report"}
+              disabled={printsCaseStudy && !printTarget.ready}
+              title={!printsCaseStudy ? "Print this child's psychological report"
+                : !printTarget.ready ? 'Getting the final copy ready to print…'
+                  : printTarget.mode === 'final' ? "Print this child's social case study report as it was made final"
+                    : "Print this child's social case study report as a draft"}
               iconLeft={<Icon name="printer" size={17} />}>
-              {printsCaseStudy ? 'Print case study' : 'Print'}
+              {printsCaseStudy ? (printTarget.mode === 'final' ? 'Print final copy' : 'Print case study') : 'Print'}
             </Button>
             {/* Booking a session is the thing you most often want next while
                 reading a child's record, and it used to mean leaving for the
@@ -1020,7 +1033,7 @@ export default function ChildProgressReport() {
           it survives a visit to another tab. */}
       {hasCaseStudyTab && (
         <div className="racco-stack racco-tabpanel" hidden={tab !== 'casestudy'}>
-          <CaseStudyTab key={child.id} child={child} cs={caseStudy} />
+          <CaseStudyTab key={child.id} child={child} cs={caseStudy} print={printTarget} />
         </div>
       )}
 

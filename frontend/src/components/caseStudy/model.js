@@ -130,6 +130,17 @@ export function blocksFor(child, study) {
   })).filter((b) => b.entries.length > 0);
 }
 
+/** The boxes a final copy holds, grouped under their block letters. A copy
+ *  keeps exactly the boxes that applied the day it was made, so which ones
+ *  print is read from it and never worked out again from the record. */
+export function blocksForCopy(snapshot) {
+  const kept = snapshot?.sections || {};
+  return SCSR_BLOCKS.map((b) => ({
+    ...b,
+    entries: SCSR_SECTIONS.filter((e) => e.block === b.block && e.key in kept),
+  })).filter((b) => b.entries.length > 0);
+}
+
 // --- dates ----------------------------------------------------------------------------
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
@@ -181,6 +192,11 @@ export function ageAtText(birth, on) {
 }
 
 // --- wording ---------------------------------------------------------------------------
+
+/* What the server says to a write when the case study is final
+ * (backend case_study/views.py FINAL_SENTENCE; a test holds the two together).
+ * The screen compares against it to tell "final" from "closed". */
+export const FINAL_SENTENCE = 'This case study is final. Reopen it to change it.';
 
 /* The two statements the Surrendered boxes print, in the template's own words
  * (docs/agency-forms/SCSR_Non-Relative_Regular_Placement.docx). */

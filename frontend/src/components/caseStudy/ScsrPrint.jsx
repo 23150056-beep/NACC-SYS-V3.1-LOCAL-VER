@@ -1,15 +1,26 @@
 import { PAP_ROWS } from '../../config/scsr';
+import { clock } from '../../utils/time';
 import {
-  PAP_SIDES, TICK_SENTENCES, ageAtText, blocksFor, canonical, isBlank, longDate, partOneRows,
-  partialDate, recordNotes, todayIso,
+  PAP_SIDES, TICK_SENTENCES, ageAtText, blocksFor, blocksForCopy, canonical, isBlank, longDate,
+  partOneRows, partialDate, recordNotes, todayIso,
 } from './model';
 
 /* What Print puts on paper while the Case study tab is open: the Social Case
  * Study Report, in the template's order and numbering
  * (docs/agency-forms/SCSR_Non-Relative_Regular_Placement.docx).
  *
- * It prints what is SAVED, not what is half-typed in a box, and says DRAFT at
- * the top until the case study is final. Conventions are PsychReportPrint's:
+ * It prints one of two things:
+ *
+ *   a DRAFT   the case study as it is SAVED now (not what is half-typed in a
+ *             box), read live from the record and the profiles, marked DRAFT;
+ *   a FINAL   one `copy` of a final, whole: Part I, every box, the preparer's
+ *             name and license and the agency's Head of Office as they were the
+ *             day it was made final. Nothing is read from the live record or
+ *             the profiles then, and there is no DRAFT marker - a license
+ *             renewed or a Head of Office changed since must not alter a copy
+ *             that was signed.
+ *
+ * Conventions are PsychReportPrint's:
  * a standard layout, a serif page, no <header>/<footer> elements (index.css
  * hides those when printing), and anything the record does not hold printed
  * as ruled lines to complete by hand. Headings stay with the text that follows
@@ -168,16 +179,59 @@ function Body({ entry, row, facts }) {
   }
 }
 
-export default function ScsrPrint({ child, study, agency, license, preparedBy, className = 'racco-print-only' }) {
-  const facts = study.record_facts;
+const text = (value) => (value || '').trim();
+
+// A moment as the reader's calendar and clock say it, in the print's own style.
+function momentText(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${longDate(day)}, ${clock(d)}`;
+}
+
+/* Everything the page needs, from the live case study (a draft) ... */
+function liveView({ child, study, agency, license, preparedBy }) {
   const stored = new Map((study.sections || []).map((s) => [s.key, s]));
-  const blocks = blocksFor(child, study);
-  const draft = study.status !== 'final';
-  const heads = (agency?.agency_name || '').trim();
-  const licenseNumber = (license?.license_number || '').trim();
-  const licenseUntil = license?.license_valid_until ? longDate(license.license_valid_until) : '';
-  const headName = (agency?.head_of_office_name || '').trim();
-  const headTitle = (agency?.head_of_office_title || '').trim();
+  return {
+    draft: true,
+    facts: study.record_facts,
+    datePrepared: study.date_prepared,
+    ageNote: study.date_prepared ? 'the date prepared' : `${longDate(todayIso())}, because the date prepared is not set`,
+    blocks: blocksFor(child, study),
+    rowOf: (key) => stored.get(key),
+    agency: agency || {},
+    preparer: {
+      name: preparedBy || '',
+      license_number: license?.license_number,
+      license_valid_until: license?.license_valid_until,
+    },
+  };
+}
+
+/* ... or from one final copy, which holds all of it. */
+function copyView(copy) {
+  const snap = copy.snapshot;
+  return {
+    draft: false,
+    facts: snap.part_one,
+    datePrepared: snap.date_prepared,
+    ageNote: 'the date prepared',
+    blocks: blocksForCopy(snap),
+    rowOf: (key) => snap.sections[key],
+    agency: snap.agency || {},
+    preparer: snap.preparer || {},
+    madeAt: copy.finalized_at,
+  };
+}
+
+export default function ScsrPrint({ child, study, copy = null, agency, license, preparedBy, className = 'racco-print-only' }) {
+  const view = copy ? copyView(copy) : liveView({ child, study, agency, license, preparedBy });
+  const { draft, facts, blocks } = view;
+  const heads = text(view.agency.agency_name);
+  const licenseNumber = text(view.preparer.license_number);
+  const licenseUntil = view.preparer.license_valid_until ? longDate(view.preparer.license_valid_until) : '';
+  const headName = text(view.agency.head_of_office_name);
+  const headTitle = text(view.agency.head_of_office_title);
 
   return (
     <div className={className} style={S.page}>
@@ -191,8 +245,8 @@ export default function ScsrPrint({ child, study, agency, license, preparedBy, c
       {/* Not <header>/<footer>: index.css hides those when printing. */}
       <div style={{ textAlign: 'center', marginBottom: '12pt' }}>
         {heads ? <div style={{ fontWeight: 700, fontSize: '12pt' }}>{heads}</div> : <div style={{ ...S.line, width: '60%', margin: '0 auto' }} aria-hidden="true" />}
-        {(agency?.office_address || '').trim() && <div style={{ fontSize: '10pt', whiteSpace: 'pre-line' }}>{agency.office_address.trim()}</div>}
-        {(agency?.contact_details || '').trim() && <div style={{ fontSize: '10pt', whiteSpace: 'pre-line' }}>{agency.contact_details.trim()}</div>}
+        {text(view.agency.office_address) && <div style={{ fontSize: '10pt', whiteSpace: 'pre-line' }}>{text(view.agency.office_address)}</div>}
+        {text(view.agency.contact_details) && <div style={{ fontSize: '10pt', whiteSpace: 'pre-line' }}>{text(view.agency.contact_details)}</div>}
         <div style={{ fontSize: '14pt', fontWeight: 700, marginTop: '12pt', letterSpacing: '0.06em' }}>SOCIAL CASE STUDY REPORT</div>
         <div style={{ fontSize: '9pt', marginTop: '2pt' }}>(Applicable for all categories: Regular, relative, step-parent, adult, independent placement.)</div>
         <div style={{ fontSize: '9pt', fontWeight: 700, marginTop: '2pt' }}>CONFIDENTIAL</div>
@@ -200,8 +254,8 @@ export default function ScsrPrint({ child, study, agency, license, preparedBy, c
 
       <div style={{ display: 'flex', alignItems: 'flex-end', gap: '8pt', marginBottom: '4pt' }}>
         <strong>Date prepared:</strong>
-        {study.date_prepared
-          ? <span>{longDate(study.date_prepared)}</span>
+        {view.datePrepared
+          ? <span>{longDate(view.datePrepared)}</span>
           : <span style={{ ...S.line, width: '40%', height: '14pt' }} aria-hidden="true" />}
       </div>
 
@@ -220,13 +274,13 @@ export default function ScsrPrint({ child, study, agency, license, preparedBy, c
                 </tbody>
               </table>
               <div style={{ fontSize: '8.5pt', marginTop: '2pt' }}>
-                Age is worked out as of {study.date_prepared ? 'the date prepared' : `${longDate(todayIso())}, because the date prepared is not set`}.
+                Age is worked out as of {view.ageNote}.
               </div>
             </div>
           )}
 
           {block.entries.map((entry) => {
-            const row = stored.get(entry.key);
+            const row = view.rowOf(entry.key);
             const notes = recordNotes(entry.key, facts, longDate);
             return (
               <div key={entry.key}>
@@ -247,7 +301,7 @@ export default function ScsrPrint({ child, study, agency, license, preparedBy, c
         <div>
           <div>Prepared by:</div>
           <div style={{ ...S.line, marginTop: '28pt' }} />
-          <div style={{ fontWeight: 700 }}>{preparedBy || 'Social Worker'}</div>
+          <div style={{ fontWeight: 700 }}>{text(view.preparer.name) || 'Social Worker'}</div>
           <div>Social Worker</div>
           <div>
             License No. {licenseNumber || '__________'}, valid until {licenseUntil || '__________'}
@@ -262,9 +316,10 @@ export default function ScsrPrint({ child, study, agency, license, preparedBy, c
       </div>
 
       <div style={{ marginTop: '24pt', fontSize: '8.5pt', borderTop: '1px solid #000', paddingTop: '4pt' }}>
-        Confidential. Printed from the records of {heads || 'the agency'} on {longDate(todayIso())}
-        {draft ? ' as a draft; sections left as lines are for the social worker to complete' : ''}.
-        Release only to persons authorized under the Data Privacy Act of 2012.
+        Confidential. {draft
+          ? `Printed from the records of ${heads || 'the agency'} on ${longDate(todayIso())} as a draft; sections left as lines are for the social worker to complete.`
+          : `Final copy made on ${momentText(view.madeAt)}, printed from the records of ${heads || 'the agency'} on ${longDate(todayIso())}.`}
+        {' '}Release only to persons authorized under the Data Privacy Act of 2012.
       </div>
     </div>
   );

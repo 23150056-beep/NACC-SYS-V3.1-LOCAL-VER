@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import api from '../../api/client';
 import { getAgencyProfile } from '../../api/agency';
-import { getCaseStudy } from '../../api/caseStudy';
+import { getCaseStudy, getCaseStudyFinal } from '../../api/caseStudy';
+import { sentence } from './model';
 
 /* The child's case study, loaded for the child's page.
  *
@@ -65,4 +67,94 @@ export function usePrintExtras(enabled) {
     return () => { live = false; };
   }, [enabled]);
   return extras;
+}
+
+// A paint, or a moment if the tab is in the background and none comes.
+const nextPaint = () => new Promise((resolve) => {
+  const timer = setTimeout(resolve, 150);
+  requestAnimationFrame(() => { clearTimeout(timer); resolve(); });
+});
+
+/* Which case study the print element holds, and printing it.
+ *
+ *   DRAFT   the live case study, as saved (`copy` is null);
+ *   FINAL   the newest final copy, fetched as soon as the tab shows a final
+ *           case study, so the page's Print button - and the browser's own
+ *           Ctrl+P - print what was signed, never the live record;
+ *   a chosen version (Finals on file, "Print this version") for as long as it
+ *           takes to print it.
+ *
+ * A copy is immutable, so each is fetched once and kept. Printing waits for
+ * the chosen copy to be on the page: `flushSync` commits it before
+ * `window.print()` runs, then a paint is allowed for - printing an element
+ * that the browser has not drawn yet gives a blank or the previous page.
+ */
+export function useScsrPrint(childId, study, enabled) {
+  const [copies, setCopies] = useState({}); // final id -> { id, finalized_at, snapshot, ... }
+  const [chosen, setChosen] = useState(null); // a version picked to print, by id
+  const [busyId, setBusyId] = useState(null);
+  const [error, setError] = useState('');
+  const kept = useRef(copies);
+  kept.current = copies;
+
+  const isFinal = study?.status === 'final';
+  const latestId = isFinal && study?.finals?.length ? study.finals[0].id : null;
+
+  // The newest final, ready before anybody presses Print.
+  useEffect(() => {
+    if (!enabled || latestId == null || kept.current[latestId]) return undefined;
+    let live = true;
+    getCaseStudyFinal(childId, latestId)
+      .then((record) => { if (live) setCopies((c) => ({ ...c, [record.id]: record })); })
+      .catch((err) => { if (live) setError(sentence(err, 'Could not load the final copy to print.')); });
+    return () => { live = false; };
+  }, [enabled, childId, latestId]);
+
+  // A chosen version is a one-off: the print dialog closing puts the page back
+  // on the default.
+  useEffect(() => {
+    const done = () => setChosen(null);
+    window.addEventListener('afterprint', done);
+    return () => window.removeEventListener('afterprint', done);
+  }, []);
+
+  const copy = chosen != null ? copies[chosen] || null : (isFinal ? copies[latestId] || null : null);
+
+  const run = useCallback(async (id) => {
+    flushSync(() => setChosen(id));
+    await nextPaint();
+    window.print();
+  }, []);
+
+  /** The page's own Print button: the newest final, or the draft. */
+  const printDefault = useCallback(() => run(null), [run]);
+
+  /** "Print this version". */
+  const printVersion = useCallback(async (finalId) => {
+    setBusyId(finalId);
+    setError('');
+    try {
+      let record = kept.current[finalId];
+      if (!record) {
+        record = await getCaseStudyFinal(childId, finalId);
+        flushSync(() => setCopies((c) => ({ ...c, [finalId]: record })));
+      }
+      await run(finalId);
+    } catch (err) {
+      setError(sentence(err, 'Could not open that version to print.'));
+    } finally {
+      setBusyId(null);
+    }
+  }, [childId, run]);
+
+  return {
+    copy,
+    mode: isFinal ? 'final' : 'draft',
+    // A draft always prints; a final prints once its copy has arrived.
+    ready: !isFinal || !!copies[latestId],
+    busyId,
+    error,
+    printDefault,
+    printVersion,
+  };
 }
