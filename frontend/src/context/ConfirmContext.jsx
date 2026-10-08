@@ -58,8 +58,9 @@ export function ConfirmProvider({ children }) {
         >
           {request.details && (
             <dl style={{ margin: '12px 0 0', display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '6px 14px', fontSize: 13 }}>
-              {request.details.filter(([, v]) => v).map(([k, v]) => (
-                <div key={k} style={{ display: 'contents' }}>
+              {request.details.filter(([, v]) => v).map(([k, v], i) => (
+                // Keyed by position as well: a list of sections can repeat a label.
+                <div key={`${i}-${k}`} style={{ display: 'contents' }}>
                   <dt style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{k}</dt>
                   <dd style={{ margin: 0, color: 'var(--text-strong)', fontWeight: 700, minWidth: 0, overflowWrap: 'anywhere' }}>{v}</dd>
                 </div>

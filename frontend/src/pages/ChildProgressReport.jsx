@@ -21,6 +21,8 @@ import ReportCheckNote from '../components/ReportCheckNote';
 import UploadDrawer from '../components/UploadDrawer';
 import PsychReportPrint from '../components/PsychReportPrint';
 import ReportViewer from '../components/ReportViewer';
+import CaseStudyTab from '../components/caseStudy/CaseStudyTab';
+import { useCaseStudy } from '../components/caseStudy/useCaseStudy';
 
 // "In her own words" reads better than a label, but gender is blank=True on
 // the model and must never render as an empty string.
@@ -65,6 +67,8 @@ export default function ChildProgressReport() {
   // a social worker cannot start a survey.) Above the early returns, with the
   // other hooks.
   useOpenFromLink('tab', 'voice', () => setTab('voice'));
+  // The case study's activity events link here (utils/activity.js).
+  useOpenFromLink('tab', 'casestudy', () => setTab('casestudy'));
   const [ackBusy, setAckBusy] = useState(null);
   const [remarkText, setRemarkText] = useState('');
   const [result, setResult] = useState(null); // add-result drawer
@@ -127,6 +131,18 @@ export default function ChildProgressReport() {
   const canStartSurvey = ['Administrator', 'Staff', 'Psychologist'].includes(user?.role_name);
 
   const load = () => api.get(`/reports/child/${id}/`).then((r) => setData(r.data)).catch(() => setData('error'));
+
+  // The Social Case Study Report belongs to Adoption records only, and the tab
+  // exists only if the server does not answer 404 for this reader (components/
+  // caseStudy/useCaseStudy.js). Above the early returns, like every hook here.
+  const isAdoption = !!data && data !== 'error' && data.child?.case_type === 'Adoption';
+  const caseStudy = useCaseStudy(id, isAdoption);
+  const hasCaseStudyTab = caseStudy.phase === 'ready' || caseStudy.phase === 'error';
+  // Landed on the tab by a link, or left on it by a record that has none.
+  const caseStudyGone = caseStudy.phase === 'none' || (!!data && data !== 'error' && !isAdoption);
+  useEffect(() => {
+    if (tab === 'casestudy' && caseStudyGone) setTab('overview');
+  }, [tab, caseStudyGone]);
 
   const resolveProblem = async () => {
     setResolveBusy(true);
@@ -204,6 +220,7 @@ export default function ChildProgressReport() {
     { id: 'remarks', label: 'Remarks', count: (data.remarks || []).length || undefined },
     { id: 'voice', label: "Child's voice", count: (data.opinionnaires || []).length || undefined },
     { id: 'casework', label: 'Casework', count: (data.case_referrals || []).length || undefined },
+    ...(hasCaseStudyTab ? [{ id: 'casestudy', label: 'Case study' }] : []),
     ...(isAdmin ? [{ id: 'assistant', label: 'Assistant log' }] : []),
   ];
 
@@ -970,6 +987,15 @@ export default function ChildProgressReport() {
       </Card>
 
       </div>
+
+      {/* The Social Case Study Report (Adoption records). Mounted as soon as the
+          server has answered, like every other panel, so what is half-typed in
+          it survives a visit to another tab. */}
+      {hasCaseStudyTab && (
+        <div className="racco-stack racco-tabpanel" hidden={tab !== 'casestudy'}>
+          <CaseStudyTab key={child.id} child={child} cs={caseStudy} />
+        </div>
+      )}
 
       {isAdmin && (
         <div className="racco-stack racco-tabpanel" hidden={tab !== 'assistant'}>
