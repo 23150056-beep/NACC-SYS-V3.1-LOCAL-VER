@@ -575,6 +575,21 @@ Settings, no per-feature flags.
   unchanged; feeding these facts INTO it is next step 5 and needs `ai_eval`.
   The modal keys every reply to the child it was opened for: a page that stays
   mounted across children once showed one child's facts on another's page.
+- **The written brief is the psychologist's only** (owner, 8 Oct 2026).
+  `PreSessionBriefView`, `LatestBriefView` and prefetch answer 403 to Staff and
+  the ISA BEFORE `gate()`, so nothing reaches the model and no job is written.
+  Its instructions say "for a licensed psychologist" and it is built from
+  remarks, which a SW cannot write - for them it was always empty. The ISA is
+  the agency's IT support and has no case reason to have the model read a
+  child's notes. **Both get the "Case brief"**: the same facts endpoint with
+  `kind: "case"` and rows made for a SW - the case referral and its CONFIRMED
+  summary, the psychologist (assigned / asked n days ago / declined and why /
+  none), consent, custodian texts (`custodian.status_of`, never the name or
+  number), the newest survey; the care gaps those rows already say are
+  dropped. `/assistant/capabilities/` says `brief: "clinical" | "case"`. A
+  model-written part for SWs is next step 6 and waits on `ai_eval` on the
+  owner's PC; it may read no remarks, no self-report words, no case study
+  text and no unconfirmed summary.
 - **The ISA can see who had the model read a child**: the Assistant log tab
   on the child's page, administrators only (`ChildAccessLogView`). Briefs,
   report and referral summaries, the self-report check; who, when, what kind,
@@ -777,6 +792,59 @@ none of the real ones has been seen.
   over within each psychologist's children - turned over across the list they
   fell in step with the seeder's round-robin and each psychologist saw one.
   Exactly one carries another child's name, for the check to find.
+
+## The case study (the SCSR on the child's record)
+
+Built from 8 Oct 2026; design in
+`docs/superpowers/specs/2026-10-07-scsr-parts-2-5-design.md`. The owner's aim:
+the Social Case Study Report "digitally on the child record module" - a Case
+study tab on an Adoption child's page that prints the SCSR. No Word export.
+App `case_study` (never `adoption`, see "Removed").
+
+- **Numbering is the template's**: A (the child, I-V), B (the PAPs, I-XVII),
+  C (placement, I-VI), roman numbers restarting in each block. Part I is the
+  record form, read live and frozen at Final; everything else is one row per
+  section (`CaseStudySection`, unique on case study + key, JSON value).
+- **The catalogue is `case_study/sections.py` and `config/scsr.js`**, pinned
+  by `test_catalogue.py` the way `test_intake.py` pins caseData.js. **A key is
+  never renamed or reused**: `ALL_KEYS_EVER` keeps every one ever issued. A
+  JSON key rename is the 0020 trap in another form - stored text would stop
+  matching any section.
+- **Access lives in `case_study/access.py`, not the clinical base class**,
+  where "Administrators see everything" would hand IT support every case
+  study, the adoptive parents' incomes included. The record's SW reads and
+  writes; the ASSIGNED psychologist reads block A, drafts included (a pending
+  one is nobody), minus the psychological-evaluation highlights where the
+  history is not carried to them - otherwise the previous psychologist's
+  findings reach them through the SW's text; the ISA gets status only (exists,
+  state, holder, "(inactive)", how much is missing) - never text, never print;
+  anyone else 404. Not registered in Django admin, where the seeded ISA is a
+  superuser. No chatbot tool, prompt, export of counts or duplicate check
+  reads it.
+- **Each section saves on its own with the version the writer saw**: a
+  conditional UPDATE, 409 with the saved text on a stale version. Sessions are
+  per tab, so the commonest conflict is the same person in two tabs.
+- **Not applicable hides, never deletes**: a ticked box keeps its text and
+  unticking brings it back; a PUT without a `value` key leaves the text alone.
+  The psychologist's read sends null for a ticked box.
+- **Pre-fills are offered, never saved**: referral source and reason, medical
+  notes, and the latest psychological report's summary ONLY if confirmed.
+- **Ages are as of Date prepared**, not today. Domestic Relative asks whether
+  the PAPs had the child more than two years (pre-answered from the placement
+  date; unknown when there is none); a yes hides Placement History, as for
+  Adult.
+- **Nobody in the system approves.** The ISA is IT support, not the Head of
+  Office; the SW finalizes (Final and Reopen are phase P2, not built as of
+  8 Oct), and the printed copy is signed on paper. The Head of
+  Office's name comes from `AgencyProfile` (Settings, ISA-edited - the card
+  that used to be a fake "RCPC" field) and the SW's PRC license number and
+  validity from their own profile (`UserProfile`, Staff and Psychologists; an
+  administrator has none). Both are to be copied into each `CaseStudyFinal`
+  so a reprint shows what was true that day.
+- **Demo data**: about a third of the active Adoption children get a draft
+  (`case_study/demo_case_studies.py`); the import re-homes its user fields to
+  the child's SW and blanks every phone, email and employer address in the
+  PAP table.
 
 ## The record form (Add Record)
 
