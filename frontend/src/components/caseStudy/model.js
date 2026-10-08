@@ -221,7 +221,10 @@ export function recordNotes(key, f, fmt) {
   if (key === 'a5_abandonment') {
     if (f.date_found) rows.push(['Date found', fmt(f.date_found)]);
     if (f.place_found) rows.push(['Place found', f.place_found]);
-    if (f.age_when_found != null) rows.push(['Age when found', `${f.age_when_found} years`]);
+    // Worked out here rather than taken from the record's whole years, which
+    // reads "0 years" for a child found as a newborn.
+    const found = ageAtText(f.birth_date, f.date_found);
+    if (found) rows.push(['Age when found', found]);
   }
   if (key === 'c4_functioning' && f.education_level) rows.push(['Education level', f.education_level]);
   return rows;

@@ -90,15 +90,17 @@ export default function SectionCard({
             )}
 
             {notes.length > 0 && (
-              <dl style={{ margin: 0, padding: '8px 12px', background: 'var(--blue-50)', borderRadius: 'var(--radius-md)', display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '3px 12px', fontSize: 13 }}>
-                {notes.map(([k, v]) => (
-                  <div key={k} style={{ display: 'contents' }}>
-                    <dt style={{ fontWeight: 700, color: 'var(--text-muted)' }}>{k}</dt>
-                    <dd style={{ margin: 0, color: 'var(--text-strong)' }}>{v}</dd>
-                  </div>
-                ))}
-                <div style={{ gridColumn: '1 / -1', fontSize: 11.5, color: 'var(--text-muted)' }}>From the record. Change it there.</div>
-              </dl>
+              <div style={{ padding: '8px 12px', background: 'var(--blue-50)', borderRadius: 'var(--radius-md)' }}>
+                <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '3px 12px', fontSize: 13 }}>
+                  {notes.map(([k, v]) => (
+                    <div key={k} style={{ display: 'contents' }}>
+                      <dt style={{ fontWeight: 700, color: 'var(--text-muted)' }}>{k}</dt>
+                      <dd style={{ margin: 0, color: 'var(--text-strong)' }}>{v}</dd>
+                    </div>
+                  ))}
+                </dl>
+                <div style={{ fontSize: 11.5, color: 'var(--text-muted)', marginTop: 3 }}>From the record. Change it there.</div>
+              </div>
             )}
 
             {readOnly ? (

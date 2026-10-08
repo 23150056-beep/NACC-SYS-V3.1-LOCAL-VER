@@ -145,7 +145,8 @@ export function TableInput({ entry, value, onChange, disabled }) {
   const width = entry.columns.reduce((sum, c) => sum + (COLUMN_WIDTH[c.type] || 160), 44);
   return (
     <div>
-      <div className="racco-scroll" style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+      <div className="racco-scroll" role="region" tabIndex={0} aria-label={`${entry.title}, table`}
+        style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
         <table style={{ width: '100%', minWidth: width, borderCollapse: 'collapse' }}>
           <thead>
             <tr>
@@ -204,7 +205,8 @@ export function PapInput({ value, onChange, custodianName, disabled }) {
           </span>
         </div>
       )}
-      <div className="racco-scroll" style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
+      <div className="racco-scroll" role="region" tabIndex={0} aria-label="Prospective adoptive parents, table"
+        style={{ overflowX: 'auto', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)' }}>
         <table style={{ width: '100%', minWidth: 600, borderCollapse: 'collapse' }}>
           <thead>
             <tr>

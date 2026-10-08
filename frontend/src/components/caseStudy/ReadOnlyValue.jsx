@@ -30,7 +30,7 @@ export default function ReadOnlyValue({ entry, value, notApplicable = false, bir
       return <ol style={{ ...TEXT, margin: 0, paddingLeft: 22 }}>{v.map((line, i) => <li key={i}>{line}</li>)}</ol>;
     case 'table':
       return (
-        <div className="racco-scroll" style={{ overflowX: 'auto' }}>
+        <div className="racco-scroll" role="region" tabIndex={0} aria-label={`${entry.title}, table`} style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: entry.columns.length > 4 ? 640 : 0 }}>
             <thead><tr>{entry.columns.map((c) => <th key={c.key} scope="col" style={TH}>{c.label}</th>)}</tr></thead>
             <tbody>
@@ -43,7 +43,7 @@ export default function ReadOnlyValue({ entry, value, notApplicable = false, bir
       );
     case 'pap_table':
       return (
-        <div className="racco-scroll" style={{ overflowX: 'auto' }}>
+        <div className="racco-scroll" role="region" tabIndex={0} aria-label="Prospective adoptive parents, table" style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 520 }}>
             <thead><tr><th scope="col" style={TH}><span className="racco-sr-only">Detail</span></th>
               {PAP_SIDES.map((s) => <th key={s.side} scope="col" style={TH}>{s.label}</th>)}</tr></thead>
