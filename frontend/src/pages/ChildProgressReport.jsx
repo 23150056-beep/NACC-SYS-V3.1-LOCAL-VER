@@ -22,7 +22,8 @@ import UploadDrawer from '../components/UploadDrawer';
 import PsychReportPrint from '../components/PsychReportPrint';
 import ReportViewer from '../components/ReportViewer';
 import CaseStudyTab from '../components/caseStudy/CaseStudyTab';
-import { useCaseStudy } from '../components/caseStudy/useCaseStudy';
+import ScsrPrint from '../components/caseStudy/ScsrPrint';
+import { useCaseStudy, usePrintExtras } from '../components/caseStudy/useCaseStudy';
 
 // "In her own words" reads better than a label, but gender is blank=True on
 // the model and must never render as an empty string.
@@ -138,6 +139,13 @@ export default function ChildProgressReport() {
   const isAdoption = !!data && data !== 'error' && data.child?.case_type === 'Adoption';
   const caseStudy = useCaseStudy(id, isAdoption);
   const hasCaseStudyTab = caseStudy.phase === 'ready' || caseStudy.phase === 'error';
+  // Print follows the tab: on the Case study tab the social worker who holds
+  // the record prints the case study; everyone else, and every other tab, the
+  // psychological report. The agency header and the license are read only once
+  // there is a case study to put them on.
+  const printsCaseStudy = tab === 'casestudy' && user?.role_name === 'Staff'
+    && caseStudy.phase === 'ready' && !!caseStudy.study?.exists;
+  const printExtras = usePrintExtras(printsCaseStudy);
   // Landed on the tab by a link, or left on it by a record that has none.
   const caseStudyGone = caseStudy.phase === 'none' || (!!data && data !== 'error' && !isAdoption);
   useEffect(() => {
@@ -445,6 +453,16 @@ export default function ChildProgressReport() {
     } catch (err) { toast.error(JSON.stringify(err.response?.data || 'Could not save.')); }
   };
 
+  // The case study prints what is saved. Say so before printing over typing
+  // that has not been saved yet.
+  const printPage = async () => {
+    if (printsCaseStudy && caseStudy.unsaved > 0 && !(await confirm({
+      description: 'Some boxes have changes that are not saved. The printed case study shows what is saved, not what is in the boxes.',
+      confirmLabel: 'Yes, print what is saved',
+    }))) return;
+    window.print();
+  };
+
   const download = async (f) => {
     try {
       const res = await api.get(`/report-files/${f.id}/download/`, { responseType: 'blob' });
@@ -459,7 +477,9 @@ export default function ChildProgressReport() {
     <div style={PAGE} className="racco-print-area racco-psych-print-root">
       {/* What Print puts on paper: the psychological report, not this screen
           (index.css hides the page's other children when printing). */}
-      <PsychReportPrint data={data} />
+      {printsCaseStudy
+        ? <ScsrPrint child={child} study={caseStudy.study} agency={printExtras.agency} license={printExtras.license} preparedBy={user?.fullname} />
+        : <PsychReportPrint data={data} />}
       {/* Hero. Back out to Records, who this child is, and the three things
           you came here to do — above the tab strip, so they stay put whichever
           section you are reading. */}
@@ -514,7 +534,11 @@ export default function ChildProgressReport() {
             <Button variant="secondary" onClick={() => openBrief()} iconLeft={<Icon name="sparkles" size={17} />}>
               {briefBusy ? 'Preparing…' : caseBrief ? 'Case brief' : 'Pre-session brief'}
             </Button>
-            <Button variant="secondary" onClick={() => window.print()} title="Print this child's psychological report" iconLeft={<Icon name="printer" size={17} />}>Print</Button>
+            <Button variant="secondary" onClick={printPage}
+              title={printsCaseStudy ? "Print this child's social case study report" : "Print this child's psychological report"}
+              iconLeft={<Icon name="printer" size={17} />}>
+              {printsCaseStudy ? 'Print case study' : 'Print'}
+            </Button>
             {/* Booking a session is the thing you most often want next while
                 reading a child's record, and it used to mean leaving for the
                 Calendar and picking the same child out of a list again. The
