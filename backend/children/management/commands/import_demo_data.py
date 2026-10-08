@@ -30,6 +30,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
 from accounts.models import Role
+from case_study.sections import PAP_CONTACT_ROWS, PAP_SIDES
 from children import demo_custodians, demo_owners, demo_profiles
 from children.models import Child
 from clinical import demo_referrals, demo_reports
@@ -94,6 +95,53 @@ def forget_custodian_contacts(rows):
     return changed
 
 
+def _blank_pap_contacts(node):
+    """Remove the phone and e-mail rows from every adoptive parents' table
+    inside `node`, however deep. Returns True if anything was removed."""
+    changed = False
+    if isinstance(node, dict):
+        for side in PAP_SIDES:
+            column = node.get(side)
+            if isinstance(column, dict):
+                for row_id in PAP_CONTACT_ROWS:
+                    if column.pop(row_id, None) is not None:
+                        changed = True
+        for value in node.values():
+            changed = _blank_pap_contacts(value) or changed
+    elif isinstance(node, list):
+        for value in node:
+            changed = _blank_pap_contacts(value) or changed
+    return changed
+
+
+def strip_pap_contacts(rows):
+    """Blank every phone number and e-mail address in the fixture's case
+    studies (the adoptive parents' table, box b1_paps, and any final copy of
+    it). Returns True if anything changed.
+
+    The demo's adoptive parents are invented and carry none, and a number typed
+    into a local copy while trying the screen out is somebody's real handset -
+    the reason demo custodians have no numbers either. The employer's address
+    and contact details go with them: that row is free text and holds a number.
+    """
+    changed = False
+    for row in rows:
+        fields = row.get("fields", {})
+        if row.get("model") == "case_study.casestudysection" and fields.get("key") == "b1_paps":
+            changed = _blank_pap_contacts(fields.get("value")) or changed
+        elif row.get("model") == "case_study.casestudyfinal":
+            changed = _blank_pap_contacts(fields.get("snapshot")) or changed
+    return changed
+
+
+# A case study is written, edited and finalized by the social worker holding
+# the record. Anyone else - the ISA - never writes one, so the generic dealing
+# in rehome_people, which gives such a link to the child's psychologist, would
+# be wrong for these.
+_CASE_STUDY_MODELS = {"case_study.casestudy", "case_study.casestudysection",
+                      "case_study.casestudyfinal"}
+
+
 def rehome_people(rows, psychologists, social_workers):
     """Give the fixture's children, and everything recorded about them, to
     accounts that exist here. Returns (children dealt, links moved).
@@ -111,6 +159,10 @@ def rehome_people(rows, psychologists, social_workers):
     from the next psychologist stays somebody else's. Anyone else falls to the
     child's psychologist, or to nobody where there is no child and the field
     allows it (an instrument or form owned by nobody is the shared one).
+
+    A case study, its sections and its final copies are the exception: every
+    person they name is the child's social worker, who is the only one who
+    writes them, and a child with no social worker here leaves them unnamed.
     """
     User = get_user_model()
     children = sorted((r for r in rows if r.get("model") == "children.child"),
@@ -131,12 +183,18 @@ def rehome_people(rows, psychologists, social_workers):
             if was is not None and now is not None:
                 caseload.setdefault(was, now)
 
+    # A section or a final copy names its case study, not the child.
+    study_child = {r["pk"]: r.get("fields", {}).get("child")
+                   for r in rows if r.get("model") == "case_study.casestudy"}
+
     moved = 0
     for row in rows:
         if row.get("model") == "children.child":
             continue
         fields = row.get("fields", {})
         child = fields.get("child")
+        if "case_study" in fields:
+            child = study_child.get(fields["case_study"])
         own_was, own_now = local.get(child, ()), new.get(child, (None, None))
         for field in apps.get_model(row["model"])._meta.concrete_fields:
             if not (field.is_relation and field.related_model is User):
@@ -144,7 +202,9 @@ def rehome_people(rows, psychologists, social_workers):
             was = fields.get(field.name)
             if was is None:
                 continue
-            if was in own_was and own_now[own_was.index(was)] is not None:
+            if row["model"] in _CASE_STUDY_MODELS:
+                now = own_now[1]
+            elif was in own_was and own_now[own_was.index(was)] is not None:
                 now = own_now[own_was.index(was)]
             else:
                 now = caseload.get(was, own_now[0])
@@ -197,6 +257,8 @@ class Command(BaseCommand):
             self.stdout.write("  fixture is an older export; child rows upgraded")
         if forget_custodian_contacts(rows):
             self.stdout.write("  custodian numbers and consent left behind")
+        if strip_pap_contacts(rows):
+            self.stdout.write("  adoptive parents' phone numbers and e-mails left behind")
         social_workers = demo_owners.active_staff()
         imported, moved = rehome_people(rows, psychologists, social_workers)
         self.stdout.write(

@@ -44,6 +44,7 @@ from clinical.models import (
     AgencyFormTemplate, ConsentRecord, InstrumentCatalog, OpinionnaireInvite,
     PreAssessment, ProblemEntry, RemarkNote, ResultEntry, TreatmentPlan)
 from locations.models import Barangay, Municipality, Province
+from case_study import demo_case_studies
 from clinical import demo_referrals, demo_reports
 from scheduling import demo_schedule
 from scheduling.models import Appointment
@@ -235,6 +236,12 @@ class Command(BaseCommand):
             Child.objects.filter(status=Child.ACTIVE)
             .select_related("assigned_psychologist").order_by("pk"))
 
+        # A draft case study for a third of the adoption children, after the
+        # social workers are dealt: the draft is the record holder's own.
+        case_studies = demo_case_studies.install_case_studies(
+            list(Child.objects.filter(status=Child.ACTIVE, case_type="Adoption")
+                 .select_related("social_worker").order_by("pk")))
+
         moved, _ = demo_schedule.realign_appointments()
 
         self.stdout.write("")
@@ -243,6 +250,7 @@ class Command(BaseCommand):
         self.stdout.write(f"  {moved} appointments placed in clinic hours")
         self.stdout.write(f"  {referrals} case referrals written")
         self.stdout.write(f"  {reports} psychological reports written")
+        self.stdout.write(f"  {case_studies} case study drafts written")
         for label in ("steady", "declining", "divergent"):
             self.stdout.write(f"  {label:<12} {made[label]:>3}")
         self.stdout.write(

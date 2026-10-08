@@ -29,6 +29,11 @@ DEMO_MODELS = [
     "clinical.OpinionnaireInvite",
     "clinical.SelfReportFlag",
     "scheduling.Appointment",
+    # Case studies travel with their child. The user links in them are the
+    # exporting machine's and are re-homed on import (import_demo_data.py).
+    "case_study.CaseStudy",
+    "case_study.CaseStudySection",
+    "case_study.CaseStudyFinal",
 ]
 
 
