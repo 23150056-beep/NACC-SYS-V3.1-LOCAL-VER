@@ -169,6 +169,9 @@ export default function Editor({ child, cs, print }) {
   const applySaved = (out) => setStudy((prev) => ({
     ...prev,
     missing: out.missing ?? prev.missing,
+    // The save moved the case study's own version, which Mark as final sends
+    // back to say what it was looking at.
+    updated_at: out.case_study_updated_at ?? prev.updated_at,
     sections: prev.sections.some((s) => s.key === out.key)
       ? prev.sections.map((s) => (s.key === out.key ? { ...s, ...pickSection(out) } : s))
       : [...prev.sections, pickSection(out)],

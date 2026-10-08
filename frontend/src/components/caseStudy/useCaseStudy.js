@@ -126,9 +126,6 @@ export function useScsrPrint(childId, study, enabled) {
     window.print();
   }, []);
 
-  /** The page's own Print button: the newest final, or the draft. */
-  const printDefault = useCallback(() => run(null), [run]);
-
   /** "Print this version". */
   const printVersion = useCallback(async (finalId) => {
     setBusyId(finalId);
@@ -147,11 +144,19 @@ export function useScsrPrint(childId, study, enabled) {
     }
   }, [childId, run]);
 
+  /** The page's own Print button: the newest final, or the draft. If the
+   *  newest final could not be fetched when the tab opened, this is the retry. */
+  const printDefault = useCallback(
+    () => (isFinal && latestId != null && !kept.current[latestId] ? printVersion(latestId) : run(null)),
+    [isFinal, latestId, printVersion, run],
+  );
+
   return {
     copy,
     mode: isFinal ? 'final' : 'draft',
-    // A draft always prints; a final prints once its copy has arrived.
-    ready: !isFinal || !!copies[latestId],
+    // A draft always prints; a final prints once its copy has arrived - or
+    // once fetching it has failed, so that pressing Print tries again.
+    ready: !isFinal || !!copies[latestId] || !!error,
     busyId,
     error,
     printDefault,

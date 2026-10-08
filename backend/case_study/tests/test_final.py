@@ -295,6 +295,26 @@ class MakingItFinalTest(FinalTestCase):
             final.save()
 
 
+class AfterSavingABoxTest(FinalTestCase):
+    """A screen that saves a box and then makes the case study final sends the
+    `updated_at` its own save answered with - it must not be refused as out of
+    date by the save it just made."""
+
+    def test_a_save_says_the_new_version_and_final_accepts_it(self):
+        with self.later():
+            res = self.save_section("a2_sources", ["The child", "A neighbor"], version=1)
+        self.assertEqual(200, res.status_code, res.data)
+        fresh = res.data["case_study_updated_at"]
+        self.assertEqual(self.stamp(), fresh)
+        self.assertEqual(self.as_user(self.sw).get(self.url()).data["updated_at"], fresh)
+        self.assertEqual(200, self.make_final(expected=fresh).status_code)
+
+    def test_a_save_that_loses_to_another_tab_changes_nothing_to_report(self):
+        res = self.save_section("a2_sources", ["x"], version=7)
+        self.assertEqual(409, res.status_code)
+        self.assertNotIn("case_study_updated_at", res.data)
+
+
 class WhileItIsFinalTest(FinalTestCase):
     def setUp(self):
         super().setUp()

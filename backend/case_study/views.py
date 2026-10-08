@@ -234,6 +234,10 @@ class SectionView(APIView):
         row = _stored_row(case_study, key)
         body = shapes.section_payload(entry, row, child, case_study)
         body["missing"] = missing_sections(case_study)
+        # The version of the case study this save made, which Final expects
+        # back (`expected_updated_at`): a screen that saved a box and then asks
+        # to make it final must not be told it is out of date by its own save.
+        body["case_study_updated_at"] = shapes.iso_datetime(case_study.updated_at)
         return Response(body)
 
     @staticmethod

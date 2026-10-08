@@ -137,6 +137,9 @@ const ACTION_META = {
   created: { icon: 'plus', tint: 'var(--success-500)', verb: 'Created', passive: 'Account created' },
   updated: { icon: 'pencil', tint: 'var(--blue-500)', verb: 'Updated', passive: 'Account updated' },
   archived: { icon: 'archive', tint: 'var(--amber-500)', verb: 'Archived', passive: 'Account deactivated' },
+  // A case study made final or taken back to a draft (backend case_study).
+  finalized: { icon: 'file-check', tint: 'var(--success-500)', verb: 'Finalized case study', passive: 'Case study finalized' },
+  reopened: { icon: 'undo-2', tint: 'var(--amber-500)', verb: 'Reopened case study', passive: 'Case study reopened' },
 };
 
 function ActivityRow({ entry }) {

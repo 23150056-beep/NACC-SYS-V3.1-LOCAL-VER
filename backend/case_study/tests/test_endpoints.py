@@ -171,7 +171,7 @@ class SavingABoxTest(CaseStudyTestCase):
         self.assertEqual(200, res.status_code)
         self.assertEqual(
             {"key", "value", "not_applicable", "version", "updated_by_name", "updated_at",
-             "applies", "missing"}, set(res.data))
+             "applies", "missing", "case_study_updated_at"}, set(res.data))
         self.assertEqual("a2_circumstances", res.data["key"])
         self.assertEqual("Left at a clinic.", res.data["value"])
         self.assertEqual(1, res.data["version"])
