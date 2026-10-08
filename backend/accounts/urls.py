@@ -5,7 +5,7 @@ from accounts.views import (
     LoginView, MeView, ChangePasswordView, UserViewSet, RoleListView, PsychologistListView,
     GoogleLoginView, EmailConfigTestView, GoogleAuthConfigView, SignupView,
     VerifySignupEmailView, ResendSignupEmailCodeView,
-    MyProfileView, MyPhoneView, SmsConfigTestView,
+    MyProfileView, MyPhoneView, SmsConfigTestView, AgencyProfileView,
 )
 
 router = DefaultRouter()
@@ -29,6 +29,8 @@ urlpatterns = [
     path("auth/me/profile/", MyProfileView.as_view(), name="my-profile"),
     # Your own mobile number and its verification. No id, same rule.
     path("auth/me/phone/", MyPhoneView.as_view(), name="my-phone"),
+    # The agency's name, address and head of office. Anyone reads, the ISA writes.
+    path("agency-profile/", AgencyProfileView.as_view(), name="agency-profile"),
     path("auth/change-password/", ChangePasswordView.as_view(), name="change-password"),
     path("roles/", RoleListView.as_view(), name="role-list"),
     path("psychologists/", PsychologistListView.as_view(), name="psychologists"),

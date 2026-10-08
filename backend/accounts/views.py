@@ -19,13 +19,13 @@ from accounts.google_auth import (
 from accounts.display import display_name
 from accounts import email_verification
 from accounts.lockout import client_ip, clear_failures, is_locked, register_failure
-from accounts.models import Role, UserProfile
+from accounts.models import AgencyProfile, Role, UserProfile
 from accounts import signup_limit
 from accounts.permissions import IsAdministrator, IsAdminOrStaff
 from children.models import Child
 from accounts.serializers import (
     LoginSerializer, UserSerializer, UserWriteSerializer, RoleSerializer,
-    ChangePasswordSerializer, UserProfileSerializer,
+    AgencyProfileSerializer, ChangePasswordSerializer, UserProfileSerializer,
     SignupSerializer,
 )
 from activity.models import ActivityLog
@@ -385,6 +385,26 @@ class MyProfileView(generics.RetrieveUpdateAPIView):
     def get_object(self):
         profile, _ = UserProfile.objects.get_or_create(user=self.request.user)
         return profile
+
+
+class AgencyProfileView(generics.RetrieveUpdateAPIView):
+    """The agency's own details, as printed on its reports.
+
+    One row, so no id in the path. Anyone signed in may read it - a printed
+    report is assembled in the reader's browser and needs the head of office's
+    name - but only an administrator writes it, the same split as the rest of
+    Settings. Nothing here is about a child or a person's account.
+    """
+
+    serializer_class = AgencyProfileSerializer
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [permissions.IsAuthenticated()]
+        return [IsAdministrator()]
+
+    def get_object(self):
+        return AgencyProfile.load()
 
 
 class MyPhoneView(generics.GenericAPIView):

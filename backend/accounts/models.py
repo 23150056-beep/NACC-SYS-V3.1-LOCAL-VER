@@ -172,6 +172,43 @@ class UserProfile(models.Model):
         return f"Profile for {self.user.email}"
 
 
+class AgencyProfile(models.Model):
+    """Who the agency is, as printed on its reports: one row, pk=1.
+
+    Agency-wide and set by an administrator in Settings. It exists because the
+    Social Case Study Report's signature block needs the Head of Office's name
+    and the printed headings need the office's name and address, and until now
+    those were typed into each report by hand or not at all. The ISA is the
+    agency's IT support and not the head of office, so the Head of Office is a
+    name and a title held here, never an account.
+
+    Blank is a valid state - an agency that has not filled it in prints lines
+    to complete by hand, as the other printed forms do.
+    """
+
+    agency_name = models.CharField(max_length=200, blank=True, default="")
+    office_address = models.TextField(max_length=500, blank=True, default="")
+    contact_details = models.TextField(max_length=300, blank=True, default="")
+    head_of_office_name = models.CharField(max_length=150, blank=True, default="")
+    head_of_office_title = models.CharField(max_length=150, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "tbl_agency_profile"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return self.agency_name or "Agency profile"
+
+
 class PhoneVerification(models.Model):
     """The code texted to a number and waiting to be typed back, and how
     often this account has asked for one. One row per account.

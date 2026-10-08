@@ -8,6 +8,7 @@ import {
   getAssistantSettings, saveAssistantSettings, getAssistantMetrics, checkAssistant,
   getUnansweredQuestions,
 } from '../api/assistant';
+import { getAgencyProfile, saveAgencyProfile } from '../api/agency';
 import { testEmailDelivery } from '../api/email';
 import { checkSmsGateway, testSmsDelivery } from '../api/sms';
 
@@ -30,11 +31,30 @@ const WHY_LABELS = {
   not_helpful: 'Marked not helpful',
 };
 
+// The agency's own details, in the order they print. `max` mirrors the model's
+// lengths so the box stops where the server would refuse.
+const AGENCY_FIELDS = [
+  ['agency_name', 'Agency name', 200, 'Regional Alternative Child Care Office No. 1'],
+  ['office_address', 'Office address', 500, 'Street, barangay, city or municipality, province'],
+  ['contact_details', 'Contact details', 300, 'Telephone and email'],
+  ['head_of_office_name', 'Head of Office', 150, 'Full name as it should be printed'],
+  ['head_of_office_title', 'Head of Office title', 150, 'Regional Director'],
+];
+const NO_AGENCY = Object.fromEntries(AGENCY_FIELDS.map(([key]) => [key, '']));
+
+const textarea = {
+  width: '100%', resize: 'vertical', padding: '10px 13px', borderRadius: 'var(--radius-md)',
+  border: '1px solid var(--border-strong)', fontFamily: 'var(--font-sans)', fontSize: 14, lineHeight: 1.5,
+};
 
 export default function Settings() {
   const toast = useToast();
   const confirm = useConfirm();
-  const [agency] = useState('St. Joseph Orphanage');
+  // What the server holds, and what is being typed. The draft is its own state
+  // so an unsaved edit never reads as the agency's details.
+  const [agency, setAgency] = useState(null);   // null = loading, 'error' = failed
+  const [agencyDraft, setAgencyDraft] = useState(NO_AGENCY);
+  const [agencySaving, setAgencySaving] = useState(false);
   const [sync, setSync] = useState(true);
   const [cfg, setCfg] = useState(null);
   const [metrics, setMetrics] = useState(null);
@@ -53,6 +73,10 @@ export default function Settings() {
   const [mailResult, setMailResult] = useState(null);   // { ok, detail, sender, recipient }
 
   useEffect(() => {
+    getAgencyProfile().then((data) => {
+      setAgency(data);
+      setAgencyDraft(Object.fromEntries(AGENCY_FIELDS.map(([key]) => [key, data[key] || ''])));
+    }).catch(() => setAgency('error'));
     getAssistantSettings().then((data) => {
       setCfg(data);
       setDraft({ ollama_url: data.ollama_url, model_name: data.model_name });
@@ -93,14 +117,70 @@ export default function Settings() {
     }
   };
 
+  const agencyChanged = agency && agency !== 'error'
+    && AGENCY_FIELDS.some(([key]) => agencyDraft[key].trim() !== (agency[key] || ''));
+
+  const saveAgency = async () => {
+    // Printed on every report, so it is asked like the other agency-wide saves.
+    const ok = await confirm({
+      description: 'This changes the agency details printed on reports, for everyone in the agency.',
+      confirmLabel: 'Yes, save the agency details',
+      details: AGENCY_FIELDS
+        .filter(([key]) => agencyDraft[key].trim() !== (agency[key] || ''))
+        .map(([key, label]) => [label, agencyDraft[key].trim() || 'Blank']),
+    });
+    if (!ok) return;
+    setAgencySaving(true);
+    try {
+      const saved = await saveAgencyProfile(agencyDraft);
+      setAgency(saved);
+      // Agree with what the server stored (it trims); a failure leaves the draft.
+      setAgencyDraft(Object.fromEntries(AGENCY_FIELDS.map(([key]) => [key, saved[key] || ''])));
+      toast.success('Agency details saved');
+    } catch (err) {
+      const data = err.response?.data;
+      const first = data && typeof data === 'object' && Object.values(data)[0];
+      toast.error((Array.isArray(first) ? first[0] : first) || 'Could not save the agency details.');
+    } finally {
+      setAgencySaving(false);
+    }
+  };
+
   return (
     <div style={{ ...PAGE, maxWidth: 780 }}>
       <PageHeader title="Settings" subtitle="Administrator only · agency-wide" />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Card eyebrow="Agency" title="Configuration" padding="16px">
-          {/* Display-only. These have never had a backend. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <FormField label="RCPC" hint="Set by the national office — not editable here yet."><Input value={agency} disabled /></FormField>
+            {agency === 'error' && <Alert tone="warning">Could not load the agency details.</Alert>}
+            {/* Real and saved: every printed report reads these. */}
+            {agency && agency !== 'error' && (
+              <>
+                {AGENCY_FIELDS.map(([key, label, max, placeholder]) => (
+                  <FormField key={key} label={label}
+                             hint={key === 'head_of_office_name'
+                               ? "Printed under 'Approved by' on the Social Case Study Report."
+                               : null}>
+                    {key === 'office_address' || key === 'contact_details' ? (
+                      <textarea value={agencyDraft[key]} rows={2} maxLength={max} placeholder={placeholder}
+                                disabled={agencySaving} style={textarea}
+                                onChange={(e) => setAgencyDraft({ ...agencyDraft, [key]: e.target.value })} />
+                    ) : (
+                      <Input value={agencyDraft[key]} maxLength={max} placeholder={placeholder}
+                             disabled={agencySaving}
+                             onChange={(e) => setAgencyDraft({ ...agencyDraft, [key]: e.target.value })} />
+                    )}
+                  </FormField>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                  <Button variant="primary" disabled={agencySaving || !agencyChanged} onClick={saveAgency}>
+                    {agencySaving ? 'Saving…' : 'Save agency details'}
+                  </Button>
+                </div>
+              </>
+            )}
+            {/* Display-only. The national office's endpoint and the sync have
+                never had a backend here. */}
             <FormField label="NACC API Endpoint" hint="Managed by the national office.">
               <Input value="https://api.nacc.gov.ph/v1/sync" disabled trailing={<Badge tone="success" size="sm">PROD</Badge>} />
             </FormField>

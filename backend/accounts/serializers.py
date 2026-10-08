@@ -3,7 +3,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
-from accounts.models import Role, UserProfile
+from accounts.models import AgencyProfile, Role, UserProfile
 from activity.models import ActivityLog
 from accounts.token_claims import stamp
 from activity.services import log_activity
@@ -411,3 +411,15 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     def validate_instagram(self, value):
         return self._normalise("instagram", value)
+
+
+class AgencyProfileSerializer(serializers.ModelSerializer):
+    """The agency's name, address and head of office. Every field is optional
+    and trimmed; the lengths are the model's, which the serializer enforces
+    because a TextField's max_length is otherwise only a hint."""
+
+    class Meta:
+        model = AgencyProfile
+        fields = ["agency_name", "office_address", "contact_details",
+                  "head_of_office_name", "head_of_office_title", "updated_at"]
+        read_only_fields = ["updated_at"]
