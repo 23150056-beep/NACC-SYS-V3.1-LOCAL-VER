@@ -17,7 +17,7 @@ import { useAuth } from './AuthContext';
  * drafting button (`drafting`), so the two cannot disagree. */
 const AssistantCtx = createContext({
   open: false, openAssistant: () => {}, closeAssistant: () => {},
-  caps: null, drafting: true,
+  caps: null, drafting: true, brief: null,
 });
 
 export function AssistantProvider({ children }) {
@@ -55,6 +55,10 @@ export function AssistantProvider({ children }) {
     // request, or an older API without the key all leave the buttons as they
     // were, and the server's 503 stays the authority.
     drafting: caps?.drafting !== false,
+    // Which brief this person gets: 'clinical' (the psychologist's, facts and
+    // a written brief) or 'case' (facts alone). null until the answer
+    // arrives; the screens fall back to the role meanwhile.
+    brief: caps?.brief ?? null,
   }), [open, caps]);
   return <AssistantCtx.Provider value={value}>{children}</AssistantCtx.Provider>;
 }

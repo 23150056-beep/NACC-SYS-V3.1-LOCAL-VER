@@ -96,14 +96,17 @@ class FactsFixture(APITestCase):
 
 class ScopeTest(FactsFixture):
     def test_each_role_gets_the_facts_for_a_child_it_can_see(self):
-        for user in (self.psy, self.sw, self.admin):
+        shared = {"kind", "next_session", "last_session", "open_problems",
+                  "treatment_plan", "unreviewed_self_reports", "care_gaps"}
+        # The case brief's extra rows (CaseBriefTest holds what is in them).
+        case_rows = {"case_referral", "psychologist", "consent", "custodian_texts",
+                     "survey"}
+        for user, keys in ((self.psy, shared), (self.sw, shared | case_rows),
+                           (self.admin, shared | case_rows)):
             with self.subTest(user=user.email):
                 res = self._facts(user)
                 self.assertEqual(res.status_code, 200, res.data)
-                self.assertEqual(
-                    set(res.data),
-                    {"next_session", "last_session", "open_problems", "treatment_plan",
-                     "unreviewed_self_reports", "care_gaps"})
+                self.assertEqual(set(res.data), keys)
 
     def test_a_child_out_of_reach_is_404(self):
         self.assertEqual(self._facts(self.psy, self.other_child).status_code, 404)
@@ -290,17 +293,21 @@ class RecordFactsTest(FactsFixture):
         self._flag()
         mine = self._facts(self.sw).data
         theirs = self._facts(self.psy).data
-        self.assertEqual(
-            {"no_case_referral", "no_signed_consent", "no_upcoming_appointment"},
-            {g["type"] for g in mine["care_gaps"]})
+        # The referral and consent gaps are the case brief's own rows now, so
+        # only the booking gap is left to list.
+        self.assertEqual({"no_upcoming_appointment"},
+                         {g["type"] for g in mine["care_gaps"]})
         self.assertIn("pre_assessment_overdue", {g["type"] for g in theirs["care_gaps"]})
         self.assertNotIn("no_case_referral", {g["type"] for g in theirs["care_gaps"]})
-        # And it agrees with their own Dashboard, less the line said elsewhere.
+        # And it agrees with their own Dashboard, less the lines said elsewhere
+        # - the control being that the Dashboard does carry them.
         self.client.force_authenticate(self.sw)
         dashboard = [a for a in self.client.get("/api/reports/dashboard/").data["care_gaps"]
                      if a["child_id"] == self.child.id]
-        self.assertIn("self_report_concern", {a["type"] for a in dashboard})
+        self.assertTrue({"self_report_concern", "no_case_referral", "no_signed_consent"}
+                        <= {a["type"] for a in dashboard})
+        said = {"self_report_concern", "no_case_referral", "no_psychologist",
+                "no_signed_consent"}
         self.assertEqual(
             [(g["type"], g["message"]) for g in mine["care_gaps"]],
-            [(a["type"], a["message"]) for a in dashboard
-             if a["type"] != "self_report_concern"])
+            [(a["type"], a["message"]) for a in dashboard if a["type"] not in said])

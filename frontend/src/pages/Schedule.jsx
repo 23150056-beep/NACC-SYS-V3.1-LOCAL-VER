@@ -340,9 +340,12 @@ export default function Schedule() {
   // Skipped where drafting is off (a hosted deployment): there is nothing to
   // warm, and the server would only refuse. Until the capabilities answer
   // arrives `drafting` reads true, as it does for the buttons.
+  // Psychologists only: the written brief is theirs alone, and the server
+  // refuses everyone else's request (a social worker and the ISA get the case
+  // facts, which need no warming).
   const { drafting } = useAssistant();
   useEffect(() => {
-    if (drafting) prefetchBriefs();
+    if (drafting && user?.role_name === 'Psychologist') prefetchBriefs();
     /* eslint-disable-next-line */
   }, []);
 

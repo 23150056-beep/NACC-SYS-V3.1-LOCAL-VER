@@ -16,7 +16,7 @@ from accounts.scoping import (role_of as _role, role_of_user as _role_of,
 from accounts.permissions import (IsAdministrator, IsAdminOrStaff, is_admin_or_assignee,
                                   writes_case_referrals)
 from assistant import evaluation, prompts, tools
-from assistant.brief_facts import brief_facts
+from assistant.brief_facts import brief_facts, brief_kind
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.serializers import AssistantSettingSerializer
 from assistant.services import (AIUnavailable, DISCLAIMER, HOSTED_DRAFTING_REFUSED,
@@ -39,6 +39,26 @@ def _brief_only_author(child, user, role):
     if role == Role.PSYCHOLOGIST and not child.assignee_sees_history:
         return user
     return None
+
+
+# What a social worker or the ISA is told when they reach for the written brief.
+# The model reads a child's case notes to write it, and neither has a case reason
+# to ask for that (owner's decision, 8 Oct 2026); what they get is the case facts
+# beside it, from plain queries.
+WRITTEN_BRIEF_REFUSED = ("The written brief is for the child's psychologist. "
+                         "The case facts are on the brief panel.")
+
+
+def _written_brief_refused(request):
+    """The 403 for anyone but a psychologist, or None.
+
+    Asked FIRST in every door to the written brief, before gate() and before
+    the child is looked up: nothing is sent to the model and no AssistantJob is
+    written for a read that was refused.
+    """
+    if _role(request) == Role.PSYCHOLOGIST:
+        return None
+    return Response({"detail": WRITTEN_BRIEF_REFUSED}, status=status.HTTP_403_FORBIDDEN)
 
 
 class AssistantBaseView(generics.GenericAPIView):
@@ -145,6 +165,9 @@ class PreSessionBriefView(AssistantBaseView):
     throttle_scope = "assistant_draft"
 
     def post(self, request, child_id):
+        refused = _written_brief_refused(request)
+        if refused:
+            return refused
         gate()
         try:
             child = visible_children(request).get(pk=child_id)
@@ -203,6 +226,9 @@ class LatestBriefView(AssistantBaseView):
     """
 
     def get(self, request, child_id):
+        refused = _written_brief_refused(request)
+        if refused:
+            return refused
         try:
             child = visible_children(request).get(pk=child_id)
         except Child.DoesNotExist:
@@ -293,6 +319,9 @@ class PrefetchBriefsView(AssistantBaseView):
     throttle_scope = "assistant_draft"
 
     def post(self, request):
+        refused = _written_brief_refused(request)
+        if refused:
+            return refused
         gate()
         if not drafting_available():
             # Every brief queued below would be refused by get_ai_client() and
@@ -737,6 +766,11 @@ class AssistantCapabilitiesView(AssistantBaseView):
     than one that explains itself. It reads the same source as the refusal
     text, so the two cannot drift apart.
 
+    `brief` says which brief the signed-in role gets: "clinical" (the
+    psychologist's, facts and a written brief) or "case" (everyone else's,
+    facts alone). It follows the role, not the deployment, so the screen can
+    choose the button before anything else has answered.
+
     `drafting` is False where the model is hosted, because get_ai_client()
     refuses every caller without allow_hosted. A brief's prose, polish, summary
     or census narrative there can only answer 503, so the screens hide those
@@ -749,7 +783,8 @@ class AssistantCapabilitiesView(AssistantBaseView):
         role = _role(request)
         return Response({"can_ask": tools.capability_text(role),
                          "examples": tools.capability_examples(role),
-                         "drafting": drafting_available()})
+                         "drafting": drafting_available(),
+                         "brief": brief_kind(role)})
 
 
 # answer_directly's `reason` defaults to "unsupported" in its resolver, so it

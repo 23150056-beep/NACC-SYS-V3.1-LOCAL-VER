@@ -109,11 +109,12 @@ class PrefetchTest(APITestCase):
 
 
 class AdminPrefetchTest(APITestCase):
-    """An administrator has no sessions of their own to prepare for, so
-    prefetch must never queue another psychologist's appointments for them —
-    doing so would queue a brief per scheduled appointment agency-wide,
-    serialized behind the single generation lock, for a role with no clinical
-    relationship to those children."""
+    """An administrator has no sessions of their own to prepare for, and since
+    8 Oct 2026 no written brief at all: the model reads a child's notes to
+    write one, and IT support has no case reason to ask for that. Prefetch is
+    refused before anything is looked up, so no brief is queued for another
+    psychologist's appointment, none is audited, and nothing reaches the
+    model."""
 
     def setUp(self):
         admin_role = Role.objects.create(role_name=Role.ADMINISTRATOR)
@@ -140,6 +141,7 @@ class AdminPrefetchTest(APITestCase):
             status=Appointment.SCHEDULED)
         with patch.object(views, "_start_prefetch_thread") as spawn:
             res = self.client.post(URL)
-        self.assertEqual(res.status_code, 200)
-        self.assertEqual(res.data["queued"], [])
+        self.assertEqual(res.status_code, 403)
+        self.assertEqual(res.data["detail"], views.WRITTEN_BRIEF_REFUSED)
         spawn.assert_not_called()
+        self.assertFalse(AssistantJob.objects.exists())

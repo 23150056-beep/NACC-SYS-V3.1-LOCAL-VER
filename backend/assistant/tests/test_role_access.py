@@ -91,12 +91,22 @@ class BriefBelongsToWhoeverDraftedItTest(RoleFixture):
         self.assertEqual(res.status_code, 200)
         return res
 
-    def test_an_administrators_brief_is_not_served_to_the_psychologist(self):
-        drafted = self._draft_as(self.admin)
-        self.assertIn("PREVIOUS PSYCHOLOGIST'S NOTE", drafted.data["draft"])
+    def _reassign(self, user):
+        self.child.assigned_psychologist = user
+        self.child.save()
 
-        res = self._latest(self.psy)
-        self.assertEqual(res.status_code, 404)
+    def test_a_brief_carrying_the_earlier_notes_is_not_served_to_the_new_psychologist(self):
+        # What the old test of an administrator's brief guarded, kept for the one
+        # way it can still happen: a brief drafted while the previous psychologist
+        # held the child quotes their notes, and the psychologist who takes over
+        # (history hidden) must not be handed it. An administrator can no longer
+        # draft one at all - see WrittenBriefIsThePsychologistsTest.
+        self._reassign(self.previous)
+        drafted = self._draft_as(self.previous)
+        self.assertIn("PREVIOUS PSYCHOLOGIST'S NOTE", drafted.data["draft"])
+        self._reassign(self.psy)
+
+        self.assertEqual(self._latest(self.psy).status_code, 404)
 
     def test_the_previous_psychologists_brief_is_not_served_after_reassignment(self):
         self.child.assigned_psychologist = self.previous
@@ -115,7 +125,10 @@ class BriefBelongsToWhoeverDraftedItTest(RoleFixture):
         self.assertNotIn("PREVIOUS PSYCHOLOGIST'S NOTE", res.data["draft"])
 
     def test_prefetch_drafts_the_psychologists_own_even_if_someone_else_briefed_today(self):
-        self._draft_as(self.admin)
+        # Someone else: the colleague who held the child this morning.
+        self._reassign(self.previous)
+        self._draft_as(self.previous)
+        self._reassign(self.psy)
         start = timezone.make_aware(datetime.combine(timezone.localdate(), time(12, 0)))
         Appointment.objects.create(child=self.child, psychologist=self.psy, start=start,
                                    status=Appointment.SCHEDULED)

@@ -1,11 +1,17 @@
 import { Badge, Icon, Note, Skeleton } from '../ui';
-import { exactDate } from '../utils/time';
+import { exactDate, shortDate } from '../utils/time';
 
 // The facts above a pre-session brief (GET /assistant/brief/child/:id/facts/).
 // Counted from the record by plain queries, so they are here when the
 // assistant is off, hosted or still drafting. The API sends no question or
 // answer from the child's self-reports - only how many wait - and this never
 // asks for one.
+//
+// A social worker's and the ISA's is the "case" kind: the same rows beneath a
+// block of where the case stands on the paperwork (referral, psychologist,
+// consent, custodian texts, survey). Each is a sentence, not a status code,
+// and none carries the custodian's name or number or a word of a summary
+// nobody has confirmed - the API does not send them, and this does not ask.
 
 const SEVERITY_COLOUR = {
   danger: 'var(--red-600)',
@@ -14,6 +20,51 @@ const SEVERITY_COLOUR = {
 };
 
 const ago = (n) => (n === 0 ? 'Today' : n === 1 ? '1 day ago' : `${n} days ago`);
+
+const CONSENT = { signed: 'Signed', pending: 'Pending', declined: 'Declined' };
+const SURVEY = {
+  answered: (d) => `Answered ${d}`,
+  sent: (d) => `Sent ${d}, no answer yet`,
+  expired: (d) => `Sent ${d}, the link has expired`,
+};
+
+// "asked M. Bulan 3 days ago" - the psychologist row, in its four states.
+function psychologistLine(p) {
+  switch (p.state) {
+    case 'assigned': return `Assigned to ${p.name}`;
+    case 'asked': return `Asked ${p.name} ${p.days_ago === 0 ? 'today' : ago(p.days_ago)}`;
+    case 'declined': return `Declined by ${p.name}${p.reason ? `: ${p.reason}` : ''}`;
+    default: return 'None yet';
+  }
+}
+
+function CaseRows({ f }) {
+  const referral = f.case_referral;
+  const consent = f.consent;
+  return (
+    <>
+      <Row label="Case referral">
+        {referral ? (
+          <>
+            {referral.count} on file, latest {shortDate(referral.latest_uploaded_on)}
+            <div style={{ marginTop: 2, fontWeight: 500, color: referral.summary ? 'var(--text-body)' : 'var(--text-muted)', whiteSpace: 'pre-wrap' }}>
+              {referral.summary || 'Not summarised yet'}
+            </div>
+          </>
+        ) : 'None on file'}
+      </Row>
+      <Row label="Psychologist">{psychologistLine(f.psychologist || {})}</Row>
+      <Row label="Consent">
+        {consent ? `${CONSENT[consent.status] || consent.status}, ${shortDate(consent.date)}` : 'None on file'}
+      </Row>
+      {/* Not asked for every case type: no row where there is no custodian. */}
+      {f.custodian_texts && <Row label="Custodian texts">{f.custodian_texts}</Row>}
+      <Row label="Survey">
+        {f.survey ? (SURVEY[f.survey.state]?.(shortDate(f.survey.date)) ?? `Sent ${shortDate(f.survey.date)}`) : 'None sent'}
+      </Row>
+    </>
+  );
+}
 
 function Row({ label, children }) {
   return (
@@ -31,6 +82,7 @@ function FactRows({ f }) {
   const waiting = f.unreviewed_self_reports;
   return (
     <dl style={{ margin: 0 }}>
+      {f.kind === 'case' && <CaseRows f={f} />}
       <Row label="Next session">
         {next ? `${exactDate(next.start)} · ${next.purpose}` : 'None booked'}
       </Row>

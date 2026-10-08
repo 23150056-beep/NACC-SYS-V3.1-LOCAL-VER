@@ -49,8 +49,13 @@ export default function ChildProgressReport() {
   // False on a hosted deployment, where the server refuses every drafting
   // feature (the chatbot is unaffected). Above the early returns below: a hook
   // under `if (!data) return` crashed this page once already.
-  const { drafting } = useAssistant();
+  const { drafting, brief: briefKind } = useAssistant();
   const isPsych = user?.role_name === 'Psychologist';
+  // Which brief this person gets (owner, 8 Oct 2026): the psychologist's is the
+  // facts and a written brief; a social worker's and the ISA's is the case
+  // facts alone, and never asks for the written one. The server says which;
+  // until it answers, the role does.
+  const caseBrief = (briefKind || (isPsych ? 'clinical' : 'case')) === 'case';
   const [data, setData] = useState(null);
   // Which section of the chart is showing. Every panel stays mounted — see
   // .racco-tabpanel in index.css for why the report still prints whole.
@@ -79,7 +84,8 @@ export default function ChildProgressReport() {
   // psychologist has a way back to their own words if the draft is worse.
   // Cleared once the remark is saved or the draft is reverted.
   const [preRemarkText, setPreRemarkText] = useState(null);
-  // { childId, facts, factsFailed, prose: 'loading'|'ready'|'unavailable'|'failed'|'not_offered', draft, generatedAt, jobId }
+  // { childId, facts, factsFailed, prose: 'loading'|'ready'|'unavailable'|'failed'|'not_offered'|'none', draft, generatedAt, jobId }
+  // ('none' is the case brief: there is no written part to wait for.)
   // childId is the child it was opened for: a reply for any other child is
   // dropped, so a slow request cannot fill another child's modal.
   const [brief, setBrief] = useState(null);
@@ -296,16 +302,16 @@ export default function ChildProgressReport() {
         factsFailed: false,
         // A draft still being written for this child fills the modal when it
         // lands; nothing else is asked of the model.
-        prose: drafting ? 'loading' : 'not_offered',
+        prose: caseBrief ? 'none' : drafting ? 'loading' : 'not_offered',
       }));
     }
     getBriefFacts(childId)
       .then((facts) => setBrief((b) => (mine(b) ? { ...b, facts, factsFailed: false } : b)))
       .catch(() => setBrief((b) => (mine(b) ? { ...b, factsFailed: !b.facts } : b)));
-    // Where the deployment does not draft, the facts are all there is: the
-    // prose is not requested at all, so nothing is refused and nothing is
-    // audited as a failed job.
-    if (!drafting) return;
+    // Where the deployment does not draft, or the reader is not the child's
+    // psychologist, the facts are all there is: the prose is not requested at
+    // all, so nothing is refused and nothing is audited as a failed job.
+    if (caseBrief || !drafting) return;
     if (!regenerate && flying) return;
     const seq = briefSeq.current + 1;
     briefSeq.current = seq;
@@ -486,9 +492,10 @@ export default function ChildProgressReport() {
             </div>
           </div>
           <div className="racco-no-print" style={{ display: 'flex', gap: 8, flex: 'none', flexWrap: 'wrap' }}>
-            {/* Stays where drafting is off: the facts need no model. */}
+            {/* Stays where drafting is off: the facts need no model. A social
+                worker's and the ISA's is the case brief, facts only. */}
             <Button variant="secondary" onClick={() => openBrief()} iconLeft={<Icon name="sparkles" size={17} />}>
-              {briefBusy ? 'Preparing…' : 'Pre-session brief'}
+              {briefBusy ? 'Preparing…' : caseBrief ? 'Case brief' : 'Pre-session brief'}
             </Button>
             <Button variant="secondary" onClick={() => window.print()} title="Print this child's psychological report" iconLeft={<Icon name="printer" size={17} />}>Print</Button>
             {/* Booking a session is the thing you most often want next while
@@ -1095,13 +1102,17 @@ export default function ChildProgressReport() {
         />
       )}
 
-      {/* Pre-session brief modal */}
+      {/* Pre-session brief modal. The case brief (social worker, ISA) is the
+          facts panel and a Close button: no written part, no disclaimer about
+          one, and it never reaches the endpoints that draft it. */}
       {brief && (
-        <Modal open onClose={() => setBrief(null)} title="Pre-session brief"
+        <Modal open onClose={() => setBrief(null)} title={caseBrief ? 'Case brief' : 'Pre-session brief'}
                subtitle={brief.prose === 'ready' ? `Drafted ${clock(brief.generatedAt)}` : null}
                width={560}>
           <BriefFacts facts={brief.facts} failed={brief.factsFailed} />
-          <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0 12px' }} />
+          {brief.prose !== 'none' && (
+            <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0 12px' }} />
+          )}
           {brief.prose === 'loading' && (
             <p role="status" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
               Drafting the written brief… this can take up to a minute.
