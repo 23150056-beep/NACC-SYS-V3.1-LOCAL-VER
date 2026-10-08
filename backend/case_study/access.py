@@ -28,6 +28,10 @@ from children.models import Child
 FULL, BLOCK_A, STATUS = "full", "block_a", "status"
 
 ADOPTION = "Adoption"
+# What a write is answered with once the case study is final. The screens tell
+# "final" from "closed" by this sentence (frontend caseStudy/model.js
+# FINAL_SENTENCE; a test holds the two together).
+FINAL_SENTENCE = "This case study is final. Reopen it to change it."
 
 
 class Access:
@@ -64,7 +68,6 @@ class Access:
         if self.level == BLOCK_A:
             return "Only the social worker who holds this record can change the case study."
         return "The ISA can see the status of a case study but not change it."
-
 
     def not_printable_reason(self):
         """Why this caller cannot open a final copy of the case study, as a
@@ -108,5 +111,5 @@ def writes_refused(child, case_study=None):
     if child.status == Child.INACTIVE or child.case_status == Child.STAGE_TERMINATED:
         return "This case is closed, so its case study can no longer be changed."
     if case_study is not None and case_study.status == case_study.FINAL:
-        return "This case study is final. Reopen it to change it."
+        return FINAL_SENTENCE
     return None

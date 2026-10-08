@@ -20,7 +20,7 @@ from case_study.sections import SCSR_SECTIONS, applies
 from case_study.serializers import iso_datetime, record_facts
 from case_study.tests.base import NOW, CaseStudyTestCase, make_user
 from case_study.tests.test_completeness import good_value
-from case_study.views import FINAL_SENTENCE
+from case_study.access import FINAL_SENTENCE
 from children.models import AssignmentRequest, Child
 
 MODEL_JS = (Path(__file__).resolve().parents[3] / "frontend" / "src" / "components"

@@ -340,7 +340,7 @@ def _pap_column(name, born, turn, female):
     }
 
 
-def _household(turn):
+def _household():
     return [{"name": "Teodora", "age": "71", "relationship": "Mother of the adoptive mother",
              "education": "Elementary graduate", "occupation": "Retired",
              "disability": "High blood pressure, controlled"}]
@@ -377,7 +377,7 @@ def _complete_boxes(child, today, turn):
         "male": ({} if turn % 3 == 2 else
                  _pap_column(_PAP_MALE[turn % 3], "1982-11-03", turn, False)),
     }
-    boxes["b2_household"] = _household(turn)
+    boxes["b2_household"] = _household()
     boxes.update(_PROSE_B)
     boxes["c1_placement"] = {"racco_cpa": "RACCO 1", **_placement_dates(child, today)}
     boxes["c4_measurements"] = _measurements(child, today)

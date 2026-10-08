@@ -194,7 +194,7 @@ export function ageAtText(birth, on) {
 // --- wording ---------------------------------------------------------------------------
 
 /* What the server says to a write when the case study is final
- * (backend case_study/views.py FINAL_SENTENCE; a test holds the two together).
+ * (backend case_study/access.py FINAL_SENTENCE; a test holds the two together).
  * The screen compares against it to tell "final" from "closed". */
 export const FINAL_SENTENCE = 'This case study is final. Reopen it to change it.';
 

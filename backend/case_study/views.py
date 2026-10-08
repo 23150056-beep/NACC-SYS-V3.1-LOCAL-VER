@@ -21,7 +21,8 @@ from rest_framework.views import APIView
 from activity.models import ActivityLog
 from activity.services import log_activity
 from case_study import serializers as shapes
-from case_study.access import FULL, access_for, child_or_404, writes_refused
+from case_study.access import (
+    FINAL_SENTENCE, FULL, access_for, child_or_404, writes_refused)
 from case_study.completeness import missing_sections
 from case_study.finalize import CannotFinalize, finalize
 from case_study.models import CaseStudy, CaseStudyFinal, CaseStudySection
@@ -30,8 +31,6 @@ from case_study.validation import (
     check_against_other_sections, clean_date_prepared, clean_value, partner_of)
 
 ALLOWED_PATCH = {"date_prepared", "custody_over_two_years"}
-# What a write is answered with when Final got there first.
-FINAL_SENTENCE = "This case study is final. Reopen it to change it."
 
 
 def _refuse(message, code=status.HTTP_400_BAD_REQUEST):
