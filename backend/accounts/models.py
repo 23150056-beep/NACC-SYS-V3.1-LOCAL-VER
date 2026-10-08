@@ -162,6 +162,13 @@ class UserProfile(models.Model):
     facebook = models.CharField(max_length=200, blank=True, default="")
     twitter = models.CharField(max_length=200, blank=True, default="")
     instagram = models.CharField(max_length=200, blank=True, default="")
+    # The PRC license a social worker or psychologist practises under. The
+    # Social Case Study Report's signature block prints both. Only the person
+    # themselves writes them, and only a Staff or Psychologist account has one -
+    # an administrator is IT support. A date in the past is allowed on purpose:
+    # a lapsed license is a fact about the person, not an input error.
+    license_number = models.CharField(max_length=50, blank=True, default="")
+    license_valid_until = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
