@@ -200,10 +200,36 @@ def _sections(case_study, child, keys, hide_kept_text=False):
 
 # --- The three answers -------------------------------------------------------------
 
+def finalized_by_name(final):
+    """Who made a final, or None when the account has since been removed."""
+    return (display_name(final.finalized_by) or None) if final.finalized_by_id else None
+
+
+def finals_of(case_study):
+    """The social worker's list of finals on file, newest first: when, and by
+    whom. Never the snapshot, which is read one at a time to print."""
+    if case_study is None:
+        return []
+    return [
+        {"id": f.pk, "finalized_at": iso_datetime(f.finalized_at),
+         "finalized_by_name": finalized_by_name(f)}
+        for f in case_study.finals.select_related("finalized_by").defer("snapshot")
+    ]
+
+
+def last_finalized_at(case_study):
+    """When the newest final was made, or None when there never was one."""
+    if case_study is None:
+        return None
+    return iso_datetime(case_study.finals.values_list(
+        "finalized_at", flat=True).order_by("-finalized_at", "-id").first())
+
+
 def social_worker_payload(request, access, case_study):
     child = access.child
     on = as_of(case_study)
     refused = writes_refused(child, case_study)
+    missing = missing_sections(case_study) if case_study else []
     body = {
         "exists": case_study is not None,
         "read_only": refused is not None,
@@ -214,7 +240,12 @@ def social_worker_payload(request, access, case_study):
         "custody_pre_answer": custody_pre_answer(child, on),
         "updated_at": iso_datetime(case_study.updated_at) if case_study else None,
         "sections": _sections(case_study, child, access.readable_keys()) if case_study else [],
-        "missing": missing_sections(case_study) if case_study else [],
+        "missing": missing,
+        # Draft, not refused for any other reason (closed, not an Adoption
+        # record) and nothing left to complete: what the endpoint checks too.
+        "can_finalize": bool(case_study and case_study.status == case_study.DRAFT
+                             and refused is None and not missing),
+        "finals": finals_of(case_study),
         "record_facts": record_facts(child, on),
         "seeds": seeds_for(request, child),
     }
@@ -234,6 +265,9 @@ def psychologist_payload(access, case_study):
         "status": case_study.status if case_study else None,
         "date_prepared": iso_date(case_study.date_prepared) if case_study else None,
         "updated_at": iso_datetime(case_study.updated_at) if case_study else None,
+        # So the screen can say "Final since ..." for a final one. Just a time:
+        # nothing of a final copy's content is the psychologist's to read.
+        "last_finalized_at": last_finalized_at(case_study),
         "sections": (_sections(case_study, child, access.readable_keys(), hide_kept_text=True)
                      if case_study else []),
         "record_facts": record_facts(child, on),
@@ -244,15 +278,13 @@ def status_payload(access, case_study):
     """The ISA's view. Counts and dates only - no section text, by design."""
     child = access.child
     holder = child.social_worker
-    last_final = (case_study.finals.order_by("-finalized_at").values_list(
-        "finalized_at", flat=True).first() if case_study else None)
     return {
         "exists": case_study is not None,
         "status": case_study.status if case_study else None,
         "holder_name": (display_name(holder) or None) if holder else None,
         "holder_active": bool(holder and holder.is_active),
         "updated_at": iso_datetime(case_study.updated_at) if case_study else None,
-        "last_finalized_at": iso_datetime(last_final),
+        "last_finalized_at": last_finalized_at(case_study),
         "missing_count": len(missing_sections(case_study)) if case_study else None,
     }
 

@@ -7,11 +7,15 @@ class ActivityLog(models.Model):
     # A psychologist asked to take a child, and their answer
     # (children/assignment.py). Entity type "Assignment"; the id is the child's.
     REQUESTED, ACCEPTED, DECLINED, WITHDRAWN = "requested", "accepted", "declined", "withdrawn"
+    # A case study made final, and taken back to a draft (case_study/views.py).
+    # Entity type "CaseStudy"; the id is the child's.
+    FINALIZED, REOPENED = "finalized", "reopened"
     ACTION_CHOICES = [
         (CREATED, "Created"), (UPDATED, "Updated"),
         (ARCHIVED, "Archived"), (LOGIN, "Login"),
         (REQUESTED, "Requested"), (ACCEPTED, "Accepted"),
         (DECLINED, "Declined"), (WITHDRAWN, "Withdrawn"),
+        (FINALIZED, "Finalized"), (REOPENED, "Reopened"),
     ]
 
     RECORD, USER, SECURITY = "record", "user", "security"

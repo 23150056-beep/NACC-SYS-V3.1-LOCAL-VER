@@ -10,7 +10,9 @@ uses, so the screens show them as they are.
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import F, Prefetch
+from django.http import Http404
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -19,14 +21,17 @@ from rest_framework.views import APIView
 from activity.models import ActivityLog
 from activity.services import log_activity
 from case_study import serializers as shapes
-from case_study.access import access_for, child_or_404, writes_refused
+from case_study.access import FULL, access_for, child_or_404, writes_refused
 from case_study.completeness import missing_sections
-from case_study.models import CaseStudy, CaseStudySection
+from case_study.finalize import CannotFinalize, finalize
+from case_study.models import CaseStudy, CaseStudyFinal, CaseStudySection
 from case_study.sections import DOMESTIC_RELATIVE, applies, entry_for
 from case_study.validation import (
     check_against_other_sections, clean_date_prepared, clean_value, partner_of)
 
 ALLOWED_PATCH = {"date_prepared", "custody_over_two_years"}
+# What a write is answered with when Final got there first.
+FINAL_SENTENCE = "This case study is final. Reopen it to change it."
 
 
 def _refuse(message, code=status.HTTP_400_BAD_REQUEST):
@@ -114,7 +119,14 @@ class CaseStudyView(APIView):
         except ValidationError as exc:
             return _refuse(exc.messages[0])
         if fields:
-            case_study.save(update_fields=fields + ["updated_at"])
+            # Conditional on still being a draft, so a header change that
+            # loses a race with Final is refused instead of altering a case
+            # study that has just been made final.
+            changed = CaseStudy.objects.filter(pk=case_study.pk, status=CaseStudy.DRAFT).update(
+                updated_at=timezone.now(),
+                **{field: getattr(case_study, field) for field in fields})
+            if not changed:
+                return _refuse(FINAL_SENTENCE)
         return Response(shapes.payload_for(request, access, _case_study_of(child)))
 
 
@@ -204,7 +216,13 @@ class SectionView(APIView):
                         version=F("version") + 1, updated_by=request.user,
                         updated_at=now, **stored) == 1
             if saved:
-                CaseStudy.objects.filter(pk=case_study.pk).update(updated_at=now)
+                moved = CaseStudy.objects.filter(
+                    pk=case_study.pk, status=CaseStudy.DRAFT).update(updated_at=now)
+                if not moved:
+                    # Final got there between the check above and this write:
+                    # undo the box too, so a final case study never changes.
+                    transaction.set_rollback(True)
+                    return _refuse(FINAL_SENTENCE)
         if not saved:
             return Response(
                 {"detail": "This section was saved from another tab or by someone else "
@@ -230,3 +248,110 @@ class SectionView(APIView):
         except IntegrityError:
             return False
         return True
+
+
+# --- Final and Reopen ------------------------------------------------------------------
+
+def _expected_updated_at(data):
+    """The `updated_at` of the case study as the writer last saw it, as an
+    aware datetime. Required: Final is refused for a case study that has
+    changed since the writer looked, and cannot tell without it."""
+    raw = data.get("expected_updated_at") if isinstance(data, dict) else None
+    parsed = parse_datetime(raw) if isinstance(raw, str) else None
+    if parsed is None or parsed.tzinfo is None:
+        raise ValidationError("Say which version of the case study you are making final "
+                              "(expected_updated_at).")
+    return parsed
+
+
+class FinalView(APIView):
+    """POST to make the case study final: the record's social worker only.
+    Everything it checks is in case_study/finalize.py, which the demo seeder
+    goes through too."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, child_id):
+        child = child_or_404(request, child_id)
+        access = access_for(request, child)
+        if not access.can_write:
+            return _refuse(access.not_writable_reason(), status.HTTP_403_FORBIDDEN)
+        case_study = _case_study_of(child)
+        if case_study is None:
+            return _refuse("This child has no case study yet. Start one first.",
+                           status.HTTP_404_NOT_FOUND)
+        try:
+            expected = _expected_updated_at(request.data)
+        except ValidationError as exc:
+            return _refuse(exc.messages[0])
+        try:
+            finalize(case_study, request.user, expected)
+        except CannotFinalize as exc:
+            body = {"detail": exc.message}
+            if exc.missing is not None:
+                body["missing"] = exc.missing
+            return Response(body, status=exc.status)
+        # Addressed to the psychologist the child is with now (a pending
+        # request is not an assignment, so nobody is told then). It names the
+        # child and never any of the case study's text.
+        log_activity(request.user, ActivityLog.FINALIZED, ActivityLog.RECORD,
+                     entity_type="CaseStudy", entity_label=child.fullname,
+                     entity_id=child.pk, recipient=child.assigned_psychologist)
+        return Response(shapes.payload_for(request, access, _case_study_of(child)))
+
+
+class ReopenView(APIView):
+    """POST to take a final case study back to a draft. The finals already
+    made stay on file, and finalizing again writes a new one."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, child_id):
+        child = child_or_404(request, child_id)
+        access = access_for(request, child)
+        if not access.can_write:
+            return _refuse(access.not_writable_reason(), status.HTTP_403_FORBIDDEN)
+        case_study = _case_study_of(child)
+        if case_study is None:
+            return _refuse("This child has no case study yet. Start one first.",
+                           status.HTTP_404_NOT_FOUND)
+        # A closed case, or one that is no longer an Adoption record, keeps its
+        # case study as it was signed.
+        refused = writes_refused(child)
+        if refused:
+            return _refuse(refused)
+        not_final = {"detail": "This case study is not final, so there is nothing to reopen."}
+        if case_study.status != CaseStudy.FINAL:
+            return Response(not_final, status=status.HTTP_409_CONFLICT)
+        moved = CaseStudy.objects.filter(
+            pk=case_study.pk, status=CaseStudy.FINAL).update(status=CaseStudy.DRAFT)
+        if not moved:
+            return Response(not_final, status=status.HTTP_409_CONFLICT)
+        log_activity(request.user, ActivityLog.REOPENED, ActivityLog.RECORD,
+                     entity_type="CaseStudy", entity_label=child.fullname,
+                     entity_id=child.pk)
+        return Response(shapes.payload_for(request, access, _case_study_of(child)))
+
+
+class FinalCopyView(APIView):
+    """GET one final copy whole, to print it: the social worker who holds the
+    record only. Looked up through the child in the URL, so a final of another
+    child is not found whatever its id."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, child_id, final_id):
+        child = child_or_404(request, child_id)
+        access = access_for(request, child)
+        if access.level != FULL:
+            return _refuse(access.not_printable_reason(), status.HTTP_403_FORBIDDEN)
+        final = (CaseStudyFinal.objects.select_related("finalized_by")
+                 .filter(pk=final_id, case_study__child=child).first())
+        if final is None:
+            raise Http404
+        return Response({
+            "id": final.pk,
+            "finalized_at": shapes.iso_datetime(final.finalized_at),
+            "finalized_by_name": shapes.finalized_by_name(final),
+            "snapshot": final.snapshot,
+        })

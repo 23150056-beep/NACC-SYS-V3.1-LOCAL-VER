@@ -430,7 +430,7 @@ class WhatTheSocialWorkerGetsTest(CaseStudyTestCase):
         self.assertEqual(
             {"exists", "read_only", "read_only_reason", "status", "date_prepared",
              "custody_over_two_years", "custody_pre_answer", "updated_at", "sections",
-             "missing", "record_facts", "seeds"}, set(body))
+             "missing", "can_finalize", "finals", "record_facts", "seeds"}, set(body))
         self.assertEqual([e["key"] for e in SCSR_SECTIONS], [s["key"] for s in body["sections"]])
         first = body["sections"][0]
         self.assertEqual(

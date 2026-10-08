@@ -115,7 +115,8 @@ class PsychologistTest(AccessBase):
 
     def test_no_seeds_no_missing_list_and_no_custody(self):
         res = self.get()
-        for absent in ("seeds", "missing", "custody_over_two_years", "custody_pre_answer"):
+        for absent in ("seeds", "missing", "custody_over_two_years", "custody_pre_answer",
+                       "finals", "can_finalize"):
             self.assertNotIn(absent, res.data)
         self.assertIn("record_facts", res.data)
 

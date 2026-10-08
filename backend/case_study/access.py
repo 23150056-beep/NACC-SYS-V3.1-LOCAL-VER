@@ -66,6 +66,17 @@ class Access:
         return "The ISA can see the status of a case study but not change it."
 
 
+    def not_printable_reason(self):
+        """Why this caller cannot open a final copy of the case study, as a
+        sentence, or None. A final copy is the whole report, adoptive parents
+        and placement included, so it is the holder's alone."""
+        if self.level == FULL:
+            return None
+        if self.level == BLOCK_A:
+            return "Only the social worker who holds this record can open a final copy of the case study."
+        return "The ISA can see the status of a case study but not its text or its print."
+
+
 def child_or_404(request, child_id):
     """The child, if this caller may see it at all; otherwise a 404."""
     child = (visible_children(request).select_related("social_worker", "assigned_psychologist")
