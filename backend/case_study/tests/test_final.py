@@ -6,6 +6,7 @@ Reopen". The clock is pinned by the base class, so a final made here is
 """
 import json
 from datetime import date, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 from django.utils.dateparse import parse_datetime
@@ -19,8 +20,11 @@ from case_study.sections import SCSR_SECTIONS, applies
 from case_study.serializers import iso_datetime, record_facts
 from case_study.tests.base import NOW, CaseStudyTestCase, make_user
 from case_study.tests.test_completeness import good_value
+from case_study.views import FINAL_SENTENCE
 from children.models import AssignmentRequest, Child
 
+MODEL_JS = (Path(__file__).resolve().parents[3] / "frontend" / "src" / "components"
+            / "caseStudy" / "model.js")
 PREPARED = date(2026, 10, 1)
 STALE = ("The case study was changed in another tab or by someone else since you "
          "opened it. Reload it before making it final.")
@@ -631,3 +635,16 @@ class TheActivityFeedTest(FinalTestCase):
         self.assertTrue({"finalized", "reopened"} <= values)
         for value in ("finalized", "reopened"):
             self.assertLessEqual(len(value), ActivityLog._meta.get_field("action").max_length)
+
+
+class TheScreenKnowsTheSentenceTest(FinalTestCase):
+    """The screen tells "final" from "closed" by the sentence a write is
+    refused with (model.js FINAL_SENTENCE), so the two must be the same."""
+
+    def test_model_js_holds_the_servers_sentence(self):
+        self.assertIn(f"export const FINAL_SENTENCE = '{FINAL_SENTENCE}';", MODEL_JS.read_text())
+
+    def test_a_final_one_says_it_to_the_social_worker(self):
+        self.make_final()
+        self.assertEqual(FINAL_SENTENCE,
+                         self.as_user(self.sw).get(self.url()).data["read_only_reason"])

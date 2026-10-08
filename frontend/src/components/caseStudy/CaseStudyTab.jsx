@@ -86,7 +86,12 @@ function BlockAReader({ child, study }) {
   const writer = child.social_worker_name || 'the social worker';
   return (
     <div className="racco-stack" style={{ gap: 12 }}>
-      {study.status === 'draft' && (
+      {study.status === 'final' ? (
+        <Alert tone="success" icon={<Icon name="file-check" size={18} />}>
+          <strong>Final since {study.last_finalized_at ? exactDate(study.last_finalized_at) : 'an earlier date'}.</strong>{' '}
+          {writer} can reopen it to revise it.
+        </Alert>
+      ) : (
         <Alert tone="info" icon={<Icon name="pencil" size={18} />}>
           Draft &ndash; being written by {writer}. What is shown can still change.
         </Alert>
@@ -191,7 +196,7 @@ function Start({ child, cs }) {
   );
 }
 
-export default function CaseStudyTab({ child, cs }) {
+export default function CaseStudyTab({ child, cs, print }) {
   const { user } = useAuth();
   const { phase, study } = cs;
 
@@ -211,5 +216,5 @@ export default function CaseStudyTab({ child, cs }) {
   if (role === 'Administrator') return <StatusCard study={study} />;
   if (role === 'Psychologist') return <BlockAReader child={child} study={study} />;
   if (!study.exists) return <Start child={child} cs={cs} />;
-  return <Editor child={child} cs={cs} />;
+  return <Editor child={child} cs={cs} print={print} />;
 }

@@ -8,8 +8,10 @@ import { saveCaseStudyHeader, saveCaseStudySection } from '../../api/caseStudy';
 import { SCSR_SECTIONS } from '../../config/scsr';
 import { shortDate } from '../../utils/time';
 import { clearDraft, readDraft, writeDraft } from './drafts';
+import { FinalBanner, FinalsOnFile, MarkAsFinal } from './FinalControls';
 import {
-  blocksFor, canonical, differs, normalise, recordNotes, sentence, todayIso, workingCopy,
+  FINAL_SENTENCE, blocksFor, canonical, differs, normalise, recordNotes, sentence, todayIso,
+  workingCopy,
 } from './model';
 import PartOne from './PartOne';
 import SectionCard from './SectionCard';
@@ -56,7 +58,7 @@ function jump(id) {
   el.querySelector('textarea, input, select, button')?.focus({ preventScroll: true });
 }
 
-export default function Editor({ child, cs }) {
+export default function Editor({ child, cs, print }) {
   const { user } = useAuth();
   const confirm = useConfirm();
   const toast = useToast();
@@ -64,6 +66,11 @@ export default function Editor({ child, cs }) {
   const { setStudy, setUnsaved } = cs;
   const readOnly = !!study.read_only;
   const facts = study.record_facts;
+  // Final locks every box. "Final" is told apart from "closed" (which can
+  // also lock a final one) by the server's own sentence, because a closed
+  // case cannot be reopened and the button would only be refused.
+  const isFinal = study.status === 'final';
+  const lockedByFinal = isFinal && study.read_only_reason === FINAL_SENTENCE;
 
   const [edits, setEdits] = useState({});
   const [errors, setErrors] = useState({});
@@ -344,7 +351,8 @@ export default function Editor({ child, cs }) {
 
   return (
     <div className="racco-stack" style={{ gap: 14 }}>
-      {readOnly && (
+      {isFinal && <FinalBanner child={child} cs={cs} canReopen={lockedByFinal} />}
+      {readOnly && !lockedByFinal && (
         <Alert tone="warning" icon={<Icon name="lock" size={18} />}>
           {study.read_only_reason || 'This case study can no longer be changed.'}
         </Alert>
@@ -426,8 +434,12 @@ export default function Editor({ child, cs }) {
           ) : (
             <div style={{ fontSize: 13, color: 'var(--success-700)', fontWeight: 700 }}>Every section is complete.</div>
           )}
+
+          {!readOnly && <MarkAsFinal child={child} cs={cs} pending={pending} />}
         </div>
       </Card>
+
+      <FinalsOnFile finals={study.finals} print={print} />
 
       {/* Block A, Part I: the record's own facts, read from it and never typed here. */}
       <h2 style={{ margin: '6px 0 0', fontFamily: 'var(--font-sans)', fontSize: 16, fontWeight: 800, color: 'var(--text-strong)' }}>
