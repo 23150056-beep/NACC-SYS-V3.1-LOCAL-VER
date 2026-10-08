@@ -96,6 +96,22 @@ class CompletenessTest(CaseStudyTestCase):
         self.assertNotIn(TITLES["a4_family_composition"], missing)
         self.assertIn(TITLES["a2_sources"], missing)
 
+    def test_a_ticked_box_is_answered_whatever_text_it_keeps(self):
+        # Not applicable hides the text and keeps it (views.py), so the tick,
+        # not the text, decides: kept text, a blank one and none all count.
+        title = TITLES["a4_family_description"]
+        self.set("a4_family_description", "Both parents are farmers.", not_applicable=True)
+        self.assertNotIn(title, self.missing())
+        self.set("a4_family_description", "", not_applicable=True)
+        self.assertNotIn(title, self.missing())
+        self.set("a4_family_description", None, not_applicable=True)
+        self.assertNotIn(title, self.missing())
+        # Unticked, the kept text is the answer; with none, it is missing again.
+        self.set("a4_family_description", "Both parents are farmers.", not_applicable=False)
+        self.assertNotIn(title, self.missing())
+        self.set("a4_family_description", "", not_applicable=False)
+        self.assertIn(title, self.missing())
+
     def test_the_date_prepared_is_required(self):
         self.fill_everything()
         CaseStudy.objects.filter(pk=self.study.pk).update(date_prepared=None)

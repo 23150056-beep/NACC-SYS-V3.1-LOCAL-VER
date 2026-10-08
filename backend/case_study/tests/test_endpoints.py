@@ -198,7 +198,9 @@ class SavingABoxTest(CaseStudyTestCase):
         self.save_section("a2_circumstances", "second", version=1, user=self.sw)
         res = self.save_section("a2_circumstances", "mine", version=1)
         self.assertEqual(409, res.status_code)
-        self.assertIn("someone else", res.data["detail"])
+        self.assertEqual(
+            "This section was saved from another tab or by someone else since you opened it.",
+            res.data["detail"])
         current = res.data["current"]
         self.assertEqual(
             {"value", "not_applicable", "version", "updated_by_name", "updated_at"}, set(current))
@@ -283,20 +285,87 @@ class SavingABoxTest(CaseStudyTestCase):
         self.assertIn("Not applicable", res.data["detail"])
         self.assertEqual(400, self.save_section("a2_sources", None, not_applicable="yes").status_code)
 
-    def test_ticking_not_applicable_stores_nothing_and_counts_as_answered(self):
-        res = self.save_section("a4_family_composition", [{"name": "ignored"}],
-                                not_applicable=True)
+    def row(self, key):
+        return CaseStudySection.objects.get(key=key)
+
+    def tick(self, key, version, **body):
+        """A PUT that only says Not applicable (or not), sending no value."""
+        return self.as_user(self.sw).put(
+            self.section_url(key),
+            {"not_applicable": body.pop("not_applicable"), "expected_version": version, **body},
+            format="json")
+
+    def test_ticking_not_applicable_counts_as_answered_and_returns_the_kept_value(self):
+        self.save_section("a4_family_composition", [{
+            "name": "Maria", "relationship": "Birth mother", "age": "", "sex": "",
+            "civil_status": "", "education": "", "employment_income": ""}])
+        res = self.tick("a4_family_composition", 1, not_applicable=True)
         self.assertEqual(200, res.status_code)
         self.assertTrue(res.data["not_applicable"])
-        self.assertIsNone(res.data["value"])
-        self.assertIsNone(CaseStudySection.objects.get(key="a4_family_composition").value)
+        self.assertEqual("Maria", res.data["value"][0]["name"])
+        self.assertEqual(2, res.data["version"])
         self.assertNotIn("Family composition", res.data["missing"])
+
+    def test_ticking_it_on_a_box_never_filled_counts_as_answered_too(self):
+        res = self.save_section("a4_family_composition", None, not_applicable=True)
+        self.assertEqual(200, res.status_code)
+        self.assertIsNone(res.data["value"])
+        self.assertNotIn("Family composition", res.data["missing"])
+
+    def test_not_applicable_hides_text_it_does_not_delete_it(self):
+        self.save_section("a4_family_description", "Both parents are farmers.")
+        ticked = self.tick("a4_family_description", 1, not_applicable=True)
+        self.assertTrue(ticked.data["not_applicable"])
+        self.assertEqual("Both parents are farmers.", ticked.data["value"])
+        self.assertEqual("Both parents are farmers.", self.row("a4_family_description").value)
+        # Counted as answered while ticked ...
+        self.assertNotIn("Family description", ticked.data["missing"])
+        # ... and the text is still there when it is unticked.
+        unticked = self.tick("a4_family_description", 2, not_applicable=False)
+        self.assertFalse(unticked.data["not_applicable"])
+        self.assertEqual("Both parents are farmers.", unticked.data["value"])
+        self.assertEqual("Both parents are farmers.", self.row("a4_family_description").value)
+        self.assertEqual(3, unticked.data["version"])
+
+    def test_a_null_value_with_the_tick_keeps_the_text_too(self):
+        self.save_section("a4_family_description", "Both parents are farmers.")
+        res = self.save_section("a4_family_description", None, version=1, not_applicable=True)
+        self.assertTrue(res.data["not_applicable"])
+        self.assertEqual("Both parents are farmers.", res.data["value"])
+
+    def test_a_value_sent_with_the_tick_is_cleaned_and_stored_as_usual(self):
+        self.save_section("a4_family_description", "Old text.")
+        res = self.save_section("a4_family_description", "  New text.  ", version=1,
+                                not_applicable=True)
+        self.assertEqual(200, res.status_code)
+        self.assertEqual("New text.", res.data["value"])
+        self.assertEqual("New text.", self.row("a4_family_description").value)
+        # And it is held to the rules: a value that is refused is refused.
+        too_long = self.save_section("a4_family_description", "x" * 20001, version=2,
+                                     not_applicable=True)
+        self.assertEqual(400, too_long.status_code)
+        self.assertEqual("New text.", self.row("a4_family_description").value)
 
     def test_unticking_it_and_writing_again(self):
         self.save_section("a4_family_description", None, not_applicable=True)
         res = self.save_section("a4_family_description", "Both parents are farmers.", version=1)
         self.assertFalse(res.data["not_applicable"])
         self.assertEqual("Both parents are farmers.", res.data["value"])
+
+    def test_saying_null_with_the_tick_off_still_empties_the_box(self):
+        self.save_section("a4_family_description", "Both parents are farmers.")
+        res = self.save_section("a4_family_description", None, version=1)
+        self.assertEqual("", res.data["value"])
+        self.assertIn("Family description", res.data["missing"])
+
+    def test_a_psychologist_does_not_read_text_that_is_hidden(self):
+        self.save_section("a4_family_description", "Both parents are farmers.")
+        self.tick("a4_family_description", 1, not_applicable=True)
+        mine = {s["key"]: s for s in self.as_user(self.sw).get(self.url()).data["sections"]}
+        theirs = {s["key"]: s for s in self.as_user(self.psy).get(self.url()).data["sections"]}
+        self.assertEqual("Both parents are farmers.", mine["a4_family_description"]["value"])
+        self.assertTrue(theirs["a4_family_description"]["not_applicable"])
+        self.assertIsNone(theirs["a4_family_description"]["value"])
 
     def test_a_box_can_be_emptied(self):
         self.save_section("a2_sources", ["The child"])

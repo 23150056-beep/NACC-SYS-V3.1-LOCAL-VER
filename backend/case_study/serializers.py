@@ -146,20 +146,31 @@ def custody_pre_answer(child, on):
     """For a Domestic Relative adoption: has the child been in the adopter's
     custody for two years or more by the date prepared? That is the answer the
     question starts at; the social worker can change it. None for every other
-    type, which is not asked."""
+    type, which is not asked, and None while the placement date is not on the
+    record: unknown is not "no"."""
     if child.type_of_adoption != DOMESTIC_RELATIVE:
         return None
     placed = child.date_of_placement_to_custodian
-    return bool(placed and placed <= _years_before(on, 2))
+    if placed is None:
+        return None
+    return placed <= _years_before(on, 2)
 
 
 # --- Sections ----------------------------------------------------------------------
 
-def section_payload(entry, row, child, case_study):
-    """One box as saved, or as it stands before anything is saved (version 0)."""
+def section_payload(entry, row, child, case_study, hide_kept_text=False):
+    """One box as saved, or as it stands before anything is saved (version 0).
+
+    A box ticked Not applicable keeps its text, hidden (the social worker can
+    untick it to bring it back), so the social worker's own screen gets it.
+    `hide_kept_text` is for readers who only see the report as it prints: the
+    text is not part of it, and is not theirs to read."""
+    value = row.value if row is not None else None
+    if hide_kept_text and row is not None and row.not_applicable:
+        value = None
     return {
         "key": entry["key"],
-        "value": row.value if row is not None else None,
+        "value": value,
         "not_applicable": bool(row and row.not_applicable),
         "version": row.version if row is not None else 0,
         "updated_by_name": (display_name(row.updated_by) or None) if row is not None else None,
@@ -180,10 +191,10 @@ def conflict_current(row):
     }
 
 
-def _sections(case_study, child, keys):
+def _sections(case_study, child, keys, hide_kept_text=False):
     stored = {s.key: s for s in case_study.sections.all()}
     wanted = set(keys)
-    return [section_payload(e, stored.get(e["key"]), child, case_study)
+    return [section_payload(e, stored.get(e["key"]), child, case_study, hide_kept_text)
             for e in SCSR_SECTIONS if e["key"] in wanted]
 
 
@@ -223,7 +234,8 @@ def psychologist_payload(access, case_study):
         "status": case_study.status if case_study else None,
         "date_prepared": iso_date(case_study.date_prepared) if case_study else None,
         "updated_at": iso_datetime(case_study.updated_at) if case_study else None,
-        "sections": _sections(case_study, child, access.readable_keys()) if case_study else [],
+        "sections": (_sections(case_study, child, access.readable_keys(), hide_kept_text=True)
+                     if case_study else []),
         "record_facts": record_facts(child, on),
     }
 

@@ -172,8 +172,15 @@ class SectionView(APIView):
                 raise ValidationError("Not applicable must be ticked or not.")
             if not_applicable and not entry["may_be_na"]:
                 raise ValidationError("This section cannot be marked Not applicable.")
-            # Ticked Not applicable: nothing is kept, whatever else was sent.
-            cleaned = None if not_applicable else clean_value(entry, data.get("value"))
+            # Not applicable hides what is written; it never deletes it, as
+            # changing an answer anywhere in the system hides what it no longer
+            # asks. A value sent with the tick is cleaned and stored as usual;
+            # with none sent, the box keeps what it already holds, so unticking
+            # brings the text back. A request that sends no `value` at all (an
+            # untick that only says so) leaves the text alone too; sending
+            # `value: null` with the tick off still empties the box.
+            keep = "value" not in data or (not_applicable and data["value"] is None)
+            cleaned = None if keep else clean_value(entry, data.get("value"))
             partner = partner_of(key)
             if partner and cleaned is not None:
                 other = case_study.sections.filter(key=partner).first()
@@ -188,16 +195,20 @@ class SectionView(APIView):
                 saved = row is None and self._create(
                     case_study, key, cleaned, not_applicable, request.user)
             else:
+                # Left out of the update when the tick is the only news, so the
+                # stored text is not touched at all.
+                stored = {} if keep else {"value": cleaned}
                 saved = row is not None and CaseStudySection.objects.filter(
                     pk=row.pk, version=expected).update(
-                        value=cleaned, not_applicable=not_applicable,
+                        not_applicable=not_applicable,
                         version=F("version") + 1, updated_by=request.user,
-                        updated_at=now) == 1
+                        updated_at=now, **stored) == 1
             if saved:
                 CaseStudy.objects.filter(pk=case_study.pk).update(updated_at=now)
         if not saved:
             return Response(
-                {"detail": "This section was changed by someone else since you opened it.",
+                {"detail": "This section was saved from another tab or by someone else "
+                           "since you opened it.",
                  "current": shapes.conflict_current(_stored_row(case_study, key))},
                 status=status.HTTP_409_CONFLICT)
 

@@ -61,8 +61,8 @@ class CaseStudySection(models.Model):
         CaseStudy, on_delete=models.CASCADE, related_name="sections")
     key = models.CharField(max_length=60)
     # The shape depends on the section's kind (case_study/validation.py).
-    # Null when the section is ticked Not applicable, and before anything is
-    # saved.
+    # Null before anything is saved. A section ticked Not applicable keeps
+    # whatever it held: the tick hides it, and unticking brings it back.
     value = models.JSONField(null=True, blank=True)
     not_applicable = models.BooleanField(default=False)
     version = models.PositiveIntegerField(default=1)

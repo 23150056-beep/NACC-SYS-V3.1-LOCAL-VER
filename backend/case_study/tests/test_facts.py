@@ -157,10 +157,16 @@ class CustodyAnswerTest(FactsBase):
         study.save()
         self.assertIs(False, self.answer())
 
-    def test_without_a_placement_date_it_starts_at_no(self):
+    def test_without_a_placement_date_it_is_unknown_not_no(self):
         self.update_child(type_of_adoption="Domestic Relative")
         self.start()
+        self.assertIsNone(self.answer())
+        self.update_child(date_of_placement_to_custodian=date(2024, 10, 9))
         self.assertIs(False, self.answer())
+
+    def test_it_is_unknown_before_a_case_study_is_started_too(self):
+        self.update_child(type_of_adoption="Domestic Relative")
+        self.assertIsNone(self.answer())
 
     def test_the_answer_the_social_worker_gave_is_kept_apart_from_it(self):
         self.update_child(type_of_adoption="Domestic Relative",
