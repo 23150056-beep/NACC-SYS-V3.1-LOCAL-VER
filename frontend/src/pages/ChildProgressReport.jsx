@@ -136,7 +136,10 @@ export default function ChildProgressReport() {
   // The Social Case Study Report belongs to Adoption records only, and the tab
   // exists only if the server does not answer 404 for this reader (components/
   // caseStudy/useCaseStudy.js). Above the early returns, like every hook here.
-  const isAdoption = !!data && data !== 'error' && data.child?.case_type === 'Adoption';
+  // `data` is still the last child's until the new one arrives (this component
+  // is re-used between routes), so it counts only once it is this child's.
+  const dataIsThisChild = !!data && data !== 'error' && String(data.child?.id) === String(id);
+  const isAdoption = dataIsThisChild && data.child.case_type === 'Adoption';
   const caseStudy = useCaseStudy(id, isAdoption);
   const hasCaseStudyTab = caseStudy.phase === 'ready' || caseStudy.phase === 'error';
   // Print follows the tab: on the Case study tab the social worker who holds
@@ -147,7 +150,7 @@ export default function ChildProgressReport() {
     && caseStudy.phase === 'ready' && !!caseStudy.study?.exists;
   const printExtras = usePrintExtras(printsCaseStudy);
   // Landed on the tab by a link, or left on it by a record that has none.
-  const caseStudyGone = caseStudy.phase === 'none' || (!!data && data !== 'error' && !isAdoption);
+  const caseStudyGone = caseStudy.phase === 'none' || (dataIsThisChild && !isAdoption);
   useEffect(() => {
     if (tab === 'casestudy' && caseStudyGone) setTab('overview');
   }, [tab, caseStudyGone]);
