@@ -29,7 +29,7 @@ from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from accounts.models import Role
+from accounts.models import AgencyProfile, Role
 from case_study.sections import PAP_CONTACT_ROWS, PAP_SIDES
 from children import demo_custodians, demo_owners, demo_profiles
 from children.models import Child
@@ -131,6 +131,29 @@ def strip_pap_contacts(rows):
             changed = _blank_pap_contacts(fields.get("value")) or changed
         elif row.get("model") == "case_study.casestudyfinal":
             changed = _blank_pap_contacts(fields.get("snapshot")) or changed
+    return changed
+
+
+def use_local_agency(rows, agency):
+    """Give every final copy's `snapshot.agency` the importing machine's agency
+    profile. The exporting machine's agency name, address and Head of Office
+    mean nothing on the demo, whose Settings are the agency's here. Returns True
+    if anything changed."""
+    local = {
+        "agency_name": agency.agency_name,
+        "office_address": agency.office_address,
+        "contact_details": agency.contact_details,
+        "head_of_office_name": agency.head_of_office_name,
+        "head_of_office_title": agency.head_of_office_title,
+    }
+    changed = False
+    for row in rows:
+        if row.get("model") != "case_study.casestudyfinal":
+            continue
+        snapshot = row.get("fields", {}).get("snapshot")
+        if isinstance(snapshot, dict) and snapshot.get("agency") != local:
+            snapshot["agency"] = dict(local)
+            changed = True
     return changed
 
 
@@ -276,6 +299,8 @@ class Command(BaseCommand):
             self.stdout.write("  custodian numbers and consent left behind")
         if strip_pap_contacts(rows):
             self.stdout.write("  adoptive parents' phone numbers and e-mails left behind")
+        if use_local_agency(rows, AgencyProfile.load()):
+            self.stdout.write("  final case studies carry this agency's name and Head of Office")
         social_workers = demo_owners.active_staff()
         imported, moved = rehome_people(rows, psychologists, social_workers)
         self.stdout.write(

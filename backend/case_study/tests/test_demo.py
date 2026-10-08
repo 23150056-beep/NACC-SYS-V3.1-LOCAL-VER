@@ -19,7 +19,7 @@ from django.core.management import call_command
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from accounts.models import Role
+from accounts.models import AgencyProfile, Role
 from case_study import demo_case_studies
 from case_study.completeness import missing_sections
 from case_study.finalize import CannotFinalize, finalize
@@ -28,9 +28,9 @@ from case_study.sections import (
     DVC_NOTARIZED, DVC_SIGNED, PAP_CONTACT_ROWS, PAP_ROWS, SCSR_SECTIONS, applies, entry_for)
 from case_study.tests.base import NOW, TODAY, CaseStudyTestCase, make_user
 from case_study.validation import clean_value
-from children.management.commands.export_demo_data import DEMO_MODELS
+from children.management.commands.export_demo_data import DEMO_MODELS, scrub_rows
 from children.management.commands.import_demo_data import (
-    rehome_people, strip_pap_contacts)
+    rehome_people, strip_pap_contacts, use_local_agency)
 from children.models import Child
 from locations.models import Barangay, Municipality, Province
 
@@ -553,6 +553,10 @@ class ToTheHostedDemoTest(TestCase):
     def test_the_whole_import_with_a_final(self):
         make_user("p@t.ph", Role.PSYCHOLOGIST, "Pia", "Reyes")
         worker = make_user("s@t.ph", Role.STAFF, "Sam", "One")
+        AgencyProfile.objects.create(
+            agency_name="Demo Agency Here", office_address="1 Demo St.",
+            contact_details="", head_of_office_name="Dir. Local Head",
+            head_of_office_title="Regional Director")
         stamp = "2026-08-01T00:00:00Z"
         rows = [
             {"model": "children.child", "pk": 900,
@@ -578,6 +582,11 @@ class ToTheHostedDemoTest(TestCase):
         snapshot = final.snapshot
         self.assertEqual({"name": "Sam One", "license_number": "", "license_valid_until": None},
                          snapshot["preparer"])
+        # The exporting machine's agency means nothing here: this one's is used.
+        self.assertEqual(
+            {"agency_name": "Demo Agency Here", "office_address": "1 Demo St.",
+             "contact_details": "", "head_of_office_name": "Dir. Local Head",
+             "head_of_office_title": "Regional Director"}, snapshot["agency"])
         table = snapshot["sections"]["b1_paps"]["value"]
         self.assertEqual({"full_name": "Maria Reyes", "religion": "Roman Catholic"}, table["female"])
         self.assertEqual({"full_name": "Jose Reyes"}, table["male"])
@@ -594,3 +603,110 @@ class ToTheHostedDemoTest(TestCase):
             f"/api/case-studies/child/{final.case_study.child_id}/finals/{final.pk}/")
         self.assertEqual(200, copy.status_code)
         self.assertEqual("Sam One", copy.data["snapshot"]["preparer"]["name"])
+
+    def test_each_final_copy_takes_the_agency_of_the_machine_it_is_loaded_on(self):
+        rows = [
+            {"model": "case_study.casestudyfinal", "pk": 1,
+             "fields": {"snapshot": self.a_snapshot()}},
+            {"model": "case_study.casestudyfinal", "pk": 2,
+             "fields": {"snapshot": {"sections": {}}}},
+            {"model": "case_study.casestudy", "pk": 3, "fields": {"status": "final"}},
+        ]
+        agency = AgencyProfile(agency_name="Here", office_address="Addr", contact_details="Tel",
+                               head_of_office_name="Dir. H", head_of_office_title="Head")
+        self.assertTrue(use_local_agency(rows, agency))
+        want = {"agency_name": "Here", "office_address": "Addr", "contact_details": "Tel",
+                "head_of_office_name": "Dir. H", "head_of_office_title": "Head"}
+        self.assertEqual(want, rows[0]["fields"]["snapshot"]["agency"])
+        self.assertEqual(want, rows[1]["fields"]["snapshot"]["agency"])
+        # Nothing else in the copy, and no other model, is touched.
+        self.assertEqual("2026-10-01", rows[0]["fields"]["snapshot"]["date_prepared"])
+        self.assertEqual({"model": "case_study.casestudy", "pk": 3,
+                          "fields": {"status": "final"}}, rows[2])
+        self.assertFalse(use_local_agency(rows, agency))
+
+    def test_a_blank_agency_here_blanks_the_copys(self):
+        rows = [{"model": "case_study.casestudyfinal", "pk": 1,
+                 "fields": {"snapshot": self.a_snapshot()}}]
+        self.assertTrue(use_local_agency(rows, AgencyProfile()))
+        self.assertEqual({"agency_name": "", "office_address": "", "contact_details": "",
+                          "head_of_office_name": "", "head_of_office_title": ""},
+                         rows[0]["fields"]["snapshot"]["agency"])
+
+
+class TheExportKeepsRealDetailsOutTest(CaseStudyTestCase):
+    """The file export_demo_data writes never carries a real PRC license or an
+    adoptive parent's phone number, e-mail address or employer address."""
+
+    def setUp(self):
+        super().setUp()
+        study = self.start(date_prepared=date(2026, 10, 1))
+        contact = {"mobile_phone": "09171234567", "home_phone": "0722222222",
+                   "work_phone": "0733333333", "email": "maria@example.com",
+                   "employer_address": "Rizal St., call 09170000000"}
+        self.table = {"female": {"full_name": "Maria Reyes", "religion": "Roman Catholic", **contact},
+                      "male": {"full_name": "Jose Reyes", **contact}}
+        CaseStudySection.objects.create(
+            case_study=study, key="b1_paps", value=self.table, updated_by=self.sw)
+        CaseStudySection.objects.create(
+            case_study=study, key="b4_motivation", value="Call 09171234567 any time.",
+            updated_by=self.sw)
+        snapshot = ToTheHostedDemoTest.a_snapshot()
+        self.final = CaseStudyFinal.objects.create(
+            case_study=study, snapshot=snapshot, finalized_by=self.sw)
+
+    def export(self):
+        path = Path(tempfile.mkdtemp()) / "demo.json"
+        try:
+            call_command("export_demo_data", output=str(path), stdout=StringIO())
+            return json.loads(path.read_text(encoding="utf-8"))
+        finally:
+            shutil.rmtree(path.parent, ignore_errors=True)
+
+    def test_the_file_has_no_license_and_no_contact_rows(self):
+        rows = self.export()
+        text = json.dumps(rows)
+        # Free text elsewhere (the motivation box) is left as written, below.
+        for real in ("0012345", "2027-06-30", "0722222222", "0733333333",
+                     "maria@example.com", "Rizal St., call", "09170000000"):
+            self.assertNotIn(real, text, real)
+        final = next(r for r in rows if r["model"] == "case_study.casestudyfinal")
+        self.assertEqual({"name": "A Social Worker On The Exporting Machine",
+                          "license_number": "", "license_valid_until": None},
+                         final["fields"]["snapshot"]["preparer"])
+        table = final["fields"]["snapshot"]["sections"]["b1_paps"]["value"]
+        self.assertEqual({"full_name": "Maria Reyes", "religion": "Roman Catholic"}, table["female"])
+        self.assertEqual({"full_name": "Jose Reyes"}, table["male"])
+        live = next(r for r in rows if r["model"] == "case_study.casestudysection"
+                    and r["fields"]["key"] == "b1_paps")
+        self.assertEqual({"full_name": "Maria Reyes", "religion": "Roman Catholic"},
+                         live["fields"]["value"]["female"])
+        self.assertEqual({"full_name": "Jose Reyes"}, live["fields"]["value"]["male"])
+
+    def test_free_text_and_everything_else_is_left_as_written(self):
+        rows = self.export()
+        motivation = next(r for r in rows if r["model"] == "case_study.casestudysection"
+                          and r["fields"]["key"] == "b4_motivation")
+        self.assertEqual("Call 09171234567 any time.", motivation["fields"]["value"])
+        final = next(r for r in rows if r["model"] == "case_study.casestudyfinal")
+        self.assertEqual("RACCO 1", final["fields"]["snapshot"]["agency"]["agency_name"])
+        self.assertEqual("2026-10-01", final["fields"]["snapshot"]["date_prepared"])
+        self.assertTrue(any(r["model"] == "children.child" for r in rows))
+
+    def test_this_machines_own_rows_keep_what_they_hold(self):
+        self.export()
+        self.final.refresh_from_db()
+        self.assertEqual("0012345", self.final.snapshot["preparer"]["license_number"])
+        row = CaseStudySection.objects.get(key="b1_paps")
+        self.assertEqual("09171234567", row.value["female"]["mobile_phone"])
+
+    def test_scrubbing_says_whether_it_changed_anything(self):
+        rows = [{"model": "case_study.casestudyfinal", "pk": 1,
+                 "fields": {"snapshot": ToTheHostedDemoTest.a_snapshot()}}]
+        self.assertTrue(scrub_rows(rows))
+        self.assertFalse(scrub_rows(rows))
+        self.assertFalse(scrub_rows([{"model": "children.child", "pk": 1, "fields": {}}]))
+        # A copy with no preparer, or a row with no snapshot, is left alone.
+        self.assertFalse(scrub_rows([
+            {"model": "case_study.casestudyfinal", "pk": 2, "fields": {"snapshot": {}}},
+            {"model": "case_study.casestudyfinal", "pk": 3, "fields": {}}]))

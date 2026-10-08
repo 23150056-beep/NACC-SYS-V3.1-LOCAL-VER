@@ -11,9 +11,20 @@ four would collide on the unique email.
 
 AssistantJob is excluded too: it stores the questions people typed, and those
 routinely name a child.
+
+A final copy of a case study carries its preparer's PRC license number, and the
+adoptive parents' table may carry phone numbers and e-mail addresses typed on
+this machine. Neither belongs in a file that leaves it, so `scrub_rows` blanks
+them before anything is written; the import blanks them again, so a fixture
+exported before this existed is still safe to load.
 """
+import json
+from io import StringIO
+
 from django.core.management import call_command
 from django.core.management.base import BaseCommand
+
+from children.management.commands.import_demo_data import strip_pap_contacts
 
 # Everything seed_demo_data creates, minus anything identifying a real person.
 DEMO_MODELS = [
@@ -37,6 +48,26 @@ DEMO_MODELS = [
 ]
 
 
+def scrub_rows(rows):
+    """Take what a real person typed out of the exported rows, in place:
+    every final copy's preparer license, and every phone number, e-mail address
+    and employer address in the adoptive parents' table (the live box and each
+    final copy of it). Returns True if anything changed."""
+    changed = strip_pap_contacts(rows)
+    for row in rows:
+        if row.get("model") != "case_study.casestudyfinal":
+            continue
+        snapshot = row.get("fields", {}).get("snapshot")
+        preparer = snapshot.get("preparer") if isinstance(snapshot, dict) else None
+        if not isinstance(preparer, dict):
+            continue
+        for field, blank in (("license_number", ""), ("license_valid_until", None)):
+            if preparer.get(field) != blank:
+                preparer[field] = blank
+                changed = True
+    return changed
+
+
 class Command(BaseCommand):
     help = "Dump the fictional caseload to a fixture for a demo deployment."
 
@@ -48,8 +79,12 @@ class Command(BaseCommand):
         from children.models import Child
 
         path = options["output"]
+        dump = StringIO()
+        call_command("dumpdata", *DEMO_MODELS, indent=2, stdout=dump)
+        rows = json.loads(dump.getvalue())
+        scrub_rows(rows)
         with open(path, "w", encoding="utf-8") as handle:
-            call_command("dumpdata", *DEMO_MODELS, indent=2, stdout=handle)
+            json.dump(rows, handle, indent=2)
 
         self.stdout.write(
             f"export_demo_data: {Child.objects.count()} children written to "
