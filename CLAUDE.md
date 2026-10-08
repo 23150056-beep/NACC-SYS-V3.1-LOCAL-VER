@@ -1439,7 +1439,7 @@ react-big-calendar's own `role="rowgroup"` markup rather than ours.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,151 tests, ~23 min
+cd backend && .venv/Scripts/python.exe manage.py test   # 2,230 tests, ~23 min
 cd frontend && npm run lint && npm run build
 ```
 
