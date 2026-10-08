@@ -845,6 +845,26 @@ App `case_study` (never `adoption`, see "Removed").
   (`case_study/demo_case_studies.py`); the import re-homes its user fields to
   the child's SW and blanks every phone, email and employer address in the
   PAP table.
+- **The screen** (`components/caseStudy/`): one editor per section kind, so
+  all three blocks are editable. Each box saves with `useConfirm()`; "Save
+  all" confirms once and stops at the first refusal. Unsaved typing is kept in
+  `localStorage` under `nacc-draft:case-study:<user>:<child>:<key>` and offered
+  back; logout clears the `nacc-draft:` prefix. On a 409 the SW chooses "Load
+  the saved version" or "Keep mine" - neither text is lost without a choice.
+- **Print follows the tab**: on the Case study tab the page's Print button
+  prints the SCSR (`ScsrPrint`), saved values only, and asks first when
+  something is unsaved; anywhere else it prints the psychological report.
+  Only the SW gets it.
+- **Every print used to come out ONE PAGE long** (found 8 Oct 2026). The app
+  shell is a fixed 100vh with hidden overflow so only `<main>` scrolls, and on
+  paper that clipped everything after page one - the psychological report had
+  been losing its recommendations and signature block. index.css now lets
+  `#root`, `.racco-shell` and `.racco-shell-row` go to auto height in print.
+  Check a printed page COUNT, not just the first page.
+- `/children?edit=<id>` opens the record form for that child ("Edit on the
+  record" from Part I). Activity reads "Started a case study for X" and opens
+  `?tab=casestudy`; P2's events must use the actions `finalized` and
+  `reopened`, which `utils/activity.js` already words.
 
 ## The record form (Add Record)
 
