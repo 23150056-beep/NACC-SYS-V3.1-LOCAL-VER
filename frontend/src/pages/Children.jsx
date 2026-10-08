@@ -326,6 +326,23 @@ export default function Children() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenCreate, form]);
 
+  /* /children?edit=<id> opens that record's edit form, the way the case study's
+   * "Edit on the record" asks. Waits for the list, opens it once, and clears the
+   * parameter whether or not the record turned out to be editable here. */
+  const editParam = searchParams.get('edit');
+  useEffect(() => {
+    if (!editParam || form || children.length === 0) return;
+    const target = children.find((c) => String(c.id) === editParam);
+    const next = new URLSearchParams(searchParams);
+    next.delete('edit');
+    setSearchParams(next, { replace: true });
+    if (target && canEditRecord(target)) openEdit(target);
+    else toast.error('That record cannot be edited from here.');
+    // One-shot, like openCreate above: depending on the helpers would reopen
+    // the form each time it was closed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editParam, form, children]);
+
   const save = async (e) => {
     e.preventDefault();
     const name = form.id ? form.fullname

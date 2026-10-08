@@ -45,10 +45,12 @@ export function AuthProvider({ children }) {
   const logout = () => {
     clearTokens();
     // Clear any unsaved intake drafts (keyed per-user) so they never leak to
-    // whichever account logs in next on this workstation.
+    // whichever account logs in next on this workstation. `nacc-draft:` is the
+    // case study's unsaved text (components/caseStudy/drafts.js), which can
+    // hold an adoptive parent's income and must not outlive the session.
     try {
       Object.keys(localStorage)
-        .filter((k) => k.startsWith('nacc-child-draft:'))
+        .filter((k) => k.startsWith('nacc-child-draft:') || k.startsWith('nacc-draft:'))
         .forEach((k) => localStorage.removeItem(k));
     } catch { /* private browsing / storage unavailable */ }
     setUser(null);
