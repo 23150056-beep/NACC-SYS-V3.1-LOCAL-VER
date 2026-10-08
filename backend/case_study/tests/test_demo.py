@@ -1,4 +1,4 @@
-"""Demo case studies: the seeder's drafts, and their way to a hosted branch.
+"""Demo case studies: the seeder's drafts and finals, and their way to a hosted branch.
 
 Seeded data must satisfy the rules the endpoint enforces (CLAUDE.md, Demo
 data). A rule and a seeder maintained separately drift, and a test that only
@@ -22,8 +22,10 @@ from rest_framework.test import APIClient
 from accounts.models import Role
 from case_study import demo_case_studies
 from case_study.completeness import missing_sections
+from case_study.finalize import CannotFinalize, finalize
 from case_study.models import CaseStudy, CaseStudyFinal, CaseStudySection
-from case_study.sections import DVC_NOTARIZED, DVC_SIGNED, PAP_ROWS, applies, entry_for
+from case_study.sections import (
+    DVC_NOTARIZED, DVC_SIGNED, PAP_CONTACT_ROWS, PAP_ROWS, SCSR_SECTIONS, applies, entry_for)
 from case_study.tests.base import NOW, TODAY, CaseStudyTestCase, make_user
 from case_study.validation import clean_value
 from children.management.commands.export_demo_data import DEMO_MODELS
@@ -54,7 +56,7 @@ class SeededDraftsAreWhatTheEndpointWouldTake(CaseStudyTestCase):
             for i in range(n)]
         return made
 
-    def test_every_third_adoption_child_gets_a_draft(self):
+    def test_every_third_adoption_child_gets_a_draft_and_a_few_others_a_final(self):
         kids = self.children(7)
         Child.objects.create(first_name="Fos", last_name="Ter", case_type="Foster Care",
                              social_worker=self.sw, birth_date=date(2015, 1, 1))
@@ -62,9 +64,22 @@ class SeededDraftsAreWhatTheEndpointWouldTake(CaseStudyTestCase):
             list(Child.objects.order_by("pk")), today=TODAY)
         # The setUpTestData child is the first adoption child, then the seven.
         adoption = [self.child] + kids
-        self.assertEqual(3, made)
-        self.assertEqual({c.pk for c in adoption[::3]},
-                         set(CaseStudy.objects.values_list("child_id", flat=True)))
+        drafts = {c.pk for c in adoption[::3]}
+        finals = {c.pk for c in adoption[1::3][:demo_case_studies.FINALS]}
+        self.assertEqual(len(drafts) + len(finals), made)
+        self.assertEqual(drafts, set(CaseStudy.objects.filter(status=CaseStudy.DRAFT)
+                                     .values_list("child_id", flat=True)))
+        self.assertEqual(finals, set(CaseStudy.objects.filter(status=CaseStudy.FINAL)
+                                     .values_list("child_id", flat=True)))
+        self.assertFalse(drafts & finals)
+        self.assertEqual(3, len(finals))
+
+    def test_at_most_three_are_final(self):
+        self.children(20)
+        demo_case_studies.install_case_studies(list(Child.objects.order_by("pk")), today=TODAY)
+        self.assertEqual(demo_case_studies.FINALS,
+                         CaseStudy.objects.filter(status=CaseStudy.FINAL).count())
+        self.assertGreater(CaseStudy.objects.filter(status=CaseStudy.DRAFT).count(), 1)
 
     def test_running_it_again_adds_nothing(self):
         self.children(7)
@@ -73,6 +88,7 @@ class SeededDraftsAreWhatTheEndpointWouldTake(CaseStudyTestCase):
         sections = CaseStudySection.objects.count()
         self.assertEqual(0, demo_case_studies.install_case_studies(everyone, today=TODAY))
         self.assertEqual(sections, CaseStudySection.objects.count())
+        self.assertEqual(3, CaseStudyFinal.objects.count())
 
     def test_a_child_with_no_social_worker_gets_none(self):
         Child.objects.filter(pk=self.child.pk).update(social_worker=None)
@@ -84,10 +100,11 @@ class SeededDraftsAreWhatTheEndpointWouldTake(CaseStudyTestCase):
         demo_case_studies.install_case_studies(list(Child.objects.order_by("pk")), today=TODAY)
         for study in CaseStudy.objects.select_related("child"):
             self.assertEqual(study.child.social_worker, study.created_by)
-            self.assertEqual(CaseStudy.DRAFT, study.status)
             for section in study.sections.all():
                 self.assertEqual(study.child.social_worker, section.updated_by)
                 self.assertEqual(1, section.version)
+        for final in CaseStudyFinal.objects.select_related("case_study__child"):
+            self.assertEqual(final.case_study.child.social_worker, final.finalized_by)
 
     def test_every_seeded_section_passes_the_real_rules_for_every_kind_of_child(self):
         for turn in range(3):
@@ -118,7 +135,7 @@ class SeededDraftsAreWhatTheEndpointWouldTake(CaseStudyTestCase):
     def test_the_drafts_stored_pass_the_rules_again_and_are_only_partly_filled(self):
         self.children(13)
         demo_case_studies.install_case_studies(list(Child.objects.order_by("pk")), today=TODAY)
-        studies = list(CaseStudy.objects.all())
+        studies = list(CaseStudy.objects.filter(status=CaseStudy.DRAFT))
         self.assertGreaterEqual(len(studies), 4)
         for study in studies:
             for section in study.sections.all():
@@ -137,7 +154,7 @@ class SeededDraftsAreWhatTheEndpointWouldTake(CaseStudyTestCase):
     def test_the_drafts_are_not_all_filled_to_the_same_depth(self):
         self.children(13)
         demo_case_studies.install_case_studies(list(Child.objects.order_by("pk")), today=TODAY)
-        depths = {s.sections.count() for s in CaseStudy.objects.all()}
+        depths = {s.sections.count() for s in CaseStudy.objects.filter(status=CaseStudy.DRAFT)}
         self.assertGreater(len(depths), 1)
 
     def test_no_seeded_text_names_a_person_or_gives_a_number(self):
@@ -189,6 +206,138 @@ class SeededDraftsAreWhatTheEndpointWouldTake(CaseStudyTestCase):
         self.assertGreater(isa.data["missing_count"], 0)
 
 
+class SeededFinalsAreWhatTheEndpointWouldMakeTest(CaseStudyTestCase):
+    """A seeded final went through `finalize()`, so it can only exist if it
+    passed `missing_sections()` - and these hold that to every kind of child."""
+
+    def adoption(self, category, adoption, name="Demo", **extra):
+        return Child.objects.create(
+            first_name=name, last_name=f"{category[:3]}{adoption[:3]}",
+            birth_date=date(2015, 5, 5), gender="Female", case_type="Adoption",
+            case_category=category, type_of_adoption=adoption,
+            date_of_admission=TODAY - timedelta(days=90),
+            social_worker=self.sw2, assigned_psychologist=self.psy, **extra)
+
+    def test_every_kind_of_child_can_be_given_a_final_that_passes_the_real_rules(self):
+        for category in CATEGORIES:
+            for adoption in ("Regular", "Domestic Relative", "Step-parent", "Adult", "IP"):
+                for turn in range(3):
+                    child = self.adoption(category, adoption, name=f"T{turn}")
+                    label = f"{category} / {adoption} / turn {turn}"
+                    demo_case_studies._write_final(child, turn, TODAY)
+                    study = CaseStudy.objects.get(child=child)
+                    self.assertEqual(CaseStudy.FINAL, study.status, label)
+                    self.assertEqual([], missing_sections(study), label)
+                    self.assertIsNotNone(study.date_prepared, label)
+                    final = CaseStudyFinal.objects.get(case_study=study)
+                    wanted = [e["key"] for e in SCSR_SECTIONS if applies(e, child, study)]
+                    self.assertEqual(wanted, list(final.snapshot["sections"]), label)
+                    for key, box in final.snapshot["sections"].items():
+                        entry = entry_for(key)
+                        if box["not_applicable"]:
+                            self.assertTrue(entry["may_be_na"], label)
+                        else:
+                            self.assertEqual(
+                                box["value"], clean_value(entry, box["value"], today=TODAY),
+                                f"{label} {key}")
+
+    def test_a_seeded_final_is_complete_in_every_block(self):
+        child = self.adoption("Surrendered", "Regular")
+        demo_case_studies._write_final(child, 0, TODAY)
+        study = CaseStudy.objects.get(child=child)
+        keys = set(study.sections.values_list("key", flat=True))
+        self.assertTrue({"a2_sources", "b1_paps", "b17_adoption_telling", "c1_placement",
+                         "c6_recommendation", "c3_stc_report"} <= keys)
+        self.assertEqual([], missing_sections(study))
+
+    def test_a_domestic_relative_with_long_custody_has_no_placement_history(self):
+        child = self.adoption("Surrendered", "Domestic Relative",
+                              date_of_placement_to_custodian=TODAY - timedelta(days=4 * 365))
+        demo_case_studies._write_final(child, 0, TODAY)
+        study = CaseStudy.objects.get(child=child)
+        self.assertTrue(study.custody_over_two_years)
+        self.assertNotIn("c1_placement", CaseStudyFinal.objects.get().snapshot["sections"])
+        self.assertEqual([], missing_sections(study))
+
+    def test_a_seeded_final_cannot_exist_if_it_is_incomplete(self):
+        child = self.adoption("Surrendered", "Regular")
+        boxes, custody = demo_case_studies.complete_for(child, 0, TODAY, TODAY)
+        del boxes["b4_motivation"]
+        study = CaseStudy.objects.create(
+            child=child, created_by=self.sw2, date_prepared=TODAY, custody_over_two_years=custody)
+        for key, (value, na) in boxes.items():
+            CaseStudySection.objects.create(
+                case_study=study, key=key, value=value, not_applicable=na, updated_by=self.sw2)
+        with self.assertRaises(CannotFinalize) as caught:
+            finalize(study, self.sw2)
+        self.assertEqual(["Motivation to adopt"], caught.exception.missing)
+        self.assertIn("Motivation to adopt", str(caught.exception))
+        self.assertEqual(0, CaseStudyFinal.objects.count())
+        self.assertEqual(CaseStudy.DRAFT, CaseStudy.objects.get(pk=study.pk).status)
+
+    def test_the_adoptive_parents_have_names_dates_and_no_contact_rows(self):
+        for turn in range(3):
+            child = self.adoption("Surrendered", "Regular", name=f"P{turn}")
+            demo_case_studies._write_final(child, turn, TODAY)
+            table = CaseStudyFinal.objects.get(case_study__child=child).snapshot[
+                "sections"]["b1_paps"]["value"]
+            self.assertTrue(table["female"]["full_name"])
+            self.assertTrue(table["female"]["date_of_birth"])
+            self.assertTrue(table["female"]["religion"])
+            # One in three has a single adopter, which the table allows.
+            self.assertEqual(turn == 2, table["male"] == {})
+            for side in table.values():
+                self.assertTrue(set(PAP_CONTACT_ROWS).isdisjoint(side), side)
+            self.assertFalse(CONTACT.search(text_of(table)))
+
+    def test_nothing_in_a_seeded_final_gives_a_number_or_an_address_to_write_to(self):
+        for turn, category in enumerate(CATEGORIES):
+            child = self.adoption(category, "Regular", name=f"C{turn}")
+            demo_case_studies._write_final(child, turn, TODAY)
+        for final in CaseStudyFinal.objects.all():
+            self.assertFalse(CONTACT.search(text_of(final.snapshot["sections"])))
+            self.assertFalse(CONTACT.search(text_of(final.snapshot["preparer"])))
+            self.assertEqual(
+                {"name": "Rosa Santos", "license_number": "", "license_valid_until": None},
+                final.snapshot["preparer"])
+
+    def test_the_dates_are_in_order_and_never_in_the_future(self):
+        child = self.adoption("Surrendered", "Regular")
+        demo_case_studies._write_final(child, 0, TODAY)
+        snap = CaseStudyFinal.objects.get().snapshot
+        self.assertLess(snap["date_prepared"], TODAY.isoformat())
+        place = snap["sections"]["c1_placement"]["value"]
+        self.assertLessEqual(place["matching_date"], place["accepted_date"])
+        self.assertLessEqual(place["accepted_date"], place["entrustment_date"])
+        self.assertLessEqual(place["entrustment_date"], TODAY.isoformat())
+        self.assertLessEqual(snap["sections"]["c4_measurements"]["value"]["measured_on"],
+                             TODAY.isoformat())
+
+    def test_the_social_worker_and_the_psychologist_read_a_seeded_final(self):
+        child = self.adoption("Surrendered", "Regular")
+        demo_case_studies._write_final(child, 0, TODAY)
+        url = f"/api/case-studies/child/{child.pk}/"
+        mine = self.as_user(self.sw2).get(url).data
+        self.assertEqual("final", mine["status"])
+        self.assertTrue(mine["read_only"])
+        self.assertFalse(mine["can_finalize"])
+        self.assertEqual(1, len(mine["finals"]))
+        self.assertEqual("Rosa Santos", mine["finals"][0]["finalized_by_name"])
+        copy = self.as_user(self.sw2).get(f"{url}finals/{mine['finals'][0]['id']}/")
+        self.assertEqual(200, copy.status_code)
+        theirs = self.as_user(self.psy).get(url).data
+        self.assertEqual("final", theirs["status"])
+        self.assertIsNotNone(theirs["last_finalized_at"])
+        self.assertEqual(0, self.as_user(self.isa).get(url).data["missing_count"])
+        # And the social worker can reopen it and finalize it again.
+        self.assertEqual(200, self.as_user(self.sw2).post(f"{url}reopen/", {}, format="json").status_code)
+        again = self.as_user(self.sw2).post(
+            f"{url}final/", {"expected_updated_at": self.as_user(self.sw2).get(url).data["updated_at"]},
+            format="json")
+        self.assertEqual(200, again.status_code, again.data)
+        self.assertEqual(2, len(again.data["finals"]))
+
+
 @override_settings(DEBUG=True)
 class SeederTest(TestCase):
     def setUp(self):
@@ -196,24 +345,38 @@ class SeederTest(TestCase):
         clock.start()
         self.addCleanup(clock.stop)
 
-    def test_the_seeder_gives_adoption_children_a_draft(self):
+    def seed(self, children):
         province = Province.objects.create(psgc_code="012800000", name="Ilocos Norte")
         town = Municipality.objects.create(psgc_code="012812000", name="Laoag City",
                                            province=province)
         Barangay.objects.create(psgc_code="012812001", name="Barangay 1", municipality=town)
         out = StringIO()
-        call_command("seed_demo_data", children=30, stdout=out)
+        call_command("seed_demo_data", children=children, stdout=out)
+        return out.getvalue()
+
+    def test_the_seeder_gives_adoption_children_a_draft_and_a_few_a_final(self):
+        out = self.seed(60)
         adoption = list(Child.objects.filter(case_type="Adoption").order_by("pk"))
-        self.assertGreaterEqual(len(adoption), 3, "the seed should draw some adoptions")
-        made = CaseStudy.objects.count()
-        self.assertEqual(len(adoption[::3]), made)
-        self.assertIn(f"{made} case study drafts written", out.getvalue())
+        self.assertGreaterEqual(len(adoption), 7, "the seed should draw some adoptions")
+        drafts = CaseStudy.objects.filter(status=CaseStudy.DRAFT).count()
+        finals = CaseStudy.objects.filter(status=CaseStudy.FINAL).count()
+        self.assertEqual(len(adoption[::3]), drafts)
+        self.assertGreaterEqual(finals, 2)
+        self.assertLessEqual(finals, demo_case_studies.FINALS)
+        self.assertEqual(finals, CaseStudyFinal.objects.count())
+        self.assertIn(f"case studies written: {drafts + finals}, {finals} of them final", out)
         for section in CaseStudySection.objects.select_related("case_study__child"):
             entry = entry_for(section.key)
             self.assertTrue(applies(entry, section.case_study.child, section.case_study))
             if not section.not_applicable:
                 self.assertEqual(section.value, clean_value(entry, section.value, today=TODAY))
-        self.assertEqual(0, CaseStudyFinal.objects.count())
+
+    def test_what_the_default_caseload_shows(self):
+        # The size a demo is usually built at: a draft to write in AND a final
+        # to print, reopen and finalize again.
+        self.seed(40)
+        self.assertGreaterEqual(CaseStudy.objects.filter(status=CaseStudy.DRAFT).count(), 1)
+        self.assertGreaterEqual(CaseStudy.objects.filter(status=CaseStudy.FINAL).count(), 1)
 
 
 class ToTheHostedDemoTest(TestCase):
@@ -331,3 +494,103 @@ class ToTheHostedDemoTest(TestCase):
         self.assertEqual(200, res.status_code)
         saved = {s["key"]: s for s in res.data["sections"]}
         self.assertEqual("Maria Reyes", saved["b1_paps"]["value"]["female"]["full_name"])
+
+    # --- the final copies --------------------------------------------------------
+
+    @staticmethod
+    def a_snapshot():
+        contact = {"mobile_phone": "09171234567", "home_phone": "0722222222",
+                   "work_phone": "0733333333", "email": "maria@example.com",
+                   "employer_address": "Rizal St., call 09170000000"}
+        return {
+            "date_prepared": "2026-10-01",
+            "child": {"id": 900, "fullname": "Demo Child"},
+            "sections": {
+                "b1_paps": {"value": {
+                    "female": {"full_name": "Maria Reyes", "religion": "Roman Catholic", **contact},
+                    "male": {"full_name": "Jose Reyes", **contact}}, "not_applicable": False},
+                "b4_motivation": {"value": "Call 09171234567 any time.", "not_applicable": False},
+            },
+            "preparer": {"name": "A Social Worker On The Exporting Machine",
+                         "license_number": "0012345", "license_valid_until": "2027-06-30"},
+            "agency": {"agency_name": "RACCO 1"},
+        }
+
+    def test_a_final_copys_preparer_becomes_the_social_worker_here_with_no_license(self):
+        psychologist = make_user("p@t.ph", Role.PSYCHOLOGIST, "Pia", "Reyes")
+        staff = [make_user("s1@t.ph", Role.STAFF, "Sam", "One"),
+                 make_user("s2@t.ph", Role.STAFF, "Sue", "Two")]
+        rows = [
+            {"model": "children.child", "pk": 10, "fields": {"social_worker": 601}},
+            {"model": "children.child", "pk": 11, "fields": {"social_worker": 601}},
+            {"model": "case_study.casestudy", "pk": 20, "fields": {"child": 11}},
+            {"model": "case_study.casestudyfinal", "pk": 31,
+             "fields": {"case_study": 20, "finalized_by": 601, "snapshot": self.a_snapshot()}},
+        ]
+        rehome_people(rows, [psychologist], staff)
+        snapshot = rows[3]["fields"]["snapshot"]
+        # The second child went to the second social worker.
+        self.assertEqual({"name": "Sue Two", "license_number": "", "license_valid_until": None},
+                         snapshot["preparer"])
+        self.assertEqual(staff[1].pk, rows[3]["fields"]["finalized_by"])
+        # Nothing else in the copy is touched.
+        self.assertEqual("RACCO 1", snapshot["agency"]["agency_name"])
+        self.assertEqual("2026-10-01", snapshot["date_prepared"])
+
+    def test_with_no_social_worker_here_the_preparer_is_left_unnamed(self):
+        psychologist = make_user("p@t.ph", Role.PSYCHOLOGIST, "Pia", "Reyes")
+        rows = [
+            {"model": "children.child", "pk": 10, "fields": {"social_worker": 601}},
+            {"model": "case_study.casestudy", "pk": 20, "fields": {"child": 10}},
+            {"model": "case_study.casestudyfinal", "pk": 31,
+             "fields": {"case_study": 20, "finalized_by": 601, "snapshot": self.a_snapshot()}},
+        ]
+        rehome_people(rows, [psychologist], [])
+        self.assertEqual({"name": "", "license_number": "", "license_valid_until": None},
+                         rows[2]["fields"]["snapshot"]["preparer"])
+        self.assertIsNone(rows[2]["fields"]["finalized_by"])
+
+    def test_the_whole_import_with_a_final(self):
+        make_user("p@t.ph", Role.PSYCHOLOGIST, "Pia", "Reyes")
+        worker = make_user("s@t.ph", Role.STAFF, "Sam", "One")
+        stamp = "2026-08-01T00:00:00Z"
+        rows = [
+            {"model": "children.child", "pk": 900,
+             "fields": {"fullname": "Demo Child", "case_type": "Adoption",
+                        "assigned_psychologist": 501, "social_worker": 601,
+                        "created_at": stamp, "updated_at": stamp}},
+            {"model": "case_study.casestudy", "pk": 5,
+             "fields": {"child": 900, "status": "final", "created_by": 601,
+                        "date_prepared": "2026-10-01", "custody_over_two_years": None,
+                        "created_at": stamp, "updated_at": stamp}},
+            {"model": "case_study.casestudyfinal", "pk": 7,
+             "fields": {"case_study": 5, "finalized_by": 601, "finalized_at": stamp,
+                        "snapshot": self.a_snapshot()}},
+        ]
+        path = Path(tempfile.mkdtemp()) / "demo.json"
+        path.write_text(json.dumps(rows), encoding="utf-8")
+        try:
+            call_command("import_demo_data", fixture=str(path), stdout=StringIO())
+        finally:
+            shutil.rmtree(path.parent, ignore_errors=True)
+        final = CaseStudyFinal.objects.get()
+        self.assertEqual(worker, final.finalized_by)
+        snapshot = final.snapshot
+        self.assertEqual({"name": "Sam One", "license_number": "", "license_valid_until": None},
+                         snapshot["preparer"])
+        table = snapshot["sections"]["b1_paps"]["value"]
+        self.assertEqual({"full_name": "Maria Reyes", "religion": "Roman Catholic"}, table["female"])
+        self.assertEqual({"full_name": "Jose Reyes"}, table["male"])
+        # Free text elsewhere is left as the author wrote it; only the table
+        # of adoptive parents is read for contact rows.
+        self.assertIn("09171234567", snapshot["sections"]["b4_motivation"]["value"])
+        # And the social worker it was dealt to can open it.
+        client = APIClient()
+        client.force_authenticate(worker)
+        listing = client.get(f"/api/case-studies/child/{final.case_study.child_id}/")
+        self.assertEqual(200, listing.status_code)
+        self.assertEqual(1, len(listing.data["finals"]))
+        copy = client.get(
+            f"/api/case-studies/child/{final.case_study.child_id}/finals/{final.pk}/")
+        self.assertEqual(200, copy.status_code)
+        self.assertEqual("Sam One", copy.data["snapshot"]["preparer"]["name"])

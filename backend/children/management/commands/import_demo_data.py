@@ -142,6 +142,16 @@ _CASE_STUDY_MODELS = {"case_study.casestudy", "case_study.casestudysection",
                       "case_study.casestudyfinal"}
 
 
+def _rehome_preparer(fields, name):
+    """Replace the preparer inside a final copy's snapshot: the social worker
+    here, by name, with no license. The exporting machine's person and PRC
+    number are not this database's, and a license number is the real thing."""
+    snapshot = fields.get("snapshot")
+    if isinstance(snapshot, dict):
+        snapshot["preparer"] = {"name": name, "license_number": "",
+                                "license_valid_until": None}
+
+
 def rehome_people(rows, psychologists, social_workers):
     """Give the fixture's children, and everything recorded about them, to
     accounts that exist here. Returns (children dealt, links moved).
@@ -163,6 +173,9 @@ def rehome_people(rows, psychologists, social_workers):
     A case study, its sections and its final copies are the exception: every
     person they name is the child's social worker, who is the only one who
     writes them, and a child with no social worker here leaves them unnamed.
+    A final copy also carries its preparer's name and PRC license number inside
+    its snapshot, which are the exporting machine's person's: they become the
+    social worker's name here, with the license left blank (`_rehome_preparer`).
     """
     User = get_user_model()
     children = sorted((r for r in rows if r.get("model") == "children.child"),
@@ -183,6 +196,8 @@ def rehome_people(rows, psychologists, social_workers):
             if was is not None and now is not None:
                 caseload.setdefault(was, now)
 
+    names = {u.pk: u.fullname for u in social_workers}
+
     # A section or a final copy names its case study, not the child.
     study_child = {r["pk"]: r.get("fields", {}).get("child")
                    for r in rows if r.get("model") == "case_study.casestudy"}
@@ -196,6 +211,8 @@ def rehome_people(rows, psychologists, social_workers):
         if "case_study" in fields:
             child = study_child.get(fields["case_study"])
         own_was, own_now = local.get(child, ()), new.get(child, (None, None))
+        if row["model"] == "case_study.casestudyfinal":
+            _rehome_preparer(fields, names.get(own_now[1], ""))
         for field in apps.get_model(row["model"])._meta.concrete_fields:
             if not (field.is_relation and field.related_model is User):
                 continue
