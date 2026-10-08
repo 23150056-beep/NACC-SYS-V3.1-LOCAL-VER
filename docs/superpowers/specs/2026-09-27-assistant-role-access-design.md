@@ -207,15 +207,18 @@ cheapest ideas are the ones that **add no tool and change no prompt**.
    referral" (social worker). Build it as a role rule in (2) rather than a tool
    unless the card shows people ask it in words that route elsewhere.
 
-### Decisions for the owner
+### Decisions for the owner (answered 8 Oct 2026)
 
-- **Should social workers get pre-session briefs?** They can today. The brief
-  only uses the remarks they can already read on the Remarks tab, so nothing
-  leaks. But its instructions say it is "for a licensed psychologist before a
-  session", and a social worker does not hold one. Either hide the button from
-  staff, or build (6) for them.
+- **Should social workers get pre-session briefs?** They could, but the brief
+  was written "for a licensed psychologist" and built from remarks, which a
+  social worker cannot write, so for them it was always empty. **Decided:
+  build (6).** SWs get a "Case brief": facts made for them first (referral and
+  its confirmed summary, the psychologist's status, consent, custodian texts,
+  sessions, survey), with a written part only after `ai_eval` on the owner's
+  PC. The written brief is the psychologist's only. **The ISA (IT support)
+  gets the facts and never a written brief**: a written brief sends a child's
+  notes to the model, and IT support has no case reason to ask for that.
 - **Should a reader who cannot write be able to *read* an AI summary draft
-  without saving it?** At present, anyone who cannot write the document sees
-  only the confirmed summary. A read-only draft, returned and not stored, would
-  give them the reading aid without the write. It is cheap to build, but it
-  is a second kind of summary that people will have to tell apart.
+  without saving it?** **Decided: no - confirmed only.** Two kinds of summary
+  on screen is one too many, and an unchecked draft about a child could pass
+  for the psychologist's own words.
