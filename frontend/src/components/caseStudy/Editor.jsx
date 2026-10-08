@@ -44,6 +44,9 @@ const pickSection = (out) => ({
   updated_by_name: out.updated_by_name, updated_at: out.updated_at, applies: out.applies,
 });
 
+// How many of the sections still to complete the header names before "Show all".
+const LISTED = 6;
+
 const UNSAVED = (key) => ({ key, value: null, not_applicable: false, version: 0, updated_by_name: null, updated_at: null, applies: true });
 
 function jump(id) {
@@ -71,6 +74,7 @@ export default function Editor({ child, cs }) {
   const [dateError, setDateError] = useState('');
   const [headerBusy, setHeaderBusy] = useState(false);
   const [custodyError, setCustodyError] = useState('');
+  const [allMissing, setAllMissing] = useState(false);
 
   const savedMap = useMemo(() => new Map((study.sections || []).map((s) => [s.key, s])), [study.sections]);
   const savedOf = useCallback((key) => savedMap.get(key) || UNSAVED(key), [savedMap]);
@@ -394,24 +398,30 @@ export default function Editor({ child, cs }) {
                   ? (study.custody_pre_answer === null
                     ? 'Not answered. The record has no date of placement, so there is nothing to suggest.'
                     : `Suggested from the placement date: ${study.custody_pre_answer ? 'Yes' : 'No'}. Not answered yet.`)
-                  : 'A yes hides Placement History (C.I), which is asked only when the child was with the adopters for less.'}
+                  : "A yes hides Placement History (C.I): it is not asked when the child had been in the adopters' custody for more than two years."}
               </div>
               {custodyError && <p role="alert" style={{ margin: '6px 0 0', color: 'var(--red-700)', fontSize: 13.5, fontWeight: 600 }}>{custodyError}</p>}
             </fieldset>
           )}
 
           {toComplete.length > 0 ? (
-            <div style={{ fontSize: 13, color: 'var(--text-body)' }}>
+            <div style={{ fontSize: 13, color: 'var(--text-body)', lineHeight: 1.7 }}>
               <strong>Still to complete:</strong>{' '}
-              {toComplete.map((m, i) => (
+              {(allMissing ? toComplete : toComplete.slice(0, LISTED)).map((m, i, shownList) => (
                 <span key={m.title}>
                   <button type="button" onClick={() => jump(m.target)}
                     style={{ background: 'none', border: 'none', padding: 0, color: 'var(--blue-700)', fontFamily: 'inherit', fontSize: 'inherit', textDecoration: 'underline', cursor: 'pointer' }}>
                     {m.title}
                   </button>
-                  {i < toComplete.length - 1 ? '; ' : '.'}
+                  {i < shownList.length - 1 || (!allMissing && toComplete.length > LISTED) ? '; ' : '.'}
                 </span>
               ))}
+              {toComplete.length > LISTED && (
+                <button type="button" aria-expanded={allMissing} onClick={() => setAllMissing((v) => !v)}
+                  style={{ background: 'none', border: 'none', padding: 0, marginLeft: 4, color: 'var(--text-muted)', fontFamily: 'inherit', fontSize: 'inherit', fontWeight: 700, cursor: 'pointer' }}>
+                  {allMissing ? 'Show fewer' : `and ${toComplete.length - LISTED} more. Show all`}
+                </button>
+              )}
             </div>
           ) : (
             <div style={{ fontSize: 13, color: 'var(--success-700)', fontWeight: 700 }}>Every section is complete.</div>

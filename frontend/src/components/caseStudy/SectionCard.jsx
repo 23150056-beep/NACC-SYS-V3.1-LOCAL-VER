@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Badge, Button, Card, Icon } from '../../ui';
-import { exactDate } from '../../utils/time';
+import { clock, exactDate } from '../../utils/time';
 import { DateInput, ListInput, MeasurementsInput, PapInput, PlacementInput, ProseInput, TableInput, TickInput } from './inputs';
 import ReadOnlyValue from './ReadOnlyValue';
 
@@ -8,6 +8,9 @@ import ReadOnlyValue from './ReadOnlyValue';
  * kind, a Not applicable tick where the template allows one, who saved it last,
  * and its own Save. Everything that changes state is handed in; this component
  * only draws and reports what was done. */
+
+// "3:40 PM" for typing from today, with the date for anything older.
+const sameDay = (iso) => new Date(iso).toDateString() === new Date().toDateString();
 
 const NOTE = { fontSize: 13, color: 'var(--text-muted)', margin: 0, lineHeight: 1.55 };
 
@@ -70,7 +73,7 @@ export default function SectionCard({
               <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 12px', borderRadius: 'var(--radius-md)', background: 'var(--amber-50)', border: '1px solid var(--amber-200)', fontSize: 13, color: 'var(--text-body)' }}>
                 <Icon name="history" size={15} />
                 <span style={{ flex: 1, minWidth: 180 }}>
-                  Unsaved text from {exactDate(kept.saved_at)}
+                  Unsaved text from {sameDay(kept.saved_at) ? clock(kept.saved_at) : exactDate(kept.saved_at)}
                   {kept.base_version !== saved.version ? ' (this box has been saved by someone since)' : ''}
                 </span>
                 <Button size="sm" variant="secondary" onClick={onRestore}>Restore</Button>

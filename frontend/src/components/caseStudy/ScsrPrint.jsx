@@ -130,7 +130,7 @@ function Body({ entry, row, facts }) {
       return blank ? <Lines n={4} /> : <Paragraphs text={v} />;
     case 'list':
       return blank ? <Lines n={3} /> : (
-        <ol style={{ margin: 0, paddingLeft: '20pt' }}>{v.map((line, i) => <li key={i} style={{ overflowWrap: 'anywhere' }}>{line}</li>)}</ol>
+        <ol style={{ margin: 0, paddingLeft: '20pt', listStyle: 'decimal' }}>{v.map((line, i) => <li key={i} style={{ overflowWrap: 'anywhere' }}>{line}</li>)}</ol>
       );
     case 'table':
       return <Table entry={entry} rows={v} />;
@@ -250,7 +250,7 @@ export default function ScsrPrint({ child, study, agency, license, preparedBy, c
           <div style={{ fontWeight: 700 }}>{preparedBy || 'Social Worker'}</div>
           <div>Social Worker</div>
           <div>
-            License No. {licenseNumber || '______________'}, valid until {licenseUntil || '______________'}
+            License No. {licenseNumber || '__________'}, valid until {licenseUntil || '__________'}
           </div>
         </div>
         <div>
