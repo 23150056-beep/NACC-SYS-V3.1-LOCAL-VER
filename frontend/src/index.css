@@ -1003,5 +1003,6 @@ input::-ms-clear {
  * away behind a button. `racco-sr-only` is text for screen readers only. */
 .racco-cs-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 300px); gap: 16px 22px; align-items: start; }
 @media (max-width: 960px) { .racco-cs-body { grid-template-columns: minmax(0, 1fr); } }
+.racco-cs-stacked { grid-template-columns: minmax(0, 1fr); }
 .racco-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .racco-cs-section { scroll-margin-top: 16px; }

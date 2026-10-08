@@ -61,13 +61,16 @@ export default function SectionCard({
   const state = dirty ? <Badge tone="amber" size="sm" dot>Unsaved changes</Badge>
     : missing ? <Badge tone="neutral" size="sm" dot>To complete</Badge>
       : <Badge tone="success" size="sm" dot>Complete</Badge>;
+  // A wide table gets the full width, with the guidance under it, instead of
+  // being squeezed into a scrolling strip beside the checklist.
+  const stacked = entry.kind === 'pap_table' || (entry.kind === 'table' && entry.columns.length > 4);
   const showSeed = !readOnly && seed && !edit.notApplicable
     && (entry.kind === 'prose') && !String(edit.value).trim();
 
   return (
     <section id={`cs-sec-${entry.key}`} className="racco-cs-section" aria-label={title}>
       <Card title={title} actions={readOnly ? null : state} padding="14px 15px">
-        <div className="racco-cs-body">
+        <div className={`racco-cs-body${stacked ? ' racco-cs-stacked' : ''}`}>
           <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 11 }}>
             {kept && !readOnly && (
               <div role="status" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '8px 12px', borderRadius: 'var(--radius-md)', background: 'var(--amber-50)', border: '1px solid var(--amber-200)', fontSize: 13, color: 'var(--text-body)' }}>
