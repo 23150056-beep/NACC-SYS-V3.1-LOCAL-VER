@@ -1004,6 +1004,51 @@ middle name, a date found, and every question that applies made mandatory.
   redeploy of the same commit went through in two minutes. Prefer additive
   migrations (add, copy, drop later); widening a column, as 0022 does, is safe.
 
+## One child, one record
+
+Found 9 Oct 2026: the owner pressed Save Record again while the first save
+was still going, and the same child was added twice (C-0049 and C-0050), each
+with its own request to the psychologist. Three layers now, because each
+covers a hole the others leave:
+
+- **One save at a time** (`savingRef` in `Children.jsx save()`): from the press
+  until the confirm, the request, the referral upload and the end dialog are
+  over; the button reads "Saving…". A literal double click never got through
+  - the confirm dialog's backdrop takes the second click and cancels - the
+  window was pressing Save again DURING the request. The draft autosave stands
+  down while saving, or it rewrote the draft after a successful save and Add
+  Record offered the child back. Other create buttons with no busy state got
+  `useSingleFlight` (`utils/singleFlight.js`, a ref set before any await);
+  leave was the one the server would not have refused.
+- **The server recognises a submission it already saved**: each new-record
+  form carries a `crypto.randomUUID()` (`Child.intake_token`, children 0031,
+  unique), kept with the draft. A repeat answers 409 "already saved" with the
+  id only if the requester can see it, and a near-simultaneous pair is settled
+  by the unique column. Covers a lost response and a retry, not just a click.
+- **The same child cannot be added twice by any route**
+  (`children/duplicates.py`, POST only): same first name, last name AND birth
+  date as any record, active or closed, whoever holds it. Names compared
+  trimmed, case-folded and NFC-normalised in Python - SQLite's `iexact` folds
+  ASCII only and would call PEÑA and Peña two children. First and last name
+  alone are NOT enough: two children share common names. The refusals follow
+  the duplicate check's disclosure rules (no id for another SW's record).
+- **The ISA can remove a duplicate made by mistake**
+  (`POST /children/<id>/remove-duplicate/`, "Remove duplicate record…" in the
+  record drawer): both must match, the removed record's case number is typed
+  to confirm, and the record must hold nothing but what Add Record makes - a
+  pending request and its referral files go with it; any appointment,
+  clinical record, case study, answered request or assistant job blocks it.
+  Every model with a FK to Child is named in `KEEPS_IT` or `TAKEN_ALONG`, and
+  a test reading `Child._meta.related_objects` fails on one that is not - a
+  new relation must be decided, never deleted along by default. Children
+  still have no delete otherwise.
+- **A name with a replacement character (U+FFFD) is refused** at sign-up, the
+  user form and a new record (`accounts/names.py`): a Latin-1 form-encoded body
+  (curl, PowerShell 5.1) turns Ñ into `%D1`, which Django decodes to U+FFFD,
+  and "PEÑAMORA" was stored as "PE�AMORA". A value a record already holds
+  passes unchanged; the ISA corrects it from Users. The code paths themselves
+  carry Ñ end to end (`accounts/tests/test_accented_names.py`).
+
 ## Each social worker's own records
 
 Owner's decision, 24 Sep 2026: **each SW keeps their own records**, not one
