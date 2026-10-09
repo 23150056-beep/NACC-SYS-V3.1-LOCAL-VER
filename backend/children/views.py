@@ -54,7 +54,7 @@ class ChildViewSet(viewsets.ModelViewSet):
         # psychologist), enforced in the action body - RecordsAccess would
         # block psychologists.
         if self.action in ("terminate", "advance_status", "presence", "reopen",
-                           "closure_reasons"):
+                           "closure_reasons", "remove_duplicate"):
             return [IsAuthenticated()]
         return super().get_permissions()
 
@@ -352,6 +352,29 @@ class ChildViewSet(viewsets.ModelViewSet):
                      recipient=previous if taking_over else child.assigned_psychologist)
         return Response({"status": child.status, "case_status": child.case_status,
                          "social_worker": child.social_worker_id})
+
+    @action(detail=True, methods=["post"], url_path="remove-duplicate")
+    def remove_duplicate(self, request, pk=None):
+        """The ISA takes out a record that was made by mistake for a child who
+        already has one (children/duplicates.py has the rule).
+
+        Body: duplicate_of, the id of the record this one repeats, and
+        case_reference, the case number of THIS record typed out as the
+        confirmation. Refused with one sentence unless the two match on first
+        name, last name and birth date and this one holds nothing but what Add
+        Record makes. Nothing else deletes a child.
+
+        Checked before the record is looked up, so anyone else is told no
+        whether or not the id exists."""
+        if role_of(request) != Role.ADMINISTRATOR:
+            return Response({"detail": "Only the ISA (Administrator) can remove a duplicate record."},
+                            status=status.HTTP_403_FORBIDDEN)
+        try:
+            done = duplicates.remove(pk, request.data.get("duplicate_of"),
+                                     request.data.get("case_reference"), by=request.user)
+        except duplicates.Refused as refusal:
+            return Response({"detail": str(refusal)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(done)
 
     @action(detail=False, methods=["get"], url_path="check-duplicate")
     def check_duplicate(self, request):

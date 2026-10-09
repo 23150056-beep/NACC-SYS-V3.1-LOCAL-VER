@@ -10,12 +10,17 @@ class ActivityLog(models.Model):
     # A case study made final, and taken back to a draft (case_study/views.py).
     # Entity type "CaseStudy"; the id is the child's.
     FINALIZED, REOPENED = "finalized", "reopened"
+    # A duplicate record taken out by the ISA (children/duplicates.py). Entity
+    # type "Child"; the label reads "C-0050 (duplicate of C-0049)", since the
+    # record it names is gone.
+    REMOVED = "removed"
     ACTION_CHOICES = [
         (CREATED, "Created"), (UPDATED, "Updated"),
         (ARCHIVED, "Archived"), (LOGIN, "Login"),
         (REQUESTED, "Requested"), (ACCEPTED, "Accepted"),
         (DECLINED, "Declined"), (WITHDRAWN, "Withdrawn"),
         (FINALIZED, "Finalized"), (REOPENED, "Reopened"),
+        (REMOVED, "Removed"),
     ]
 
     RECORD, USER, SECURITY = "record", "user", "security"
