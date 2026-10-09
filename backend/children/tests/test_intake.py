@@ -541,14 +541,18 @@ class TheAgeRuleByAdoptionTypeTest(_Staff):
                          [str(e) for e in r.data["birth_date"]])
 
     def test_every_other_case_is_still_5_to_17(self):
-        for kwargs in ({}, {"case_type": "Adoption", "type_of_adoption": "Regular",
-                        "date_of_admission": "2026-03-01", "date_of_placement_to_custodian": None},
-                       {"case_type": "Adoption", "type_of_adoption": "Step-parent"},
-                       {"case_type": "Residential Care", "custodian_name": "",
-                        "date_of_placement_to_custodian": None,
-                        "date_of_admission": "2026-03-01"}):
+        # A different child for each case: the same name and birth date twice is
+        # refused as a second record (children/duplicates.py), and the ages
+        # that are accepted repeat from one case to the next.
+        for first, kwargs in zip(("Ana", "Bea", "Cora", "Dina"), (
+                {}, {"case_type": "Adoption", "type_of_adoption": "Regular",
+                     "date_of_admission": "2026-03-01", "date_of_placement_to_custodian": None},
+                {"case_type": "Adoption", "type_of_adoption": "Step-parent"},
+                {"case_type": "Residential Care", "custodian_name": "",
+                 "date_of_placement_to_custodian": None,
+                 "date_of_admission": "2026-03-01"})):
             for years, ok in ((4, False), (5, True), (17, True), (18, False), (30, False)):
-                r = self.post(birth_date=_born(years), **kwargs)
+                r = self.post(birth_date=_born(years), first_name=first, **kwargs)
                 self.assertEqual(201 if ok else 400, r.status_code, f"{kwargs} {years}: {r.data}")
                 if not ok:
                     self.assertEqual("The child must be between 5 and 17 years old.",
@@ -589,7 +593,8 @@ class TheLegalStatusDateTest(_Staff):
         r = self.post(legal_status="With IVC")
         self.assertEqual(201, r.status_code, r.data)
         self.assertIsNone(r.data["legal_status_date"])
-        r = self.post(legal_status="With IVC", legal_status_date="2024-05-06")
+        # Another child: the same name and birth date again would be refused.
+        r = self.post(legal_status="With IVC", legal_status_date="2024-05-06", first_name="Bea")
         self.assertEqual(201, r.status_code, r.data)
         self.assertEqual("2024-05-06", r.data["legal_status_date"])
 
@@ -604,8 +609,10 @@ class TheLegalStatusDateTest(_Staff):
         r = self.post(legal_status="", legal_status_date="2024-05-06")
         self.assertEqual(201, r.status_code, r.data)
         self.assertIsNone(r.data["legal_status_date"])
+        # Another child: the same name and birth date again would be refused.
         child = Child.objects.get(pk=self.post(
-            legal_status="With IVC", legal_status_date="2024-05-06").data["id"])
+            legal_status="With IVC", legal_status_date="2024-05-06",
+            first_name="Bea").data["id"])
         body = complete(legal_status="", legal_status_date="2024-05-06")
         for f in ("first_name", "middle_name", "last_name"):
             body.pop(f)

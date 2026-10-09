@@ -107,7 +107,10 @@ class SubmissionTokenTest(TestCase):
             looks.append(token)
             return None if len(looks) == 1 else real(request, token)
 
-        with patch.object(duplicates, "already_saved", blind_on_the_first_look):
+        # The same child is refused too, by the next guard: for the pair
+        # that arrive together that check also finds nothing yet.
+        with patch.object(duplicates, "already_saved", blind_on_the_first_look), \
+                patch.object(duplicates, "refusal_for_second_record", return_value=None):
             res = self._add()
         self.assertEqual([TOKEN, TOKEN], looks)
         self.assertEqual(409, res.status_code, res.data)

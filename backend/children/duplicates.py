@@ -1,6 +1,6 @@
 """One child, twice (found 9 Oct 2026).
 
-A social worker double-clicked Save Record. Two records came out - same child,
+A social worker pressed Save Record twice. Two records came out - same child,
 same birth date - each with its own request to the psychologist, who then had
 two "Waiting for your answer" rows for one child. There was no way to delete
 either: children are never deleted through the API.
@@ -25,13 +25,16 @@ Three guards live here, one for each way it can happen:
    holding nothing but what Add Record makes; see `remove`.
 """
 import re
+import unicodedata
 
 from django.db import transaction
 from rest_framework import status
 from rest_framework.response import Response
 
+from accounts.display import display_name
 from accounts.scoping import scope_to_visible
 from children.models import Child
+from scheduling.visibility import case_ref
 
 # --- 1. The same submission ----------------------------------------------
 
@@ -74,6 +77,59 @@ def already_saved(request, token):
     if scope_to_visible(Child.objects.filter(pk=existing), request, path=None).exists():
         body["id"] = existing
     return Response(body, status=status.HTTP_409_CONFLICT)
+
+
+# --- 2. The same child ----------------------------------------------------
+
+
+def _key(text):
+    """A name as compared: trimmed, one space between words, case folded.
+    Done here rather than by the database because SQLite folds only ASCII,
+    which would treat PEÑA and Peña as two children."""
+    return " ".join(unicodedata.normalize("NFC", str(text or "")).casefold().split())
+
+
+def same_child(first, last, birth, exclude=None):
+    """Every record for the child with this first name, last name AND birth
+    date. Any of the three blank matches nothing: a last name alone is half a
+    barangay."""
+    if not (_key(first) and _key(last) and birth):
+        return []
+    wanted = (_key(first), _key(last))
+    qs = Child.objects.filter(birth_date=birth).select_related("social_worker")
+    if exclude is not None:
+        qs = qs.exclude(pk=exclude)
+    return [c for c in qs.order_by("-updated_at")
+            if (_key(c.first_name), _key(c.last_name)) == wanted]
+
+
+def refusal_for_second_record(request, first, last, birth):
+    """The sentence that refuses a new record for a child who already has one,
+    or None. It says as much as check_duplicate does and no more:
+
+    - the requester's own active record: its case reference;
+    - another social worker's active record: who holds it, no id;
+    - a closed record, anybody's: that it exists and can be reopened.
+    """
+    found = same_child(first, last, birth)
+    if not found:
+        return None
+    mine = set(scope_to_visible(Child.objects.filter(pk__in=[c.pk for c in found]),
+                                request, path=None).values_list("pk", flat=True))
+    active = [c for c in found if c.status == Child.ACTIVE]
+    if not active:
+        return ("This child has a closed record. Reopen it from the warning above "
+                "instead of adding a new one.")
+    own = next((c for c in active if c.pk in mine), None)
+    if own is not None:
+        return (f"This child already has a record ({case_ref(own.pk)}). "
+                "Open it instead of adding a second one.")
+    holder = display_name(active[0].social_worker)
+    if holder:
+        return (f"A record for this child is already held by {holder}. "
+                "Ask the ISA (Administrator) to transfer it to you.")
+    return ("A record for this child already exists and is not with a social "
+            "worker yet. Ask the ISA (Administrator) to assign it to you.")
 
 
 def save_new(serializer, **extra):

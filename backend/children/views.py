@@ -5,6 +5,7 @@ from django.db.models import Prefetch, Q
 from django.http import Http404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -92,6 +93,16 @@ class ChildViewSet(viewsets.ModelViewSet):
         # assignment.py): the record is saved with nobody, and the child joins
         # their records when they accept.
         asked = serializer.validated_data.pop("assigned_psychologist", None)
+        # One record per child, whoever adds it. A new record for a child who
+        # already has one is refused here and told where the first is; only
+        # when the name parts and the birth date are all given - the
+        # fullname-only door has neither (children/duplicates.py).
+        data = serializer.validated_data
+        refused = duplicates.refusal_for_second_record(
+            self.request, data.get("first_name"), data.get("last_name"),
+            data.get("birth_date"))
+        if refused:
+            raise ValidationError({"detail": refused})
         if role_of(self.request) == Role.STAFF:
             obj = duplicates.save_new(serializer, social_worker=self.request.user)
         else:
