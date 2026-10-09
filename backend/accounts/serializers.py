@@ -4,6 +4,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from accounts.models import AgencyProfile, Role, UserProfile
+from accounts.names import refuse_unreadable
 from accounts.scoping import role_of
 from activity.models import ActivityLog
 from accounts.token_claims import stamp
@@ -72,6 +73,20 @@ class UserWriteSerializer(serializers.ModelSerializer):
             "id", "email", "username", "first_name", "last_name",
             "middle_initial", "contact_details", "role", "status",
         ]
+
+    # Names are refused with a replacement character in them (accounts/names.py);
+    # one the record already holds passes, so it can be edited around.
+    def _name(self, field, value):
+        return refuse_unreadable(value, getattr(self.instance, field, None))
+
+    def validate_first_name(self, value):
+        return self._name("first_name", value)
+
+    def validate_last_name(self, value):
+        return self._name("last_name", value)
+
+    def validate_middle_initial(self, value):
+        return self._name("middle_initial", value)
 
     def validate(self, attrs):
         """An account may not be saved into the roleless state.
@@ -302,6 +317,12 @@ class SignupSerializer(serializers.Serializer):
     # open form into a way to enumerate the agency's staff.
     GENERIC = ("This address cannot be registered. If you already have an "
                "account, sign in instead, or ask an administrator.")
+
+    def validate_first_name(self, value):
+        return refuse_unreadable(value)
+
+    def validate_last_name(self, value):
+        return refuse_unreadable(value)
 
     def validate_email(self, value):
         email = value.strip().lower()

@@ -2,6 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from accounts.display import display_name
+from accounts.names import refuse_unreadable
 from accounts.models import Role
 from accounts.phone import as_typed as phone_as_typed
 from children import assignment, custodian, duplicates, intake
@@ -99,6 +100,21 @@ class ChildSerializer(serializers.ModelSerializer):
 
     def get_social_worker_name(self, obj):
         return display_name(obj.social_worker) or None
+
+    # A name that reached us with a replacement character in it was damaged on
+    # the way (accounts/names.py). The name cannot be changed after the record
+    # is created, so one that is already damaged simply passes unchanged.
+    def _name(self, field, value):
+        return refuse_unreadable(value, getattr(self.instance, field, None))
+
+    def validate_first_name(self, value):
+        return self._name("first_name", value)
+
+    def validate_middle_name(self, value):
+        return self._name("middle_name", value)
+
+    def validate_last_name(self, value):
+        return self._name("last_name", value)
 
     def validate_intake_token(self, value):
         try:
