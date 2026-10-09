@@ -17,6 +17,7 @@ import ChildForm from './children/ChildForm';
 import { EMPTY, NOT_AN_ANSWER, formFromRecord, newIntakeToken } from './children/recordForm';
 import ChildDrawer, { TerminateModal } from './children/ChildDrawer';
 import CaseloadCard from './children/CaseloadCard';
+import RemoveDuplicateDialog from './children/RemoveDuplicateDialog';
 import { fmtDay, fmtTime, localDate } from './children/shared';
 import { ageFrom, ageGroup, caseRef } from '../utils/child';
 import { shortDate } from '../utils/time';
@@ -144,6 +145,7 @@ export default function Children() {
   const [sel, setSel] = useState(null); // detail drawer record
   const [form, setForm] = useState(null); // add/edit drawer
   const [terminating, setTerminating] = useState(null); // terminate modal record
+  const [removing, setRemoving] = useState(null); // remove-duplicate dialog record (the ISA)
   // The child awaiting a reopen confirmation. This was a native browser
   // confirm, and the same 180-character string was written out at both call
   // sites - the row button and the drawer - which is two copies of one
@@ -614,6 +616,26 @@ export default function Children() {
     });
   };
 
+  /* The duplicate is gone: close the drawer behind the dialog, reload, and say
+   * what happened and what comes next. `kept` is the record it repeated. */
+  const duplicateRemoved = async (c, result, kept) => {
+    setRemoving(null);
+    setSel(null);
+    load();
+    refreshActivity();
+    await notice({
+      title: 'Duplicate record removed',
+      icon: 'trash-2',
+      description: `${c.fullname}'s second record (${result.removed}) is deleted. The record to keep is ${result.duplicate_of}.`,
+      details: [['Removed', `${result.removed} · ${c.fullname}`],
+        ['Kept', kept ? `${result.duplicate_of} · ${kept.fullname}` : result.duplicate_of],
+        ['Request to a psychologist', c.pending_assignment
+          ? `${c.pending_assignment.psychologist_name} — withdrawn, and they are told why` : null],
+        ['Case referral file', c.has_case_referral ? 'Deleted with it' : null],
+        ['Recorded', 'In the audit trail']],
+    });
+  };
+
   const reopen = async () => {
     const c = reopening;
     setReopenBusy(true);
@@ -810,9 +832,10 @@ export default function Children() {
 
       {canManage && psychologists.length > 0 && <CaseloadCard psychologists={psychologists} />}
 
-      {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} canReopen={canManage} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => setReopening(sel)} onClose={() => setSel(null)} />}
+      {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} canReopen={canManage} canRemoveDuplicate={isAdmin} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => setReopening(sel)} onRemoveDuplicate={() => setRemoving(sel)} onClose={() => setSel(null)} />}
       {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} socialWorkers={isAdmin ? socialWorkers : null} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} fieldErrors={fieldErrors} refusedWith={refusedWith} saving={saving} onSubmit={save} onWithdraw={withdrawRequest} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
       {terminating && <TerminateModal child={terminating} onConfirm={terminate} onClose={() => setTerminating(null)} />}
+      {removing && <RemoveDuplicateDialog child={removing} onClose={() => setRemoving(null)} onRemoved={(result, kept) => duplicateRemoved(removing, result, kept)} />}
       {reopening && (
         <ConfirmDialog
           onClose={() => setReopening(null)}

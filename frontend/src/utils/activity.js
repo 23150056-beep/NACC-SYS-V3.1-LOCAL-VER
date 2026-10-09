@@ -22,6 +22,8 @@ export const ACTION_META = {
   // reopened once those events exist (phase P2).
   finalized: { icon: 'file-check', color: 'var(--success-700)', bg: 'var(--success-50)' },
   reopened: { icon: 'undo-2', color: 'var(--amber-700)', bg: 'var(--amber-50)' },
+  // A duplicate record removed by the ISA (backend children/duplicates.py).
+  removed: { icon: 'trash-2', color: 'var(--red-700)', bg: 'var(--red-50)' },
 };
 
 // Worded so they read right to the psychologist asked, to the social worker
@@ -44,6 +46,9 @@ const CASE_STUDY_TEXT = {
 
 export function eventText(e) {
   if (e.action === 'login') return 'Signed in';
+  // The record is gone, so the label is its case reference alone:
+  // "C-0050 (duplicate of C-0049)".
+  if (e.action === 'removed') return `Removed duplicate record ${e.entity_label || ''}`.trim();
   if (e.entity_type === 'CaseStudy') {
     return `${CASE_STUDY_TEXT[e.action] || 'Edited the case study for'} ${e.entity_label || 'a child'}`;
   }

@@ -140,6 +140,8 @@ const ACTION_META = {
   // A case study made final or taken back to a draft (backend case_study).
   finalized: { icon: 'file-check', tint: 'var(--success-500)', verb: 'Finalized case study', passive: 'Case study finalized' },
   reopened: { icon: 'undo-2', tint: 'var(--amber-500)', verb: 'Reopened case study', passive: 'Case study reopened' },
+  // A duplicate child record taken out by the ISA (backend children/duplicates.py).
+  removed: { icon: 'trash-2', tint: 'var(--red-500)', verb: 'Removed duplicate record', passive: 'Duplicate record removed' },
 };
 
 function ActivityRow({ entry }) {

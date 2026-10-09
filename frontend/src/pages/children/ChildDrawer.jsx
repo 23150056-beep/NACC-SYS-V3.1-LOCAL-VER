@@ -24,7 +24,7 @@ const TYPED_TEXT = { fontSize: 13, color: 'var(--text-body)', margin: 0, lineHei
  * Nothing in either body changed.
  */
 
-export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminate, canReopen = false, others = [], onEdit, onTerminate, onReopen, onClose }) {
+export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminate, canReopen = false, canRemoveDuplicate = false, others = [], onEdit, onTerminate, onReopen, onRemoveDuplicate, onClose }) {
   const toast = useToast();
   const navigate = useNavigate();
   useEffect(() => {
@@ -389,15 +389,20 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
             </div>
           </div>
         </div>
-        {(canEdit || canTerminate || showReopen) && (
+        {(canEdit || canTerminate || showReopen || canRemoveDuplicate) && (
           <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
             {showReopen && (
               <Button variant="primary" fullWidth onClick={onReopen} iconLeft={<Icon name="rotate-ccw" size={16} />}>Reopen Case</Button>
             )}
-            {(canEdit || canTerminate) && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-                {canEdit && <Button variant="secondary" onClick={onEdit} iconLeft={<Icon name="pencil" size={16} />}>Edit</Button>}
-                {canTerminate && <Button variant="danger" onClick={onTerminate} iconLeft={<Icon name="archive" size={16} />}>Terminate Case</Button>}
+            {(canEdit || canTerminate || canRemoveDuplicate) && (
+              <div style={{ display: 'flex', justifyContent: canRemoveDuplicate ? 'space-between' : 'flex-end', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                {/* The ISA only, and only for a record added by mistake; the
+                    server says whether this one may go. */}
+                {canRemoveDuplicate && <Button variant="ghost" onClick={onRemoveDuplicate} iconLeft={<Icon name="trash-2" size={16} />}>Remove duplicate record…</Button>}
+                <span style={{ display: 'inline-flex', gap: 10 }}>
+                  {canEdit && <Button variant="secondary" onClick={onEdit} iconLeft={<Icon name="pencil" size={16} />}>Edit</Button>}
+                  {canTerminate && <Button variant="danger" onClick={onTerminate} iconLeft={<Icon name="archive" size={16} />}>Terminate Case</Button>}
+                </span>
               </div>
             )}
           </div>
