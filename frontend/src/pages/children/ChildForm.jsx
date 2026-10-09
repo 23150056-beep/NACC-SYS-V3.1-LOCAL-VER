@@ -12,7 +12,7 @@ import {
 import { shortDate, timeAgo } from '../../utils/time';
 import CustodianFields from './CustodianFields';
 import PsychologistPicker from './PsychologistPicker';
-import { EMPTY, formFromRecord } from './recordForm';
+import { EMPTY, NOT_AN_ANSWER, formFromRecord, newIntakeToken } from './recordForm';
 
 // "2008-09-29" from the date's LOCAL parts. toISOString() gives the UTC date,
 // which in Manila (UTC+8) is the previous day for anything before 8 a.m.
@@ -163,7 +163,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
     // with no filename and try to upload an empty object. A chosen file is
     // not something a draft can hold, so it is not kept.
     delete data.referralFile;
-    if (Object.entries(data).some(([k, v]) => k !== 'assignee_sees_history' && v)) {
+    if (Object.entries(data).some(([k, v]) => !NOT_AN_ANSWER.includes(k) && v)) {
       try { localStorage.setItem(draftKey, JSON.stringify(data)); } catch { /* storage full */ }
     }
   };
@@ -438,7 +438,10 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                 <Button variant="secondary" size="sm" onClick={() => {
                   // A draft typed before 24 Sep 2026 holds a middle initial.
                   const { middle_initial: mi, ...draft } = form._draft;
-                  setForm({ ...EMPTY, ...draft, middle_name: draft.middle_name || mi || '', _draft: null });
+                  // The draft keeps its token, so a record that was in fact
+                  // saved is recognised when the draft is saved again; one
+                  // from before tokens gets a new one.
+                  setForm({ ...EMPTY, ...draft, middle_name: draft.middle_name || mi || '', intake_token: draft.intake_token || newIntakeToken(), _draft: null });
                 }} iconLeft={<Icon name="rotate-ccw" size={14} />}>Restore draft</Button>
                 <Button variant="ghost" size="sm" onClick={() => { try { localStorage.removeItem(draftKey); } catch { /* private browsing */ } setForm((f) => ({ ...f, _draft: null })); }}>Discard</Button>
               </div>

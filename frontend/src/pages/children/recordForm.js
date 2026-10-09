@@ -16,6 +16,31 @@ export const EMPTY = {
   recommendation: '',
 };
 
+/* One token for one submission of Add Record (backend children/duplicates.py).
+ * The form makes it when it opens a NEW record, keeps it with the draft, and
+ * sends it with every attempt to save: a second attempt - a double click that
+ * got past the button, or a retry after a response that never arrived - is
+ * then told the record was already saved instead of adding the child again.
+ * crypto.randomUUID() exists only on https and localhost; a workstation
+ * reaching the app by its address on the office network has just
+ * getRandomValues, which is enough for a token. */
+export function newIntakeToken() {
+  const c = globalThis.crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  const b = new Uint8Array(16);
+  if (c?.getRandomValues) c.getRandomValues(b);
+  else for (let i = 0; i < b.length; i += 1) b[i] = Math.floor(Math.random() * 256);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/* What a form holds that is not something the person typed. A draft is worth
+ * keeping, and offering back, only when an answer was; the token and the
+ * history tick are there from the moment the form opens. */
+export const NOT_AN_ANSWER = ['assignee_sees_history', 'intake_token'];
+
 /* Who, and which number, texting consent was given for. Consent belongs to
  * that pair (pages/children/CustodianFields.jsx): change either and it is
  * off, put both back and it is on again. `number` is as stored, +639... */

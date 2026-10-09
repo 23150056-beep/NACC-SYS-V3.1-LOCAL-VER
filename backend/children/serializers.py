@@ -4,7 +4,7 @@ from django.utils import timezone
 from accounts.display import display_name
 from accounts.models import Role
 from accounts.phone import as_typed as phone_as_typed
-from children import assignment, custodian, intake
+from children import assignment, custodian, duplicates, intake
 from children.models import AssignmentRequest, Child
 
 User = get_user_model()
@@ -43,6 +43,12 @@ class ChildSerializer(serializers.ModelSerializer):
     type_of_adoption = serializers.CharField(required=False, allow_blank=True)
     # And for Referral Source, which was free text until it became a list.
     referral_source = serializers.CharField(required=False, allow_blank=True, max_length=150)
+
+    # Which submission of Add Record this is (children/duplicates.py). Sent on
+    # create and never read back; an edit ignores it. Blank means none.
+    intake_token = serializers.CharField(
+        write_only=True, required=False, allow_null=True, allow_blank=True,
+        max_length=64)
 
     termination = serializers.SerializerMethodField()
     terminations = serializers.SerializerMethodField()
@@ -85,7 +91,7 @@ class ChildSerializer(serializers.ModelSerializer):
             "termination", "terminations",
             "pre_assessment_status", "instruments_used", "has_case_referral",
             "pending_assignment", "declined_assignment",
-            "updated_at",
+            "intake_token", "updated_at",
         ]
         # The tracker moves only through the advance-status / terminate actions.
         # fullname is derived (Child.save() composes it from the name parts).
@@ -93,6 +99,12 @@ class ChildSerializer(serializers.ModelSerializer):
 
     def get_social_worker_name(self, obj):
         return display_name(obj.social_worker) or None
+
+    def validate_intake_token(self, value):
+        try:
+            return duplicates.clean_token(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
 
     def validate_social_worker(self, value):
         request = self.context.get("request")
@@ -306,6 +318,9 @@ class ChildSerializer(serializers.ModelSerializer):
         role = getattr(getattr(getattr(request, "user", None), "role", None),
                        "role_name", None) if request else None
         if self.instance:
+            # The token belongs to the submission that made the record; no
+            # edit moves or sets it.
+            attrs.pop("intake_token", None)
             # fullname is read-only (DRF drops it from `attrs`), so an attempt to
             # PATCH it has to be caught from the raw request payload instead.
             raw = self.initial_data if hasattr(self, "initial_data") else {}

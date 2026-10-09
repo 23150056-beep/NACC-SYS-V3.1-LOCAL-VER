@@ -1,5 +1,6 @@
 ﻿import time
 from django.core.cache import cache
+from django.db import IntegrityError
 from django.db.models import Prefetch, Q
 from django.http import Http404
 from rest_framework import viewsets, status
@@ -15,7 +16,7 @@ from accounts.permissions import (ChildRecordAccess,
 from accounts.scoping import role_of, scope_to_visible, visible_pre_assessments
 from activity.models import ActivityLog
 from activity.services import log_activity
-from children import assignment, custodian, termination
+from children import assignment, custodian, duplicates, termination
 from children.models import AssignmentRequest, Child, TerminationRecord
 from children.serializers import ChildSerializer
 
@@ -56,6 +57,32 @@ class ChildViewSet(viewsets.ModelViewSet):
             return [IsAuthenticated()]
         return super().get_permissions()
 
+    def create(self, request, *args, **kwargs):
+        """Add a record, once per submission (children/duplicates.py).
+
+        The form sends the same token with every attempt to save, so a second
+        attempt - a double click that got past the button, or a retry after a
+        response that never arrived - is told the record was already saved,
+        with its id when the requester may open it, rather than adding the
+        child again. The token is looked up before anything is validated: the
+        first attempt may have changed what the second would be checked
+        against."""
+        token = duplicates.token_in(request.data)
+        if token:
+            again = duplicates.already_saved(request, token)
+            if again is not None:
+                return again
+        try:
+            return super().create(request, *args, **kwargs)
+        except IntegrityError:
+            # Two attempts arrived together: both found no record for the
+            # token, and the unique column let one of them in. The loser gets
+            # the same answer as a later retry. Anything else is not ours.
+            again = duplicates.already_saved(request, token) if token else None
+            if again is None:
+                raise
+            return again
+
     def perform_create(self, serializer):
         # A record a social worker adds is theirs (accounts/scoping.py), and
         # nothing they send can make it someone else's. An administrator may
@@ -66,9 +93,9 @@ class ChildViewSet(viewsets.ModelViewSet):
         # their records when they accept.
         asked = serializer.validated_data.pop("assigned_psychologist", None)
         if role_of(self.request) == Role.STAFF:
-            obj = serializer.save(social_worker=self.request.user)
+            obj = duplicates.save_new(serializer, social_worker=self.request.user)
         else:
-            obj = serializer.save()
+            obj = duplicates.save_new(serializer)
         self._log(obj, ActivityLog.CREATED)
         if asked is not None:
             assignment.request_assignment(obj, asked, by=self.request.user)

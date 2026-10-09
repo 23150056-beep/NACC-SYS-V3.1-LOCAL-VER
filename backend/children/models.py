@@ -218,6 +218,14 @@ class Child(models.Model):
     # Free-text recommendations + fields not part of the agency's intake
     # interview live under the "Recommendation" section in the UI.
     recommendation = models.TextField(blank=True)
+    # Which submission of Add Record made this row (children/duplicates.py).
+    # The form makes one token when it opens and sends it with every attempt
+    # to save, so the same submission arriving twice - a double click, or a
+    # retry after a response that never came back - is recognised instead of
+    # adding the child twice. Null for every record made any other way, and
+    # unique, which is what settles two requests that arrive together.
+    intake_token = models.CharField(
+        max_length=64, null=True, blank=True, unique=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

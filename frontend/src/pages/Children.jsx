@@ -14,7 +14,7 @@ import { ALL_CLOSURE_REASONS, unaskedAnswers } from '../config/caseData';
 import { loadAll } from '../utils/load';
 import { firstError } from '../utils/errors';
 import ChildForm from './children/ChildForm';
-import { EMPTY, formFromRecord } from './children/recordForm';
+import { EMPTY, NOT_AN_ANSWER, formFromRecord, newIntakeToken } from './children/recordForm';
 import ChildDrawer, { TerminateModal } from './children/ChildDrawer';
 import CaseloadCard from './children/CaseloadCard';
 import { fmtDay, fmtTime, localDate } from './children/shared';
@@ -300,8 +300,9 @@ export default function Children() {
     setError(''); setFieldErrors(null); setRefusedWith(null);
     let draft = null;
     try { draft = JSON.parse(localStorage.getItem(draftKey) || 'null'); } catch { /* corrupt draft */ }
-    const meaningful = draft && Object.entries(draft).some(([k, v]) => k !== 'assignee_sees_history' && v);
-    setForm({ ...EMPTY, _draft: meaningful ? draft : null });
+    const meaningful = draft && Object.entries(draft).some(([k, v]) => !NOT_AN_ANSWER.includes(k) && v);
+    // A new token for this submission; a restored draft brings its own back.
+    setForm({ ...EMPTY, intake_token: newIntakeToken(), _draft: meaningful ? draft : null });
   };
   // What the form holds for a record is worked out in one place, which the
   // form's own "Load latest" uses too (ChildForm.jsx formFromRecord).
@@ -445,7 +446,7 @@ export default function Children() {
     }
     // The date issued goes with the legal status.
     if (!payload.legal_status) payload.legal_status_date = null;
-    if (form.id) delete payload.fullname;
+    if (form.id) { delete payload.fullname; delete payload.intake_token; }
     try {
       let saved;
       if (form.id) saved = (await api.put(`/children/${form.id}/`, payload)).data;
@@ -511,6 +512,27 @@ export default function Children() {
         });
       }
     } catch (err) {
+      /* A new record the server already holds - this very submission, by its
+         token. The first attempt got through (a response that never arrived,
+         then a retry), so there is nothing to add and nothing to upload: the
+         referral went, or failed, with that attempt. */
+      if (err.response?.status === 409 && !form.id) {
+        const body = err.response.data || {};
+        if (body.id) {
+          try { localStorage.removeItem(draftKey); } catch { /* private browsing */ }
+          setForm(null);
+          load();
+          refreshActivity();
+          toast.success(referralFile
+            ? 'Already saved. Open the record and check its case referral is on file.'
+            : 'Already saved');
+          return;
+        }
+        const said = body.detail || 'This record was already saved.';
+        setError(String(said));
+        toast.error(String(said));
+        return;
+      }
       if (err.response?.status === 409) {
         const fresh = err.response.data.current;
         setError('');
@@ -529,7 +551,8 @@ export default function Children() {
       setError(perField
         ? (perField.detail || perField.non_field_errors?.join(' ') || '')
         : 'Save failed. Please try again.');
-      toast.error('Could not save the record. Please check the marked fields.');
+      toast.error(typeof perField?.detail === 'string' ? perField.detail
+        : 'Could not save the record. Please check the marked fields.');
     }
   };
 
