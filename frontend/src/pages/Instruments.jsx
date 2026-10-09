@@ -12,6 +12,7 @@ import { loadAll } from '../utils/load';
 import { printBlankForm } from '../utils/printForm';
 import { FIELD_TYPES } from '../config/formFields';
 import InstrumentFormDrawer, { CATEGORIES, EMPTY_INSTRUMENT } from '../components/InstrumentFormDrawer';
+import { useSingleFlight } from '../utils/singleFlight';
 
 const FORM_TYPES = [
   { v: 'consent', label: 'Consent Form' },
@@ -32,6 +33,8 @@ export default function Instruments() {
   const showCatalog = isAdmin;
   const toast = useToast();
   const confirm = useConfirm();
+  // A catalogue title or a form saved twice was two rows; one save at a time.
+  const [once, saving] = useSingleFlight();
   const [tab, setTab] = useState(isAdmin ? 'catalog' : 'forms');
   const [instruments, setInstruments] = useState([]);
   const [templates, setTemplates] = useState([]);
@@ -54,7 +57,7 @@ export default function Instruments() {
   [isAdmin, toast]);
   useEffect(() => { load(); }, [load]);
 
-  const saveInstrument = async () => {
+  const saveInstrument = () => once(async () => {
     setError('');
     if (!form.title.trim()) { setError('Title is required.'); return; }
     const payload = { ...form };
@@ -76,7 +79,7 @@ export default function Instruments() {
     } catch (err) {
       setError(JSON.stringify(err.response?.data || 'Save failed'));
     }
-  };
+  });
 
   /* Both deactivations run through one dialog rather than two, because the
      question and the consequence are identical and only the noun and the
@@ -94,7 +97,7 @@ export default function Instruments() {
   };
 
   const setTplField = (i, patch) => setTpl((t) => ({ ...t, fields: t.fields.map((f, idx) => (idx === i ? { ...f, ...patch } : f)) }));
-  const saveTemplate = async () => {
+  const saveTemplate = () => once(async () => {
     setError('');
     if (!tpl.title.trim()) { setError('Title is required.'); return; }
     if (!tpl.attestation) { setError('You must tick the attestation checkbox to save an agency form.'); return; }
@@ -119,7 +122,7 @@ export default function Instruments() {
     } catch (err) {
       setError(JSON.stringify(err.response?.data || 'Save failed'));
     }
-  };
+  });
 
 
 
@@ -223,7 +226,7 @@ export default function Instruments() {
         <InstrumentFormDrawer
           form={form} setForm={setForm}
           psychologists={psychologists} isAdmin={isAdmin}
-          error={error} onSave={saveInstrument} onClose={() => setForm(null)}
+          error={error} saving={saving} onSave={saveInstrument} onClose={() => setForm(null)}
         />
       )}
 
@@ -275,7 +278,7 @@ export default function Instruments() {
               </div>
             </div>
             <div style={{ padding: 16, borderTop: '1px solid var(--border)' }}>
-              <Button variant="primary" fullWidth onClick={saveTemplate} disabled={!tpl.attestation} iconLeft={<Icon name="save" size={16} />}>Save Form Template</Button>
+              <Button variant="primary" fullWidth onClick={saveTemplate} disabled={!tpl.attestation || saving} iconLeft={<Icon name="save" size={16} />}>Save Form Template</Button>
             </div>
           </div>
         </div>

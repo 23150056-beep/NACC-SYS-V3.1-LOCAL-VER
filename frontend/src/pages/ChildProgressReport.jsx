@@ -21,6 +21,7 @@ import ReportCheckNote from '../components/ReportCheckNote';
 import UploadDrawer from '../components/UploadDrawer';
 import PsychReportPrint from '../components/PsychReportPrint';
 import ReportViewer from '../components/ReportViewer';
+import { useSingleFlight } from '../utils/singleFlight';
 import CaseStudyTab from '../components/caseStudy/CaseStudyTab';
 import ScsrPrint from '../components/caseStudy/ScsrPrint';
 import { useCaseStudy, usePrintExtras, useScsrPrint } from '../components/caseStudy/useCaseStudy';
@@ -49,6 +50,9 @@ export default function ChildProgressReport() {
   const { user } = useAuth();
   const toast = useToast();
   const confirm = useConfirm();
+  // One write at a time on this page (a survey link, a remark, a result, a plan):
+  // a second press while the first is going added the row twice.
+  const [once, writing] = useSingleFlight();
   // False on a hosted deployment, where the server refuses every drafting
   // feature (the chatbot is unaffected). Above the early returns below: a hook
   // under `if (!data) return` crashed this page once already.
@@ -270,7 +274,7 @@ export default function ChildProgressReport() {
    * cannot read /form-templates/, can start a survey too. An empty list
    * names who can fix it by role.
    */
-  const createInvite = async () => {
+  const createInvite = () => once(async () => {
     const tpl = surveyTemplates[0];
     if (!tpl) {
       toast.error(user?.role_name === 'Staff'
@@ -288,7 +292,7 @@ export default function ChildProgressReport() {
       setQr({ token: inv.token, url: `${window.location.origin}/survey/${inv.token}`, title: tpl.title });
       load();
     } catch (err) { toast.error(JSON.stringify(err.response?.data || 'Could not create the survey link.')); }
-  };
+  });
 
   const polish = async () => {
     const raw = remarkText.trim();
@@ -411,7 +415,7 @@ export default function ChildProgressReport() {
     }
   };
 
-  const addRemark = async () => {
+  const addRemark = () => once(async () => {
     if (!remarkText.trim()) return;
     const saved = remarkText.trim();
     if (!(await confirm({
@@ -429,9 +433,9 @@ export default function ChildProgressReport() {
       setPreRemarkText(null);
       setRemarkText(''); load(); toast.success('Remark added');
     } catch (err) { toast.error(err.response?.data?.detail || 'Could not add the remark.'); }
-  };
+  });
 
-  const saveResult = async () => {
+  const saveResult = () => once(async () => {
     if (!(await confirm({
       description: `This saves the result entry on ${child.fullname}'s record.`,
       confirmLabel: 'Yes, save the entry',
@@ -445,9 +449,9 @@ export default function ChildProgressReport() {
       });
       setResult(null); load(); toast.success('Result entry saved');
     } catch (err) { toast.error(JSON.stringify(err.response?.data || 'Could not save.')); }
-  };
+  });
 
-  const savePlan = async () => {
+  const savePlan = () => once(async () => {
     if (!(await confirm({
       description: plan.id ? `This saves your changes to ${child.fullname}'s treatment plan.`
         : `This starts a treatment plan for ${child.fullname}.`,
@@ -459,7 +463,7 @@ export default function ChildProgressReport() {
       else await api.post('/treatment-plans/', { child: Number(id), objectives: plan.objectives, interventions: plan.interventions, review_date: plan.review_date || null });
       setPlan(null); load(); toast.success('Treatment plan saved');
     } catch (err) { toast.error(JSON.stringify(err.response?.data || 'Could not save.')); }
-  };
+  });
 
   // A draft prints what is saved. Say so before printing over typing that has
   // not been saved yet. A final prints its newest final copy.
@@ -880,7 +884,7 @@ export default function ChildProgressReport() {
                   {polishing ? 'Polishing…' : 'Polish writing'}
                 </Button>
               )}
-              <Button variant="primary" onClick={addRemark} iconLeft={<Icon name="plus" size={16} />} disabled={!remarkText.trim()}>Add remark</Button>
+              <Button variant="primary" onClick={addRemark} iconLeft={<Icon name="plus" size={16} />} disabled={!remarkText.trim() || writing}>Add remark</Button>
             </div>
             {polishJob && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
@@ -921,7 +925,7 @@ export default function ChildProgressReport() {
             psychologist.
           </p>
           {(isStaffOrAdmin || canWrite) && child.status === 'active' && (
-            <Button variant="primary" onClick={createInvite} iconLeft={<Icon name="qr-code" size={16} />} className="racco-no-print">New QR Survey</Button>
+            <Button variant="primary" onClick={createInvite} disabled={writing} iconLeft={<Icon name="qr-code" size={16} />} className="racco-no-print">New QR Survey</Button>
           )}
         </div>
         {(data.opinionnaires || []).length > 0 && (
@@ -1069,7 +1073,7 @@ export default function ChildProgressReport() {
             <FormField label="Classification (your own words)">
               <textarea value={result.classification} onChange={(e) => setResult({ ...result, classification: e.target.value })} rows={2} style={textarea} />
             </FormField>
-            <Button variant="primary" onClick={saveResult} disabled={!result.summary.trim()} iconLeft={<Icon name="save" size={16} />}>Save entry</Button>
+            <Button variant="primary" onClick={saveResult} disabled={!result.summary.trim() || writing} iconLeft={<Icon name="save" size={16} />}>Save entry</Button>
             <div style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>Manual input only — the system never computes scores.</div>
           </div>
         </div>
@@ -1118,7 +1122,7 @@ export default function ChildProgressReport() {
                   style={{ width: '100%', padding: '9px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', fontFamily: 'var(--font-sans)', fontSize: 14 }} />
               </FormField>
             </div>
-            <Button variant="primary" onClick={savePlan} disabled={!plan.objectives.trim()} iconLeft={<Icon name="save" size={16} />}>Save plan</Button>
+            <Button variant="primary" onClick={savePlan} disabled={!plan.objectives.trim() || writing} iconLeft={<Icon name="save" size={16} />}>Save plan</Button>
           </div>
         </div>
       )}

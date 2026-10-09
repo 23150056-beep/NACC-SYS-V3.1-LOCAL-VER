@@ -13,6 +13,7 @@ import InstrumentFormDrawer, { EMPTY_INSTRUMENT } from '../components/Instrument
 import PdfFrame from '../components/PdfFrame';
 import TemplateUpload from '../components/TemplateUpload';
 import { pdfObjectUrl } from '../utils/pdf';
+import { useSingleFlight } from '../utils/singleFlight';
 
 const STEPS = ['Child', 'Consent', 'Interview', 'Instruments', 'Problems', 'Complete'];
 
@@ -35,6 +36,7 @@ function FormBody({ body }) {
 export default function PreAssessment() {
   const toast = useToast();
   const confirm = useConfirm();
+  const [once, savingInstrument] = useSingleFlight();
   const navigate = useNavigate();
   const { user } = useAuth();
   const [step, setStep] = useState(0);
@@ -137,7 +139,7 @@ export default function PreAssessment() {
   // itself already reports. A second message about the refresh would be
   // two messages for one action.
   const reloadInstruments = () => api.get('/instruments/').then((r) => setInstruments(r.data)).catch(() => {});
-  const saveInstrument = async () => {
+  const saveInstrument = () => once(async () => {
     setInstError('');
     if (!instForm.title.trim()) { setInstError('Title is required.'); return; }
     if (!(await confirm({
@@ -153,7 +155,7 @@ export default function PreAssessment() {
       toast.success(instForm.id ? 'Instrument updated' : 'Instrument added');
       setInstForm(null); reloadInstruments();
     } catch (err) { setInstError(JSON.stringify(err.response?.data || 'Save failed')); }
-  };
+  });
 
   const complete = async () => {
     setError('');
@@ -411,7 +413,7 @@ export default function PreAssessment() {
       )}
 
       {instForm && (
-        <InstrumentFormDrawer form={instForm} setForm={setInstForm} error={instError} onSave={saveInstrument} onClose={() => setInstForm(null)} />
+        <InstrumentFormDrawer form={instForm} setForm={setInstForm} error={instError} saving={savingInstrument} onSave={saveInstrument} onClose={() => setInstForm(null)} />
       )}
     </div>
   );
@@ -734,10 +736,11 @@ function InterviewStep({ child, templates, onDone, setError, onTemplateAdded }) 
 
 function ProblemsStep({ child, problems, setProblems, setError, onNext }) {
   const confirm = useConfirm();
+  const [once, adding] = useSingleFlight();
   const [desc, setDesc] = useState('');
   const [cat, setCat] = useState('');
 
-  const add = async () => {
+  const add = () => once(async () => {
     if (!desc.trim()) return;
     setError('');
     if (!(await confirm({
@@ -752,7 +755,7 @@ function ProblemsStep({ child, problems, setProblems, setError, onNext }) {
     } catch (err) {
       setError(JSON.stringify(err.response?.data || 'Could not log the problem.'));
     }
-  };
+  });
 
   return (
     <Card eyebrow="Step 5" title="Problems encountered" padding="16px">
@@ -762,7 +765,7 @@ function ProblemsStep({ child, problems, setProblems, setError, onNext }) {
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr auto', gap: 10, marginBottom: 14 }}>
         <Input value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Problem description…" />
         <Input value={cat} onChange={(e) => setCat(e.target.value)} placeholder="Category (optional)" />
-        <Button variant="secondary" onClick={add} disabled={!desc.trim()} iconLeft={<Icon name="plus" size={16} />}>Add</Button>
+        <Button variant="secondary" onClick={add} disabled={!desc.trim() || adding} iconLeft={<Icon name="plus" size={16} />}>Add</Button>
       </div>
       {problems.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>

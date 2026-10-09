@@ -17,6 +17,7 @@ import { prefetchBriefs } from '../api/assistant';
 import { useAssistant } from '../context/AssistantContext';
 import { useOpenFromLink } from '../utils/links';
 import { firstError } from '../utils/errors';
+import { useSingleFlight } from '../utils/singleFlight';
 
 const localizer = dateFnsLocalizer({ format, parse, startOfWeek, getDay, locales: { 'en-US': enUS } });
 // Every time the calendar draws, on the 12-hour clock. The localizer's own
@@ -198,6 +199,10 @@ export default function Schedule() {
   const { user } = useAuth();
   const toast = useToast();
   const confirm = useConfirm();
+  // Booking, availability and leave are written one at a time: the drawer stays
+  // open behind the confirmation and the request, and a second press added the
+  // row again (9 Oct 2026).
+  const [once, saving] = useSingleFlight();
   const role = user?.role_name || 'Staff';
   const isPsych = role === 'Psychologist';
   const canBook = ['Administrator', 'Staff', 'Psychologist'].includes(role);
@@ -435,8 +440,11 @@ export default function Schedule() {
   const openPsyDated = openPsyBlocks.filter((b) => b.date != null)
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
-  const book = async (e) => {
+  const book = (e) => {
     e.preventDefault();
+    return once(() => bookIt());
+  };
+  const bookIt = async () => {
     setError('');
     const payload = {
       child: booking.child, psychologist: booking.psychologist || undefined,
@@ -522,8 +530,11 @@ export default function Schedule() {
   // edit, and the form said "Add Availability ... Availability added".
   const editingBlock = !!(blockForm?.id || blockForm?.byDay);
 
-  const saveBlock = async (e) => {
+  const saveBlock = (e) => {
     e.preventDefault();
+    return once(() => saveBlockNow());
+  };
+  const saveBlockNow = async () => {
     setError('');
     if (!isPsych && !blockForm.id && !blockForm.psychologist) {
       setError('Select which psychologist this availability belongs to.');
@@ -605,8 +616,11 @@ export default function Schedule() {
     booked: b.booked_ahead || 0,
   });
 
-  const saveLeave = async (e) => {
+  const saveLeave = (e) => {
     e.preventDefault();
+    return once(() => saveLeaveNow());
+  };
+  const saveLeaveNow = async () => {
     setError('');
     if (!leaveForm.starts_on || !leaveForm.ends_on) { setError('Pick both dates.'); return; }
     if (!(await confirm({
@@ -976,7 +990,7 @@ export default function Schedule() {
           title="Record leave"
           onClose={() => setLeaveForm(null)}
           footer={(
-            <Button type="submit" variant="primary" fullWidth iconLeft={<Icon name="plane" size={16} />}>
+            <Button type="submit" variant="primary" fullWidth disabled={saving} iconLeft={<Icon name="plane" size={16} />}>
               Record it
             </Button>
           )}
@@ -1090,7 +1104,7 @@ export default function Schedule() {
             // Says what is still missing rather than sitting there grey.
             <Button
               type="submit" variant="primary" fullWidth
-              disabled={!booking.child || !booking.date || !booking.time || (!isPsych && !booking.psychologist)}
+              disabled={saving || !booking.child || !booking.date || !booking.time || (!isPsych && !booking.psychologist)}
               title={!booking.child ? 'Choose a child'
                 : (!isPsych && !booking.psychologist) ? 'Choose a psychologist'
                   : !booking.date ? 'Choose a day'
@@ -1243,7 +1257,7 @@ export default function Schedule() {
           onClose={() => setBlockForm(null)}
           footer={(
             <Button type="submit" variant="primary" fullWidth
-              disabled={!isPsych && !blockForm.id && !blockForm.psychologist}
+              disabled={saving || (!isPsych && !blockForm.id && !blockForm.psychologist)}
               iconLeft={<Icon name="save" size={16} />}>
               {editingBlock ? 'Save Changes' : 'Save Availability'}
             </Button>
