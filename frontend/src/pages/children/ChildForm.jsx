@@ -113,7 +113,7 @@ const snapshot = (f) => JSON.stringify(Object.keys(f).sort()
   .map((k) => [k, k === 'referralFile' ? Boolean(f[k]) : f[k]]));
 
 
-export default function ChildForm({ form, setForm, draftKey, psychologists, socialWorkers = null, blocks = [], error, fieldErrors = null, refusedWith = null, isPsych = false, canReopen = false, others = [], onSubmit, onWithdraw, onClose, onReopen, onOpenExisting }) {
+export default function ChildForm({ form, setForm, draftKey, psychologists, socialWorkers = null, blocks = [], error, fieldErrors = null, refusedWith = null, isPsych = false, canReopen = false, others = [], saving = false, onSubmit, onWithdraw, onClose, onReopen, onOpenExisting }) {
   const [step, setStep] = useState(1);
   // Reopening the form for a different record starts at the beginning again.
   useEffect(() => { setStep(1); }, [form.id]);
@@ -973,7 +973,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             <Button type="button" variant={isEdit ? 'secondary' : 'primary'} onClick={() => setStep((n) => n + 1)}>Next</Button>
           )}
           {(isEdit || step === FORM_STEPS.length) && (
-            <Button type="submit" variant="primary" disabled={blockers.length > 0} iconLeft={<Icon name="save" size={16} />}>Save Record</Button>
+            <Button type="submit" variant="primary" disabled={blockers.length > 0 || saving} aria-busy={saving || undefined} iconLeft={<Icon name="save" size={16} />}>{saving ? 'Saving…' : 'Save Record'}</Button>
           )}
         </div>
       </form>

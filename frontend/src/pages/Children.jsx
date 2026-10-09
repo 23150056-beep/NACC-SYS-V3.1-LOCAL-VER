@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -343,8 +343,34 @@ export default function Children() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editParam, form, children]);
 
+  /* One save at a time, from the moment Save is pressed until the whole of it
+   * is over: the confirmation, the POST or PUT, the referral upload and the end
+   * dialog. A double click, or Enter held down, used to start the save twice
+   * and add the child twice (9 Oct 2026: C-0049 and C-0050, one child, two
+   * requests for the psychologist to answer). The ref is the guard - it is set
+   * in the same tick as the click, before any await, which state is not.
+   * `saving` is only what the button shows: it comes on once the request is
+   * really going, so the button does not say "Saving…" behind the question.
+   *
+   * Cancelling the confirmation returns from saveRecord like any other exit,
+   * so the guard is released by the finally below. So is a second confirm()
+   * opening while this one is up (the form's own "Close without saving?"):
+   * the provider settles the first as "no", and it lands here the same way. */
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
   const save = async (e) => {
     e.preventDefault();
+    if (savingRef.current) return;
+    savingRef.current = true;
+    try {
+      await saveRecord();
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
+
+  const saveRecord = async () => {
     const name = form.id ? form.fullname
       : [form.first_name, form.middle_name, form.last_name].filter(Boolean).join(' ');
     // A pick ASKS the psychologist (children/assignment.py): say so before
@@ -380,6 +406,7 @@ export default function Children() {
            ['Case referral', form.referralFile?.name]],
     });
     if (!ok) return;
+    setSaving(true);
     setError('');
     setFieldErrors(null);
     setRefusedWith(null);
@@ -761,7 +788,7 @@ export default function Children() {
       {canManage && psychologists.length > 0 && <CaseloadCard psychologists={psychologists} />}
 
       {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} canReopen={canManage} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => setReopening(sel)} onClose={() => setSel(null)} />}
-      {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} socialWorkers={isAdmin ? socialWorkers : null} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} fieldErrors={fieldErrors} refusedWith={refusedWith} onSubmit={save} onWithdraw={withdrawRequest} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
+      {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} socialWorkers={isAdmin ? socialWorkers : null} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} fieldErrors={fieldErrors} refusedWith={refusedWith} saving={saving} onSubmit={save} onWithdraw={withdrawRequest} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
       {terminating && <TerminateModal child={terminating} onConfirm={terminate} onClose={() => setTerminating(null)} />}
       {reopening && (
         <ConfirmDialog
