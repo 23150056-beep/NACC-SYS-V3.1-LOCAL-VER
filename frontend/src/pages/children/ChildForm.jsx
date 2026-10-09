@@ -168,12 +168,15 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
     }
   };
   useEffect(() => {
-    if (form.id) return undefined;
+    // Not while the save is going: a keystroke (or a chosen file) in the half
+    // second before Save would otherwise be written as a draft AFTER the save
+    // removed it, and Add Record would offer back a child already added.
+    if (form.id || saving) return undefined;
     const t = setTimeout(() => saveDraft(form), 500);
     return () => clearTimeout(t);
     // saveDraft reads only its argument and draftKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, draftKey]);
+  }, [form, draftKey, saving]);
   // Duplicate/returning-child detection (create mode only): debounce-check
   // while typing so intake staff can reopen an archived record instead of
   // accidentally creating a second one.
