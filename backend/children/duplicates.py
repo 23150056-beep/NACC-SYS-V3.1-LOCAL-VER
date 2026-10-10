@@ -152,16 +152,20 @@ def save_new(serializer, **extra):
 # CASCADE, so one DELETE would take the sessions, notes, consents and closing
 # records with it. A duplicate made by mistake is the one exception, and it is
 # allowed only while it holds nothing but what Add Record itself makes: the
-# row, its case referral, and the question put to a psychologist.
+# row, its case referral, and the question put to a psychologist (and a
+# decline, which is only a reason).
 #
 # Every model that points at a child is named in one of the two tables below,
 # and a test fails when a new one is not (test_remove_duplicate.py). An
 # unnamed one blocks removal rather than going with the record, so a model
 # added later is safe until somebody decides otherwise.
 
-# Removed with the record. A request still waiting, or withdrawn, is only the
-# question; one that was ANSWERED means a psychologist acted on the record,
-# and it stays (see `_answered`).
+# Removed with the record. A request that is waiting, withdrawn or DECLINED is
+# only a question and, at most, a reason: it puts nothing in anyone's caseload.
+# A psychologist shown two identical requests for one child will decline the
+# second as a duplicate, and that must not be what makes the duplicate
+# impossible to remove. An ACCEPTED request means a psychologist took the child
+# on, and it stays (see `_accepted`).
 TAKEN_ALONG = {
     "children.AssignmentRequest",
     "clinical.CaseReferral",
@@ -186,8 +190,9 @@ KEEPS_IT = {
     # would detach them, and the access log would stop saying whose record
     # the assistant had read.
     "assistant.AssistantJob": ("assistant log entry", "assistant log entries"),
-    "children.AssignmentRequest": ("answered assignment request",
-                                   "answered assignment requests"),
+    # Only an ACCEPTED one; the others go with the record (TAKEN_ALONG).
+    "children.AssignmentRequest": ("accepted assignment request",
+                                   "accepted assignment requests"),
 }
 
 
@@ -195,10 +200,11 @@ class Refused(Exception):
     """A removal the server will not do; the message is the sentence shown."""
 
 
-def _answered(rows):
-    """The requests a psychologist has acted on. Pending ones are the question
-    still open, withdrawn ones are already nothing."""
-    return rows.exclude(status__in=[AssignmentRequest.PENDING, AssignmentRequest.WITHDRAWN])
+def _accepted(rows):
+    """The requests a psychologist has taken on. Pending ones are the question
+    still open, withdrawn ones are already nothing, and a declined one holds
+    only a reason."""
+    return rows.filter(status=AssignmentRequest.ACCEPTED)
 
 
 def what_keeps_it(child):
@@ -213,7 +219,7 @@ def what_keeps_it(child):
         label = model._meta.label
         rows = model._default_manager.filter(**{rel.field.name: child})
         if label == "children.AssignmentRequest":
-            rows = _answered(rows)
+            rows = _accepted(rows)
         elif label in TAKEN_ALONG:
             continue
         n = rows.count()
@@ -247,9 +253,10 @@ def remove(duplicate_pk, original_pk, case_reference, *, by):
     Only the ISA calls this (ChildViewSet.remove_duplicate). The two records
     must match on first name, last name and birth date; the one removed must
     hold nothing but what Add Record makes; and its own case number has to be
-    typed, as the confirmation. Its case referral files go with it, and so
-    does its open request, with a notice to the psychologist asked and a line
-    in the audit trail."""
+    typed, as the confirmation. Its case referral files go with it, and so do
+    its requests to a psychologist unless one was accepted. A psychologist
+    whose request was still pending is told; one whose request was declined
+    or withdrawn is not. A line goes in the audit trail."""
     if not str(duplicate_pk).isdigit():
         raise Http404
     try:
@@ -296,8 +303,10 @@ def remove(duplicate_pk, original_pk, case_reference, *, by):
         log_activity(by, ActivityLog.REMOVED, ActivityLog.RECORD,
                      entity_type="Child", entity_label=f"{dup_ref} (duplicate of {orig_ref})",
                      recipient=holder if holder is not None and holder.pk != by.pk else None)
-        # The psychologist whose question disappeared. No child's name, like
-        # every other notice about a request (children/assignment.py).
+        # The psychologist whose question disappeared - only a request still
+        # PENDING, since a declined one was already answered and needs no
+        # notice. No child's name, like every other notice about a request
+        # (children/assignment.py).
         for psychologist in asked:
             log_activity(by, ActivityLog.WITHDRAWN, ActivityLog.RECORD,
                          entity_type="Assignment",

@@ -49,6 +49,7 @@ class RemoveDuplicateBase(TestCase):
         cls.admin = make("admin@t.ph", "Ada", "Admin", Role.ADMINISTRATOR)
         cls.psy = make("psy@t.ph", "Marivic", "Bulan", Role.PSYCHOLOGIST)
         cls.psy2 = make("psy2@t.ph", "Jose", "Rizal", Role.PSYCHOLOGIST)
+        cls.other_psy = make("psy3@t.ph", "Andres", "Bonifacio", Role.PSYCHOLOGIST)
         child = lambda **over: Child.objects.create(  # noqa: E731
             **{"first_name": "Libai", "last_name": "Cramm", "birth_date": BORN,
                "case_type": "Adoption", "case_category": "Without Known Parents",
@@ -225,6 +226,39 @@ class ItGoesTest(RemoveDuplicateBase):
         self.assertFalse(AssignmentRequest.objects.filter(child_id=self.duplicate.pk).exists())
         self.assertFalse(ActivityLog.objects.filter(recipient=self.psy).exists())
 
+    def test_a_declined_request_goes_with_the_record_and_nobody_is_told(self):
+        """A psychologist shown two identical requests declines one as a
+        duplicate; that decline must not be what stops it being removed. It
+        holds only a reason, so it goes, and needs no notice."""
+        AssignmentRequest.objects.filter(child=self.duplicate).update(
+            status=AssignmentRequest.DECLINED, reason="This is a duplicate of another request.")
+        before = ActivityLog.objects.count()
+        res = self._remove()
+        self.assertEqual(200, res.status_code, res.data)
+        self.assertFalse(Child.objects.filter(pk=self.duplicate.pk).exists())
+        self.assertFalse(AssignmentRequest.objects.filter(child_id=self.duplicate.pk).exists())
+        self.assertFalse(ActivityLog.objects.filter(action=ActivityLog.WITHDRAWN).exists())
+        self.assertFalse(ActivityLog.objects.filter(recipient=self.psy).exists())
+        # Only the audit line was added.
+        self.assertEqual(before + 1, ActivityLog.objects.count())
+        self.assertEqual(1, ActivityLog.objects.filter(action=ActivityLog.REMOVED).count())
+
+    def test_only_the_psychologist_whose_request_was_pending_is_told(self):
+        """A declined request and a pending one on the same record: both go,
+        and the notice reaches only the psychologist still waiting."""
+        AssignmentRequest.objects.create(
+            child=self.duplicate, psychologist=self.psy2, requested_by=self.sw,
+            status=AssignmentRequest.DECLINED, reason="busy")
+        AssignmentRequest.objects.create(
+            child=self.duplicate, psychologist=self.other_psy, requested_by=self.sw,
+            status=AssignmentRequest.WITHDRAWN)
+        self.assertEqual(200, self._remove().status_code)
+        self.assertFalse(AssignmentRequest.objects.filter(child_id=self.duplicate.pk).exists())
+        told = ActivityLog.objects.filter(action=ActivityLog.WITHDRAWN)
+        self.assertEqual([self.psy], [e.recipient for e in told])
+        self.assertFalse(ActivityLog.objects.filter(recipient=self.psy2).exists())
+        self.assertFalse(ActivityLog.objects.filter(recipient=self.other_psy).exists())
+
     def test_the_case_number_may_be_typed_any_of_these_ways(self):
         n = self.duplicate.pk
         for typed in (f"c-{n:04d}", f"  C-{n:04d}  ", f"C-{n}", f"C{n}"):
@@ -339,8 +373,7 @@ KEEPERS = {
     "assistant.AssistantJob": lambda t, c: AssistantJob.objects.create(
         job_type="brief", child=c),
     "children.AssignmentRequest": lambda t, c: AssignmentRequest.objects.create(
-        child=c, psychologist=t.psy2, requested_by=t.sw, status=AssignmentRequest.DECLINED,
-        reason="busy"),
+        child=c, psychologist=t.psy2, requested_by=t.sw, status=AssignmentRequest.ACCEPTED),
 }
 
 
@@ -360,12 +393,32 @@ class WhatKeepsARecordTest(RemoveDuplicateBase):
     def test_an_accepted_request_keeps_it(self):
         AssignmentRequest.objects.filter(child=self.duplicate).update(
             status=AssignmentRequest.ACCEPTED)
-        self._refused(self._remove(), "1 answered assignment request")
+        self.assertEqual(
+            f"{self.dup_ref} cannot be removed: it already has 1 accepted assignment request, "
+            "and only a record holding nothing but what Add Record makes can be removed.",
+            self._refused(self._remove()))
+        self.assertEqual(AssignmentRequest.ACCEPTED,
+                         AssignmentRequest.objects.get(child=self.duplicate).status)
 
-    def test_a_declined_request_keeps_it(self):
+    def test_only_the_accepted_request_is_counted_among_others(self):
+        """Declined, withdrawn and pending requests beside an accepted one go
+        with the record but are not what keeps it, so they are not counted."""
+        AssignmentRequest.objects.filter(child=self.duplicate).update(
+            status=AssignmentRequest.ACCEPTED)
+        AssignmentRequest.objects.create(
+            child=self.duplicate, psychologist=self.psy2, requested_by=self.sw,
+            status=AssignmentRequest.DECLINED, reason="busy")
+        AssignmentRequest.objects.create(
+            child=self.duplicate, psychologist=self.other_psy, requested_by=self.sw,
+            status=AssignmentRequest.WITHDRAWN)
+        self._refused(self._remove(), "it already has 1 accepted assignment request,")
+        self.assertEqual(3, AssignmentRequest.objects.filter(child=self.duplicate).count())
+
+    def test_a_declined_request_does_not_keep_it(self):
         AssignmentRequest.objects.filter(child=self.duplicate).update(
             status=AssignmentRequest.DECLINED, reason="busy")
-        self._refused(self._remove(), "1 answered assignment request")
+        self.assertEqual([], duplicates.what_keeps_it(self.duplicate))
+        self.assertEqual(200, self._remove().status_code)
 
     def test_a_model_nobody_has_named_keeps_it_rather_than_going_with_it(self):
         """Fail safe: a new relation to a child is a blocker until somebody
@@ -392,7 +445,8 @@ class EveryRelationToAChildIsConsideredTest(TestCase):
                          "children/duplicates.py names a model that no longer points at Child.")
 
     def test_only_the_assignment_request_is_in_both(self):
-        """A request still waiting goes with the record; one answered keeps it."""
+        """A request still waiting, withdrawn or declined goes with the record;
+        an accepted one keeps it."""
         self.assertEqual({"children.AssignmentRequest"},
                          set(duplicates.KEEPS_IT) & set(duplicates.TAKEN_ALONG))
 

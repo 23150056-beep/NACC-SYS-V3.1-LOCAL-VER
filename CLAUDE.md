@@ -1035,9 +1035,12 @@ covers a hole the others leave:
 - **The ISA can remove a duplicate made by mistake**
   (`POST /children/<id>/remove-duplicate/`, "Remove duplicate record…" in the
   record drawer): both must match, the removed record's case number is typed
-  to confirm, and the record must hold nothing but what Add Record makes - a
-  pending request and its referral files go with it; any appointment,
-  clinical record, case study, answered request or assistant job blocks it.
+  to confirm, and the record must hold nothing but what Add Record makes - its
+  referral files and any pending, withdrawn or declined request go with it (a
+  psychologist shown two identical requests declines one as a duplicate, and
+  a decline holds only a reason; only a still-pending one is notified); any
+  appointment, clinical record, case study, accepted request, assigned
+  psychologist or assistant job blocks it.
   Every model with a FK to Child is named in `KEEPS_IT` or `TAKEN_ALONG`, and
   a test reading `Child._meta.related_objects` fails on one that is not - a
   new relation must be decided, never deleted along by default. Children
