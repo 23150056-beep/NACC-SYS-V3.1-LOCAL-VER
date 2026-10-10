@@ -267,9 +267,9 @@ Demo data ships with each phase and satisfies the same rules
   the owner's PC and his reading of samples. It reads no remarks, no
   self-report words, no case study text and no unconfirmed summary.
 
-## Later, if wanted
+## Block A for every case type (built 10 Oct 2026)
 
-Block A (background, medical history, immunizations, development, family) is
-useful for every case type, not only adoptions. Extending the tab to Foster
-Care and the others would make it the child's profile everywhere, with the
-SCSR print still Adoption-only.
+The owner asked for it: block A (background, medical history, immunizations,
+development, family, surrender or abandonment) is the child's profile for
+every case type. Blocks B and C, and the adoption wording, stay Adoption-only.
+See CLAUDE.md "The case study".

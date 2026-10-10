@@ -585,8 +585,10 @@ Settings, no per-feature flags.
   `kind: "case"` and rows made for a SW - the case referral and its CONFIRMED
   summary, the psychologist (assigned / asked n days ago / declined and why /
   none), consent, custodian texts (`custodian.status_of`, never the name or
-  number), the newest survey; the care gaps those rows already say are
-  dropped. `/assistant/capabilities/` says `brief: "clinical" | "case"`. A
+  number), the newest survey; every care gap a row already says is
+  dropped, for both role lists (the ISA's consent gap is `consent_missing`
+  from `compute_alerts`, a SW's `no_signed_consent`; a guard test fails on a
+  gap type nobody has decided). `/assistant/capabilities/` says `brief: "clinical" | "case"`. A
   model-written part for SWs is next step 6 and waits on `ai_eval` on the
   owner's PC; it may read no remarks, no self-report words, no case study
   text and no unconfirmed summary.
@@ -798,8 +800,22 @@ none of the real ones has been seen.
 Built from 8 Oct 2026; design in
 `docs/superpowers/specs/2026-10-07-scsr-parts-2-5-design.md`. The owner's aim:
 the Social Case Study Report "digitally on the child record module" - a Case
-study tab on an Adoption child's page that prints the SCSR. No Word export.
+study tab on the child's page that prints the SCSR. No Word export.
 App `case_study` (never `adoption`, see "Removed").
+
+- **Block A is every child's; B and C are adoptions'** (owner, 10 Oct 2026).
+  The child's background - referral, description, medical history,
+  immunizations, development, birth family, surrender or abandonment - is the
+  child's profile whatever the case type, so the tab shows for Foster Care and
+  the rest with block A only. `sections.applies()` gates B and C on
+  `case_type == "Adoption"` (mirrored in `scsr.js appliesTo`); completeness,
+  Final and the snapshot all read `applies`, so a non-adoption Final is block
+  A. Moving a record away from Adoption HIDES B and C - their rows stay and
+  come back if it moves back. Reopen works on any active record, or a final
+  made as an adoption would be stuck after a case-type change. A
+  non-adoption record reads "The Child" (not "/Adoptee"), shows "Case type" in
+  Part I, and prints block A without the adoption subtitle; a final copy
+  prints by the case type it was MADE with.
 
 - **Numbering is the template's**: A (the child, I-V), B (the PAPs, I-XVII),
   C (placement, I-VI), roman numbers restarting in each block. Part I is the
@@ -850,8 +866,8 @@ App `case_study` (never `adoption`, see "Removed").
   nobody reviewed; a box save that loses that race is rolled back. The box-save
   response carries `case_study_updated_at` for that reason.
 - **Reopen** puts it back to draft; every final stays on file ("Finals on
-  file", each printable). A closed or non-Adoption case cannot be reopened -
-  its finals still print. Finalized is addressed to the ASSIGNED psychologist
+  file", each printable). A closed case cannot be reopened - its finals still
+  print. Finalized is addressed to the ASSIGNED psychologist
   (a pending one is told nothing); Reopened to nobody; neither carries text.
 - **Demo data**: about a third of the active Adoption children get a draft and
   a few others a final (`case_study/demo_case_studies.py`). The export blanks
@@ -1487,9 +1503,16 @@ react-big-calendar's own `role="rowgroup"` markup rather than ours.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,309 tests, ~20 min
+cd backend && .venv/Scripts/python.exe manage.py test   # 2,354 tests, ~1 min
 cd frontend && npm run lint && npm run build
 ```
+
+**Tests hash passwords with MD5** (`settings.py`, only `if _TESTING`; 10 Oct
+2026). PBKDF2 at Django's default costs ~0.22 s a hash and the suite hashes
+thousands in setUp: the full run went from ~23 minutes to ~50 seconds.
+Production hashing is unchanged - check `manage.py shell` still reports
+PBKDF2 if this is ever touched. Nothing asserts a hash prefix; a test that
+genuinely needs PBKDF2 sets it with `override_settings`.
 
 **A test never reads the wall clock** (4 Oct 2026). Three failed only between
 11 PM and midnight, Manila time (`TIME_ZONE`), and a run that straddles that
