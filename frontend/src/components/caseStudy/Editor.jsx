@@ -10,8 +10,8 @@ import { shortDate } from '../../utils/time';
 import { clearDraft, readDraft, writeDraft } from './drafts';
 import { FinalBanner, FinalsOnFile, MarkAsFinal } from './FinalControls';
 import {
-  FINAL_SENTENCE, blocksFor, canonical, differs, normalise, recordNotes, sentence, todayIso,
-  workingCopy,
+  FINAL_SENTENCE, NOT_AN_ADOPTION_NOTE, blockTitle, blocksFor, canonical, differs,
+  isAdoptionRecord, normalise, recordNotes, sentence, todayIso, workingCopy,
 } from './model';
 import PartOne from './PartOne';
 import SectionCard from './SectionCard';
@@ -346,7 +346,10 @@ export default function Editor({ child, cs, print }) {
     ...shown.filter((e) => missingSet.has(e.title)).map((e) => ({ title: e.title, target: `cs-sec-${e.key}` })),
   ];
 
-  const isDomesticRelative = child.type_of_adoption === 'Domestic Relative';
+  // The custody question decides the placement history (block C), so only an
+  // Adoption record is asked it, whatever adoption type an older record kept.
+  const adoption = isAdoptionRecord(child);
+  const isDomesticRelative = adoption && child.type_of_adoption === 'Domestic Relative';
   const inputBusy = headerBusy;
   const asOfText = study.date_prepared
     ? `as of the date prepared, ${shortDate(facts.age_as_of)}`
@@ -364,6 +367,9 @@ export default function Editor({ child, cs, print }) {
       <Card title="Social Case Study Report" padding="14px 15px"
         actions={<Badge tone={study.status === 'final' ? 'success' : 'amber'} size="sm" dot>{study.status === 'final' ? 'Final' : 'Draft'}</Badge>}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {!adoption && (
+            <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.55 }}>{NOT_AN_ADOPTION_NOTE}</p>
+          )}
           <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center' }}>
             <div style={{ fontWeight: 800, fontSize: 15, color: 'var(--text-strong)' }}>
               {done} of {shown.length} sections complete
@@ -445,7 +451,7 @@ export default function Editor({ child, cs, print }) {
 
       {/* Block A, Part I: the record's own facts, read from it and never typed here. */}
       <h2 style={{ margin: '6px 0 0', fontFamily: 'var(--font-sans)', fontSize: 16, fontWeight: 800, color: 'var(--text-strong)' }}>
-        A. The Child/Adoptee
+        A. {blockTitle('A', adoption)}
       </h2>
       <PartOne facts={facts}
         actions={child.status === 'active'

@@ -12,7 +12,7 @@ import { sentence } from './model';
  * reader may not know there is one), the Print button (which prints the case
  * study while that tab is open), and the print element itself.
  *
- *   phase  'idle'     not an Adoption record, or nothing asked yet
+ *   phase  'idle'     the child's record has not arrived yet, so nothing is asked
  *          'loading'  asked, not answered
  *          'ready'    `study` holds the answer (its shape depends on the role)
  *          'none'     404: no tab

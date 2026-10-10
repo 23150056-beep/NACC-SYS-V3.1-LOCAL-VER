@@ -137,14 +137,14 @@ export default function ChildProgressReport() {
 
   const load = () => api.get(`/reports/child/${id}/`).then((r) => setData(r.data)).catch(() => setData('error'));
 
-  // The Social Case Study Report belongs to Adoption records only, and the tab
-  // exists only if the server does not answer 404 for this reader (components/
-  // caseStudy/useCaseStudy.js). Above the early returns, like every hook here.
-  // `data` is still the last child's until the new one arrives (this component
-  // is re-used between routes), so it counts only once it is this child's.
+  // Every case type has a case study (block A; blocks B and C are an
+  // adoption's), and the tab exists only if the server does not answer 404 for
+  // this reader (components/caseStudy/useCaseStudy.js). Above the early returns,
+  // like every hook here. `data` is still the last child's until the new one
+  // arrives (this component is re-used between routes), so it counts only once
+  // it is this child's.
   const dataIsThisChild = !!data && data !== 'error' && String(data.child?.id) === String(id);
-  const isAdoption = dataIsThisChild && data.child.case_type === 'Adoption';
-  const caseStudy = useCaseStudy(id, isAdoption);
+  const caseStudy = useCaseStudy(id, dataIsThisChild);
   const hasCaseStudyTab = caseStudy.phase === 'ready' || caseStudy.phase === 'error';
   // Print follows the tab: on the Case study tab the social worker who holds
   // the record prints the case study; everyone else, and every other tab, the
@@ -159,7 +159,7 @@ export default function ChildProgressReport() {
   const printTarget = useScsrPrint(id, caseStudy.study, printsCaseStudy);
   const printExtras = usePrintExtras(printsCaseStudy && printTarget.mode === 'draft');
   // Landed on the tab by a link, or left on it by a record that has none.
-  const caseStudyGone = caseStudy.phase === 'none' || (dataIsThisChild && !isAdoption);
+  const caseStudyGone = caseStudy.phase === 'none';
   useEffect(() => {
     if (tab === 'casestudy' && caseStudyGone) setTab('overview');
   }, [tab, caseStudyGone]);
@@ -1032,7 +1032,7 @@ export default function ChildProgressReport() {
 
       </div>
 
-      {/* The Social Case Study Report (Adoption records). Mounted as soon as the
+      {/* The Social Case Study Report (every case type). Mounted as soon as the
           server has answered, like every other panel, so what is half-typed in
           it survives a visit to another tab. */}
       {hasCaseStudyTab && (

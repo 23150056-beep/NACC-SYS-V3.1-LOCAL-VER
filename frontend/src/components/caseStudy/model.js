@@ -8,7 +8,7 @@
  * "changed" only when its normalised copy differs from the saved one, so a
  * trailing space or an empty row typed and removed is not a change.
  */
-import { PAP_ROWS, SCSR_BLOCKS, SCSR_SECTIONS, appliesTo } from '../../config/scsr';
+import { ADOPTION, PAP_ROWS, SCSR_BLOCKS, SCSR_SECTIONS, appliesTo } from '../../config/scsr';
 
 export const PROSE_MAX = 20000;
 export const ROWS_MAX = 50;
@@ -118,6 +118,21 @@ export const isBlank = (entry, saved) =>
 
 // --- the catalogue, by block -------------------------------------------------------
 
+/** Is this an Adoption record? Blocks B (the prospective adoptive parents) and
+ *  C (the placement) are an adoption's; every case type has block A. Accepts
+ *  the child record or the case study's `record_facts`. */
+export const isAdoptionRecord = (child) => child?.case_type === ADOPTION;
+
+/* The one line a record that is not an adoption carries under the header. */
+export const NOT_AN_ADOPTION_NOTE = 'Blocks B and C (the prospective adoptive parents and the placement) are for adoption records.';
+
+/** A block's title. Block A is "The Child/Adoptee" in the template; on a record
+ *  that is not an adoption there is no adoptee, so it reads "The Child". */
+export function blockTitle(letter, adoption) {
+  if (letter === 'A' && !adoption) return 'The Child';
+  return SCSR_BLOCKS.find((b) => b.block === letter)?.title || '';
+}
+
 /** The boxes that apply to this child, grouped under their block letters. */
 export function blocksFor(child, study) {
   const stored = new Map((study?.sections || []).map((s) => [s.key, s]));
@@ -206,11 +221,19 @@ export const TICK_SENTENCES = {
 };
 
 /** Part I as the template words it, one row per line. `fmt` writes a date. The
- *  value is read from the record (`record_facts`), never typed here. */
+ *  value is read from the record (`record_facts`), never typed here.
+ *
+ *  For a record that is not an adoption the template's adoption wording gives
+ *  way: "Case type" stands where "Type of adoption" is, the placement date
+ *  loses its adoption-only note, and the rows only an adoption uses (the legal
+ *  status for the CDCLAA and the two intake dates, of which a record has one)
+ *  are left out where they are blank. A copy made before this existed has no
+ *  case type in its facts and is an adoption's. */
 export function partOneRows(f, fmt) {
+  const adoption = !f.case_type || f.case_type === ADOPTION;
   const health = f.health_condition === 'With special needs' && f.special_needs
     ? `${f.health_condition}: ${f.special_needs}` : f.health_condition;
-  return [
+  const rows = [
     ['Name (First, Middle and Last Name. For Child Without Known Parents, indicate the given first and last name and alias, if applicable)',
       f.alias ? `${f.fullname} (alias ${f.alias})` : f.fullname, 'Name'],
     ['Sex', f.gender],
@@ -220,13 +243,19 @@ export function partOneRows(f, fmt) {
     ['Birth Status (Marital/Non-Marital/Child)', f.birth_status, 'Birth status'],
     ['Category (Surrendered/Abandoned/Dependent/Neglected/Without Known Parents, Orphan)', f.case_category, 'Category'],
     ['Legal Status (with issued CDCLAA / IVC / judicially declared abandoned)',
-      [f.legal_status, f.legal_status && f.legal_status_date ? `issued ${fmt(f.legal_status_date)}` : ''].filter(Boolean).join(', '), 'Legal status'],
+      [f.legal_status, f.legal_status && f.legal_status_date ? `issued ${fmt(f.legal_status_date)}` : ''].filter(Boolean).join(', '), 'Legal status', true],
     ['Health Condition (healthy or with special needs, specify)', health, 'Health condition'],
-    ['Date of Admission to the Agency', fmt(f.date_of_admission), 'Date of admission'],
-    ['Date of Placement to Custodian (for Relative/Stepparent/Adult/FA/IP)', fmt(f.date_of_placement_to_custodian), 'Date of placement to custodian'],
-    ['Type of Adoption (Regular, Domestic Relative, Step-parent, Adult, SIBRA, ICA Relative, IP, Foster-Adopt)', f.type_of_adoption, 'Type of adoption'],
+    ['Date of Admission to the Agency', fmt(f.date_of_admission), 'Date of admission', true],
+    [adoption ? 'Date of Placement to Custodian (for Relative/Stepparent/Adult/FA/IP)' : 'Date of Placement to Custodian',
+      fmt(f.date_of_placement_to_custodian), 'Date of placement to custodian', true],
+    adoption
+      ? ['Type of Adoption (Regular, Domestic Relative, Step-parent, Adult, SIBRA, ICA Relative, IP, Foster-Adopt)', f.type_of_adoption, 'Type of adoption']
+      : ['Case Type', f.case_type, 'Case type'],
     ['Current Whereabouts', f.current_placement],
-  ].map(([label, value, short]) => ({ label, short: short || label, value: value || '' }));
+  ];
+  return rows
+    .filter(([, value, , adoptionOnly]) => adoption || !adoptionOnly || value)
+    .map(([label, value, short]) => ({ label, short: short || label, value: value || '' }));
 }
 
 /** Facts from the record that the template shows beside a box. */

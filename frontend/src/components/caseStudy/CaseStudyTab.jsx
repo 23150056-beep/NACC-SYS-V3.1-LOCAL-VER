@@ -5,7 +5,7 @@ import { useConfirm } from '../../context/ConfirmContext';
 import { useToast } from '../../context/ToastContext';
 import { startCaseStudy } from '../../api/caseStudy';
 import { exactDate, shortDate } from '../../utils/time';
-import { blocksFor, recordNotes, sentence } from './model';
+import { NOT_AN_ADOPTION_NOTE, blockTitle, blocksFor, isAdoptionRecord, recordNotes, sentence } from './model';
 import Editor from './Editor';
 import PartOne from './PartOne';
 import ReadOnlyValue from './ReadOnlyValue';
@@ -84,6 +84,7 @@ function BlockAReader({ child, study }) {
   const stored = new Map(study.sections.map((s) => [s.key, s]));
   const block = blocksFor(child, study).find((b) => b.block === 'A');
   const writer = child.social_worker_name || 'the social worker';
+  const adoption = isAdoptionRecord(child);
   return (
     <div className="racco-stack" style={{ gap: 12 }}>
       {study.status === 'final' ? (
@@ -97,9 +98,11 @@ function BlockAReader({ child, study }) {
         </Alert>
       )}
       <Aside>
-        You can read the child&apos;s side of the case study (block A). The adoptive parents and the placement are not shared with psychologists, and only {writer} can change any of it.
+        {adoption
+          ? <>You can read the child&apos;s side of the case study (block A). The adoptive parents and the placement are not shared with psychologists, and only {writer} can change any of it.</>
+          : <>You can read the child&apos;s case study (block A). Only {writer} can change any of it. {NOT_AN_ADOPTION_NOTE}</>}
       </Aside>
-      <h2 style={{ margin: '4px 0 0', fontFamily: 'var(--font-sans)', fontSize: 16, fontWeight: 800, color: 'var(--text-strong)' }}>A. The Child/Adoptee</h2>
+      <h2 style={{ margin: '4px 0 0', fontFamily: 'var(--font-sans)', fontSize: 16, fontWeight: 800, color: 'var(--text-strong)' }}>A. {blockTitle('A', adoption)}</h2>
       <PartOne facts={study.record_facts} />
       {(block?.entries || []).filter((entry) => stored.has(entry.key)).map((entry) => {
         const row = stored.get(entry.key);
@@ -150,6 +153,7 @@ function Start({ child, cs }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const { study } = cs;
+  const adoption = isAdoptionRecord(child);
 
   if (study.read_only) {
     return (
@@ -181,7 +185,9 @@ function Start({ child, cs }) {
       <EmptyState
         icon={<Icon name="file-text" size={26} />}
         title="No case study yet"
-        description="The Social Case Study Report (SCSR) is written about the child, the prospective adoptive parents and the placement. For a regular, IP or foster adoption it is prepared after the Pre-Adoption Placement Authority (PAPA) is issued and the supervised trial custody is done; for a relative, step-parent or adult adoption, before the petition is filed."
+        description={adoption
+          ? "The Social Case Study Report (SCSR) is written about the child, and for an adoption also about the prospective adoptive parents and the placement. It covers why the child was referred, the child's background and development, the birth family, and the surrender or abandonment. For a regular, IP or foster adoption it is prepared after the Pre-Adoption Placement Authority (PAPA) is issued and the supervised trial custody is done; for a relative, step-parent or adult adoption, before the petition is filed."
+          : `The case study is the Social Case Study Report (SCSR) of a child in care. It covers why the child was referred, the child's background and development, the birth family, and the surrender or abandonment. ${NOT_AN_ADOPTION_NOTE}`}
         action={(
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' }}>
             <Button variant="primary" disabled={busy} onClick={start} iconLeft={<Icon name="file-plus" size={17} />}>
