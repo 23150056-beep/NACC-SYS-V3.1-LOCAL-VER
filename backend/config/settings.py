@@ -255,6 +255,14 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Django REST Framework
 _TESTING = "test" in sys.argv
 
+# The test suite creates thousands of users in setUp, and each create_user
+# hashes a password: PBKDF2 at Django's default iteration count is ~0.25 s a
+# hash, which was a large share of the run. MD5 is instant. This applies ONLY
+# while `manage.py test` runs; every other process keeps Django's default
+# hashers, so production hashing, and the hashes already stored, are unchanged.
+if _TESTING:
+    PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "accounts.authentication.ForcePasswordChangeJWTAuthentication",
