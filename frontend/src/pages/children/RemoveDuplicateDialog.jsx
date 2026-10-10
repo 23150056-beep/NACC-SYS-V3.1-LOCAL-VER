@@ -76,9 +76,10 @@ export default function RemoveDuplicateDialog({ child, onClose, onRemoved }) {
       </>}
     >
       <p style={{ margin: 0, fontSize: 14, lineHeight: 1.6, color: 'var(--text-body)' }}>
-        This deletes <strong>{child.fullname}</strong> ({ref}) for good, with its case referral file and
-        any open request to a psychologist. Use it only for a record added by mistake when the child
-        already has another one. A record that has sessions, notes or any other work cannot be removed.
+        This deletes <strong>{child.fullname}</strong> ({ref}) for good, with its case referral files and
+        any request to a psychologist that has not been accepted (pending, declined or withdrawn). Use it
+        only for a record added by mistake when the child already has another one. A record that has
+        sessions, notes, an accepted request or any other work cannot be removed.
       </p>
       {loadError && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{loadError}</Alert>}
       {!matches && !loadError && <p style={{ margin: 0, fontSize: 12.5, color: 'var(--text-muted)' }}>Looking for the other record…</p>}
