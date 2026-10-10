@@ -27,6 +27,16 @@ export const getLatestBrief = (childId) =>
 export const generateBrief = (childId) =>
   api.post(`/assistant/brief/child/${childId}/`).then((r) => r.data);
 
+// The social worker's written case brief (owner, 8 Oct 2026). Only a social
+// worker is let in at either door; the ISA and the psychologist get a 403 and
+// the screens never ask. `latest` answers 404 "No current brief." when nothing
+// was drafted today or the facts have moved on since.
+export const getLatestCaseBrief = (childId) =>
+  api.get(`/assistant/case-brief/child/${childId}/latest/`).then((r) => r.data);
+
+export const generateCaseBrief = (childId) =>
+  api.post(`/assistant/case-brief/child/${childId}/`).then((r) => r.data);
+
 // The facts above a brief: plain queries, no model. Answers when the
 // assistant is off or hosted, where the brief itself is a 503.
 export const getBriefFacts = (childId) =>

@@ -17,6 +17,7 @@ import { clock } from '../utils/time';
 import { polishRemark, sendFeedback, getLatestBrief, generateBrief, getBriefFacts, summarizeDocument, confirmSummary } from '../api/assistant';
 import AssistantAccessLog from '../components/AssistantAccessLog';
 import BriefFacts from '../components/BriefFacts';
+import WrittenCaseBrief from '../components/WrittenCaseBrief';
 import ReportCheckNote from '../components/ReportCheckNote';
 import UploadDrawer from '../components/UploadDrawer';
 import PsychReportPrint from '../components/PsychReportPrint';
@@ -56,12 +57,13 @@ export default function ChildProgressReport() {
   // False on a hosted deployment, where the server refuses every drafting
   // feature (the chatbot is unaffected). Above the early returns below: a hook
   // under `if (!data) return` crashed this page once already.
-  const { drafting, brief: briefKind } = useAssistant();
+  const { drafting, brief: briefKind, caseBriefWriting } = useAssistant();
   const isPsych = user?.role_name === 'Psychologist';
   // Which brief this person gets (owner, 8 Oct 2026): the psychologist's is the
-  // facts and a written brief; a social worker's and the ISA's is the case
-  // facts alone, and never asks for the written one. The server says which;
-  // until it answers, the role does.
+  // facts and a written brief; a social worker's is the case facts and, where
+  // the deployment drafts, a written part of its own (WrittenCaseBrief); the
+  // ISA's is the case facts alone, and never asks for either written one. The
+  // server says which; until it answers, the role does.
   const caseBrief = (briefKind || (isPsych ? 'clinical' : 'case')) === 'case';
   const [data, setData] = useState(null);
   // Which section of the chart is showing. Every panel stays mounted — see
@@ -94,7 +96,8 @@ export default function ChildProgressReport() {
   // Cleared once the remark is saved or the draft is reverted.
   const [preRemarkText, setPreRemarkText] = useState(null);
   // { childId, facts, factsFailed, prose: 'loading'|'ready'|'unavailable'|'failed'|'not_offered'|'none', draft, generatedAt, jobId }
-  // ('none' is the case brief: there is no written part to wait for.)
+  // ('none' is the case brief: its written part, a social worker's only, is
+  // WrittenCaseBrief's own and is not waited for here.)
   // childId is the child it was opened for: a reply for any other child is
   // dropped, so a slow request cannot fill another child's modal.
   const [brief, setBrief] = useState(null);
@@ -1172,64 +1175,73 @@ export default function ChildProgressReport() {
         />
       )}
 
-      {/* Pre-session brief modal. The case brief (social worker, ISA) is the
-          facts panel and a Close button: no written part, no disclaimer about
-          one, and it never reaches the endpoints that draft it. */}
+      {/* Pre-session brief modal. The case brief is the facts panel and a Close
+          button for the ISA, and never reaches the endpoints that draft the
+          psychologist's brief. A social worker, where the deployment drafts,
+          gets WrittenCaseBrief under the facts: its own draft, disclaimer and
+          buttons, keyed to the child the modal was opened for. */}
       {brief && (
         <Modal open onClose={() => setBrief(null)} title={caseBrief ? 'Case brief' : 'Pre-session brief'}
                subtitle={brief.prose === 'ready' ? `Drafted ${clock(brief.generatedAt)}` : null}
                width={560}>
           <BriefFacts facts={brief.facts} failed={brief.factsFailed} />
-          {brief.prose !== 'none' && (
-            <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0 12px' }} />
-          )}
-          {brief.prose === 'loading' && (
-            <p role="status" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
-              Drafting the written brief… this can take up to a minute.
-            </p>
-          )}
-          {brief.prose === 'not_offered' && (
-            <Note icon="info">A written brief is not available on this deployment.</Note>
-          )}
-          {brief.prose === 'unavailable' && (
-            <Note icon="info">
-              The written brief is unavailable right now. The facts above come straight from the record.
-            </Note>
-          )}
-          {brief.prose === 'failed' && (
-            <Note tone="warning" icon="alert-triangle">Could not prepare the written brief.</Note>
-          )}
-          {brief.prose === 'ready' && (
+          {caseBrief && caseBriefWriting ? (
+            <WrittenCaseBrief key={brief.childId} childId={brief.childId}
+                              onClose={() => setBrief(null)} />
+          ) : (
             <>
-              <Alert tone="info" disclaimer style={{ marginBottom: 12 }}>
-                AI-drafted decision support, not a diagnosis. The licensed psychologist
-                reviews, edits, and approves all content.
-              </Alert>
-              <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6 }}>{brief.draft}</div>
+              {brief.prose !== 'none' && (
+                <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0 12px' }} />
+              )}
+              {brief.prose === 'loading' && (
+                <p role="status" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                  Drafting the written brief… this can take up to a minute.
+                </p>
+              )}
+              {brief.prose === 'not_offered' && (
+                <Note icon="info">A written brief is not available on this deployment.</Note>
+              )}
+              {brief.prose === 'unavailable' && (
+                <Note icon="info">
+                  The written brief is unavailable right now. The facts above come straight from the record.
+                </Note>
+              )}
+              {brief.prose === 'failed' && (
+                <Note tone="warning" icon="alert-triangle">Could not prepare the written brief.</Note>
+              )}
+              {brief.prose === 'ready' && (
+                <>
+                  <Alert tone="info" disclaimer style={{ marginBottom: 12 }}>
+                    AI-drafted decision support, not a diagnosis. The licensed psychologist
+                    reviews, edits, and approves all content.
+                  </Alert>
+                  <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6 }}>{brief.draft}</div>
+                </>
+              )}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+                {brief.prose === 'ready' ? (
+                  <>
+                    <Button variant="ghost" onClick={() => { sendFeedback(brief.jobId, 'discarded').catch(() => {}); setBrief(null); }}>
+                      Not useful
+                    </Button>
+                    <Button variant="ghost" onClick={() => openBrief({ regenerate: true })} disabled={briefBusy}>
+                      {briefBusy ? 'Drafting…' : 'Regenerate (slow)'}
+                    </Button>
+                    <Button variant="primary" onClick={() => { sendFeedback(brief.jobId, 'accepted').catch(() => {}); setBrief(null); }}>
+                      Useful
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    {brief.prose === 'failed' && (
+                      <Button variant="ghost" onClick={() => openBrief()} disabled={briefBusy}>Try again</Button>
+                    )}
+                    <Button variant="primary" onClick={() => setBrief(null)}>Close</Button>
+                  </>
+                )}
+              </div>
             </>
           )}
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-            {brief.prose === 'ready' ? (
-              <>
-                <Button variant="ghost" onClick={() => { sendFeedback(brief.jobId, 'discarded').catch(() => {}); setBrief(null); }}>
-                  Not useful
-                </Button>
-                <Button variant="ghost" onClick={() => openBrief({ regenerate: true })} disabled={briefBusy}>
-                  {briefBusy ? 'Drafting…' : 'Regenerate (slow)'}
-                </Button>
-                <Button variant="primary" onClick={() => { sendFeedback(brief.jobId, 'accepted').catch(() => {}); setBrief(null); }}>
-                  Useful
-                </Button>
-              </>
-            ) : (
-              <>
-                {brief.prose === 'failed' && (
-                  <Button variant="ghost" onClick={() => openBrief()} disabled={briefBusy}>Try again</Button>
-                )}
-                <Button variant="primary" onClick={() => setBrief(null)}>Close</Button>
-              </>
-            )}
-          </div>
         </Modal>
       )}
 

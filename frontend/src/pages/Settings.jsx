@@ -14,6 +14,7 @@ import { checkSmsGateway, testSmsDelivery } from '../api/sms';
 
 const FEATURE_LABELS = {
   brief: 'Pre-session briefs',
+  case_brief: 'Case briefs',
   doc_intelligence: 'Document summaries',
   remark_polish: 'Remark polishing',
   census_narrative: 'Census narrative',

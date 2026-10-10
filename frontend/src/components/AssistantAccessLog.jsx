@@ -7,6 +7,7 @@ import { exactDate } from '../utils/time';
 
 const KIND_LABELS = {
   brief: 'Pre-session brief',
+  case_brief: 'Case brief',
   report_summary: 'Report summary',
   referral_summary: 'Referral summary',
   survey_check: 'Self-report check',
@@ -117,7 +118,8 @@ export default function AssistantAccessLog({ childId, active }) {
       )}
       <p style={{ margin: '12px 0 0', fontSize: 12, lineHeight: 1.5, ...muted }}>
         Every time the assistant&apos;s model was given this child&apos;s notes, documents or
-        survey answers through the app: briefs, summaries and the self-report check.
+        survey answers through the app: pre-session briefs, case briefs, summaries and the
+        self-report check.
         Developer commands such as ai_eval are not listed. Chatbot questions are not listed: the chatbot&apos;s model only picks
         which lookup to run and never reads a record. Remark polishing is not listed: it reads
         only the words being typed, which are not tied to a child. A summary of a document

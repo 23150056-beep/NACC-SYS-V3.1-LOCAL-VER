@@ -17,7 +17,7 @@ import { useAuth } from './AuthContext';
  * drafting button (`drafting`), so the two cannot disagree. */
 const AssistantCtx = createContext({
   open: false, openAssistant: () => {}, closeAssistant: () => {},
-  caps: null, drafting: true, brief: null,
+  caps: null, drafting: true, brief: null, caseBriefWriting: false,
 });
 
 export function AssistantProvider({ children }) {
@@ -59,6 +59,11 @@ export function AssistantProvider({ children }) {
     // a written brief) or 'case' (facts alone). null until the answer
     // arrives; the screens fall back to the role meanwhile.
     brief: caps?.brief ?? null,
+    // Whether this person is offered a WRITTEN case brief: a social worker, on
+    // a deployment that drafts. Unlike `drafting` this fails closed - until the
+    // server says so there is no button, because it is new, it is one role's,
+    // and a brief modal that opens before the answer is simply facts alone.
+    caseBriefWriting: caps?.case_brief_writing === true,
   }), [open, caps]);
   return <AssistantCtx.Provider value={value}>{children}</AssistantCtx.Provider>;
 }
