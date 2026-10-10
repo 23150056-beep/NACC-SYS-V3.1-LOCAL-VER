@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Alert, Badge, Button, Card, FormField, Icon } from '../../ui';
+import { Alert, Badge, Button, Card, FormField, Icon, Input } from '../../ui';
 import { useAuth } from '../../context/AuthContext';
 import { useConfirm } from '../../context/ConfirmContext';
 import { useToast } from '../../context/ToastContext';
@@ -376,10 +376,9 @@ export default function Editor({ child, cs, print }) {
           <div id="cs-date-prepared" className="racco-cs-section" style={{ display: 'flex', gap: 10, alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <FormField label="Date prepared" required error={dateError}
               hint="Every age in the report is worked out as of this date." style={{ width: 240 }}>
-              <input
+              <Input
                 type="date" max={todayIso()} value={dateDraft ?? savedDate} disabled={readOnly || inputBusy}
                 onChange={(e) => { setDateDraft(e.target.value); setDateError(''); }}
-                style={{ height: 'var(--field-h)', padding: '0 12px', border: '1px solid var(--border-strong)', borderRadius: 'var(--radius-md)', background: 'var(--surface)', color: 'var(--text-strong)', fontFamily: 'var(--font-sans)', fontSize: 15 }}
               />
             </FormField>
             {!readOnly && (
