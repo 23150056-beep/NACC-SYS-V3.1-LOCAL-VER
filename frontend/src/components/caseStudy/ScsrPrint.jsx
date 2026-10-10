@@ -1,8 +1,8 @@
-import { PAP_ROWS } from '../../config/scsr';
+import { ADOPTION, PAP_ROWS } from '../../config/scsr';
 import { clock } from '../../utils/time';
 import {
-  PAP_SIDES, TICK_SENTENCES, ageAtText, blocksFor, blocksForCopy, canonical, isBlank, longDate,
-  partOneRows, partialDate, recordNotes, todayIso,
+  PAP_SIDES, TICK_SENTENCES, ageAtText, blockTitle, blocksFor, blocksForCopy, canonical,
+  isAdoptionRecord, isBlank, longDate, partOneRows, partialDate, recordNotes, todayIso,
 } from './model';
 
 /* What Print puts on paper while the Case study tab is open: the Social Case
@@ -26,6 +26,12 @@ import {
  * as ruled lines to complete by hand. Headings stay with the text that follows
  * them (break-after: avoid) but a long box is allowed to run over a page:
  * keeping whole sections together would leave half-empty pages.
+ *
+ * A record that is not an adoption prints block A alone: the same agency
+ * header, title and signature block, no adoption-only subtitle, and Part I with
+ * "Case type" where an adoption has its type of adoption. A copy decides this
+ * from the case type it was made with, so a copy signed while the record was an
+ * adoption reprints as the adoption report even after the record has moved.
  *
  * Only the social worker who holds the record gets this print. The
  * psychologist and the ISA keep the page's ordinary Print.
@@ -194,6 +200,7 @@ function liveView({ child, study, agency, license, preparedBy }) {
   const stored = new Map((study.sections || []).map((s) => [s.key, s]));
   return {
     draft: true,
+    adoption: isAdoptionRecord(child),
     facts: study.record_facts,
     datePrepared: study.date_prepared,
     ageNote: study.date_prepared ? 'the date prepared' : `${longDate(todayIso())}, because the date prepared is not set`,
@@ -211,9 +218,13 @@ function liveView({ child, study, agency, license, preparedBy }) {
 /* ... or from one final copy, which holds all of it. */
 function copyView(copy) {
   const snap = copy.snapshot;
+  // A copy made before block A was every case type's has no case type in its
+  // Part I, but its child block says: and none was anything but an adoption.
+  const caseType = snap.part_one?.case_type || snap.child?.case_type || ADOPTION;
   return {
     draft: false,
-    facts: snap.part_one,
+    adoption: caseType === ADOPTION,
+    facts: { ...snap.part_one, case_type: caseType },
     datePrepared: snap.date_prepared,
     ageNote: 'the date prepared',
     blocks: blocksForCopy(snap),
@@ -248,7 +259,9 @@ export default function ScsrPrint({ child, study, copy = null, agency, license, 
         {text(view.agency.office_address) && <div style={{ fontSize: '10pt', whiteSpace: 'pre-line' }}>{text(view.agency.office_address)}</div>}
         {text(view.agency.contact_details) && <div style={{ fontSize: '10pt', whiteSpace: 'pre-line' }}>{text(view.agency.contact_details)}</div>}
         <div style={{ fontSize: '14pt', fontWeight: 700, marginTop: '12pt', letterSpacing: '0.06em' }}>SOCIAL CASE STUDY REPORT</div>
-        <div style={{ fontSize: '9pt', marginTop: '2pt' }}>(Applicable for all categories: Regular, relative, step-parent, adult, independent placement.)</div>
+        {view.adoption && (
+          <div style={{ fontSize: '9pt', marginTop: '2pt' }}>(Applicable for all categories: Regular, relative, step-parent, adult, independent placement.)</div>
+        )}
         <div style={{ fontSize: '9pt', fontWeight: 700, marginTop: '2pt' }}>CONFIDENTIAL</div>
       </div>
 
@@ -261,7 +274,7 @@ export default function ScsrPrint({ child, study, copy = null, agency, license, 
 
       {blocks.map((block) => (
         <div key={block.block}>
-          <h2 style={S.block}>{block.block === 'A' ? 'THE CHILD/ADOPTEE' : block.title.toUpperCase()}</h2>
+          <h2 style={S.block}>{blockTitle(block.block, view.adoption).toUpperCase()}</h2>
 
           {block.block === 'A' && (
             <div>
