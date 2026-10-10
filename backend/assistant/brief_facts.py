@@ -36,10 +36,19 @@ CLINICAL, CASE = "clinical", "case"
 # showing it twice is noise.
 _SAID_ELSEWHERE = {"self_report_concern"}
 
-# A case brief says these in a row of its own (referral, psychologist, consent),
-# so the same gap listed again below would be the same sentence twice. The
-# strings are care_gaps.compute_staff_alerts' own.
-_SAID_IN_CASE_ROWS = {"no_case_referral", "no_psychologist", "no_signed_consent"}
+# A case brief says these in a row of its own, so the same gap listed again
+# below would be the same sentence twice. Each row is keyed to EVERY gap type
+# that says what it says, from both rule sets in clinical/care_gaps.py: the
+# social worker's (compute_staff_alerts) and the clinical set the ISA reads
+# (compute_alerts), which words the consent gap differently. Missing one left
+# the ISA reading "without a signed consent" under a Consent row.
+_CASE_ROW_GAPS = {
+    "case_referral": {"no_case_referral"},
+    "psychologist": {"no_psychologist"},
+    "consent": {"no_signed_consent", "consent_missing"},
+    "survey": {"survey_unanswered"},
+}
+_SAID_IN_CASE_ROWS = set().union(*_CASE_ROW_GAPS.values())
 
 
 def brief_kind(role):

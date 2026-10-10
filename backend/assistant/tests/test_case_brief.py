@@ -13,18 +13,21 @@ custodian name or number, no child's words, no summary a person has not
 confirmed.
 """
 import json
+import re
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 from django.utils import timezone
 
 from accounts.models import Role
-from assistant import services, views
+from assistant import brief_facts, services, views
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.tests.test_brief_facts import FactsFixture
 from children.models import AssignmentRequest, Child
+from clinical import care_gaps
 from clinical.models import (AgencyFormTemplate, CaseReferral, ConsentRecord,
-                             OpinionnaireInvite)
+                             OpinionnaireInvite, PreAssessment)
 
 BRIEF = "/api/assistant/brief/child/{}/"
 LATEST = "/api/assistant/brief/child/{}/latest/"
@@ -387,6 +390,85 @@ class CaseBriefFactsTest(FactsFixture):
                      if a["child_id"] == self.child.id}
         self.assertTrue({"no_case_referral", "no_psychologist",
                          "no_signed_consent"} <= dashboard, dashboard)
+
+    def _gaps_on_the_dashboard(self, user):
+        self.client.force_authenticate(user)
+        return [a["type"] for a in
+                self.client.get("/api/reports/dashboard/").data["care_gaps"]
+                if a["child_id"] == self.child.id]
+
+    def test_a_social_workers_list_drops_every_gap_a_row_says(self):
+        # Four rows, four gaps: referral, psychologist, consent and the survey
+        # (sent 8 days ago and not answered, which its row says as "no answer
+        # yet"). What the rows do not say - the two booking gaps - stays.
+        self._unassign()
+        invite = self._invite(status=OpinionnaireInvite.PENDING,
+                              expires_at=NOW + timedelta(days=2))
+        OpinionnaireInvite.objects.filter(pk=invite.pk).update(
+            created_at=NOW - timedelta(days=8))
+        with patch("django.utils.timezone.now", return_value=NOW):
+            data = self._case(self.sw)
+            on_dashboard = self._gaps_on_the_dashboard(self.sw)
+        said = {"no_case_referral", "no_psychologist", "no_signed_consent",
+                "survey_unanswered"}
+        # The control: the Dashboard carries all four, so the brief's silence
+        # is the rows' doing and not a child with no gaps.
+        self.assertTrue(said <= set(on_dashboard), on_dashboard)
+        self.assertIsNone(data["case_referral"])
+        self.assertEqual(data["psychologist"], {"state": "none"})
+        self.assertIsNone(data["consent"])
+        self.assertEqual(data["survey"]["state"], "sent")
+        types = [g["type"] for g in data["care_gaps"]]
+        self.assertFalse(said & set(types), types)
+        self.assertEqual(sorted(types),
+                         sorted(t for t in on_dashboard
+                                if t not in said | {"self_report_concern"}))
+        self.assertIn("no_upcoming_appointment", types)
+
+    def test_the_isa_is_not_told_the_consent_gap_under_the_consent_row(self):
+        # The ISA's gaps are the clinical set, whose consent gap is
+        # "consent_missing" - "Pre-assessment in progress without a signed
+        # consent" - not the social worker's "no_signed_consent". An open
+        # pre-assessment and no signed consent is the case that raises it.
+        PreAssessment.objects.create(child=self.child, psychologist=self.psy)
+        Child.objects.filter(pk=self.child.pk).update(
+            created_at=NOW - timedelta(days=30))
+        with patch("django.utils.timezone.now", return_value=NOW):
+            data = self._case(self.admin)
+            on_dashboard = self._gaps_on_the_dashboard(self.admin)
+        # The control, and the row that says it instead.
+        self.assertIn("consent_missing", on_dashboard)
+        self.assertIsNone(data["consent"])
+        types = [g["type"] for g in data["care_gaps"]]
+        self.assertNotIn("consent_missing", types)
+        self.assertNotIn("without a signed consent",
+                         " ".join(g["message"] for g in data["care_gaps"]))
+        # Only the rows' gaps went: the ISA still reads the rest of their list.
+        self.assertIn("pre_assessment_overdue", types)
+        self.assertEqual(sorted(types),
+                         sorted(t for t in on_dashboard
+                                if t not in {"consent_missing", "self_report_concern"}))
+
+    def test_a_signed_consent_leaves_the_isa_nothing_to_drop_and_nothing_to_add(self):
+        PreAssessment.objects.create(child=self.child, psychologist=self.psy)
+        ConsentRecord.objects.create(
+            child=self.child, status=ConsentRecord.SIGNED, date=NOW.date())
+        data = self._case(self.admin)
+        self.assertEqual(data["consent"]["status"], "signed")
+        self.assertNotIn("consent_missing", {g["type"] for g in data["care_gaps"]})
+        self.assertNotIn("consent_missing", self._gaps_on_the_dashboard(self.admin))
+
+    def test_every_gap_type_is_either_a_row_or_decided_to_stay(self):
+        # A new gap type is a decision: does a case row already say it? The
+        # consent gap went unmapped because the ISA's rule set spells it
+        # differently from the social worker's, and nothing noticed.
+        source = Path(care_gaps.__file__).read_text(encoding="utf-8")
+        issued = set(re.findall(r'(?:_alert|add)\(\s*\w+,\s*"([a-z_]+)"', source))
+        kept_in_the_list = {"pre_assessment_overdue", "report_missing",
+                            "follow_up_overdue", "no_upcoming_appointment"}
+        decided = (brief_facts._SAID_IN_CASE_ROWS | brief_facts._SAID_ELSEWHERE
+                   | kept_in_the_list)
+        self.assertEqual(issued, decided)
 
     def test_the_psychologists_care_gaps_are_still_their_dashboards(self):
         # The case brief drops three lines it says in rows; the psychologist's
