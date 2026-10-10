@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 DISCLAIMER = ("AI-drafted decision support, not a diagnosis. The licensed "
               "psychologist reviews, edits, and approves all content.")
 
+# Said under a social worker's written case brief. Not DISCLAIMER: the reader is
+# not a psychologist and the draft is not clinical. What the worker is asked to
+# do is the one thing that makes it safe - check it against the facts it was
+# written from, which sit directly above it.
+CASE_BRIEF_DISCLAIMER = ("Drafted by the assistant from the facts above. Check it "
+                         "against them before relying on it.")
+
 # On 4 CPU cores, concurrent generations make every request slower rather than
 # parallel, and each parallel slot multiplies the KV cache against very little
 # free RAM. One generation at a time, always.
@@ -219,7 +226,8 @@ def _normalize_output(text):
     return text
 
 
-def run_job(job_type, prompt, *, system=None, input_ref="", user=None, child=None):
+def run_job(job_type, prompt, *, system=None, input_ref="", user=None, child=None,
+            prompt_sha=""):
     """Run one generation and audit it. Returns (text, AssistantJob).
 
     Writes an AssistantJob row on failure as well as success, so "it stopped
@@ -227,6 +235,9 @@ def run_job(job_type, prompt, *, system=None, input_ref="", user=None, child=Non
 
     Pass `child` whenever the prompt is built from a child's record, or the
     ISA's access log on that child's page will not show the read.
+
+    `prompt_sha` is stored as given, for a draft that is served again only
+    while it would still be written from the same facts (the case brief).
     """
     client = get_ai_client()
     creator = user if getattr(user, "is_authenticated", False) else None
@@ -240,7 +251,7 @@ def run_job(job_type, prompt, *, system=None, input_ref="", user=None, child=Non
             job_type=job_type, input_ref=input_ref, ok=False,
             error=str(exc)[:255], model_used=getattr(client, "model", ""),
             latency_ms=int((time.monotonic() - started) * 1000),
-            created_by=creator, child=child)
+            created_by=creator, child=child, prompt_sha=prompt_sha)
         raise
 
     text = _normalize_output(raw)
@@ -248,7 +259,7 @@ def run_job(job_type, prompt, *, system=None, input_ref="", user=None, child=Non
         job_type=job_type, input_ref=input_ref, output_text=text,
         model_used=client.model, ok=True,
         latency_ms=int((time.monotonic() - started) * 1000),
-        created_by=creator, child=child)
+        created_by=creator, child=child, prompt_sha=prompt_sha)
     return text, job
 
 

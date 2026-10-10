@@ -47,6 +47,7 @@ class AssistantJob(models.Model):
         ("census_narrative", "Census Narrative"),
         ("chat", "Chatbot Question"),
         ("self_report", "Self-Report Check"),
+        ("case_brief", "Case Brief"),
     ]
 
     PENDING, ACCEPTED, EDITED, DISCARDED = "pending", "accepted", "edited", "discarded"
@@ -86,6 +87,12 @@ class AssistantJob(models.Model):
     # other kind of turn, and for rows written before sizes were recorded —
     # those are unknown, not empty.
     result_count = models.PositiveIntegerField(null=True, blank=True)
+    # The SHA-256 of the system text and prompt the model was given, where the
+    # draft is only good for the facts it was written from (the case brief). A
+    # draft is served again only while the prompt built NOW hashes the same, so
+    # a session booked or a consent recorded since makes it stale without
+    # anything having to remember to invalidate it. Blank for every other job.
+    prompt_sha = models.CharField(max_length=64, blank=True, default="")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="assistant_jobs")

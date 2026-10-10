@@ -74,6 +74,13 @@ class AccessLogBase(APITestCase):
         self.assertEqual(200, res.status_code)
         return res
 
+    def _case_brief(self, user=None, child=None, reply="A written brief."):
+        res = self._drafted(
+            user or self.sw, f"/api/assistant/case-brief/child/{(child or self.child).id}/",
+            reply)
+        self.assertEqual(200, res.status_code)
+        return res
+
     def _log(self, child=None):
         self.client.force_authenticate(self.admin)
         res = self.client.get(URL.format((child or self.child).id))
@@ -114,6 +121,52 @@ class WhatIsListedTest(AccessLogBase):
         self.assertEqual("pending", entry["status"])
         self.assertIsNone(entry["document"])
         self.assertFalse(entry["document_deleted"])
+
+    def test_a_case_brief_is_listed_as_its_own_kind_with_the_social_worker_named(self):
+        self._case_brief()
+        data = self._log()
+        self.assertEqual(1, len(data["entries"]))
+        entry = data["entries"][0]
+        self.assertEqual("case_brief", entry["kind"])
+        self.assertEqual({"name": "Sara Cruz", "role": "Staff"}, entry["by"])
+        self.assertEqual("pending", entry["status"])
+        self.assertIsNone(entry["document"])
+        self.assertFalse(entry["document_deleted"])
+        self.assertEqual(1, data["total"])
+
+    def test_a_case_brief_and_a_psychologists_brief_are_told_apart(self):
+        self._brief(self.psy)
+        self._case_brief()
+        kinds = sorted(e["kind"] for e in self._log()["entries"])
+        self.assertEqual(["brief", "case_brief"], kinds)
+
+    def test_a_case_brief_that_did_not_complete_is_listed_as_failed(self):
+        self.client.force_authenticate(self.sw)
+        with patch.object(services.OllamaClient, "generate",
+                          side_effect=services.AIUnavailable("down")):
+            res = self.client.post(f"/api/assistant/case-brief/child/{self.child.id}/")
+        self.assertEqual(503, res.status_code)
+        entries = self._log()["entries"]
+        self.assertEqual(["case_brief"], [e["kind"] for e in entries])
+        self.assertEqual(["failed"], [e["status"] for e in entries])
+
+    def test_a_case_brief_that_was_refused_is_not_a_read(self):
+        # The ISA and a psychologist are refused before anything is sent; a
+        # hosted deployment and a switched-off assistant likewise.
+        for user in (self.admin, self.psy):
+            self.client.force_authenticate(user)
+            self.assertEqual(403, self.client.post(
+                f"/api/assistant/case-brief/child/{self.child.id}/").status_code)
+        cfg = AssistantSetting.load()
+        cfg.enabled = False
+        cfg.save()
+        self.client.force_authenticate(self.sw)
+        self.assertEqual(503, self.client.post(
+            f"/api/assistant/case-brief/child/{self.child.id}/").status_code)
+        data = self._log()
+        self.assertEqual([], data["entries"])
+        self.assertEqual(0, data["total"])
+        self.assertFalse(AssistantJob.objects.exists())
 
     def test_a_prefetched_brief_is_listed_too(self):
         with patch.object(services.OllamaClient, "generate", return_value="Draft."):
@@ -283,6 +336,79 @@ class WhatIsListedTest(AccessLogBase):
     def test_it_never_shows_what_was_drafted(self):
         self._brief(self.psy, reply="SECRET DRAFT TEXT")
         self.assertNotIn("SECRET DRAFT TEXT", str(self._log()))
+        self._case_brief(reply="SECRET CASE BRIEF TEXT")
+        self.assertNotIn("SECRET CASE BRIEF TEXT", str(self._log()))
+
+
+# The job types that do NOT read one child's record, and so are not in the log -
+# each for a reason that is checked below, not only asserted here.
+NOT_A_CHILD_READ = {
+    # The chatbot's model is handed the typed question and picks a lookup; the
+    # results come from the database and never pass through it.
+    "chat",
+    # Polishing reads only the words being typed into the remark box.
+    "remark_polish",
+    # Narrates agency-wide figures the caller already computed.
+    "census_narrative",
+}
+
+
+class TheLogCoversEveryJobTypeTest(AccessLogBase):
+    """A new kind of job that reads a child's record must reach the ISA's log,
+    or the log says "nothing was read" about a child it was read about. The case
+    brief shipped as a new job type and would have been invisible without this."""
+
+    def test_every_job_type_is_listed_or_exempt_on_purpose(self):
+        types = {kind for kind, _ in AssistantJob.TYPE_CHOICES}
+        logged = set(views.ACCESS_LOGGED_JOB_TYPES)
+        self.assertEqual(
+            set(), types - logged - NOT_A_CHILD_READ,
+            "A job type the log neither lists nor exempts: say which, and why, in "
+            "views.ACCESS_LOGGED_JOB_TYPES or NOT_A_CHILD_READ.")
+        self.assertEqual(set(), logged & NOT_A_CHILD_READ, "Both listed and exempt.")
+        self.assertEqual(set(), (logged | NOT_A_CHILD_READ) - types,
+                         "Names a job type that no longer exists.")
+
+    def test_every_listed_type_really_reaches_the_log(self):
+        template = AgencyFormTemplate.objects.create(
+            title="Self-report", fields=[{"label": "Q1"}])
+        invite = OpinionnaireInvite.objects.create(
+            child=self.child, template=template,
+            status=OpinionnaireInvite.SUBMITTED, submitted_at=timezone.now(),
+            answers={"Q1": "Okay lang."}, expires_at=timezone.now() + timedelta(days=7))
+        refs = {"brief": f"child:{self.child.id}", "case_brief": f"child:{self.child.id}",
+                "doc_intelligence": f"report:{self.report.id}",
+                "self_report": f"invite:{invite.id}"}
+        self.assertEqual(set(views.ACCESS_LOGGED_JOB_TYPES), set(refs))
+        for job_type, ref in refs.items():
+            AssistantJob.objects.create(job_type=job_type, input_ref=ref, child=self.child,
+                                        created_by=self.sw, ok=True)
+        entries = self._log()["entries"]
+        self.assertEqual(
+            ["brief", "case_brief", "report_summary", "survey_check"],
+            sorted(e["kind"] for e in entries))
+
+    def test_the_exempt_types_write_no_child(self):
+        """Run the real endpoints: not one of these reads a record, so not one
+        of the rows names a child."""
+        self.client.force_authenticate(self.psy)
+        with patch.object(services.OllamaClient, "choose_tool",
+                          return_value=("get_child_summary", {"name": "Maria"})):
+            self.assertEqual(200, self.client.post(
+                "/api/assistant/ask/", {"question": "tell me about Maria"},
+                format="json").status_code)
+        with patch.object(services.OllamaClient, "generate", return_value="Polished."):
+            self.assertEqual(200, self.client.post(
+                "/api/assistant/polish-remark/", {"text": "Maria slept well."},
+                format="json").status_code)
+        self.client.force_authenticate(self.admin)
+        with patch.object(services.OllamaClient, "generate", return_value="Narrative."):
+            self.assertEqual(200, self.client.post(
+                "/api/assistant/census-narrative/", {"figures": {"active": 2}},
+                format="json").status_code)
+        rows = AssistantJob.objects.filter(job_type__in=NOT_A_CHILD_READ)
+        self.assertEqual(NOT_A_CHILD_READ, {r.job_type for r in rows})
+        self.assertEqual([], [r.job_type for r in rows if r.child_id is not None])
 
 
 class OrderAndLimitTest(AccessLogBase):
