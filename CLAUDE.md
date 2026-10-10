@@ -588,10 +588,33 @@ Settings, no per-feature flags.
   number), the newest survey; every care gap a row already says is
   dropped, for both role lists (the ISA's consent gap is `consent_missing`
   from `compute_alerts`, a SW's `no_signed_consent`; a guard test fails on a
-  gap type nobody has decided). `/assistant/capabilities/` says `brief: "clinical" | "case"`. A
-  model-written part for SWs is next step 6 and waits on `ai_eval` on the
-  owner's PC; it may read no remarks, no self-report words, no case study
-  text and no unconfirmed summary.
+  gap type nobody has decided). `/assistant/capabilities/` says `brief: "clinical" | "case"`.
+- **A SW's Case brief has a written part** (10 Oct 2026, job type
+  `case_brief`, assistant 0007): `POST /api/assistant/case-brief/child/<id>/`,
+  the record's SW only - the ISA and psychologists get 403 before `gate()`, so
+  nothing reaches the model. The prompt (`build_case_brief_prompt`) is built
+  from the SAME dict the facts panel shows, static prefix first, dates in
+  words worked out in Python; it never carries remarks, self-report words,
+  case study text, an unconfirmed summary, the custodian's name or number, or
+  the psychologist's name (only the decline reason, cut to 200 characters,
+  and the CONFIRMED referral summary, ~1,500). `latest/` serves today's draft
+  only while `AssistantJob.prompt_sha` equals the prompt built now, so a new
+  next session, consent or referral makes it stale; a second booking that
+  does not change the next session does not. Hosted: never offered
+  (`case_brief_writing` false). The access log selects job types from
+  `ACCESS_LOGGED_JOB_TYPES`, and a guard test fails on a `TYPE_CHOICES` entry
+  that is neither logged nor in `NOT_A_CHILD_READ` - the "nothing checks
+  this" gap below, closed for job types.
+- **`ai_eval --feature case_brief`** (10 children x 3 reps by default; the
+  older features keep 3 x 2) counts invented names, invented dates and
+  invented numbers (scored against the FACTS part of the prompt - the
+  instructions contain digits), over 150 words, repeats, drift. It prints 5
+  drafts in full and ends with one verdict line: PASS needs zero invented
+  names and dates over at least 30 drafts from at least 10 children; fewer
+  than 10 children prints counts, never rates. **`invented_names` cannot see a
+  name at the start of a sentence or line** (it needs a lowercase word before
+  the capital) - the printed samples are the control for that, so read them.
+  Not yet run on the owner's PC as of 10 Oct 2026.
 - **The ISA can see who had the model read a child**: the Assistant log tab
   on the child's page, administrators only (`ChildAccessLogView`). Briefs,
   report and referral summaries, the self-report check; who, when, what kind,
@@ -1503,7 +1526,7 @@ react-big-calendar's own `role="rowgroup"` markup rather than ours.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,354 tests, ~1 min
+cd backend && .venv/Scripts/python.exe manage.py test   # 2,508 tests, ~1 min
 cd frontend && npm run lint && npm run build
 ```
 
