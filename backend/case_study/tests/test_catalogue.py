@@ -20,8 +20,8 @@ from django.test import SimpleTestCase
 
 from case_study import sections
 from case_study.sections import (
-    ALL_KEYS_EVER, BLOCKS, KINDS, PAP_CONTACT_ROWS, PAP_ROWS, RULES, SCSR_SECTIONS,
-    applies)
+    ADOPTION, ADOPTION_ONLY_BLOCKS, ALL_KEYS_EVER, BLOCKS, KINDS, PAP_CONTACT_ROWS,
+    PAP_ROWS, RULES, SCSR_SECTIONS, applies)
 from children.models import Child
 
 SCSR_JS = (Path(__file__).resolve().parents[3] / "frontend" / "src" / "config" / "scsr.js")
@@ -84,30 +84,46 @@ class TheBrowserAndTheServerAgreeTest(SimpleTestCase):
         and compare with the server's `applies`."""
         categories = [c for c, _ in Child.CASE_CATEGORY_CHOICES] + [""]
         adoptions = [t for t, _ in Child.TYPE_OF_ADOPTION_CHOICES] + [""]
+        # Every case type: blocks B and C apply to an Adoption record only.
+        case_types = [t for t, _ in Child.CASE_TYPE_CHOICES] + [""]
         custody = [None, True, False]
         script = (
             f"import {{ SCSR_SECTIONS, appliesTo }} from {json.dumps(SCSR_JS.as_uri())};\n"
             f"const cats = {json.dumps(categories)}, types = {json.dumps(adoptions)};\n"
+            f"const caseTypes = {json.dumps(case_types)};\n"
             f"const custody = {json.dumps(custody)};\n"
             "const out = [];\n"
-            "for (const entry of SCSR_SECTIONS) for (const c of cats) for (const t of types)\n"
-            "  for (const k of custody)\n"
-            "    out.push(appliesTo(entry, { case_category: c, type_of_adoption: t },\n"
-            "      k === null ? null : { custody_over_two_years: k }));\n"
+            "for (const entry of SCSR_SECTIONS) for (const ct of caseTypes)\n"
+            "  for (const c of cats) for (const t of types)\n"
+            "    for (const k of custody)\n"
+            "      out.push(appliesTo(entry,\n"
+            "        { case_type: ct, case_category: c, type_of_adoption: t },\n"
+            "        k === null ? null : { custody_over_two_years: k }));\n"
             "console.log(JSON.stringify(out));\n")
         done = subprocess.run(["node", "--input-type=module", "-e", script],
                               capture_output=True, text=True, timeout=60)
         self.assertEqual(0, done.returncode, done.stderr)
         browser = json.loads(done.stdout)
         server = []
+        labels = []
         for entry in SCSR_SECTIONS:
-            for c in categories:
-                for t in adoptions:
-                    for k in custody:
-                        child = SimpleNamespace(case_category=c, type_of_adoption=t)
-                        case_study = None if k is None else SimpleNamespace(custody_over_two_years=k)
-                        server.append(applies(entry, child, case_study))
-        self.assertEqual(server, browser)
+            for ct in case_types:
+                for c in categories:
+                    for t in adoptions:
+                        for k in custody:
+                            child = SimpleNamespace(
+                                case_type=ct, case_category=c, type_of_adoption=t)
+                            case_study = (None if k is None
+                                          else SimpleNamespace(custody_over_two_years=k))
+                            server.append(applies(entry, child, case_study))
+                            labels.append((entry["key"], ct, c, t, k))
+        self.assertEqual(len(server), len(browser))
+        # Not assertEqual on the two lists: tens of thousands of answers, and a
+        # failing diff of that size takes minutes. Name the first few instead.
+        differ = [(labels[i], server[i], browser[i])
+                  for i in range(len(server)) if server[i] != browser[i]]
+        self.assertEqual([], differ[:5], f"{len(differ)} answers differ (key, case type, "
+                         "category, adoption type, custody), server then browser")
 
 
 class TheCatalogueKeepsItsPromisesTest(SimpleTestCase):
@@ -194,10 +210,11 @@ class TheCatalogueKeepsItsPromisesTest(SimpleTestCase):
 
     def test_who_each_rule_applies_to(self):
         def child(category="", adoption=""):
-            return SimpleNamespace(case_category=category, type_of_adoption=adoption)
+            return SimpleNamespace(case_type=ADOPTION, case_category=category,
+                                   type_of_adoption=adoption)
 
         def entry(rule):
-            return {"applies": rule}
+            return {"block": "B", "applies": rule}
 
         self.assertTrue(applies(entry("always"), child(), None))
         self.assertTrue(applies(entry("surrendered"), child("Surrendered"), None))
@@ -211,10 +228,11 @@ class TheCatalogueKeepsItsPromisesTest(SimpleTestCase):
             self.assertFalse(applies(entry("stc"), child(adoption=adoption), None))
 
     def test_placement_history_is_hidden_for_adult_and_for_a_long_custody(self):
-        rule = {"applies": "placement_history"}
+        rule = {"block": "C", "applies": "placement_history"}
 
         def child(adoption):
-            return SimpleNamespace(case_category="", type_of_adoption=adoption)
+            return SimpleNamespace(case_type=ADOPTION, case_category="",
+                                   type_of_adoption=adoption)
 
         yes, no, unanswered = (SimpleNamespace(custody_over_two_years=v)
                                for v in (True, False, None))
@@ -233,3 +251,67 @@ class TheCatalogueKeepsItsPromisesTest(SimpleTestCase):
         self.assertTrue(set(sections.SURRENDERED) | set(sections.ABANDONED) <= categories)
         self.assertTrue(set(sections.STC_TYPES) | {sections.ADULT, sections.DOMESTIC_RELATIVE}
                         <= adoptions)
+
+
+class OnlyAnAdoptionRecordHasBlocksBAndCTest(SimpleTestCase):
+    """Owner's decision, 10 Oct 2026: block A is the child's profile for every
+    case type; the adoptive parents and the placement are an adoption's."""
+
+    def child(self, case_type, category="Surrendered", adoption="Regular"):
+        return SimpleNamespace(case_type=case_type, case_category=category,
+                               type_of_adoption=adoption)
+
+    def keys(self, child, block=None, case_study=None):
+        return [e["key"] for e in SCSR_SECTIONS
+                if (block is None or e["block"] == block) and applies(e, child, case_study)]
+
+    def test_the_blocks_that_belong_to_an_adoption(self):
+        self.assertEqual(("B", "C"), ADOPTION_ONLY_BLOCKS)
+        self.assertEqual("Adoption", ADOPTION)
+
+    def test_every_case_type_that_is_not_an_adoption_has_block_a_only(self):
+        case_types = [t for t, _ in Child.CASE_TYPE_CHOICES if t != ADOPTION]
+        self.assertGreaterEqual(len(case_types), 5)
+        for case_type in case_types:
+            child = self.child(case_type)
+            self.assertEqual([], self.keys(child, "B"), case_type)
+            self.assertEqual([], self.keys(child, "C"), case_type)
+            self.assertTrue(self.keys(child, "A"), case_type)
+
+    def test_block_a_keeps_its_own_rules_for_every_case_type(self):
+        for case_type in [t for t, _ in Child.CASE_TYPE_CHOICES] + [""]:
+            surrendered = self.keys(self.child(case_type, "Surrendered"), "A")
+            abandoned = self.keys(self.child(case_type, "Abandoned"), "A")
+            unknown = self.keys(self.child(case_type, "Without Known Parents"), "A")
+            dependent = self.keys(self.child(case_type, "Dependent"), "A")
+            self.assertIn("a5_dvc_signed", surrendered, case_type)
+            self.assertNotIn("a5_abandonment", surrendered, case_type)
+            self.assertIn("a5_abandonment", abandoned, case_type)
+            self.assertNotIn("a5_dvc_signed", abandoned, case_type)
+            self.assertIn("a5_search_efforts", unknown, case_type)
+            for key in ("a5_dvc_signed", "a5_abandonment"):
+                self.assertNotIn(key, dependent, case_type)
+            # The rest of block A is everyone's, whatever the category.
+            for key in ("a2_sources", "a3_immunizations", "a4_family_composition", "a5_summary"):
+                self.assertIn(key, dependent, case_type)
+
+    def test_an_adoption_has_all_three_blocks_as_before(self):
+        child = self.child("Adoption")
+        for block in ("A", "B", "C"):
+            self.assertTrue(self.keys(child, block), block)
+        self.assertIn("b1_paps", self.keys(child))
+        self.assertIn("c3_stc_report", self.keys(child))
+
+    def test_a_record_moved_away_from_adoption_and_back_is_asked_the_same_again(self):
+        adoption = self.keys(self.child("Adoption"))
+        self.assertEqual(adoption, self.keys(self.child("Adoption")))
+        self.assertNotEqual(adoption, self.keys(self.child("Foster Care")))
+        self.assertEqual(
+            [k for k in adoption if not k.startswith(("b", "c"))],
+            self.keys(self.child("Foster Care")))
+
+    def test_the_adoption_type_cannot_make_a_block_c_box_apply_to_another_case_type(self):
+        # A Foster Care record can still carry an old adoption type.
+        child = self.child("Foster Care", adoption="Regular")
+        self.assertNotIn("c3_stc_report", self.keys(child))
+        self.assertNotIn("c1_placement", self.keys(child))

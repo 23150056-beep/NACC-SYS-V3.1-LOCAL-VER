@@ -9,6 +9,10 @@ tick. A few boxes have a stricter meaning of "content", written out below
 from the design: the two Surrendered ticks must both be ticked, at least one
 adoptive parent must be named, the entrustment date must be set where the
 placement history applies, and the date prepared must be set.
+
+What "applicable" means is `sections.applies`: for a record that is not an
+Adoption one, blocks B and C do not apply, so only block A (and the date
+prepared) can be missing.
 """
 from case_study.sections import SCSR_SECTIONS, applies
 

@@ -98,8 +98,9 @@ def finalize(case_study, user, expected_updated_at=None):
     no screen to be out of date (the demo seeder).
 
     Raises CannotFinalize, and changes nothing, when the case cannot take it:
-    not an Adoption record or closed, already final, changed since the writer
-    looked, or something is still to complete.
+    closed, already final, changed since the writer looked, or something is
+    still to complete. What is "still to complete" is what applies to the
+    child's case type: a Foster Care record's is block A alone.
     """
     child = case_study.child
     refused = writes_refused(child)

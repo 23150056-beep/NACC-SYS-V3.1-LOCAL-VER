@@ -37,12 +37,18 @@ class StartingOneTest(CaseStudyTestCase):
             res = self.as_user(self.sw).post(self.url(), {}, format="json")
         self.assertEqual(409, res.status_code)
 
-    def test_only_an_adoption_record_has_one(self):
-        Child.objects.filter(pk=self.child.pk).update(case_type="Foster Care")
-        res = self.as_user(self.sw).post(self.url(), {}, format="json")
-        self.assertEqual(400, res.status_code)
-        self.assertIn("adoption", res.data["detail"])
-        self.assertFalse(CaseStudy.objects.exists())
+    def test_every_case_type_can_start_one(self):
+        # Block A is the child's profile for every case type (10 Oct 2026).
+        for number, (case_type, _) in enumerate(Child.CASE_TYPE_CHOICES):
+            child = Child.objects.create(
+                first_name=f"Kid{number}", last_name="Reyes", gender="Male",
+                birth_date=date(2018, 4, 4), case_type=case_type,
+                case_category="Dependent", social_worker=self.sw)
+            res = self.as_user(self.sw).post(self.url(child), {}, format="json")
+            self.assertEqual(201, res.status_code, case_type)
+            self.assertTrue(res.data["exists"], case_type)
+            self.assertFalse(res.data["read_only"], case_type)
+            self.assertEqual(self.sw, CaseStudy.objects.get(child=child).created_by, case_type)
 
     def test_a_closed_case_cannot_start_one(self):
         Child.objects.filter(pk=self.child.pk).update(
@@ -121,6 +127,18 @@ class TheHeaderTest(CaseStudyTestCase):
         self.assertEqual(400, res.status_code)
         self.assertIn("Domestic Relative", res.data["detail"])
         self.assertIsNone(CaseStudy.objects.get().custody_over_two_years)
+
+    def test_nor_for_a_record_that_only_still_carries_that_adoption_type(self):
+        # Moved to Foster Care, the record keeps its old adoption type (the
+        # system hides answers, never deletes them); that must not reopen the
+        # question, which only decides block C.
+        Child.objects.filter(pk=self.child.pk).update(
+            type_of_adoption="Domestic Relative", case_type="Foster Care")
+        res = self.patch_header({"custody_over_two_years": True})
+        self.assertEqual(400, res.status_code)
+        self.assertIn("Domestic Relative", res.data["detail"])
+        self.assertIsNone(CaseStudy.objects.get().custody_over_two_years)
+        self.assertEqual(200, self.patch_header({"date_prepared": "2026-09-30"}).status_code)
 
     def test_a_domestic_relative_adoption_answers_it(self):
         Child.objects.filter(pk=self.child.pk).update(type_of_adoption="Domestic Relative")
@@ -398,15 +416,15 @@ class SavingABoxTest(CaseStudyTestCase):
         self.assertIn("closed", res.data["detail"])
         self.assertFalse(CaseStudySection.objects.exists())
 
-    def test_a_case_that_is_no_longer_an_adoption_cannot_be_written_but_keeps_its_rows(self):
+    def test_a_case_that_is_no_longer_an_adoption_is_still_written_to_for_block_a(self):
         self.save_section("a2_sources", ["The child"])
         Child.objects.filter(pk=self.child.pk).update(case_type="Foster Care")
-        res = self.save_section("a2_sources", ["x"], version=1)
-        self.assertEqual(400, res.status_code)
-        self.assertIn("adoption", res.data["detail"])
-        self.assertEqual(["The child"], CaseStudySection.objects.get(key="a2_sources").value)
+        res = self.save_section("a2_sources", ["The child", "The foster parent"], version=1)
+        self.assertEqual(200, res.status_code)
+        self.assertEqual(["The child", "The foster parent"],
+                         CaseStudySection.objects.get(key="a2_sources").value)
         body = self.as_user(self.sw).get(self.url()).data
-        self.assertTrue(body["read_only"])
+        self.assertFalse(body["read_only"])
 
     def test_a_final_case_study_must_be_reopened_first(self):
         CaseStudy.objects.filter(pk=self.study.pk).update(status=CaseStudy.FINAL)

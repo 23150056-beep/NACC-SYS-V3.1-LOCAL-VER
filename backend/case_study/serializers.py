@@ -18,7 +18,7 @@ from accounts.scoping import hide_earlier_history, scope_to_visible
 from case_study.access import FULL, BLOCK_A, writes_refused
 from case_study.completeness import missing_sections
 from case_study.sections import (
-    ABANDONED, DOMESTIC_RELATIVE, SCSR_SECTIONS, applies)
+    ABANDONED, ADOPTION, DOMESTIC_RELATIVE, SCSR_SECTIONS, applies)
 from clinical.models import CaseReferral, PsychologicalReport
 from clinical.reports import age_on
 
@@ -60,6 +60,9 @@ def record_facts(child, on):
     found = child.date_found
     return {
         "fullname": child.fullname,
+        # Part I names the case type where an adoption names its type of
+        # adoption, and leaves out rows only an adoption uses.
+        "case_type": child.case_type,
         "alias": child.alias,
         "gender": child.gender,
         "birth_date": iso_date(child.birth_date),
@@ -146,9 +149,10 @@ def custody_pre_answer(child, on):
     """For a Domestic Relative adoption: has the child been in the adopter's
     custody for two years or more by the date prepared? That is the answer the
     question starts at; the social worker can change it. None for every other
-    type, which is not asked, and None while the placement date is not on the
-    record: unknown is not "no"."""
-    if child.type_of_adoption != DOMESTIC_RELATIVE:
+    type, which is not asked (nor of a record that is not an Adoption one,
+    whatever adoption type it still carries), and None while the placement date
+    is not on the record: unknown is not "no"."""
+    if child.case_type != ADOPTION or child.type_of_adoption != DOMESTIC_RELATIVE:
         return None
     placed = child.date_of_placement_to_custodian
     if placed is None:
@@ -241,8 +245,8 @@ def social_worker_payload(request, access, case_study):
         "updated_at": iso_datetime(case_study.updated_at) if case_study else None,
         "sections": _sections(case_study, child, access.readable_keys()) if case_study else [],
         "missing": missing,
-        # Draft, not refused for any other reason (closed, not an Adoption
-        # record) and nothing left to complete: what the endpoint checks too.
+        # Draft, not refused for any other reason (closed) and nothing left to
+        # complete: what the endpoint checks too.
         "can_finalize": bool(case_study and case_study.status == case_study.DRAFT
                              and refused is None and not missing),
         "finals": finals_of(case_study),

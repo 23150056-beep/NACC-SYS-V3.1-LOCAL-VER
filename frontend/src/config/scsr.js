@@ -892,11 +892,19 @@ export const PAP_ROWS = [
 
 export const sectionByKey = (key) => SCSR_SECTIONS.find((entry) => entry.key === key);
 
+/* Blocks B (the prospective adoptive parents) and C (the placement) are an
+ * adoption's: they apply to an Adoption record only (owner, 10 Oct 2026).
+ * Block A is the child's profile for every case type. The same constants as
+ * ADOPTION and ADOPTION_ONLY_BLOCKS in backend/case_study/sections.py. */
+export const ADOPTION = 'Adoption';
+export const ADOPTION_ONLY_BLOCKS = ['B', 'C'];
+
 /* Does this box apply to this child? `child` is the child record as the API
- * gives it (case_category, type_of_adoption) and `caseStudy` the case study
- * header (custody_over_two_years), which may be null before one is started.
- * The same rules as `applies()` in backend/case_study/sections.py. */
+ * gives it (case_type, case_category, type_of_adoption) and `caseStudy` the
+ * case study header (custody_over_two_years), which may be null before one is
+ * started. The same rules as `applies()` in backend/case_study/sections.py. */
 export function appliesTo(entry, child, caseStudy) {
+  if (ADOPTION_ONLY_BLOCKS.includes(entry.block) && child.case_type !== ADOPTION) return false;
   switch (entry.applies) {
     case 'surrendered':
       return child.case_category === 'Surrendered';

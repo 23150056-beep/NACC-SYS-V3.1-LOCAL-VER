@@ -17,8 +17,9 @@ from django.db import models
 
 
 class CaseStudy(models.Model):
-    """One per child, and only for an Adoption record (the API enforces that;
-    changing the case type away from Adoption keeps the row)."""
+    """One per child, of any case type. Block A is every child's; blocks B and C
+    apply to an Adoption record only (case_study/sections.py `applies`), and
+    changing the case type away from Adoption keeps their rows, hidden."""
 
     DRAFT, FINAL = "draft", "final"
     STATUS_CHOICES = [(DRAFT, "Draft"), (FINAL, "Final")]

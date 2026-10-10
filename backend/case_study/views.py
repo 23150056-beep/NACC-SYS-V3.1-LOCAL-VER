@@ -26,7 +26,7 @@ from case_study.access import (
 from case_study.completeness import missing_sections
 from case_study.finalize import CannotFinalize, finalize
 from case_study.models import CaseStudy, CaseStudyFinal, CaseStudySection
-from case_study.sections import DOMESTIC_RELATIVE, applies, entry_for
+from case_study.sections import ADOPTION, DOMESTIC_RELATIVE, applies, entry_for
 from case_study.validation import (
     check_against_other_sections, clean_date_prepared, clean_value, partner_of)
 
@@ -110,7 +110,11 @@ class CaseStudyView(APIView):
                 answer = data["custody_over_two_years"]
                 if answer is not None and not isinstance(answer, bool):
                     return _refuse("The custody answer must be yes or no.")
-                if answer is not None and child.type_of_adoption != DOMESTIC_RELATIVE:
+                # An old adoption type can outlive a move to another case type,
+                # and must not make the question askable there.
+                if answer is not None and not (
+                        child.case_type == ADOPTION
+                        and child.type_of_adoption == DOMESTIC_RELATIVE):
                     return _refuse("The custody question is asked for a Domestic "
                                    "Relative adoption only.")
                 case_study.custody_over_two_years = answer
@@ -318,8 +322,10 @@ class ReopenView(APIView):
         if case_study is None:
             return _refuse("This child has no case study yet. Start one first.",
                            status.HTTP_404_NOT_FOUND)
-        # A closed case, or one that is no longer an Adoption record, keeps its
-        # case study as it was signed.
+        # A closed case keeps its case study as it was signed. Any ACTIVE record
+        # can reopen, whatever its case type now is: one made final while it was
+        # an Adoption record and moved to Foster Care since would otherwise be
+        # stuck read-only.
         refused = writes_refused(child)
         if refused:
             return _refuse(refused)

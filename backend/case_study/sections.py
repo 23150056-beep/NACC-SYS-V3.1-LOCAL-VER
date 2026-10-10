@@ -40,6 +40,16 @@ COLUMN_TYPES = ("text", "partial_date", "date", "int", "choice")
 # asked, not required and cannot be saved.
 RULES = ("always", "surrendered", "abandoned", "stc", "placement_history")
 
+# Block A is the child's profile for every case type (owner, 10 Oct 2026): a
+# Foster Care, Kinship Care, Residential Care, Family Tracing & Reunification
+# or Independent Living record has one too. Blocks B (the prospective adoptive
+# parents) and C (the adoption placement) are about an adoption and apply to an
+# Adoption record only, whatever their own rule says. A record moved away from
+# Adoption keeps the text of those boxes - they are hidden, never deleted - and
+# moved back they apply again.
+ADOPTION = "Adoption"
+ADOPTION_ONLY_BLOCKS = ("B", "C")
+
 # Child.case_category and Child.type_of_adoption, as stored
 # (children/models.py).
 SURRENDERED = ("Surrendered",)
@@ -607,5 +617,11 @@ _RULE_FUNCTIONS = {
 
 def applies(entry, child, case_study):
     """Does this box apply to this child? `case_study` may be None (nothing
-    started yet) and is read only for the Domestic Relative custody answer."""
+    started yet) and is read only for the Domestic Relative custody answer.
+
+    Blocks B and C come first: no rule of their own makes them apply to a
+    record that is not an Adoption one. Block A keeps its own rules (the
+    Surrendered and Abandoned boxes) for every case type."""
+    if entry["block"] in ADOPTION_ONLY_BLOCKS and child.case_type != ADOPTION:
+        return False
     return _RULE_FUNCTIONS[entry["applies"]](child, case_study)

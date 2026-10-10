@@ -276,11 +276,6 @@ class MakingItFinalTest(FinalTestCase):
         res = self.make_final()
         self.assertEqual(400, res.status_code)
         self.assertIn("closed", res.data["detail"])
-        Child.objects.filter(pk=self.child.pk).update(
-            case_status="counseling", status="active", case_type="Foster Care")
-        res = self.make_final()
-        self.assertEqual(400, res.status_code)
-        self.assertIn("adoption records only", res.data["detail"])
         self.assertEqual(0, CaseStudyFinal.objects.count())
 
     def test_no_case_study_yet_is_not_found(self):
