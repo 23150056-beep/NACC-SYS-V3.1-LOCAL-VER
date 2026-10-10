@@ -9,12 +9,14 @@ name reached a clinical draft unnoticed.
     manage.py ai_eval --feature polish     # one feature
     manage.py ai_eval --feature summary    # long reports, fitted vs whole
     manage.py ai_eval --reps 5 --limit 6   # more evidence, more children
+    manage.py ai_eval --feature case_brief # the social worker's written brief
 """
 import time
 
 from django.core.management.base import BaseCommand
 
 from assistant import evaluation, prompts, tools
+from assistant.brief_facts import brief_facts
 from assistant.models import AssistantSetting
 from assistant.services import AIUnavailable, get_ai_client
 from children.models import Child
@@ -232,18 +234,122 @@ def _looks_taglish(text):
     return any(h in low for h in _TAGALOG_HINT)
 
 
+# --- the social worker's case brief ------------------------------------------
+#
+# The written part of the case brief (prompts.build_case_brief_prompt) is judged
+# here, on the machine that runs the model, before anyone relies on it. It is
+# scored on what a reader would be hurt by: a name, a date or a number the facts
+# never held. The verdict is deliberately narrow - no invented name and no
+# invented date - and deliberately demanding about evidence: 30 drafts from at
+# least 10 different children, because a clean run over three children says
+# almost nothing about the rest.
+
+CASE_BRIEF_CHILDREN = 10       # the default --limit for this feature
+CASE_BRIEF_REPS = 3            # the default --reps for this feature
+CASE_BRIEF_PASS_CHILDREN = 10  # fewer distinct children than this: counts only
+CASE_BRIEF_PASS_DRAFTS = 30    # fewer drafts than this cannot PASS
+CASE_BRIEF_SAMPLES = 5         # drafts printed in full for the owner to read
+
+
+def score_case_brief(prompt, text):
+    """{flag: [items]} for one draft of a case brief, from strings alone.
+
+    Dates and numbers are compared with the FACTS part of the prompt, not the
+    instructions: the instructions have digits of their own, and counting them
+    as given would let "2 sessions" through when the facts said three. Names are
+    compared with the whole prompt, as the other features are. Tagalog drift is
+    reported and never counted against the draft: a referral summary may itself
+    be Taglish.
+    """
+    facts = prompt[len(prompts.CASE_BRIEF_INSTRUCTIONS):]
+    flags = {}
+    checks = (
+        ("invented names", evaluation.invented_names(prompt, text)),
+        ("invented dates", evaluation.invented_dates(facts, text)),
+        ("invented numbers", evaluation.invented_numbers(facts, text)),
+        ("repeated lines", evaluation.repeated_lines(text)),
+        ("language drift", evaluation.language_drift(text)),
+    )
+    for label, found in checks:
+        if found:
+            flags[label] = found
+    words = evaluation.words_over(text)
+    if words:
+        flags["over 150 words"] = [f"{words} words"]
+    return flags
+
+
+def case_brief_verdict(drafts, children, with_names, with_dates):
+    """The one line the run ends with.
+
+    PASS needs no draft with an invented name or date, over at least 30 drafts
+    from at least 10 children. Anything else is NOT YET, and says which part.
+    `with_names` and `with_dates` count DRAFTS that had one, not the items.
+    """
+    if not drafts:
+        return "NOT YET: no draft was produced, so nothing was measured."
+    found = []
+    if with_names:
+        found.append(f"{with_names} draft{'s' if with_names != 1 else ''} with invented names")
+    if with_dates:
+        found.append(f"{with_dates} draft{'s' if with_dates != 1 else ''} with invented dates")
+    short = drafts < CASE_BRIEF_PASS_DRAFTS or children < CASE_BRIEF_PASS_CHILDREN
+    if not found and not short:
+        return f"PASS: 0 invented names, 0 invented dates over {drafts} drafts"
+    parts = [", ".join(found)] if found else []
+    if short:
+        parts.append(
+            f"only {drafts} draft{'s' if drafts != 1 else ''} from {children} "
+            f"child{'ren' if children != 1 else ''} (PASS needs at least "
+            f"{CASE_BRIEF_PASS_DRAFTS} from at least {CASE_BRIEF_PASS_CHILDREN})")
+    return f"NOT YET: {'; '.join(parts)}"
+
+
+def case_brief_sample(limit):
+    """Up to `limit` active children held by a social worker, [(child, summary)].
+
+    Children whose latest case referral has a confirmed summary come first: the
+    brief's first part is written from it, and a sample of children with
+    nothing to summarise measures the easy case. A social worker is the Staff
+    account on the record - the facts are built as that person would see them.
+    """
+    from django.contrib.auth import get_user_model
+
+    from accounts.models import Role
+    from clinical.models import CaseReferral
+
+    User = get_user_model()
+    candidates = (Child.objects
+                  .filter(status=Child.ACTIVE, social_worker__role__role_name=Role.STAFF,
+                          social_worker__status=User.ACTIVE)
+                  .select_related("social_worker").order_by("id"))
+    with_summary, without = [], []
+    for child in candidates:
+        latest = (CaseReferral.objects.filter(child=child)
+                  .order_by("-created_at", "-id").first())
+        confirmed = bool(latest and latest.ai_summary_confirmed
+                         and (latest.ai_summary or "").strip())
+        (with_summary if confirmed else without).append(child)
+        if len(with_summary) >= limit:
+            break
+    return [(child, True) for child in with_summary[:limit]] + \
+           [(child, False) for child in without[:max(0, limit - len(with_summary))]]
+
+
 class Command(BaseCommand):
     help = "Evaluate the assistant's drafting output against real records."
 
     def add_arguments(self, parser):
         parser.add_argument("--feature",
-                            choices=["brief", "polish", "chat", "self_report", "summary",
-                                     "all"],
+                            choices=["brief", "case_brief", "polish", "chat", "self_report",
+                                     "summary", "all"],
                             default="all")
-        parser.add_argument("--reps", type=int, default=2,
-                            help="Runs per case; the model is not deterministic.")
-        parser.add_argument("--limit", type=int, default=3,
-                            help="Children to sample for briefs; reports for summaries.")
+        parser.add_argument("--reps", type=int, default=None,
+                            help="Runs per case; the model is not deterministic. "
+                                 f"Default 2, and {CASE_BRIEF_REPS} for case_brief.")
+        parser.add_argument("--limit", type=int, default=None,
+                            help="Children to sample for briefs; reports for summaries. "
+                                 f"Default 3, and {CASE_BRIEF_CHILDREN} for case_brief.")
 
     def handle(self, *args, **options):
         cfg = AssistantSetting.load()
@@ -254,29 +360,42 @@ class Command(BaseCommand):
         # A measurement, run by hand, and the step the docs require before a
         # drafting feature runs on any other model - so it may reach one.
         self.client = get_ai_client(allow_hosted=True)
-        self.stdout.write(f"Model: {cfg.model_name}   reps: {options['reps']}\n")
+        reps = options["reps"] or 2
+        limit = options["limit"] or 3
+        self.stdout.write(f"Model: {cfg.model_name}   reps: {options['reps'] or 'default'}\n")
 
+        self._case_verdict = None
         totals = []
         if options["feature"] in ("brief", "all"):
-            totals.append(self._briefs(options["reps"], options["limit"]))
+            totals.append(self._briefs(reps, limit))
+        if options["feature"] in ("case_brief", "all"):
+            totals.append(self._case_briefs(options["reps"] or CASE_BRIEF_REPS,
+                                            options["limit"] or CASE_BRIEF_CHILDREN))
         if options["feature"] in ("polish", "all"):
-            totals.append(self._polish(options["reps"]))
+            totals.append(self._polish(reps))
         if options["feature"] in ("chat", "all"):
-            totals.append(self._chat(options["reps"]))
+            totals.append(self._chat(reps))
         if options["feature"] in ("self_report", "all"):
-            totals.append(self._self_report(options["reps"]))
+            totals.append(self._self_report(reps))
         if options["feature"] in ("summary", "all"):
-            totals.extend(self._summaries(options["reps"], options["limit"]))
+            totals.extend(self._summaries(reps, limit))
 
-        self.stdout.write("\n" + "=" * 62)
-        self.stdout.write("SUMMARY")
-        for name, runs, flags, latency in totals:
-            if not runs:
-                continue
-            self.stdout.write(f"\n{name}  ({runs} runs, median {latency} ms)")
-            for label, n in flags.items():
-                pct = 100 * n / runs
-                self.stdout.write(f"  {label:22} {n}/{runs}  ({pct:.0f}%)")
+        # The case brief prints its own block (it decides when rates are shown),
+        # so a run of it alone has nothing for the general table.
+        if any(runs for _, runs, _, _ in totals):
+            self.stdout.write("\n" + "=" * 62)
+            self.stdout.write("SUMMARY")
+            for name, runs, flags, latency in totals:
+                if not runs:
+                    continue
+                self.stdout.write(f"\n{name}  ({runs} runs, median {latency} ms)")
+                for label, n in flags.items():
+                    pct = 100 * n / runs
+                    self.stdout.write(f"  {label:22} {n}/{runs}  ({pct:.0f}%)")
+
+        # Last, so it is the line the run ends on.
+        if self._case_verdict:
+            self.stdout.write("\n" + self._case_verdict)
 
     # -- features ---------------------------------------------------------
 
@@ -334,6 +453,98 @@ class Command(BaseCommand):
                 self._report(rep, ms, flags, text=text)
 
         return ("BRIEFS", runs, counts, self._median(latencies))
+
+    def _case_briefs(self, reps, limit):
+        """Draft each sampled child's case brief `reps` times, from the facts
+        that child's social worker sees, and score what comes back.
+
+        Through the client the app uses, with the prompt the app builds, and
+        with NO AssistantJob written (like every evaluation): a measurement
+        must not appear in the usage figures or in a child's access log. The
+        output names a child by first name only, drafts included.
+        """
+        sample = case_brief_sample(limit)
+        self.stdout.write("\n" + "=" * 62)
+        self.stdout.write(f"CASE BRIEF - {len(sample)} children x {reps} reps")
+        if not sample:
+            self.stdout.write("  No active child is held by a social worker "
+                              "(a Staff account): nothing to evaluate as.")
+            self._case_verdict = case_brief_verdict(0, 0, 0, 0)
+            return ("CASE BRIEF", 0, {}, 0)
+
+        drafts, latencies, children = [], [], set()
+        counts = {"invented names": 0, "invented dates": 0, "invented numbers": 0,
+                  "over 150 words": 0, "repeated lines": 0, "language drift": 0}
+        for child, has_summary in sample:
+            facts = brief_facts(_EvalRequest(child.social_worker), child)
+            prompt = prompts.build_case_brief_prompt(facts, child)
+            name = prompts.first_name(child)
+            self.stdout.write(
+                f"\n  {name} (id={child.id}) [referral summary: "
+                f"{'confirmed' if has_summary else 'none'}, {len(prompt)} chars sent]")
+            for rep in range(reps):
+                try:
+                    text, ms = self._generate(prompt, prompts.CASE_BRIEF_SYSTEM)
+                except AIUnavailable as exc:
+                    self.stdout.write(f"    rep{rep}: UNAVAILABLE - {exc}")
+                    continue
+                latencies.append(ms)
+                children.add(child.id)
+                flags = score_case_brief(prompt, text)
+                for key in flags:
+                    counts[key] += 1
+                drafts.append({"child": child.id, "name": name, "rep": rep, "ms": ms,
+                               "text": text, "flags": flags, "summary": has_summary})
+                self._report(rep, ms, flags, text=text)
+
+        self._print_case_brief_summary(drafts, counts, latencies, len(children),
+                                       sum(1 for _, has in sample if has))
+        self._case_verdict = case_brief_verdict(
+            len(drafts), len(children), counts["invented names"], counts["invented dates"])
+        return ("CASE BRIEF", 0, {}, self._median(latencies))
+
+    def _print_case_brief_summary(self, drafts, counts, latencies, children, with_summary):
+        self.stdout.write("\n" + "=" * 62)
+        self.stdout.write("CASE BRIEF - SUMMARY")
+        n = len(drafts)
+        self.stdout.write(f"  children evaluated     {children}  "
+                          f"({with_summary} with a confirmed referral summary)")
+        self.stdout.write(f"  drafts                 {n}")
+        self.stdout.write(f"  median latency         {self._median(latencies)} ms")
+        # Rates over a handful of children say more than the data does: three
+        # clean children is not "0%". Below the threshold only counts are shown.
+        rates = children >= CASE_BRIEF_PASS_CHILDREN
+        for label, hits in counts.items():
+            shown = (f"{hits}/{n}  ({100 * hits / n:.0f}%)" if rates and n
+                     else f"{hits} of {n} drafts")
+            note = "  (reported, not failed)" if label == "language drift" else ""
+            self.stdout.write(f"  {label:22} {shown}{note}")
+        if not rates:
+            self.stdout.write(
+                f"  Rates are not printed: only {children} distinct "
+                f"child{'ren were' if children != 1 else ' was'} evaluated, and a "
+                f"percentage over fewer than {CASE_BRIEF_PASS_CHILDREN} children says "
+                f"more than the data does. Counts only.")
+
+        # The owner reads these, not a number: the first draft of each child, in
+        # the order sampled (confirmed referral summaries first), then the rest.
+        seen, firsts = set(), []
+        for d in drafts:
+            if d["child"] not in seen:
+                seen.add(d["child"])
+                firsts.append(d)
+        samples = (firsts + [d for d in drafts if d not in firsts])[:CASE_BRIEF_SAMPLES]
+        self.stdout.write("\n" + "-" * 62)
+        self.stdout.write(f"SAMPLE DRAFTS - {len(samples)} of {n}, in full "
+                          f"(first names only)")
+        for i, d in enumerate(samples, 1):
+            marks = ", ".join(d["flags"]) or "clean"
+            self.stdout.write(
+                f"\n  [{i}] {d['name']} (id={d['child']}), rep{d['rep']}, "
+                f"referral summary: {'confirmed' if d['summary'] else 'none'}, "
+                f"{d['ms']} ms - {marks}")
+            for line in d["text"].strip().splitlines():
+                self.stdout.write(f"      {line}")
 
     def _polish(self, reps):
         self.stdout.write("\n" + "=" * 62)
