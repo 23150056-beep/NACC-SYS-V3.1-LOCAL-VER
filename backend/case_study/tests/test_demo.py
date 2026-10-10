@@ -25,7 +25,8 @@ from case_study.completeness import missing_sections
 from case_study.finalize import CannotFinalize, finalize
 from case_study.models import CaseStudy, CaseStudyFinal, CaseStudySection
 from case_study.sections import (
-    DVC_NOTARIZED, DVC_SIGNED, PAP_CONTACT_ROWS, PAP_ROWS, SCSR_SECTIONS, applies, entry_for)
+    BLOCK_A_KEYS, DVC_NOTARIZED, DVC_SIGNED, PAP_CONTACT_ROWS, PAP_ROWS, SCSR_SECTIONS, applies,
+    entry_for)
 from case_study.tests.base import NOW, TODAY, CaseStudyTestCase, make_user
 from case_study.validation import clean_value
 from children.management.commands.export_demo_data import DEMO_MODELS, scrub_rows
@@ -58,21 +59,131 @@ class SeededDraftsAreWhatTheEndpointWouldTake(CaseStudyTestCase):
 
     def test_every_third_adoption_child_gets_a_draft_and_a_few_others_a_final(self):
         kids = self.children(7)
-        Child.objects.create(first_name="Fos", last_name="Ter", case_type="Foster Care",
-                             social_worker=self.sw, birth_date=date(2015, 1, 1))
+        fostered = Child.objects.create(
+            first_name="Fos", last_name="Ter", case_type="Foster Care",
+            social_worker=self.sw, birth_date=date(2015, 1, 1))
         made = demo_case_studies.install_case_studies(
             list(Child.objects.order_by("pk")), today=TODAY)
         # The setUpTestData child is the first adoption child, then the seven.
         adoption = [self.child] + kids
         drafts = {c.pk for c in adoption[::3]}
         finals = {c.pk for c in adoption[1::3][:demo_case_studies.FINALS]}
-        self.assertEqual(len(drafts) + len(finals), made)
-        self.assertEqual(drafts, set(CaseStudy.objects.filter(status=CaseStudy.DRAFT)
-                                     .values_list("child_id", flat=True)))
+        # The one Foster Care child is the first of its kind, so it has a
+        # block-A draft too (below).
+        self.assertEqual(len(drafts) + len(finals) + 1, made)
+        self.assertEqual(drafts | {fostered.pk},
+                         set(CaseStudy.objects.filter(status=CaseStudy.DRAFT)
+                             .values_list("child_id", flat=True)))
         self.assertEqual(finals, set(CaseStudy.objects.filter(status=CaseStudy.FINAL)
                                      .values_list("child_id", flat=True)))
         self.assertFalse(drafts & finals)
         self.assertEqual(3, len(finals))
+
+    def care_children(self, n, case_types=None):
+        types = case_types or ["Foster Care", "Kinship Care", "Residential Care",
+                               "Family Tracing & Reunification", "Independent Living"]
+        return [Child.objects.create(
+            first_name=f"Care{i}", last_name="Child", gender="Female",
+            birth_date=TODAY - timedelta(days=(7 + i) * 366),
+            case_type=types[i % len(types)], case_category=CATEGORIES[i % 6],
+            date_of_admission=TODAY - timedelta(days=60 + i),
+            date_of_placement_to_custodian=TODAY - timedelta(days=60 + i),
+            social_worker=[self.sw, self.sw2][i % 2], assigned_psychologist=self.psy)
+            for i in range(n)]
+
+    def test_a_few_children_of_the_other_case_types_get_a_block_a_draft(self):
+        kids = self.care_children(30)
+        made = demo_case_studies.install_case_studies(
+            list(Child.objects.order_by("pk")), today=TODAY)
+        wanted = {c.pk for c in kids[::demo_case_studies.CARE_EVERY][:demo_case_studies.CARE_DRAFTS]}
+        have = set(CaseStudy.objects.exclude(child__case_type="Adoption")
+                   .values_list("child_id", flat=True))
+        self.assertEqual(wanted, have)
+        self.assertEqual(demo_case_studies.CARE_DRAFTS, len(have))
+        # The adoption child of the base class is counted in what was made.
+        self.assertEqual(made, CaseStudy.objects.count())
+        for study in CaseStudy.objects.exclude(child__case_type="Adoption"):
+            self.assertEqual(CaseStudy.DRAFT, study.status)
+            self.assertEqual(study.child.social_worker, study.created_by)
+            keys = {s.key for s in study.sections.all()}
+            self.assertTrue(keys)
+            self.assertTrue(keys <= set(BLOCK_A_KEYS), keys)
+            self.assertTrue(missing_sections(study))
+
+    def test_what_a_non_adoption_draft_holds_passes_the_real_rules_and_never_speaks_of_adoption(self):
+        for case_type in ("Foster Care", "Kinship Care", "Residential Care",
+                          "Family Tracing & Reunification", "Independent Living"):
+            for turn in range(3):
+                for category in CATEGORIES:
+                    child = Child.objects.create(
+                        first_name="Demo", last_name=f"{case_type[:3]}{turn}{category[:3]}",
+                        birth_date=date(2016, 5, 5), case_type=case_type,
+                        case_category=category, date_of_admission=TODAY - timedelta(days=40),
+                        date_of_placement_to_custodian=TODAY - timedelta(days=40),
+                        social_worker=self.sw2)
+                    draft = demo_case_studies.draft_for(child, turn, TODAY)
+                    label = f"{case_type} / {category} / turn {turn}"
+                    self.assertTrue(draft, label)
+                    for key, (value, not_applicable) in draft.items():
+                        entry = entry_for(key)
+                        self.assertEqual("A", entry["block"], label)
+                        self.assertTrue(applies(entry, child, None), label)
+                        if not_applicable:
+                            self.assertTrue(entry["may_be_na"], label)
+                            continue
+                        self.assertEqual(value, clean_value(entry, value, today=TODAY), label)
+                        self.assertFalse(CONTACT.search(text_of(value)), label)
+                        self.assertNotRegex(text_of(value), r"(?i)adopt|CDCLAA", f"{label} {key}")
+                    if DVC_SIGNED in draft and DVC_NOTARIZED in draft:
+                        self.assertLessEqual(draft[DVC_SIGNED][0], draft[DVC_NOTARIZED][0], label)
+
+    def test_a_non_adoption_draft_follows_block_as_own_rules(self):
+        surrendered, abandoned = self.care_children(2, ["Foster Care"])
+        Child.objects.filter(pk=surrendered.pk).update(case_category="Surrendered")
+        Child.objects.filter(pk=abandoned.pk).update(case_category="Abandoned")
+        surrendered.refresh_from_db()
+        abandoned.refresh_from_db()
+        self.assertIn(DVC_SIGNED, demo_case_studies.draft_for(surrendered, 2, TODAY))
+        draft = demo_case_studies.draft_for(abandoned, 2, TODAY)
+        self.assertNotIn(DVC_SIGNED, draft)
+        self.assertIn("a5_abandonment", draft)
+
+    def test_a_non_adoption_child_never_gets_a_final_or_a_box_of_block_b_or_c(self):
+        self.care_children(40)
+        demo_case_studies.install_case_studies(list(Child.objects.order_by("pk")), today=TODAY)
+        self.assertFalse(CaseStudy.objects.exclude(child__case_type="Adoption")
+                         .filter(status=CaseStudy.FINAL).exists())
+        self.assertFalse(CaseStudySection.objects.exclude(
+            case_study__child__case_type="Adoption").filter(key__regex=r"^[bc]").exists())
+
+    def test_running_it_again_adds_nothing_for_them_either(self):
+        self.care_children(20)
+        everyone = list(Child.objects.order_by("pk"))
+        demo_case_studies.install_case_studies(everyone, today=TODAY)
+        sections = CaseStudySection.objects.count()
+        self.assertEqual(0, demo_case_studies.install_case_studies(everyone, today=TODAY))
+        self.assertEqual(sections, CaseStudySection.objects.count())
+
+    def test_a_non_adoption_child_with_no_social_worker_gets_none(self):
+        Child.objects.create(first_name="No", last_name="Worker", case_type="Foster Care",
+                             birth_date=date(2015, 1, 1))
+        self.assertEqual(0, demo_case_studies.install_case_studies(
+            list(Child.objects.filter(case_type="Foster Care")), today=TODAY))
+
+    def test_the_social_worker_the_psychologist_and_the_isa_each_read_a_foster_care_draft(self):
+        child = self.care_children(1, ["Foster Care"])[0]
+        demo_case_studies.install_case_studies([child], today=TODAY)
+        self.assertTrue(CaseStudy.objects.filter(child=child).exists())
+        mine = self.as_user(child.social_worker).get(self.url(child))
+        self.assertEqual(200, mine.status_code)
+        self.assertFalse(mine.data["read_only"])
+        self.assertTrue([s for s in mine.data["sections"] if s["version"] == 1])
+        theirs = self.as_user(self.psy).get(self.url(child))
+        self.assertEqual(200, theirs.status_code)
+        self.assertTrue(theirs.data["read_only"])
+        isa = self.as_user(self.isa).get(self.url(child))
+        self.assertNotIn("sections", isa.data)
+        self.assertGreater(isa.data["missing_count"], 0)
 
     def test_at_most_three_are_final(self):
         self.children(20)
@@ -360,7 +471,19 @@ class SeederTest(TestCase):
         self.assertGreaterEqual(len(adoption), 7, "the seed should draw some adoptions")
         drafts = CaseStudy.objects.filter(status=CaseStudy.DRAFT).count()
         finals = CaseStudy.objects.filter(status=CaseStudy.FINAL).count()
-        self.assertEqual(len(adoption[::3]), drafts)
+        self.assertEqual(len(adoption[::3]), CaseStudy.objects.filter(
+            status=CaseStudy.DRAFT, child__case_type="Adoption").count())
+        # And a few of the other case types have a block-A draft: every fourth,
+        # up to the cap.
+        others = [c for c in Child.objects.exclude(case_type="Adoption").order_by("pk")
+                  if c.social_worker_id and c.birth_date]
+        self.assertGreaterEqual(len(others), 4, "the seed should draw some other case types")
+        care = CaseStudy.objects.exclude(child__case_type="Adoption")
+        self.assertEqual(
+            {c.pk for c in others[::demo_case_studies.CARE_EVERY][:demo_case_studies.CARE_DRAFTS]},
+            set(care.values_list("child_id", flat=True)))
+        self.assertEqual({CaseStudy.DRAFT}, set(care.values_list("status", flat=True)))
+        self.assertEqual(len(adoption[::3]) + care.count(), drafts)
         self.assertGreaterEqual(finals, 2)
         self.assertLessEqual(finals, demo_case_studies.FINALS)
         self.assertEqual(finals, CaseStudyFinal.objects.count())

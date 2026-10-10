@@ -237,11 +237,12 @@ class Command(BaseCommand):
             Child.objects.filter(status=Child.ACTIVE)
             .select_related("assigned_psychologist").order_by("pk"))
 
-        # A draft case study for a third of the adoption children, and a final
-        # one for a few more, after the social workers are dealt: each is the
-        # record holder's own (case_study/demo_case_studies.py).
+        # A draft case study for a third of the adoption children, a final one
+        # for a few more, and a block-A draft for a few of the other case
+        # types, after the social workers are dealt: each is the record
+        # holder's own (case_study/demo_case_studies.py).
         case_studies = demo_case_studies.install_case_studies(
-            list(Child.objects.filter(status=Child.ACTIVE, case_type="Adoption")
+            list(Child.objects.filter(status=Child.ACTIVE)
                  .select_related("social_worker").order_by("pk")))
 
         moved, _ = demo_schedule.realign_appointments()

@@ -1,10 +1,13 @@
-"""Invented case studies for demo adoption children (8 Oct 2026).
+"""Invented case studies for demo children (8 and 10 Oct 2026).
 
 A third of the adoption children get a draft with block A partly filled, so the
 tab, the psychologist's read-only view and the ISA's status card have something
 to show. A few others (up to three) get a complete case study that is FINAL, so
 the print of a final, "Finals on file" and Reopen have something to work on
-too. Everything is fictional and plain: no phone numbers,
+too. Block A is every case type's, so a few children of the other case types
+(Foster Care, Kinship Care and the rest) get a block-A draft too, in plainer
+wording that does not speak of adoption; they have no block B or C to fill.
+Everything is fictional and plain: no phone numbers,
 no e-mail addresses. A draft leaves block B (the adoptive parents) empty; a
 final fills it, but its adoptive parents' table has no contact rows, for the
 reason demo custodians have no numbers either - an invented mobile is
@@ -43,6 +46,12 @@ EVERY = 3
 # from the second), so a demo has both: drafts to write in, and finals to
 # print, reopen and finalize again.
 FINALS = 3
+# And one block-A draft for every FOURTH child of any other case type, up to
+# this many, so the case study shows on a Foster Care or Residential Care
+# record too.
+CARE_EVERY = 4
+CARE_DRAFTS = 6
+ADOPTION = "Adoption"
 # How many boxes each draft has filled, by turns: a start, a good way along and
 # nearly there. Never all of block A, so each stays visibly a draft.
 FILLED = (4, 7, 11)
@@ -61,6 +70,15 @@ _CIRCUMSTANCES = [
     "The child was admitted to the center on the day of the referral.",
     "A neighbor reported the child to the barangay, and the barangay referred the child to "
     "the agency. The child was received by the social worker and admitted that afternoon.",
+]
+# The same account, for a child who is not being placed for adoption: only the
+# second one spoke of adoption.
+_CIRCUMSTANCES_CARE = [
+    _CIRCUMSTANCES[0],
+    "The child was referred by the municipal social welfare office. The birth mother, who "
+    "has other children and no steady income, asked the agency to look after the child "
+    "for now. The child was admitted to the center on the day of the referral.",
+    _CIRCUMSTANCES[2],
 ]
 _DESCRIPTION = [
     "On admission the child was quiet and watchful, with no physical deformities and a small "
@@ -111,6 +129,18 @@ _SUMMARY_ABANDONED = (
 _SUMMARY_OTHER = (
     "The child remains in the agency's care while the petition for the CDCLAA is "
     "prepared. The circumstances of the child's admission are as described above.")
+# For the other case types, which have no petition for the CDCLAA to speak of.
+_SUMMARY_SURRENDERED_CARE = (
+    "The birth mother voluntarily committed the child to the agency after counseling. She "
+    "understood that the Deed of Voluntary Commitment would become irrevocable and chose "
+    "to proceed. The child remains in the agency's care.")
+_SUMMARY_ABANDONED_CARE = (
+    "The child was found alone and brought to the barangay, and then to the agency. The "
+    "search for the birth family was carried out as described below, with no result. The "
+    "child remains in the agency's care.")
+_SUMMARY_OTHER_CARE = (
+    "The child remains in the agency's care. The circumstances of the child's admission "
+    "are as described above.")
 _ASSISTANCE = (
     "The social worker offered the birth mother counseling and referred her to the "
     "municipal office for livelihood support. The relatives were visited and none could "
@@ -160,21 +190,24 @@ def _started_on(child, today):
 
 
 def _summary(child):
+    adoption = child.case_type == ADOPTION
     if child.case_category == "Surrendered":
-        return _SUMMARY_SURRENDERED
+        return _SUMMARY_SURRENDERED if adoption else _SUMMARY_SURRENDERED_CARE
     if child.case_category in ABANDONED:
-        return _SUMMARY_ABANDONED
-    return _SUMMARY_OTHER
+        return _SUMMARY_ABANDONED if adoption else _SUMMARY_ABANDONED_CARE
+    return _SUMMARY_OTHER if adoption else _SUMMARY_OTHER_CARE
 
 
 def _boxes(child, today, turn):
     """The demo text for each box worth showing, in the catalogue's order. Only
-    block A: the psychologist reads it, and block B stays empty."""
+    block A: the psychologist reads it, and block B stays empty. It is every
+    case type's, so the wording does not assume an adoption."""
     start = _started_on(child, today)
     signed = start - timedelta(days=12)
     boxes = {
         "a2_sources": _SOURCES[turn % 3],
-        "a2_circumstances": _CIRCUMSTANCES[turn % 3],
+        "a2_circumstances": (_CIRCUMSTANCES if child.case_type == ADOPTION
+                             else _CIRCUMSTANCES_CARE)[turn % 3],
         "a3_description": _DESCRIPTION[turn % 3],
         "a3_medical": _MEDICAL[turn % 3],
         "a3_immunizations": _immunizations(child, today),
@@ -434,18 +467,22 @@ def draft_for(child, turn, today):
 
 
 def install_case_studies(children, today=None):
-    """Give some adoption children that have a social worker, and no case study
-    yet, a case study. Returns how many were written.
+    """Give some children that have a social worker, and no case study yet, a
+    case study. Returns how many were written.
 
-    Every third one (from the first) gets a draft. Every third from the
-    second - never one that has a draft, and at most FINALS of them - gets a
-    complete case study that is made final. The same children get the same
-    every time (record order), and a child that has one is left alone, so
+    Of the adoption children, every third one (from the first) gets a draft.
+    Every third from the second - never one that has a draft, and at most
+    FINALS of them - gets a complete case study that is made final. Of the
+    children of every other case type, every fourth one (from the first), at
+    most CARE_DRAFTS of them, gets a block-A draft. The same children get the
+    same every time (record order), and a child that has one is left alone, so
     running this twice adds nothing.
     """
     today = today or timezone.localdate()
     eligible = [c for c in children
-                if c.case_type == "Adoption" and c.social_worker_id and c.birth_date]
+                if c.case_type == ADOPTION and c.social_worker_id and c.birth_date]
+    other = [c for c in children
+             if c.case_type != ADOPTION and c.social_worker_id and c.birth_date]
     made = 0
     for turn, child in enumerate(eligible[::EVERY]):
         if not CaseStudy.objects.filter(child=child).exists():
@@ -454,6 +491,10 @@ def install_case_studies(children, today=None):
     for turn, child in enumerate(eligible[1::EVERY][:FINALS]):
         if not CaseStudy.objects.filter(child=child).exists():
             _write_final(child, turn, today)
+            made += 1
+    for turn, child in enumerate(other[::CARE_EVERY][:CARE_DRAFTS]):
+        if not CaseStudy.objects.filter(child=child).exists():
+            _write_draft(child, turn, today)
             made += 1
     return made
 
