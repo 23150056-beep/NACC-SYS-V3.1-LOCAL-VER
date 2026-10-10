@@ -1,3 +1,5 @@
+from datetime import date
+
 from rest_framework.test import APITestCase
 from django.contrib.auth import get_user_model
 from accounts.models import Role
@@ -231,8 +233,37 @@ class DashboardTest(ReportsBase):
         qbuckets = [row["bucket"] for row in quarterly.data["intake_vs_termination"]]
         self.assertTrue(qbuckets and all("-Q" in b for b in qbuckets), qbuckets)  # "2026-Q3"
 
+    def test_the_today_strip_age_is_a_calendar_age(self):
+        # Pinned to noon on 10 Oct 2026, Manila. Days over 365 called a child
+        # a day short of ten "10" (3,651 days is 10.003 by that arithmetic and
+        # still nine by the calendar); the birthday itself counts.
+        from datetime import datetime, time
+        from unittest.mock import patch
+        from django.utils import timezone
+        from scheduling.models import Appointment
+
+        now = timezone.make_aware(datetime(2026, 10, 10, 12, 0))
+        eve = Child.objects.create(fullname="Eve", birth_date=date(2016, 10, 11),
+                                   assigned_psychologist=self.psy)
+        day = Child.objects.create(fullname="Day", birth_date=date(2016, 10, 10),
+                                   assigned_psychologist=self.psy)
+        leap = Child.objects.create(fullname="Leap", birth_date=date(2012, 2, 29),
+                                    assigned_psychologist=self.psy)
+        none = Child.objects.create(fullname="None", assigned_psychologist=self.psy)
+        for child in (eve, day, leap, none):
+            Appointment.objects.create(
+                child=child, psychologist=self.psy,
+                start=timezone.make_aware(datetime.combine(now.date(), time(15))))
+        self._auth("a@racco1.gov.ph")
+        with patch("django.utils.timezone.now", return_value=now):
+            strip = self.client.get("/api/reports/dashboard/").data["today_schedule"]
+        ages = {row["child_id"]: row["age"] for row in strip}
+        self.assertEqual(9, ages[eve.id])
+        self.assertEqual(10, ages[day.id])
+        self.assertEqual(14, ages[leap.id])
+        self.assertIsNone(ages[none.id])
+
     def test_quarterly_bucket_format(self):
-        from datetime import date
         from clinical import reports
         self.assertEqual(reports.bucket(date(2026, 7, 18), "quarterly"), "2026-Q3")
         self.assertEqual(reports.bucket(date(2026, 1, 2), "quarterly"), "2026-Q1")
