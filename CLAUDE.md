@@ -947,6 +947,32 @@ switched to the record.)
 - The record form also asks before closing with unsaved input; a new record's
   draft is flushed and kept, an edit's changes are discarded only on "Discard".
 
+## The header search (Ctrl K)
+
+Owner's request, 11 Oct 2026: the box in the header finds AND does
+(`components/GlobalSearch.jsx`, matching in `utils/search.js`).
+
+- **A child is found by what intake remembers**: name in any word order,
+  case number, custodian, barangay/municipality/province, birth year or date
+  (2015, 2015-03-02, 03/02/2015), case type, psychologist, social worker.
+  Accents and ñ do not count, "Ma." is also Maria. A match outside the name
+  says where it was found. Never add medical notes, the referral reason or
+  contact numbers to what is matched: the box finds a child, it does not read
+  the file.
+- **Only from `/children/`**, which the server already scopes - nothing here
+  may widen what an account sees. Fetched each time the box opens, so a child
+  added since is found.
+- **Quick actions on a child** (right arrow, or the row's arrow): Open record,
+  Book a session (only with a case referral), Upload (a referral for
+  SW/ISA, a report for the child's psychologist), Edit record - through the
+  links the screens already read (`?book=1&child=`, `?upload=1&child=`), plus
+  Records' `?edit=<id>`, which opens the form only where `canEditRecord`
+  allows. Same rules as the screens; the server checks again.
+- **Before typing**: Recent (ids only in sessionStorage, names from the
+  current list, cleared by logout - office computers are shared), Needs you
+  (from the list already fetched, and `useCensus`'s pending counts), and the
+  role's actions.
+
 ## Text messages (Semaphore)
 
 Audited 26 Sep 2026 when the owner chose Semaphore. `SMS_PROVIDER` picks the

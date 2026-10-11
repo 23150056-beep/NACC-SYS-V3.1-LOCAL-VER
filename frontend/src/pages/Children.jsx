@@ -116,6 +116,8 @@ export default function Children() {
   const isAdmin = user?.role_name === 'Administrator';
   const isPsych = user?.role_name === 'Psychologist';
   const [children, setChildren] = useState([]);
+  // The list has arrived at least once (an empty caseload included).
+  const [listed, setListed] = useState(false);
   const [psychologists, setPsychologists] = useState([]);
   // Social worker accounts, for the ISA's filter and the form's owner field.
   // Each SW sees only the records they hold (accounts/scoping.py), so only
@@ -157,7 +159,7 @@ export default function Children() {
     const weekAhead = new Date(today); weekAhead.setDate(today.getDate() + 7);
     return loadAll(toast, [
       // Include inactive (terminated) cases — the V2 roster shows them with chips.
-      () => api.get('/children/?include_archived=true').then((r) => setChildren(r.data)),
+      () => api.get('/children/?include_archived=true').then((r) => { setChildren(r.data); setListed(true); }),
       // Active psychologists + current caseload. Admin/staff only, at both
       // ends: the endpoint is IsAdminOrStaff, and the list is only rendered
       // behind canManage. Asking as a psychologist earned a guaranteed 403.
@@ -314,6 +316,24 @@ export default function Children() {
     // would fight the user closing the form.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenCreate, form]);
+
+  /* /children?edit=12 opens that record's form: the header search's "Edit
+   * record" (components/GlobalSearch). It waits for the list, opens the form
+   * only where this account may edit the record - the same canEditRecord the
+   * screen uses - and clears the parameter either way. */
+  const editId = searchParams.get('edit');
+  useEffect(() => {
+    if (!editId || form || !listed) return;
+    const c = children.find((x) => String(x.id) === editId);
+    if (c && canEditRecord(c)) openEdit(c);
+    else toast.error('That record is not one this account can edit.');
+    const next = new URLSearchParams(searchParams);
+    next.delete('edit');
+    setSearchParams(next, { replace: true });
+    // A one-shot like openCreate above; canEditRecord and openEdit are
+    // redefined every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editId, form, listed]);
 
   const save = async (e) => {
     e.preventDefault();

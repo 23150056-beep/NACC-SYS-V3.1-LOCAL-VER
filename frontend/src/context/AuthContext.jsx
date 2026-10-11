@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import api from '../api/client';
 import { clearTokens, getAccess, setTokens } from '../api/session';
+import { forgetRecentChildren } from '../utils/search';
 
 const AuthContext = createContext(null);
 
@@ -51,6 +52,8 @@ export function AuthProvider({ children }) {
         .filter((k) => k.startsWith('nacc-child-draft:'))
         .forEach((k) => localStorage.removeItem(k));
     } catch { /* private browsing / storage unavailable */ }
+    // And the search box's "Recent" list, for the same reason.
+    forgetRecentChildren();
     setUser(null);
   };
 

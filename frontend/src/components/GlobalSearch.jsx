@@ -1,42 +1,132 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import api from '../api/client';
+import { screensFor } from '../config/nav';
 import { useAuth } from '../context/AuthContext';
+import { useCensus } from '../context/CensusContext';
 import { useLayout } from '../context/LayoutContext';
 import { useToast } from '../context/ToastContext';
 import { Icon, roleLabel } from '../ui';
 import { ageFrom, caseRef, initialsOf } from '../utils/child';
 import { loadAll } from '../utils/load';
+import { matchChildren, matchesCommand, matchStaff, recentChildIds, rememberChild } from '../utils/search';
 
-/* One search box, in the chrome, on every screen.
+/* One search box, in the chrome, on every screen - and the quickest way to
+ * DO something, not only to find somebody (owner, 11 Oct 2026).
  *
- * Before this there was a filter input on Records and another on Monitoring,
- * each of which only searched the page you were already on — so finding a
- * child meant first knowing which screen they were on. This searches children
- * and, for administrators, staff accounts, from wherever you are.
+ * - Children are found by more than the name: the custodian, the barangay,
+ *   the birth year, the case type, who works the case (utils/search.js), and
+ *   a match outside the name says where it was found.
+ * - A child has quick actions: highlight them and press the right arrow (or
+ *   click the arrow on the row) for Open record, Book a session, Upload, and
+ *   Edit - each through the link that screen already understands, so the
+ *   drawer opens with the child chosen.
+ * - Actions and screens are found by typing them: "book", "upload", "add".
+ * - Before anything is typed it shows the children opened lately, what is
+ *   waiting on this account, and its actions.
  *
- * The roster is fetched once on first open and kept: it is a few dozen rows,
- * the server already scopes it to what this account may see, and typing
- * against a local list is what makes the arrow keys feel instant.
+ * The roster is fetched each time the box opens, and the last copy is shown
+ * meanwhile: the server already scopes it to what this account may see, a
+ * child added since is found, and typing against a local list keeps the arrow
+ * keys instant. Every action is the role's own, as the Dashboard offers it;
+ * the server checks each one again.
  */
-const MAX_PER_GROUP = 5;
+const MAX_CHILDREN = 6;
+const MAX_STAFF = 5;
+const MAX_RECENT = 5;
+const MAX_NEEDS = 5;
+
+function actionsFor(role, pendingAccess) {
+  const list = role === 'Psychologist' ? [
+    { key: 'a-pre', label: 'Start a pre-assessment', icon: 'clipboard-list', to: '/pre-assessment', keywords: 'begin new assess assessment' },
+    { key: 'a-avail', label: 'Add my availability', icon: 'clock', to: '/schedule?availability=1', keywords: 'hours schedule time open' },
+    { key: 'a-book', label: 'Book a session', icon: 'calendar-plus', to: '/schedule?book=1', keywords: 'appointment schedule new' },
+    { key: 'a-upload', label: 'Upload a report', icon: 'upload', to: '/reports?upload=1', keywords: 'file document attach' },
+  ] : [
+    { key: 'a-add', label: 'Add a record', icon: 'user-plus', to: '/children?openCreate=1', keywords: 'new child intake create register' },
+    { key: 'a-book', label: 'Book an appointment', icon: 'calendar-plus', to: '/schedule?book=1', keywords: 'session schedule new' },
+    { key: 'a-upload', label: 'Upload a case referral', icon: 'upload', to: '/reports?upload=1', keywords: 'file document attach' },
+  ];
+  if (role === 'Administrator') {
+    list.push({
+      key: 'a-access', label: 'Review access requests', icon: 'user-check', to: '/users?tab=requests',
+      keywords: 'approve sign-up signup pending accounts new users',
+      meta: pendingAccess > 0 ? `${pendingAccess} waiting` : null,
+    });
+  }
+  return list.map((a) => ({ ...a, kind: 'action' }));
+}
+
+/* What the roster says is waiting on this account, most pressing first. Read
+ * from the list already fetched - nothing here asks the server again. */
+function needsFor(role, children, userId) {
+  const rows = [];
+  for (const c of children) {
+    if (c.status !== 'active') continue;
+    if (role === 'Psychologist') {
+      if (String(c.psychologist) === String(userId)
+        && ['No Consent Yet', 'Not Yet Pre-Assessed'].includes(c.pre_assessment_status)) {
+        rows.push({ c, rank: 1, reason: 'Pre-assessment not started' });
+      }
+      continue;
+    }
+    if (role === 'Administrator' && !c.social_worker) {
+      rows.push({ c, rank: 0, reason: 'No social worker yet' });
+    } else if (!c.psychologist && !c.pending_assignment) {
+      rows.push({
+        c, rank: 1,
+        reason: c.declined_assignment
+          ? `Declined by ${c.declined_assignment.psychologist_name || 'the psychologist'}`
+          : 'No psychologist yet',
+      });
+    } else if (!c.has_case_referral) {
+      rows.push({ c, rank: 2, reason: 'No case referral yet' });
+    }
+  }
+  return rows.sort((a, b) => (a.rank - b.rank) || String(a.c.fullname).localeCompare(String(b.c.fullname)));
+}
+
+// `field` is where a match outside the name was found; what it already
+// names is not said twice on the line.
+function childItem(c, { field, ...extra } = {}) {
+  const age = ageFrom(c.birth_date);
+  return {
+    kind: 'child', key: `c${c.id}`, child: c, name: c.fullname, ref: caseRef(c.id),
+    initials: initialsOf(c.fullname), to: `/report/child/${c.id}`,
+    meta: [
+      c.status === 'inactive' ? 'Archived' : age != null && field !== 'born' ? `${age} y` : null,
+      field !== 'case' && c.case_type,
+      field !== 'psych' && c.psychologist_name,
+    ].filter(Boolean).join(' · '),
+    ...extra,
+  };
+}
 
 export default function GlobalSearch({ open, onOpenChange }) {
   const { user } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const layout = useLayout();
   const toast = useToast();
-  const isAdmin = user?.role_name === 'Administrator';
+  const { pendingAccess, pendingAssignments, refreshPendingAccess, refreshPendingAssignments } = useCensus();
+  const role = user?.role_name;
+  const isAdmin = role === 'Administrator';
+  const isStaff = role === 'Staff';
+  const isPsych = role === 'Psychologist';
 
   const [q, setQ] = useState('');
   const [children, setChildren] = useState([]);
   const [staff, setStaff] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [cursor, setCursor] = useState(0);
+  // The child whose quick actions are showing, and where to return to.
+  const [focus, setFocus] = useState(null);
+  const [recent, setRecent] = useState(() => recentChildIds(user?.id));
   const boxRef = useRef(null);
   const inputRef = useRef(null);
+  const listRef = useRef(null);
 
-  const close = useCallback(() => { onOpenChange(false); setQ(''); setCursor(0); }, [onOpenChange]);
+  const close = useCallback(() => { onOpenChange(false); setQ(''); setCursor(0); setFocus(null); }, [onOpenChange]);
 
   // Ctrl/Cmd-K from anywhere, including from inside a text field — the
   // shortcut is worth nothing if it only works when nothing has focus.
@@ -51,16 +141,27 @@ export default function GlobalSearch({ open, onOpenChange }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onOpenChange]);
 
+  // Every child's record opened, from here or anywhere else, is "recent".
   useEffect(() => {
-    if (!open || loaded) return;
-    setLoaded(true);
+    const m = location.pathname.match(/^\/report\/child\/(\d+)/);
+    if (m && user?.id) setRecent(rememberChild(user.id, m[1]));
+  }, [location.pathname, user?.id]);
+  useEffect(() => { setRecent(recentChildIds(user?.id)); }, [user?.id]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    let live = true;
+    refreshPendingAccess();
+    refreshPendingAssignments();
     // Silence here is worse than elsewhere: search would simply find
     // nothing, which reads as "no such child" rather than "not loaded".
     loadAll(toast, [
-      () => api.get('/children/?include_archived=true').then((r) => setChildren(r.data || [])),
-      isAdmin && (() => api.get('/users/').then((r) => setStaff(r.data || []))),
-    ], 'Search could not load. Results will be incomplete until you refresh.');
-  }, [open, loaded, isAdmin, toast]);
+      () => api.get('/children/?include_archived=true').then((r) => { if (live) setChildren(r.data || []); }),
+      isAdmin && (() => api.get('/users/').then((r) => { if (live) setStaff(r.data || []); })),
+    ], 'Search could not load. Results will be incomplete until you refresh.')
+      .then(() => { if (live) setLoaded(true); });
+    return () => { live = false; };
+  }, [open, isAdmin, toast, refreshPendingAccess, refreshPendingAssignments]);
 
   useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
 
@@ -71,86 +172,188 @@ export default function GlobalSearch({ open, onOpenChange }) {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open, close]);
 
-  const term = q.trim().toLowerCase();
+  const term = q.trim();
+  const actions = useMemo(() => actionsFor(role, pendingAccess), [role, pendingAccess]);
+  const screens = useMemo(() => screensFor(role).map((s) => ({
+    kind: 'screen', key: `s-${s.id}`, label: s.label, icon: s.icon, to: s.to, keywords: 'go to open screen page',
+  })), [role]);
 
-  const childHits = useMemo(() => {
-    if (!term) return [];
-    return children
-      .filter((c) => (c.fullname || '').toLowerCase().includes(term) || caseRef(c.id).toLowerCase().includes(term))
-      .slice(0, MAX_PER_GROUP)
-      .map((c) => {
-        const age = ageFrom(c.birth_date);
-        const bits = [
-          c.status === 'inactive' ? 'Archived' : age != null ? `${age} y` : null,
-          c.case_type,
-          c.psychologist_name,
-        ].filter(Boolean);
-        return {
-          key: `c${c.id}`, name: c.fullname, meta: bits.join(' · '),
-          ref: caseRef(c.id), initials: initialsOf(c.fullname),
-          to: `/report/child/${c.id}`,
-        };
+  /* The child's quick actions, each only where this account may do it - the
+   * same rules the screens use (Children.jsx canEditRecord, the Calendar's
+   * referral gate). */
+  const childActions = useCallback((c) => {
+    const active = c.status === 'active';
+    const mine = isPsych && String(c.psychologist) === String(user?.id);
+    const items = [{ key: 'x-open', label: 'Open record', icon: 'folder-open', to: `/report/child/${c.id}` }];
+    if (active && c.has_case_referral) {
+      items.push({ key: 'x-book', label: 'Book a session', icon: 'calendar-plus', to: `/schedule?book=1&child=${c.id}` });
+    }
+    if (active && (isAdmin || isStaff)) {
+      items.push({
+        key: 'x-referral', label: 'Upload a case referral', icon: 'upload', to: `/reports?upload=1&child=${c.id}`,
+        meta: c.has_case_referral ? null : 'Needed before a session can be booked',
       });
-  }, [children, term]);
+    }
+    if (active && mine) {
+      items.push({ key: 'x-report', label: 'Upload a report', icon: 'upload', to: `/reports?upload=1&child=${c.id}` });
+    }
+    if (isAdmin || isStaff || (mine && active)) {
+      items.push({ key: 'x-edit', label: 'Edit record', icon: 'pencil', to: `/children?edit=${c.id}` });
+    }
+    const notes = [];
+    if (!active) notes.push('This case is closed. Reopen it from Records to book or upload.');
+    else if (!c.has_case_referral) notes.push('No case referral on file yet, so a session cannot be booked.');
+    return { items: items.map((i) => ({ ...i, kind: 'action' })), notes };
+  }, [isAdmin, isStaff, isPsych, user?.id]);
 
-  const staffHits = useMemo(() => {
-    if (!term) return [];
-    return staff
-      .filter((u) => (u.fullname || '').toLowerCase().includes(term) || (u.email || '').toLowerCase().includes(term))
-      .slice(0, MAX_PER_GROUP)
-      .map((u) => ({
-        key: `u${u.id}`, name: u.fullname || u.email, initials: initialsOf(u.fullname || u.email),
-        meta: [roleLabel(u.role_name), (u.status || '').toLowerCase()].filter(Boolean).join(' · '),
-        ref: '', to: '/users',
-      }));
-  }, [staff, term]);
+  /* What the panel shows: groups of rows, plus lines that are read, not
+   * picked (`notes`). */
+  const groups = useMemo(() => {
+    if (focus) {
+      const { items, notes } = childActions(focus.child);
+      return [{ label: null, items, notes }];
+    }
+    if (!term) {
+      const byId = new Map(children.map((c) => [String(c.id), c]));
+      const recentItems = recent.map((id) => byId.get(id)).filter(Boolean).slice(0, MAX_RECENT)
+        .map((c) => childItem(c, { key: `r${c.id}` }));
+      const needs = needsFor(role, children, user?.id);
+      const needItems = needs.slice(0, MAX_NEEDS).map(({ c, reason }) => childItem(c, { key: `n${c.id}`, reason, tone: 'amber' }));
+      if (isPsych && pendingAssignments > 0) {
+        needItems.unshift({
+          kind: 'action', key: 'n-answer', icon: 'inbox', to: '/children',
+          label: `Answer ${pendingAssignments} assignment request${pendingAssignments === 1 ? '' : 's'}`,
+          meta: 'Waiting for you to accept or decline',
+        });
+      }
+      if (isAdmin && pendingAccess > 0) needItems.unshift({ ...actions.find((a) => a.key === 'a-access'), key: 'n-access' });
+      return [
+        { label: 'Recent', items: recentItems },
+        {
+          label: 'Needs you', items: needItems,
+          notes: needs.length > MAX_NEEDS ? [`And ${needs.length - MAX_NEEDS} more. Records lists them all.`] : [],
+        },
+        { label: 'Actions', items: actions.filter((a) => a.key !== 'a-access') },
+      ];
+    }
+    const hits = matchChildren(children, term);
+    const childItems = hits.slice(0, MAX_CHILDREN).map(({ child, reason, field }) => childItem(child, { reason, field }));
+    const staffItems = isAdmin ? matchStaff(staff, term).slice(0, MAX_STAFF).map((u) => ({
+      kind: 'staff', key: `u${u.id}`, name: u.fullname || u.email, initials: initialsOf(u.fullname || u.email),
+      meta: [roleLabel(u.role_name), (u.status || '').toLowerCase()].filter(Boolean).join(' · '), to: '/users',
+    })) : [];
+    return [
+      {
+        label: 'Children', items: childItems,
+        notes: hits.length > MAX_CHILDREN ? [`${hits.length - MAX_CHILDREN} more match. Type more to narrow it.`] : [],
+      },
+      { label: 'Staff', items: staffItems },
+      { label: 'Actions', items: actions.filter((a) => matchesCommand(a, term)) },
+      { label: 'Go to', items: screens.filter((s) => matchesCommand(s, term)) },
+    ];
+  }, [focus, term, children, staff, recent, role, user?.id, isAdmin, isPsych, actions, screens,
+    pendingAccess, pendingAssignments, childActions]);
 
-  const flat = useMemo(() => childHits.concat(staffHits), [childHits, staffHits]);
-  useEffect(() => { setCursor(0); }, [term]);
+  const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);
+  const childMatches = term && !focus ? (groups[0]?.items.length || 0) : 0;
 
-  const go = (hit) => { if (!hit) return; close(); navigate(hit.to); };
+  // A new search starts from the top, out of any child's actions.
+  useEffect(() => { setCursor(0); setFocus(null); }, [term]);
+  useEffect(() => { if (cursor >= flat.length) setCursor(Math.max(0, flat.length - 1)); }, [flat.length, cursor]);
+  // Keep the highlighted row in view as the arrows move it.
+  useEffect(() => {
+    listRef.current?.querySelector(`[data-row="${cursor}"]`)?.scrollIntoView({ block: 'nearest' });
+  }, [cursor, focus]);
+
+  const go = (hit) => { if (!hit?.to) return; close(); navigate(hit.to); };
+  const showActions = (item, index) => {
+    if (item?.kind !== 'child') return;
+    setFocus({ child: item.child, from: index });
+    setCursor(0);
+    inputRef.current?.focus();
+  };
+  const back = () => { const from = focus?.from ?? 0; setFocus(null); setCursor(from); inputRef.current?.focus(); };
 
   const onKeyDown = (e) => {
-    if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+    const input = e.currentTarget;
+    if (e.key === 'Escape') { e.preventDefault(); if (focus) back(); else close(); return; }
     if (e.key === 'ArrowDown') { e.preventDefault(); setCursor((i) => Math.min(flat.length - 1, i + 1)); return; }
     if (e.key === 'ArrowUp') { e.preventDefault(); setCursor((i) => Math.max(0, i - 1)); return; }
-    if (e.key === 'Enter') { e.preventDefault(); go(flat[cursor]); }
+    if (e.key === 'Enter') { e.preventDefault(); go(flat[cursor]); return; }
+    // The arrows only take over where the caret has nowhere to go, so the
+    // text can still be edited.
+    const atEnd = input.selectionStart === input.value.length && input.selectionEnd === input.value.length;
+    if (e.key === 'ArrowRight' && !focus && atEnd && flat[cursor]?.kind === 'child') {
+      e.preventDefault(); showActions(flat[cursor], cursor); return;
+    }
+    if (e.key === 'ArrowLeft' && focus) { e.preventDefault(); back(); }
   };
 
   const groupLabel = {
     fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 'var(--text-3xs)',
     letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--text-faint)', padding: '10px 8px 4px',
   };
+  const noteStyle = { padding: '4px 8px 6px', fontSize: 11.5, lineHeight: 1.5, color: 'var(--text-muted)' };
 
-  const row = (hit, i) => (
-    <button
-      key={hit.key}
-      type="button"
-      onClick={() => go(hit)}
-      onMouseEnter={() => setCursor(i)}
-      style={{
-        width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '7px 8px',
-        borderRadius: 'var(--radius-sm)', border: 'none', cursor: 'pointer', textAlign: 'left',
-        background: cursor === i ? 'var(--blue-50)' : 'transparent', fontFamily: 'var(--font-sans)',
-      }}
-    >
-      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', flex: 'none', background: 'var(--blue-100)', color: 'var(--blue-700)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 11 }}>
-        {hit.initials}
-      </span>
-      <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ display: 'block', fontWeight: 700, fontSize: 13, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hit.name}</span>
-        <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hit.meta}</span>
-      </span>
-      {hit.ref && <span className="racco-mono" style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-faint)', flex: 'none' }}>{hit.ref}</span>}
-    </button>
-  );
+  const row = (hit, i) => {
+    const on = cursor === i;
+    const isChild = hit.kind === 'child';
+    return (
+      <div
+        key={hit.key} data-row={i} onMouseEnter={() => setCursor(i)}
+        style={{ display: 'flex', alignItems: 'center', borderRadius: 'var(--radius-sm)', background: on ? 'var(--blue-50)' : 'transparent' }}
+      >
+        <button
+          type="button" onClick={() => go(hit)}
+          style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '7px 8px', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-sans)' }}
+        >
+          {hit.initials != null ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', flex: 'none', background: 'var(--blue-100)', color: 'var(--blue-700)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 11 }}>
+              {hit.initials}
+            </span>
+          ) : (
+            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 'var(--radius-control)', flex: 'none', background: on ? 'var(--blue-100)' : 'var(--ink-50)', color: 'var(--blue-700)' }}>
+              <Icon name={hit.icon || 'arrow-right'} size={15} />
+            </span>
+          )}
+          <span style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ display: 'block', fontWeight: 700, fontSize: 13, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{hit.name || hit.label}</span>
+            {(hit.reason || hit.meta) && (
+              <span style={{ display: 'block', fontSize: 11.5, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {hit.reason && (
+                  <span style={{ fontWeight: 600, color: hit.tone === 'amber' ? 'var(--amber-700)' : 'var(--blue-700)' }}>
+                    {hit.reason}{hit.meta ? ' · ' : ''}
+                  </span>
+                )}
+                {hit.meta}
+              </span>
+            )}
+          </span>
+          {hit.ref && <span className="racco-mono" style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-faint)', flex: 'none' }}>{hit.ref}</span>}
+        </button>
+        {isChild && (
+          <button
+            type="button" onClick={() => showActions(hit, i)}
+            aria-label={`Quick actions for ${hit.name}`} title="Quick actions (→)"
+            style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, marginRight: 4, border: 'none', borderRadius: 'var(--radius-sm)', background: on ? 'var(--blue-100)' : 'transparent', color: on ? 'var(--blue-700)' : 'var(--text-faint)', cursor: 'pointer' }}
+          >
+            <Icon name="chevron-right" size={16} />
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  let index = 0;
+  const shownGroups = groups.filter((g) => g.items.length || g.notes?.length);
+  const nothing = term && !focus && loaded && flat.length === 0;
 
   return (
     <div ref={boxRef} style={{ position: 'relative', flex: 'none' }}>
       <button
         type="button"
         onClick={() => onOpenChange(!open)}
-        aria-label="Search children and staff"
+        aria-label={isAdmin ? 'Search children, staff and actions' : 'Search children and actions'}
         aria-expanded={open}
         style={{
           display: 'flex', alignItems: 'center', gap: 9,
@@ -164,7 +367,7 @@ export default function GlobalSearch({ open, onOpenChange }) {
       >
         <Icon name="search" size={17} style={{ color: 'var(--chrome-ink-soft)' }} />
         <span style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 13, color: 'var(--chrome-ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          Search children, staff, reports…
+          Find a child or action…
         </span>
         {layout.searchHintOn && (
           <span className="racco-mono" style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--chrome-ink-dim)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 'var(--radius-xs)', padding: '1px 5px', whiteSpace: 'nowrap', flex: 'none' }}>
@@ -191,39 +394,65 @@ export default function GlobalSearch({ open, onOpenChange }) {
               value={q}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={onKeyDown}
-              placeholder="Name, case reference, email…"
-              aria-label="Search children and staff"
+              placeholder="Name, case no., custodian, barangay…"
+              aria-label={isAdmin ? 'Search children, staff and actions' : 'Search children and actions'}
               style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 14, color: 'var(--text-strong)', height: 30 }}
             />
-            {term && (
+            {term && !focus && loaded && (childMatches > 0 || flat.length === 0) && (
               <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 'var(--text-3xs)', letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>
-                {flat.length} result{flat.length === 1 ? '' : 's'}
+                {childMatches} {childMatches === 1 ? 'child' : 'children'}
               </span>
             )}
           </div>
 
-          <div className="racco-scroll" style={{ padding: '2px 8px 10px', maxHeight: 360, overflowY: 'auto' }}>
-            {!term && (
+          {focus && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px 2px' }}>
+              <button
+                type="button" onClick={back} aria-label="Back to the results"
+                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 26, height: 26, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', background: 'var(--surface)', color: 'var(--text-body)', cursor: 'pointer', flex: 'none' }}
+              >
+                <Icon name="chevron-left" size={15} />
+              </button>
+              <span style={{ flex: 1, minWidth: 0, fontWeight: 800, fontSize: 13, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {focus.child.fullname}
+              </span>
+              <span className="racco-mono" style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-faint)', flex: 'none' }}>{caseRef(focus.child.id)}</span>
+            </div>
+          )}
+
+          <div ref={listRef} className="racco-scroll" style={{ padding: '2px 8px 10px', maxHeight: 400, overflowY: 'auto' }}>
+            {!term && !focus && !loaded && children.length === 0 && (
+              <p style={{ padding: '18px 8px', fontSize: 12.5, color: 'var(--text-muted)' }}>Loading…</p>
+            )}
+            {term && !focus && !loaded && children.length === 0 && (
+              <p style={{ padding: '18px 8px', fontSize: 12.5, color: 'var(--text-muted)' }}>Loading records…</p>
+            )}
+            {nothing && (
               <p style={{ padding: '18px 8px', fontSize: 12.5, lineHeight: 1.6, color: 'var(--text-muted)' }}>
-                Type a child&rsquo;s name or a case reference{isAdmin ? ', or a colleague&rsquo;s name' : ''}. Results are
-                limited to the records your account may open.
+                Nothing matches &ldquo;{term}&rdquo;. Try part of the name, the case number, the custodian, the
+                barangay or the birth year. Only the records your account may open are searched.
               </p>
             )}
-            {term && flat.length === 0 && (
-              <p style={{ padding: '18px 8px', fontSize: 12.5, lineHeight: 1.6, color: 'var(--text-muted)' }}>
-                Nothing matches &ldquo;{q.trim()}&rdquo;.
-              </p>
-            )}
-            {childHits.length > 0 && <div style={groupLabel}>Children</div>}
-            {childHits.map((h, i) => row(h, i))}
-            {staffHits.length > 0 && <div style={groupLabel}>Staff</div>}
-            {staffHits.map((h, i) => row(h, childHits.length + i))}
+            {shownGroups.map((g) => (
+              <div key={g.label || 'focus'}>
+                {g.label && <div style={groupLabel}>{g.label}</div>}
+                {g.items.map((item) => row(item, index++))}
+                {(g.notes || []).map((n) => <p key={n} style={noteStyle}>{n}</p>)}
+              </div>
+            ))}
           </div>
 
-          <div style={{ padding: '9px 14px', background: 'var(--ink-50)', borderTop: '1px solid var(--divider)', fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)', display: 'flex', gap: 14 }}>
-            <span><span className="racco-mono" style={{ color: 'var(--text-body)' }}>&uarr;&darr;</span> navigate</span>
+          <div style={{ padding: '9px 14px', background: 'var(--ink-50)', borderTop: '1px solid var(--divider)', fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)', display: 'flex', flexWrap: 'wrap', columnGap: 14, rowGap: 2 }}>
+            <span><span className="racco-mono" style={{ color: 'var(--text-body)' }}>&uarr;&darr;</span> move</span>
             <span><span className="racco-mono" style={{ color: 'var(--text-body)' }}>&crarr;</span> open</span>
-            <span><span className="racco-mono" style={{ color: 'var(--text-body)' }}>esc</span> close</span>
+            {focus
+              ? <span><span className="racco-mono" style={{ color: 'var(--text-body)' }}>&larr; esc</span> back</span>
+              : (
+                <>
+                  <span><span className="racco-mono" style={{ color: 'var(--text-body)' }}>&rarr;</span> actions for a child</span>
+                  <span><span className="racco-mono" style={{ color: 'var(--text-body)' }}>esc</span> close</span>
+                </>
+              )}
           </div>
         </div>
       )}

@@ -368,7 +368,11 @@ export default function AppHeader() {
                   <div className="racco-eyebrow" style={{ fontSize: 'var(--text-3xs)', marginBottom: 6 }}>Shortcuts</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5, color: 'var(--text-body)' }}>
                     <span className="racco-mono" style={{ fontSize: 11, fontWeight: 600, border: '1px solid var(--border)', borderRadius: 'var(--radius-xs)', padding: '1px 6px' }}>Ctrl K</span>
-                    Search every child and colleague
+                    Search, or type an action: &ldquo;book&rdquo;, &ldquo;upload&rdquo;
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 6, fontSize: 12.5, color: 'var(--text-body)' }}>
+                    <span className="racco-mono" style={{ fontSize: 11, fontWeight: 600, border: '1px solid var(--border)', borderRadius: 'var(--radius-xs)', padding: '1px 6px' }}>&rarr;</span>
+                    On a child in the results: book, upload, edit
                   </div>
                 </div>
                 <RoleAccessPanel to={role} />
