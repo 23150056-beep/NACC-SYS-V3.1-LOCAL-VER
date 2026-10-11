@@ -243,7 +243,10 @@ export default function AppHeader() {
 
       {/* Tabs. Icon-only and centred, with the label as the tooltip: five or
           six destinations is few enough to learn by position, and labels here
-          cost the width the search box needs. */}
+          cost the width the search box needs. They give up width before they
+          spill: under 1180 the strip has less room than six tabs at full
+          width, and centred overflow ran out under the search box on its left
+          (the clear button sat beneath the first tab) and the bell on its right. */}
       <nav aria-label="Primary" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, minWidth: 0 }}>
         {tabs.map((t) => {
           const on = tabIsActive(t.id, screenId, role);
@@ -253,10 +256,10 @@ export default function AppHeader() {
               key={t.id} type="button" title={t.label} aria-label={t.label} aria-current={on ? 'page' : undefined}
               onClick={() => navigate(t.to)}
               style={{
-                position: 'relative', width: layout.tabWidth, height: 44, border: 'none',
+                position: 'relative', width: layout.tabWidth, minWidth: 36, height: 44, border: 'none',
                 borderRadius: 'var(--radius-sm)', background: on ? 'rgba(255,255,255,0.12)' : 'transparent',
                 cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: on ? 'var(--chrome-ink)' : 'var(--chrome-ink-soft)', flex: 'none',
+                color: on ? 'var(--chrome-ink)' : 'var(--chrome-ink-soft)', flex: '0 1 auto',
                 transition: 'background var(--dur-fast) var(--ease-out), color var(--dur-fast) var(--ease-out)',
               }}
               onMouseEnter={(e) => { if (!on) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}

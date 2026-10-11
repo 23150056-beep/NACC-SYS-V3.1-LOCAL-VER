@@ -14,6 +14,16 @@ import { matchChildren, matchesCommand, matchStaff, recentChildIds, rememberChil
 /* One search box, in the chrome, on every screen - and the quickest way to
  * DO something, not only to find somebody (owner, 11 Oct 2026).
  *
+ * - The pill in the header IS the field: it is typed in where it sits, and the
+ *   results drop down under it (owner, 11 Oct 2026). It used to be a button
+ *   that opened a panel with a second box inside, so the first one looked like
+ *   a field and acted like a button. Nothing in the panel takes text.
+ * - The panel swallows mousedown. A click on a row, a label or empty space
+ *   would otherwise move focus off the field, and the arrow keys - which are
+ *   read there - would stop working until it was clicked again. Clicks still
+ *   arrive. For the same reason nothing in the panel is a tab stop: Tab
+ *   leaves the bar and closes it, and the rows are options the field names
+ *   through aria-activedescendant, not buttons to be focused.
  * - Children are found by more than the name: the custodian, the barangay,
  *   the birth year, the case type, who works the case (utils/search.js), and
  *   a match outside the name says where it was found.
@@ -122,24 +132,47 @@ export default function GlobalSearch({ open, onOpenChange }) {
   // The child whose quick actions are showing, and where to return to.
   const [focus, setFocus] = useState(null);
   const [recent, setRecent] = useState(() => recentChildIds(user?.id));
+  const [hover, setHover] = useState(false);
   const boxRef = useRef(null);
   const inputRef = useRef(null);
   const listRef = useRef(null);
+  // Where the pointer last was, to tell a pointer that moved from a list that
+  // moved under it.
+  const pointerAt = useRef(null);
 
-  const close = useCallback(() => { onOpenChange(false); setQ(''); setCursor(0); setFocus(null); }, [onOpenChange]);
+  const reset = useCallback(() => {
+    onOpenChange(false); setQ(''); setCursor(0); setFocus(null);
+  }, [onOpenChange]);
+  // Closing lets go of the field too, so the keys go back to the page.
+  const close = useCallback(() => { reset(); inputRef.current?.blur(); }, [reset]);
+
+  // Closed for ANY reason - this component, another header popover opening,
+  // a new screen - the text goes with it. A query left in the bar with no
+  // panel under it would look like a search that found nothing.
+  useEffect(() => {
+    if (!open) { setQ(''); setCursor(0); setFocus(null); }
+  }, [open]);
 
   // Ctrl/Cmd-K from anywhere, including from inside a text field — the
-  // shortcut is worth nothing if it only works when nothing has focus.
+  // shortcut is worth nothing if it only works when nothing has focus. Only
+  // the plain chord: Ctrl+Shift+K and Ctrl+Alt+K belong to the browser, and
+  // Ctrl+Alt is AltGr on some keyboards.
   useEffect(() => {
     const onKey = (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        onOpenChange(!open);
+        if (open) { close(); return; }
+        // A drawer or dialog owns the keyboard. Opened over it, the panel
+        // would sit under its scrim and take the focus out of it.
+        if (document.querySelector('[aria-modal="true"]')) return;
+        onOpenChange(true);
+        inputRef.current?.focus();
+        inputRef.current?.select();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onOpenChange]);
+  }, [open, onOpenChange, close]);
 
   // Every child's record opened, from here or anywhere else, is "recent".
   useEffect(() => {
@@ -167,7 +200,10 @@ export default function GlobalSearch({ open, onOpenChange }) {
 
   useEffect(() => {
     if (!open) return undefined;
-    const onDoc = (e) => { if (boxRef.current && !boxRef.current.contains(e.target)) close(); };
+    // The path is read, not `contains(e.target)`: a press on the Ctrl K chip
+    // opens the panel, which unmounts the chip, and by the time this runs the
+    // target is no longer in the box.
+    const onDoc = (e) => { if (boxRef.current && !e.composedPath().includes(boxRef.current)) close(); };
     document.addEventListener('mousedown', onDoc);
     return () => document.removeEventListener('mousedown', onDoc);
   }, [open, close]);
@@ -255,14 +291,21 @@ export default function GlobalSearch({ open, onOpenChange }) {
     pendingAccess, pendingAssignments, childActions]);
 
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);
-  const childMatches = term && !focus ? (groups[0]?.items.length || 0) : 0;
 
-  // A new search starts from the top, out of any child's actions.
+  // A new search starts from the top, out of any child's actions. The clamp
+  // below is a functional update so it cannot overwrite that with the cursor
+  // the shorter list was rendered with: from the foot of a long list, a letter
+  // typed left the highlight on the new list's last row, not its first.
   useEffect(() => { setCursor(0); setFocus(null); }, [term]);
-  useEffect(() => { if (cursor >= flat.length) setCursor(Math.max(0, flat.length - 1)); }, [flat.length, cursor]);
-  // Keep the highlighted row in view as the arrows move it.
+  useEffect(() => { setCursor((i) => Math.min(i, Math.max(0, flat.length - 1))); }, [flat.length]);
+  // Keep the highlighted row in view as the arrows move it. The first row sits
+  // under its group's label, which 'nearest' leaves scrolled off: back at the
+  // top of the list, it goes to the top.
   useEffect(() => {
-    listRef.current?.querySelector(`[data-row="${cursor}"]`)?.scrollIntoView({ block: 'nearest' });
+    const list = listRef.current;
+    if (!list) return;
+    if (cursor === 0) list.scrollTop = 0;
+    else list.querySelector(`[data-row="${cursor}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [cursor, focus]);
 
   const go = (hit) => { if (!hit?.to) return; close(); navigate(hit.to); };
@@ -276,6 +319,19 @@ export default function GlobalSearch({ open, onOpenChange }) {
 
   const onKeyDown = (e) => {
     const input = e.currentTarget;
+    // The field can hold focus with the panel shut (tabbed onto, or left so by
+    // the browser's back button). Enter must not open a row nobody can see, so
+    // only the way back in is read.
+    if (!open) {
+      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      else if (e.key === 'ArrowDown') { e.preventDefault(); onOpenChange(true); }
+      return;
+    }
+    // Tab or Shift+Tab leaves the bar and takes the panel with it. Nothing in
+    // the panel is a tab stop, so there is no inside to walk into, and a row
+    // focused there would not answer Esc or the arrows. Not close(): the
+    // browser is about to move focus on from where it is.
+    if (e.key === 'Tab') { reset(); return; }
     if (e.key === 'Escape') { e.preventDefault(); if (focus) back(); else close(); return; }
     if (e.key === 'ArrowDown') { e.preventDefault(); setCursor((i) => Math.min(flat.length - 1, i + 1)); return; }
     if (e.key === 'ArrowUp') { e.preventDefault(); setCursor((i) => Math.max(0, i - 1)); return; }
@@ -300,19 +356,19 @@ export default function GlobalSearch({ open, onOpenChange }) {
     const isChild = hit.kind === 'child';
     return (
       <div
-        key={hit.key} data-row={i} onMouseEnter={() => setCursor(i)}
+        key={hit.key} data-row={i} role="option" id={`global-search-row-${i}`} aria-selected={on}
         style={{ display: 'flex', alignItems: 'center', borderRadius: 'var(--radius-sm)', background: on ? 'var(--blue-50)' : 'transparent' }}
       >
-        <button
-          type="button" onClick={() => go(hit)}
-          style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '7px 8px', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-sans)' }}
+        <div
+          onClick={() => go(hit)}
+          style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 10, padding: '7px 8px', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-sans)' }}
         >
           {hit.initials != null ? (
-            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', flex: 'none', background: 'var(--blue-100)', color: 'var(--blue-700)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 11 }}>
+            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: '50%', flex: 'none', background: 'var(--blue-100)', color: 'var(--blue-700)', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 11 }}>
               {hit.initials}
             </span>
           ) : (
-            <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 'var(--radius-control)', flex: 'none', background: on ? 'var(--blue-100)' : 'var(--ink-50)', color: 'var(--blue-700)' }}>
+            <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, borderRadius: 'var(--radius-control)', flex: 'none', background: on ? 'var(--blue-100)' : 'var(--ink-50)', color: 'var(--blue-700)' }}>
               <Icon name={hit.icon || 'arrow-right'} size={15} />
             </span>
           )}
@@ -330,15 +386,14 @@ export default function GlobalSearch({ open, onOpenChange }) {
             )}
           </span>
           {hit.ref && <span className="racco-mono" style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-faint)', flex: 'none' }}>{hit.ref}</span>}
-        </button>
+        </div>
         {isChild && (
-          <button
-            type="button" onClick={() => showActions(hit, i)}
-            aria-label={`Quick actions for ${hit.name}`} title="Quick actions (→)"
-            style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, marginRight: 4, border: 'none', borderRadius: 'var(--radius-sm)', background: on ? 'var(--blue-100)' : 'transparent', color: on ? 'var(--blue-700)' : 'var(--text-faint)', cursor: 'pointer' }}
+          <div
+            aria-hidden="true" onClick={() => showActions(hit, i)} title="Quick actions (→)"
+            style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 28, height: 28, marginRight: 4, borderRadius: 'var(--radius-sm)', background: on ? 'var(--blue-100)' : 'transparent', color: on ? 'var(--blue-700)' : 'var(--text-faint)', cursor: 'pointer' }}
           >
             <Icon name="chevron-right" size={16} />
-          </button>
+          </div>
         )}
       </div>
     );
@@ -350,36 +405,78 @@ export default function GlobalSearch({ open, onOpenChange }) {
 
   return (
     <div ref={boxRef} style={{ position: 'relative', flex: 'none' }}>
-      <button
-        type="button"
-        onClick={() => onOpenChange(!open)}
-        aria-label={isAdmin ? 'Search children, staff and actions' : 'Search children and actions'}
-        aria-expanded={open}
+      {/* The pill is the field. Clicking anywhere on it, icon, padding and the
+          Ctrl K chip included, puts the caret in the input and opens the panel
+          - also when the field already has focus with the panel shut (the
+          browser's back button leaves it so), where focusing does nothing. */}
+      <div
+        className="racco-chrome-search"
+        onMouseDown={(e) => {
+          if (e.target !== inputRef.current) { e.preventDefault(); inputRef.current?.focus(); }
+          if (!open) onOpenChange(true);
+        }}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
         style={{
           display: 'flex', alignItems: 'center', gap: 9,
           width: layout.searchWidth, height: 36, padding: '0 8px 0 12px',
-          border: '1px solid var(--chrome-line)', borderRadius: 'var(--radius-pill)',
-          background: 'rgba(255,255,255,0.09)', cursor: 'pointer', textAlign: 'left',
-          transition: 'background var(--dur-fast) var(--ease-out)',
+          border: `1px solid ${open ? 'rgba(255,255,255,0.35)' : 'var(--chrome-line)'}`,
+          borderRadius: 'var(--radius-pill)',
+          background: open || hover ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.09)',
+          cursor: 'text',
+          transition: 'background var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out)',
         }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.16)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.09)'; }}
       >
-        <Icon name="search" size={17} style={{ color: 'var(--chrome-ink-soft)' }} />
-        <span style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 13, color: 'var(--chrome-ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          Find a child or task
-        </span>
-        {layout.searchHintOn && (
+        <Icon name="search" size={17} aria-hidden="true" style={{ color: 'var(--chrome-ink-soft)' }} />
+        <input
+          ref={inputRef}
+          type="text"
+          role="combobox"
+          aria-expanded={open}
+          aria-controls="global-search-results"
+          aria-activedescendant={open && flat[cursor] ? `global-search-row-${cursor}` : undefined}
+          aria-autocomplete="list"
+          aria-label={isAdmin ? 'Search children, staff and actions' : 'Search children and actions'}
+          autoComplete="off"
+          spellCheck={false}
+          placeholder="Find a child or task"
+          value={q}
+          onChange={(e) => { setQ(e.target.value); if (!open) onOpenChange(true); }}
+          // No onFocus: tabbing onto the bar is a pass through the header, not
+          // a search. A press, typing, the down arrow and Ctrl K open it.
+          onKeyDown={onKeyDown}
+          style={{ flex: 1, minWidth: 0, height: '100%', padding: 0, border: 'none', background: 'transparent', color: 'var(--chrome-ink)', fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 13 }}
+        />
+        {q && (
+          <button
+            type="button" tabIndex={-1} aria-label="Clear search"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { setQ(''); setCursor(0); setFocus(null); inputRef.current?.focus(); }}
+            style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, padding: 0, border: 'none', borderRadius: '50%', background: 'rgba(255,255,255,0.12)', color: 'var(--chrome-ink-soft)', cursor: 'pointer' }}
+          >
+            <Icon name="x" size={13} />
+          </button>
+        )}
+        {layout.searchHintOn && !open && !q && (
           <span className="racco-mono" style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--chrome-ink-dim)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 'var(--radius-xs)', padding: '1px 5px', whiteSpace: 'nowrap', flex: 'none' }}>
             Ctrl K
           </span>
         )}
-      </button>
+      </div>
 
       {open && (
         <div
-          role="dialog"
-          aria-label="Search"
+          onMouseDown={(e) => e.preventDefault()}
+          // The highlight follows the pointer when it MOVES. The list scrolling
+          // or refilling under a pointer that is resting fires the same events,
+          // and would pull the highlight off the row the keys had reached.
+          onMouseMove={(e) => {
+            const at = pointerAt.current;
+            if (at && at.x === e.clientX && at.y === e.clientY) return;
+            pointerAt.current = { x: e.clientX, y: e.clientY };
+            const hit = e.target.closest?.('[data-row]');
+            if (hit) setCursor(+hit.dataset.row);
+          }}
           style={{
             position: 'absolute', top: 44, left: 0, width: layout.searchPanelWidth, maxWidth: '80vw',
             background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)',
@@ -387,24 +484,6 @@ export default function GlobalSearch({ open, onOpenChange }) {
             animation: 'racco-pop-in var(--dur-base) var(--ease-out)',
           }}
         >
-          <div style={{ padding: '8px 14px', borderBottom: '1px solid var(--divider)', display: 'flex', alignItems: 'center', gap: 9 }}>
-            <Icon name="search" size={17} style={{ color: 'var(--blue-600)' }} />
-            <input
-              ref={inputRef}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={onKeyDown}
-              placeholder="Name, case no., custodian, barangay…"
-              aria-label={isAdmin ? 'Search children, staff and actions' : 'Search children and actions'}
-              style={{ flex: 1, minWidth: 0, border: 'none', outline: 'none', background: 'transparent', fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 14, color: 'var(--text-strong)', height: 30 }}
-            />
-            {term && !focus && loaded && (childMatches > 0 || flat.length === 0) && (
-              <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 'var(--text-3xs)', letterSpacing: '0.07em', textTransform: 'uppercase', color: 'var(--text-faint)', whiteSpace: 'nowrap' }}>
-                {childMatches} {childMatches === 1 ? 'child' : 'children'}
-              </span>
-            )}
-          </div>
-
           {focus && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px 2px' }}>
               <button
@@ -421,6 +500,11 @@ export default function GlobalSearch({ open, onOpenChange }) {
           )}
 
           <div ref={listRef} className="racco-scroll" style={{ padding: '2px 8px 10px', maxHeight: 400, overflowY: 'auto' }}>
+            {!term && !focus && (
+              <p style={{ ...noteStyle, padding: '8px 8px 2px' }}>
+                Search by name, case no., custodian, barangay or birth year{isAdmin ? ", or a colleague's name" : ''}.
+              </p>
+            )}
             {!term && !focus && !loaded && children.length === 0 && (
               <p style={{ padding: '18px 8px', fontSize: 12.5, color: 'var(--text-muted)' }}>Loading…</p>
             )}
@@ -428,18 +512,20 @@ export default function GlobalSearch({ open, onOpenChange }) {
               <p style={{ padding: '18px 8px', fontSize: 12.5, color: 'var(--text-muted)' }}>Loading records…</p>
             )}
             {nothing && (
-              <p style={{ padding: '18px 8px', fontSize: 12.5, lineHeight: 1.6, color: 'var(--text-muted)' }}>
+              <p style={{ padding: '18px 8px', fontSize: 12.5, lineHeight: 1.6, color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>
                 Nothing matches &ldquo;{term}&rdquo;. Try part of the name, the case number, the custodian, the
                 barangay or the birth year. Only the records your account may open are searched.
               </p>
             )}
-            {shownGroups.map((g) => (
-              <div key={g.label || 'focus'}>
-                {g.label && <div style={groupLabel}>{g.label}</div>}
-                {g.items.map((item) => row(item, index++))}
-                {(g.notes || []).map((n) => <p key={n} style={noteStyle}>{n}</p>)}
-              </div>
-            ))}
+            <div id="global-search-results" role="listbox" aria-label="Search results">
+              {shownGroups.map((g) => (
+                <div key={g.label || 'focus'} role="group" aria-label={g.label || undefined}>
+                  {g.label && <div aria-hidden="true" style={groupLabel}>{g.label}</div>}
+                  {g.items.map((item) => row(item, index++))}
+                  {(g.notes || []).map((n) => <p key={n} style={noteStyle}>{n}</p>)}
+                </div>
+              ))}
+            </div>
           </div>
 
           <div style={{ padding: '9px 14px', background: 'var(--ink-50)', borderTop: '1px solid var(--divider)', fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)', display: 'flex', flexWrap: 'wrap', columnGap: 14, rowGap: 2 }}>
