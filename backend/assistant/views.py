@@ -4,7 +4,7 @@ import time
 from datetime import timedelta
 
 from django.db import connection
-from django.db.models import Avg, Count, Q
+from django.db.models import Avg, Count, Max, Q
 from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
@@ -16,12 +16,15 @@ from accounts.scoping import (role_of as _role, role_of_user as _role_of,
 from accounts.permissions import (IsAdministrator, IsAdminOrStaff, is_admin_or_assignee,
                                   writes_case_referrals)
 from assistant import evaluation, prompts, tools
+from assistant.brief_facts import brief_facts, brief_kind
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.serializers import AssistantSettingSerializer
-from assistant.services import (AIUnavailable, DISCLAIMER, OpenAICompatibleClient,
-                                gate, get_ai_client, run_job, services_lock)
+from assistant.services import (AIUnavailable, CASE_BRIEF_DISCLAIMER, DISCLAIMER,
+                                HOSTED_DRAFTING_REFUSED, OpenAICompatibleClient,
+                                drafting_available, gate, get_ai_client, run_job,
+                                services_lock)
 from children.models import Child
-from clinical.models import CaseReferral, PsychologicalReport
+from clinical.models import CaseReferral, OpinionnaireInvite, PsychologicalReport
 from clinical.services import ensure_text
 from scheduling.models import Appointment
 
@@ -37,6 +40,26 @@ def _brief_only_author(child, user, role):
     if role == Role.PSYCHOLOGIST and not child.assignee_sees_history:
         return user
     return None
+
+
+# What a social worker or the ISA is told when they reach for the written brief.
+# The model reads a child's case notes to write it, and neither has a case reason
+# to ask for that (owner's decision, 8 Oct 2026); what they get is the case facts
+# beside it, from plain queries.
+WRITTEN_BRIEF_REFUSED = ("The written brief is for the child's psychologist. "
+                         "The case facts are on the brief panel.")
+
+
+def _written_brief_refused(request):
+    """The 403 for anyone but a psychologist, or None.
+
+    Asked FIRST in every door to the written brief, before gate() and before
+    the child is looked up: nothing is sent to the model and no AssistantJob is
+    written for a read that was refused.
+    """
+    if _role(request) == Role.PSYCHOLOGIST:
+        return None
+    return Response({"detail": WRITTEN_BRIEF_REFUSED}, status=status.HTTP_403_FORBIDDEN)
 
 
 class AssistantBaseView(generics.GenericAPIView):
@@ -143,6 +166,9 @@ class PreSessionBriefView(AssistantBaseView):
     throttle_scope = "assistant_draft"
 
     def post(self, request, child_id):
+        refused = _written_brief_refused(request)
+        if refused:
+            return refused
         gate()
         try:
             child = visible_children(request).get(pk=child_id)
@@ -155,7 +181,7 @@ class PreSessionBriefView(AssistantBaseView):
             prompts.build_brief_prompt(child, only_author=only_author),
             system=prompts.BRIEF_SYSTEM,
             input_ref=f"child:{child.id}",
-            user=request.user)
+            user=request.user, child=child)
         return Response({"draft": draft, "job_id": job.id,
                          "generated_at": job.created_at,
                          "disclaimer": DISCLAIMER})
@@ -201,6 +227,9 @@ class LatestBriefView(AssistantBaseView):
     """
 
     def get(self, request, child_id):
+        refused = _written_brief_refused(request)
+        if refused:
+            return refused
         try:
             child = visible_children(request).get(pk=child_id)
         except Child.DoesNotExist:
@@ -213,6 +242,141 @@ class LatestBriefView(AssistantBaseView):
         return Response({"draft": job.output_text, "job_id": job.id,
                          "generated_at": job.created_at,
                          "disclaimer": DISCLAIMER})
+
+
+class BriefFactsView(AssistantBaseView):
+    """The facts shown above a brief, from plain queries (assistant/brief_facts.py).
+
+    Their own endpoint rather than part of the brief's response: the brief
+    answers 503 when the assistant is off or the model is hosted, 404 when
+    nothing was drafted today, is throttled, and takes up to a minute -
+    and these must show in all of those cases, at once. Nor are they stored
+    with the brief: LatestBriefView serves this morning's prose, and a
+    session booked or a self-report read since then must not be stale.
+
+    Not gated, not throttled, and writes no AssistantJob: no model is
+    involved, so there is nothing to switch off or audit.
+    """
+
+    def get(self, request, child_id):
+        try:
+            child = visible_children(request).get(pk=child_id)
+        except Child.DoesNotExist:
+            return Response({"detail": "Not found."},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response(brief_facts(request, child))
+
+
+# --- the social worker's written case brief --------------------------------
+#
+# Owner's decision, 8 Oct 2026: a social worker gets the case facts AND a short
+# written part drafted from them; the ISA (IT support) gets the facts and never
+# the written part, and the psychologist keeps their own brief above. Drafted
+# only where drafting is (the local copy with the model runtime), measured by
+# `manage.py ai_eval --feature case_brief`, and behind the one assistant switch
+# like everything else - no switch of its own.
+
+# What anyone but a social worker is told at either door. One sentence: the
+# facts are on the brief panel for the ISA and the psychologist has their own
+# brief, so there is nothing else to point them at.
+CASE_BRIEF_REFUSED = "The written case brief is for the child's social worker."
+
+
+def _case_brief_refused(request):
+    """The 403 for anyone but a social worker, or None.
+
+    Asked FIRST at both doors, before the child is looked up and before gate():
+    nothing is sent to the model and no AssistantJob is written for a read that
+    was refused.
+    """
+    if _role(request) == Role.STAFF:
+        return None
+    return Response({"detail": CASE_BRIEF_REFUSED}, status=status.HTTP_403_FORBIDDEN)
+
+
+def _case_brief_prompt(request, child):
+    """(prompt, its SHA-256) as the facts stand now.
+
+    The facts are the very dict the panel above the draft is made from, so what
+    the model was given and what the worker can check it against cannot differ.
+    """
+    prompt = prompts.build_case_brief_prompt(brief_facts(request, child), child)
+    return prompt, prompts.prompt_sha(prompts.CASE_BRIEF_SYSTEM, prompt)
+
+
+class CaseBriefView(AssistantBaseView):
+    """Draft today's written case brief for a social worker's own child.
+
+    The ~20-60s path on the agency machine: the screen asks LatestCaseBriefView
+    first and only comes here when there is no current draft.
+    """
+    throttle_scope = "assistant_draft"
+
+    def post(self, request, child_id):
+        refused = _case_brief_refused(request)
+        if refused:
+            return refused
+        # Staff are narrowed to their own records by visible_children: another
+        # social worker's child is a 404, as everywhere else.
+        child = visible_children(request).filter(pk=child_id).first()
+        if child is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        gate()
+        if not drafting_available():
+            # Refused before the prompt is built or a job is written, as the
+            # prefetch is: run_job would audit a read that never happened.
+            raise AIUnavailable(HOSTED_DRAFTING_REFUSED)
+        prompt, sha = _case_brief_prompt(request, child)
+        draft, job = run_job(
+            "case_brief", prompt, system=prompts.CASE_BRIEF_SYSTEM,
+            input_ref=f"child:{child.id}", user=request.user, child=child,
+            prompt_sha=sha)
+        if not draft.strip():
+            # An empty "written brief" under a disclaimer reads as broken, and
+            # must not be served again as today's.
+            job.ok = False
+            job.error = "the model returned nothing"
+            job.save(update_fields=["ok", "error"])
+            return Response({"detail": "The assistant did not write a brief. "
+                                       "Try again."},
+                            status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+        return Response({"draft": draft, "job_id": job.id,
+                         "generated_at": job.created_at,
+                         "disclaimer": CASE_BRIEF_DISCLAIMER})
+
+
+class LatestCaseBriefView(AssistantBaseView):
+    """Today's case brief by THIS user for THIS child, if it is still true.
+
+    Served only while the prompt built from the facts NOW hashes the same as
+    the one it was drafted from (`AssistantJob.prompt_sha`). A session booked,
+    a consent recorded or a referral summary confirmed since changes the facts,
+    so the draft answers 404 "No current brief" and the worker drafts it again,
+    rather than reading yesterday's account of a case that has moved on.
+
+    Reads history only, so, like LatestBriefView, it does NOT gate: a brief
+    drafted this morning stays readable after the assistant is switched off.
+    """
+
+    def get(self, request, child_id):
+        refused = _case_brief_refused(request)
+        if refused:
+            return refused
+        child = visible_children(request).filter(pk=child_id).first()
+        if child is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        _, sha = _case_brief_prompt(request, child)
+        job = (AssistantJob.objects
+               .filter(job_type="case_brief", ok=True, created_by=request.user,
+                       child=child, prompt_sha=sha,
+                       created_at__date=timezone.localdate())
+               .order_by("-created_at", "-id").first())
+        if job is None:
+            return Response({"detail": "No current brief."},
+                            status=status.HTTP_404_NOT_FOUND)
+        return Response({"draft": job.output_text, "job_id": job.id,
+                         "generated_at": job.created_at,
+                         "disclaimer": CASE_BRIEF_DISCLAIMER})
 
 
 # (user id, child id) pairs currently being briefed, so two page loads cannot
@@ -238,7 +402,7 @@ def _generate_briefs_now(child_ids, user):
             try:
                 run_job("brief", prompts.build_brief_prompt(child, only_author=only_author),
                         system=prompts.BRIEF_SYSTEM,
-                        input_ref=f"child:{child.id}", user=user)
+                        input_ref=f"child:{child.id}", user=user, child=child)
             except AIUnavailable:
                 # Already audited by run_job. A runtime that is down must not
                 # abandon the rest of the queue.
@@ -268,7 +432,16 @@ class PrefetchBriefsView(AssistantBaseView):
     throttle_scope = "assistant_draft"
 
     def post(self, request):
+        refused = _written_brief_refused(request)
+        if refused:
+            return refused
         gate()
+        if not drafting_available():
+            # Every brief queued below would be refused by get_ai_client() and
+            # audited as a failure - a row per child per schedule visit, in a
+            # background thread, for nobody. prefetchBriefs() on the schedule
+            # screen already swallows the 503.
+            raise AIUnavailable(HOSTED_DRAFTING_REFUSED)
         today = timezone.localdate()
         visible = visible_children(request)
         appts = Appointment.objects.filter(
@@ -383,7 +556,7 @@ class DocumentSummaryView(AssistantBaseView):
             prompts.build_summary_prompt(doc.extracted_text, label),
             system=prompts.SUMMARY_SYSTEM,
             input_ref=f"{prefix}:{doc.id}",
-            user=request.user)
+            user=request.user, child=doc.child)
         doc.ai_summary = draft
         doc.ai_summary_confirmed = False
         doc.save(update_fields=["ai_summary", "ai_summary_confirmed"])
@@ -588,6 +761,100 @@ class AssistantUnansweredView(AssistantBaseView):
                          "questions": ordered[:self.LIST_LIMIT]})
 
 
+# input_ref prefix -> what the access log calls the read.
+_ACCESS_KINDS = {"child": "brief", "report": "report_summary",
+                 "casereferral": "referral_summary", "invite": "survey_check"}
+# A case brief is "child:<id>" like the psychologist's brief and is told apart
+# by its job type; the log names it for what it is.
+_ACCESS_KINDS_BY_JOB_TYPE = {"case_brief": "case_brief"}
+
+# Every job type the log lists: drafts, one row each, and the self-report check,
+# one entry per survey. A job type missing from here, and not deliberately
+# exempt in test_access_log.TheLogCoversEveryJobType, is a read of a child's
+# record the ISA cannot see.
+_LOGGED_DRAFTS = ("brief", "case_brief", "doc_intelligence")
+_LOGGED_SURVEYS = ("self_report",)
+ACCESS_LOGGED_JOB_TYPES = _LOGGED_DRAFTS + _LOGGED_SURVEYS
+
+
+def _who(user):
+    if user is None:
+        return None
+    return {"name": user.fullname or user.email, "role": _role_of(user)}
+
+
+class ChildAccessLogView(AssistantBaseView):
+    """Who had the model read this child's record: the ISA's question, answered
+    for one child.
+
+    Lists every pre-session brief, every social worker's case brief, every report
+    and referral summary and the automatic self-report check, with when, who,
+    what kind and how it ended.
+    Metadata only - never `output_text` - so it shows who and when, not what
+    was drafted.
+
+    Administrators only, like the metrics beside it, and not gated for the
+    same reason: reading history has to keep working while the assistant is
+    switched off. `hide_earlier_history` does not apply because only an
+    administrator reaches this view.
+
+    Not listed, on purpose. Chat: the chatbot's model only picks a lookup and
+    never reads a record - the results come from the database. Remark polish:
+    it reads only the words being typed, and the request names no child. The
+    census narrative: agency figures, not a record.
+    """
+    permission_classes = [IsAdministrator]
+    LIMIT = 100
+
+    def get(self, request, child_id):
+        child = visible_children(request).filter(pk=child_id).first()
+        if child is None:
+            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
+        jobs = AssistantJob.objects.filter(child=child)
+        drafts = (jobs.filter(job_type__in=_LOGGED_DRAFTS)
+                  .select_related("created_by__role").order_by("-created_at"))
+        # One row per answer checked; one entry per survey on screen.
+        surveys = (jobs.filter(job_type__in=_LOGGED_SURVEYS).values("input_ref")
+                   .annotate(at=Max("created_at"),
+                             reads=Count("id", filter=Q(ok=True)),
+                             failed=Count("id", filter=Q(ok=False)))
+                   .order_by("-at"))
+        names = {
+            "report": dict(PsychologicalReport.objects.filter(child=child)
+                           .values_list("id", "original_filename")),
+            "casereferral": dict(CaseReferral.objects.filter(child=child)
+                                 .values_list("id", "original_filename")),
+            "invite": dict(OpinionnaireInvite.objects.filter(child=child)
+                           .values_list("id", "template__title")),
+        }
+
+        def described(ref, job_type=None):
+            prefix, _, pk = ref.partition(":")
+            kept = names.get(prefix)
+            doc_id = int(pk) if pk.isdigit() else None
+            kind = _ACCESS_KINDS_BY_JOB_TYPE.get(job_type) or _ACCESS_KINDS.get(prefix, "other")
+            return {"kind": kind,
+                    "document": kept.get(doc_id) if kept is not None else None,
+                    "document_deleted": kept is not None and doc_id not in kept}
+
+        entries = [{"key": f"job:{job.id}", "at": job.created_at,
+                    **described(job.input_ref, job.job_type),
+                    "by": _who(job.created_by),
+                    "status": job.outcome if job.ok else "failed"}
+                   for job in drafts[:self.LIMIT]]
+        entries += [{"key": s["input_ref"], "at": s["at"], **described(s["input_ref"]),
+                     "by": None, "reads": s["reads"],
+                     # Some answers read and the check then stopped is neither
+                     # a clean read nor a failure to read.
+                     "status": (("partly_read" if s["failed"] else "read")
+                                if s["reads"] else "failed")}
+                    for s in surveys[:self.LIMIT]]
+        entries.sort(key=lambda e: e["at"], reverse=True)
+        return Response({"entries": entries[:self.LIMIT],
+                         "total": drafts.count() + surveys.count(),
+                         "limit": self.LIMIT})
+
+
 class AssistantCheckView(AssistantBaseView):
     """Probe the runtime and describe what happened.
 
@@ -625,12 +892,31 @@ class AssistantCapabilitiesView(AssistantBaseView):
     fixed sentence, needs no model, and an empty panel with no hint is worse
     than one that explains itself. It reads the same source as the refusal
     text, so the two cannot drift apart.
+
+    `brief` says which brief the signed-in role gets: "clinical" (the
+    psychologist's, facts and a written brief) or "case" (everyone else's,
+    facts alone). It follows the role, not the deployment, so the screen can
+    choose the button before anything else has answered.
+
+    `case_brief_writing` says whether this user is offered a written case
+    brief: a social worker, on a deployment that drafts. The ISA and the
+    psychologist never are, whatever the deployment.
+
+    `drafting` is False where the model is hosted, because get_ai_client()
+    refuses every caller without allow_hosted. A brief's prose, polish, summary
+    or census narrative there can only answer 503, so the screens hide those
+    buttons (the brief's facts stay: they need no model). It follows the
+    deployment, not the administrator's switch. It stays authenticated because
+    the deploy probe in CLAUDE.md reads its 401.
     """
 
     def get(self, request):
         role = _role(request)
         return Response({"can_ask": tools.capability_text(role),
-                         "examples": tools.capability_examples(role)})
+                         "examples": tools.capability_examples(role),
+                         "drafting": drafting_available(),
+                         "brief": brief_kind(role),
+                         "case_brief_writing": role == Role.STAFF and drafting_available()})
 
 
 # answer_directly's `reason` defaults to "unsupported" in its resolver, so it

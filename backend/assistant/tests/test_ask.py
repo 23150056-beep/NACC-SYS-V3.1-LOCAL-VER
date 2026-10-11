@@ -5,9 +5,12 @@ these assert the wiring around that choice — the gate, the length cap, the
 validator, the audit row, and the fact that a rejected call never reaches a
 queryset.
 """
+import re
+from pathlib import Path
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.test import SimpleTestCase, override_settings
 from rest_framework.test import APITestCase
 
 from accounts.models import Role
@@ -187,6 +190,62 @@ class CapabilitiesEndpointTest(APITestCase):
     def test_it_requires_authentication(self):
         resp = self.client.get("/api/assistant/capabilities/")
         self.assertIn(resp.status_code, (401, 403))
+
+    def test_anonymous_gets_the_401_the_deploy_check_reads(self):
+        # CLAUDE.md's deploy probe curls this route signed out and reads 401
+        # as "deployed and gated". Looser than that and the probe lies.
+        resp = self.client.get("/api/assistant/capabilities/")
+        self.assertEqual(401, resp.status_code)
+
+    def test_drafting_is_on_without_a_hosted_model(self):
+        self.client.force_authenticate(self.psy)
+        resp = self.client.get("/api/assistant/capabilities/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIs(resp.data["drafting"], True)
+        self.assertTrue(resp.data["can_ask"])
+        self.assertTrue(resp.data["examples"])
+
+    @override_settings(ASSISTANT_ALLOW_HOSTED_MODEL=False,
+                       ASSISTANT_MODEL_URL="https://api.example.invalid/v1",
+                       ASSISTANT_MODEL_TOKEN="a-token", ASSISTANT_MODEL_NAME="m")
+    def test_credentials_alone_do_not_turn_drafting_off(self):
+        # Credentials are not consent (test_hosted_guard): get_ai_client()
+        # still drafts locally, so the buttons must stay.
+        self.client.force_authenticate(self.psy)
+        resp = self.client.get("/api/assistant/capabilities/")
+        self.assertIs(resp.data["drafting"], True)
+
+    def test_drafting_follows_the_deployment_not_the_switch(self):
+        # Switched off, a click answers 503 on its own, and a brief drafted
+        # this morning stays readable - so the buttons are not hidden for it.
+        cfg = AssistantSetting.load()
+        cfg.enabled = False
+        cfg.save()
+        self.client.force_authenticate(self.psy)
+        resp = self.client.get("/api/assistant/capabilities/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIs(resp.data["drafting"], True)
+
+
+ASSISTANT_CONTEXT_JS = (Path(__file__).resolve().parents[3] / "frontend" / "src"
+                        / "context" / "AssistantContext.jsx")
+
+
+class DraftingKeyIsReadByTheScreenTest(SimpleTestCase):
+    """The server's `drafting` key and the screen's read of it are written in
+    two languages. Reading the JavaScript is crude and deliberate, like
+    config/tests/test_cross_stack_roles.py: a reformat that defeats it fails
+    loudly, which is the right outcome."""
+
+    def test_the_context_still_hides_only_on_an_explicit_false(self):
+        self.assertTrue(ASSISTANT_CONTEXT_JS.exists(),
+                        f"{ASSISTANT_CONTEXT_JS} has moved; this test is pinned to it")
+        source = ASSISTANT_CONTEXT_JS.read_text(encoding="utf-8")
+        self.assertTrue(
+            re.search(r"caps\?\.drafting\s*!==\s*false", source),
+            "AssistantContext.jsx no longer reads `caps?.drafting !== false`. "
+            "The server's key and the screen's read must match, or a hosted "
+            "deployment silently shows buttons that answer 503.")
 
 
 class AskResolverFailureTest(AskTestBase):

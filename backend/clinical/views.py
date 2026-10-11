@@ -1,6 +1,7 @@
 import logging
 
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import viewsets, status, mixins
 from rest_framework.decorators import action
@@ -572,6 +573,27 @@ class ResultEntryViewSet(_ChildScopedClinicalViewSet):
         return super().get_queryset().select_related("instrument", "entered_by", "child")
 
 
+def survey_templates_for(request, child):
+    """The self-report forms this requester may send to this child.
+
+    Active Self-Report (Government Form) templates only: shared ones (no
+    owner), the child's assigned psychologist's, and the requester's own. An
+    administrator, who can already read every template, may use any. This is
+    the one rule behind both the picker (`templates/`) and invite creation,
+    so a social worker - who may not read /form-templates/ and so cannot see
+    a psychologist's private forms - can still start a survey without being
+    shown, or able to attach, a form that is not for this child.
+    """
+    qs = AgencyFormTemplate.objects.filter(
+        form_type=AgencyFormTemplate.SELF_REPORT_GOV, active=True)
+    if _role(request) != Role.ADMINISTRATOR:
+        allowed = Q(owner__isnull=True) | Q(owner=request.user)
+        if child.assigned_psychologist_id:
+            allowed |= Q(owner_id=child.assigned_psychologist_id)
+        qs = qs.filter(allowed)
+    return qs.order_by("title", "id")
+
+
 class OpinionnaireInviteViewSet(viewsets.ModelViewSet):
     """QR survey invites. Created by staff/admin (intake) or the assigned
     psychologist; answers arrive through the public token endpoints."""
@@ -601,10 +623,30 @@ class OpinionnaireInviteViewSet(viewsets.ModelViewSet):
             return
         raise PermissionDenied("You cannot create survey invites for this child.")
 
+    @action(detail=False, methods=["get"], url_path="templates")
+    def templates(self, request):
+        """GET /api/opinionnaire-invites/templates/?child=<id> - the forms a
+        survey for this child may use, as [{id, title}] and nothing more."""
+        from children.models import Child
+        child_id = request.query_params.get("child")
+        if not str(child_id or "").isdigit():
+            raise ValidationError({"child": "Say which child the survey is for."})
+        child = get_object_or_404(scope_to_visible(Child.objects.all(), request, path=None),
+                                  pk=child_id)
+        self._assert_can_write(child)
+        return Response([{"id": t.id, "title": t.title}
+                         for t in survey_templates_for(request, child)])
+
     def perform_create(self, serializer):
         from datetime import timedelta
         from django.utils import timezone
-        self._assert_can_write(serializer.validated_data["child"])
+        child = serializer.validated_data["child"]
+        self._assert_can_write(child)
+        if not survey_templates_for(self.request, child).filter(
+                pk=serializer.validated_data["template"].pk).exists():
+            raise ValidationError(
+                {"template": "That form cannot be used for this child. "
+                             "Choose one of the self-report forms offered for them."})
         obj = serializer.save(created_by=self.request.user,
                               expires_at=timezone.now() + timedelta(days=7))
         log_activity(self.request.user, ActivityLog.CREATED, ActivityLog.RECORD,

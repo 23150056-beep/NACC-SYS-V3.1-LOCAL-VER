@@ -36,9 +36,15 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             # "Assignment" rows carry the child's id too (children/
             # assignment.py): who was asked to take one of their children,
             # and the answer.
+            #
+            # So do "CaseStudy" rows (case_study/views.py): a case study is
+            # started on one child's record and the event is keyed by that
+            # child, so it reaches only the social worker who holds it. The
+            # event names the child and never the case study's text.
             own = scope_to_visible(Child.objects.all(), self.request, path=None)
             qs = qs.filter(
-                Q(entity_type__in=["Child", "Assignment"], entity_id__in=own.values("pk"))
+                Q(entity_type__in=["Child", "Assignment", "CaseStudy"],
+                  entity_id__in=own.values("pk"))
                 | Q(recipient=self.request.user),
                 category=ActivityLog.RECORD,
             )

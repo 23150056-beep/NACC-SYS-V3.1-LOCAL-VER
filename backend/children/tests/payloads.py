@@ -10,6 +10,7 @@ def complete(**over):
         "birth_date": "2016-01-10", "gender": "Female",
         "place_of_birth_or_found": "San Fernando, La Union",
         "birth_status": "Marital", "education_level": "Grade 4",
+        "health_condition": "Healthy", "current_placement": "With a foster family",
         "custodian_name": "Rosa Dela Cruz (foster parent)",
         "date_of_placement_to_custodian": "2026-03-01",
         "house_number": "12", "street": "Rizal St.",

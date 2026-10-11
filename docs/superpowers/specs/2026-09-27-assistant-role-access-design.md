@@ -168,6 +168,26 @@ cheapest ideas are the ones that **add no tool and change no prompt**.
    them on the child's page answers "who had the model read this child's notes"
    without a new table.
 
+**Built 4 Oct 2026: items 1-4.**
+1. `assistant/brief_facts.py` and `GET /api/assistant/brief/child/<id>/facts/`,
+   shown above the prose by `components/BriefFacts.jsx`. Facts are counted the
+   way the screen that already shows each one counts it. The prompt is
+   unchanged, so item 5 still needs its own `ai_eval` run.
+2. `clinical/care_gaps.alerts_for` is used by the Dashboard, `list_care_gaps`,
+   the one-child summary and the brief facts. A social worker gets: no
+   referral, no psychologist (a pending request is not a gap until it has gone
+   7 days unanswered), no signed consent, self-report concerns and the two
+   booking gaps. "Survey unanswered" was dropped, because Staff cannot start a
+   QR survey: they cannot read the self-report templates. The tool's name,
+   description and schema are unchanged.
+3. `/assistant/capabilities/` reports `drafting`. Polish, both summary buttons
+   and the census narrative hide on a hosted deployment. The brief button
+   stays and shows only its facts.
+4. The ISA's "Assistant log" tab on the child's page. This needed one nullable
+   column after all (`AssistantJob.child`, assistant 0006, backfilled),
+   because a summary's job names a document, and replacing a referral deletes
+   that document.
+
 ### A prompt change — each needs its own `ai_eval` run
 
 5. **Brief from more than remarks.** Feed the deterministic facts from (1) into
@@ -187,15 +207,18 @@ cheapest ideas are the ones that **add no tool and change no prompt**.
    referral" (social worker). Build it as a role rule in (2) rather than a tool
    unless the card shows people ask it in words that route elsewhere.
 
-### Decisions for the owner
+### Decisions for the owner (answered 8 Oct 2026)
 
-- **Should social workers get pre-session briefs?** They can today. The brief
-  only uses the remarks they can already read on the Remarks tab, so nothing
-  leaks. But its instructions say it is "for a licensed psychologist before a
-  session", and a social worker does not hold one. Either hide the button from
-  staff, or build (6) for them.
+- **Should social workers get pre-session briefs?** They could, but the brief
+  was written "for a licensed psychologist" and built from remarks, which a
+  social worker cannot write, so for them it was always empty. **Decided:
+  build (6).** SWs get a "Case brief": facts made for them first (referral and
+  its confirmed summary, the psychologist's status, consent, custodian texts,
+  sessions, survey), with a written part only after `ai_eval` on the owner's
+  PC. The written brief is the psychologist's only. **The ISA (IT support)
+  gets the facts and never a written brief**: a written brief sends a child's
+  notes to the model, and IT support has no case reason to ask for that.
 - **Should a reader who cannot write be able to *read* an AI summary draft
-  without saving it?** At present, anyone who cannot write the document sees
-  only the confirmed summary. A read-only draft, returned and not stored, would
-  give them the reading aid without the write. It is cheap to build, but it
-  is a second kind of summary that people will have to tell apart.
+  without saving it?** **Decided: no - confirmed only.** Two kinds of summary
+  on screen is one too many, and an unchecked draft about a child could pass
+  for the psychologist's own words.

@@ -5,14 +5,14 @@ import {
 } from '../../ui';
 import { PROCEED, useConfirm } from '../../context/ConfirmContext';
 import {
-  ADMISSION, BIRTH_STATUSES, CASE_CATEGORIES, CASE_CATEGORY_OPTIONS, CASE_TYPES, CASE_TYPE_FIELDS,
-  DYNAMIC, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, TYPES_OF_ADOPTION, caseChanged, caseTypesFor,
+  ADMISSION, ALIAS_CATEGORY, BIRTH_STATUSES, CASE_CATEGORIES, CASE_CATEGORY_OPTIONS, CASE_TYPES, CASE_TYPE_FIELDS,
+  DYNAMIC, HEALTH_CONDITIONS, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, SPECIAL_NEEDS, TYPES_OF_ADOPTION, ageRange, ageRefusal, caseChanged, caseTypesFor,
   dateFieldFor, requiredFields, unaskedAnswers,
 } from '../../config/caseData';
 import { shortDate, timeAgo } from '../../utils/time';
 import CustodianFields from './CustodianFields';
 import PsychologistPicker from './PsychologistPicker';
-import { EMPTY, formFromRecord } from './recordForm';
+import { EMPTY, NOT_AN_ANSWER, formFromRecord, newIntakeToken } from './recordForm';
 
 // "2008-09-29" from the date's LOCAL parts. toISOString() gives the UTC date,
 // which in Manila (UTC+8) is the previous day for anything before 8 a.m.
@@ -44,9 +44,11 @@ const FORM_STEPS = ['Child\u2019s Profile', 'Present Environment', 'Recommendati
 const FIELD_INFO = {
   case_category: [1, 'category'], case_type: [1, 'case type'],
   first_name: [1, 'first name'], middle_name: [1, 'middle name'], last_name: [1, 'last name'],
-  birth_date: [1, 'date of birth'], date_found: [1, 'date found'], gender: [1, 'sex'],
+  birth_date: [1, 'date of birth or given date of birth'], date_found: [1, 'date found'], gender: [1, 'sex'],
   place_of_birth_or_found: [1, 'place of birth or found'], birth_status: [1, 'birth status'],
-  legal_status: [1, 'legal status'],
+  legal_status: [1, 'legal status'], legal_status_date: [1, 'date legal status issued'],
+  health_condition: [1, 'health condition'], special_needs: [1, 'special needs'],
+  current_placement: [1, 'current whereabouts'], alias: [1, 'alias'],
   custodian_name: [2, 'custodian'], custodian_contact: [2, 'contact number'],
   custodian_sms_consent: [2, 'consent to texts'],
   type_of_adoption: [1, 'type of adoption'],
@@ -67,7 +69,8 @@ const NAME_FIELDS = ['first_name', 'middle_name', 'last_name'];
  * instead, so "they are marked below" is never said over nothing marked. */
 const SHOWS_ERROR = [
   'case_category', 'case_type', 'first_name', 'middle_name', 'last_name', 'birth_date', 'date_found',
-  'gender', 'place_of_birth_or_found', 'birth_status', 'legal_status', 'education_level',
+  'gender', 'place_of_birth_or_found', 'birth_status', 'legal_status', 'legal_status_date', 'education_level',
+  'health_condition', 'special_needs', 'current_placement', 'alias',
   'type_of_adoption', ADMISSION, PLACEMENT, 'custodian_name', 'custodian_contact',
   'house_number', 'street', 'province', 'municipality', 'barangay', 'landmark', 'referral_source',
 ];
@@ -76,9 +79,12 @@ const SHOWS_ERROR = [
  * it was checked against - changes, its message goes, rather than staying
  * beside a corrected date until the next save. */
 const CHECKED_AGAINST = {
+  birth_date: ['case_type', 'type_of_adoption'],
   date_found: ['birth_date'],
+  legal_status_date: ['birth_date', 'legal_status'],
   [ADMISSION]: ['birth_date', 'case_type', 'type_of_adoption'],
   [PLACEMENT]: ['birth_date', 'case_type', 'type_of_adoption'],
+  special_needs: ['health_condition'],
   case_category: ['case_type'], case_type: ['case_category'], type_of_adoption: ['case_type'],
   custodian_name: ['custodian_contact', 'custodian_sms_consent', 'case_type'],
   custodian_contact: ['custodian_name', 'custodian_sms_consent', 'case_type'],
@@ -107,7 +113,7 @@ const snapshot = (f) => JSON.stringify(Object.keys(f).sort()
   .map((k) => [k, k === 'referralFile' ? Boolean(f[k]) : f[k]]));
 
 
-export default function ChildForm({ form, setForm, draftKey, psychologists, socialWorkers = null, blocks = [], error, fieldErrors = null, refusedWith = null, isPsych = false, canReopen = false, others = [], onSubmit, onWithdraw, onClose, onReopen, onOpenExisting }) {
+export default function ChildForm({ form, setForm, draftKey, psychologists, socialWorkers = null, blocks = [], error, fieldErrors = null, refusedWith = null, isPsych = false, canReopen = false, others = [], saving = false, onSubmit, onWithdraw, onClose, onReopen, onOpenExisting }) {
   const [step, setStep] = useState(1);
   // Reopening the form for a different record starts at the beginning again.
   useEffect(() => { setStep(1); }, [form.id]);
@@ -157,17 +163,20 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
     // with no filename and try to upload an empty object. A chosen file is
     // not something a draft can hold, so it is not kept.
     delete data.referralFile;
-    if (Object.entries(data).some(([k, v]) => k !== 'assignee_sees_history' && v)) {
+    if (Object.entries(data).some(([k, v]) => !NOT_AN_ANSWER.includes(k) && v)) {
       try { localStorage.setItem(draftKey, JSON.stringify(data)); } catch { /* storage full */ }
     }
   };
   useEffect(() => {
-    if (form.id) return undefined;
+    // Not while the save is going: a keystroke (or a chosen file) in the half
+    // second before Save would otherwise be written as a draft AFTER the save
+    // removed it, and Add Record would offer back a child already added.
+    if (form.id || saving) return undefined;
     const t = setTimeout(() => saveDraft(form), 500);
     return () => clearTimeout(t);
     // saveDraft reads only its argument and draftKey.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, draftKey]);
+  }, [form, draftKey, saving]);
   // Duplicate/returning-child detection (create mode only): debounce-check
   // while typing so intake staff can reopen an archived record instead of
   // accidentally creating a second one.
@@ -252,24 +261,24 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   };
   const fieldLabel = { fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 };
   const textarea = { width: '100%', resize: 'vertical', padding: '10px 13px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', fontFamily: 'var(--font-sans)', fontSize: 14, lineHeight: 1.5 };
-  // Agency only serves children aged 5-17, by exact birthday - the rule the
-  // backend's validate_birth_date applies, and the authoritative check. The
-  // picker offers exactly the dates it accepts: worked out with the same age
-  // arithmetic, from local dates. It used to be today minus 18 and minus 5
-  // years through toISOString(), which in Manila is the day before - so it
-  // offered two birth dates of a child already 18 and refused the day a child
-  // turns 5, and the hint named no dates at all.
+  // The age rule is the backend's (children/intake.py age_range, mirrored in
+  // caseData.js): 5-17, or 18 and over for an Adult adoption. By exact
+  // birthday, and the picker offers exactly the dates it accepts, worked out
+  // with the same age arithmetic from local dates (not toISOString, which in
+  // Manila is the day before).
   const today = new Date();
   const ageOn = (born) => today.getFullYear() - born.getFullYear()
     - ((today.getMonth() < born.getMonth()
       || (today.getMonth() === born.getMonth() && today.getDate() < born.getDate())) ? 1 : 0);
+  const [youngestAge, oldestAge] = ageRange(form.case_type, form.type_of_adoption);
   // Stepped rather than computed so 29 February lands where the server's rule
   // puts it; neither loop runs more than twice.
-  const earliestBirth = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
-  while (ageOn(earliestBirth) > 17) earliestBirth.setDate(earliestBirth.getDate() + 1);
-  const latestBirth = new Date(today.getFullYear() - 5, today.getMonth(), today.getDate());
-  while (ageOn(latestBirth) < 5) latestBirth.setDate(latestBirth.getDate() - 1);
-  const minBirthDate = localIsoDay(earliestBirth);
+  const earliestBirth = oldestAge == null ? null
+    : new Date(today.getFullYear() - oldestAge - 1, today.getMonth(), today.getDate());
+  while (earliestBirth && ageOn(earliestBirth) > oldestAge) earliestBirth.setDate(earliestBirth.getDate() + 1);
+  const latestBirth = new Date(today.getFullYear() - youngestAge, today.getMonth(), today.getDate());
+  while (ageOn(latestBirth) < youngestAge) latestBirth.setDate(latestBirth.getDate() - 1);
+  const minBirthDate = earliestBirth ? localIsoDay(earliestBirth) : undefined;
   const maxBirthDate = localIsoDay(latestBirth);
   /* The profile asks different questions per track — a Type of Adoption on a
    * reunification case is a question nobody can answer, and one more thing to
@@ -324,10 +333,13 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   const refusedIfBlank = (f) => {
     if (f === 'custodian_name' && isPsych) return false;
     if (!isEdit) return true;
+    // No record held a health condition before it was asked, so special needs
+    // typed for "With special needs" are never an older blank.
+    if (f === 'special_needs') return true;
     if (!original || legacyRecord) return false;
     return !!String(original[f] ?? '').trim() || (retyped && DYNAMIC.includes(f));
   };
-  const missingFields = requiredFields(form.case_type, form.type_of_adoption)
+  const missingFields = requiredFields(form.case_type, form.type_of_adoption, form.health_condition)
     .filter((f) => !String(form[f] ?? '').trim())
     .filter((f) => !(isEdit && NAME_FIELDS.includes(f)));
   const needed = missingFields.filter(refusedIfBlank);
@@ -340,10 +352,21 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   const sent = { ...form, ...unaskedAnswers(form, original) };
   const wholeDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') && Number(String(v).slice(0, 4)) >= 1900;
   const problems = {};
-  if (wholeDate(form.birth_date) && changed('birth_date')) {
+  // Judged again when the case type or the type of adoption changes: that
+  // changes the rule (the server does the same).
+  if (wholeDate(form.birth_date) && (changed('birth_date') || changed('case_type') || changed('type_of_adoption'))) {
     const [y, m, d] = form.birth_date.split('-').map(Number);
     const age = ageOn(new Date(y, m - 1, d));
-    if (age < 5 || age > 17) problems.birth_date = 'The child must be between 5 and 17 years old.';
+    if (age < youngestAge || (oldestAge != null && age > oldestAge)) {
+      problems.birth_date = ageRefusal(form.case_type, form.type_of_adoption);
+    }
+  }
+  if (form.legal_status && wholeDate(form.legal_status_date)
+    && (changed('legal_status_date') || (isEdit && changed('birth_date')))) {
+    if (form.legal_status_date > todayIso) problems.legal_status_date = 'The date issued cannot be in the future.';
+    else if (wholeDate(form.birth_date) && form.legal_status_date < form.birth_date) {
+      problems.legal_status_date = 'The date issued cannot be before the date of birth.';
+    }
   }
   const bornMoved = isEdit && changed('birth_date');
   for (const [f, label] of [['date_found', 'The date found'], [ADMISSION, 'The date of admission'],
@@ -418,7 +441,10 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                 <Button variant="secondary" size="sm" onClick={() => {
                   // A draft typed before 24 Sep 2026 holds a middle initial.
                   const { middle_initial: mi, ...draft } = form._draft;
-                  setForm({ ...EMPTY, ...draft, middle_name: draft.middle_name || mi || '', _draft: null });
+                  // The draft keeps its token, so a record that was in fact
+                  // saved is recognised when the draft is saved again; one
+                  // from before tokens gets a new one.
+                  setForm({ ...EMPTY, ...draft, middle_name: draft.middle_name || mi || '', intake_token: draft.intake_token || newIntakeToken(), _draft: null });
                 }} iconLeft={<Icon name="rotate-ccw" size={14} />}>Restore draft</Button>
                 <Button variant="ghost" size="sm" onClick={() => { try { localStorage.removeItem(draftKey); } catch { /* private browsing */ } setForm((f) => ({ ...f, _draft: null })); }}>Discard</Button>
               </div>
@@ -527,6 +553,15 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   </FormField>
                 </div>
               )}
+              {/* The SCSR: "For Child Without Known Parents, indicate the given
+                  first and last name and alias, if applicable". Shown for that
+                  category only; an alias already saved stays when the category
+                  changes - hidden, never deleted - and is sent with the save. */}
+              {form.case_category === ALIAS_CATEGORY && (
+                <FormField label="Alias" hint="Optional — if the child is known by another name." error={fieldError('alias')}>
+                  <Input value={form.alias || ''} maxLength={150} onChange={(e) => setForm({ ...form, alias: e.target.value })} />
+                </FormField>
+              )}
               {!isEdit && dupes.length > 0 && (
                 <Alert tone="warning" icon={<Icon name="alert-triangle" size={18} />} title="A similar record already exists" style={{ gridColumn: '1 / -1' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
@@ -570,9 +605,11 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   </div>
                 </Alert>
               )}
-              <FormField label="Date of Birth" required error={fieldError('birth_date')}
+              <FormField label="Date of Birth or Given Date of Birth" required error={fieldError('birth_date')}
                 hint={!isEdit
-                  ? `The child must be 5 to 17 today: born ${shortDate(earliestBirth)} to ${shortDate(latestBirth)}. For a foundling, the estimated date.`
+                  ? (oldestAge == null
+                    ? `Must be 18 or older for an Adult adoption: born ${shortDate(latestBirth)} or earlier. For a foundling, the given date.`
+                    : `The child must be ${youngestAge} to ${oldestAge} today: born ${shortDate(earliestBirth)} to ${shortDate(latestBirth)}. For a foundling, the given date.`)
                   : undefined}>
                 <Input type="date" value={form.birth_date || ''} min={!isEdit ? minBirthDate : undefined} max={!isEdit ? maxBirthDate : undefined} onChange={(e) => setForm({ ...form, birth_date: e.target.value })} />
               </FormField>
@@ -599,12 +636,38 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   {withRetired(LEGAL_STATUSES, form.legal_status, form._record?.legal_status).map((v) => <option key={v} value={v}>{optionLabel(LEGAL_STATUSES, v)}</option>)}
                 </Select>
               </FormField>
+              {form.legal_status && (
+                <FormField label="Date Issued" hint="Optional: when the legal status was issued." error={fieldError('legal_status_date')}>
+                  <Input type="date" value={form.legal_status_date || ''} min={form.birth_date || undefined} max={todayIso}
+                    onChange={(e) => setForm({ ...form, legal_status_date: e.target.value })} />
+                </FormField>
+              )}
+              <FormField label="Health Condition" required error={fieldError('health_condition')}>
+                <Select value={form.health_condition || ''} onChange={(e) => setForm({ ...form, health_condition: e.target.value })}>
+                  <option value="">— Select —</option>
+                  {withRetired(HEALTH_CONDITIONS, form.health_condition, form._record?.health_condition).map((v) => <option key={v} value={v}>{optionLabel(HEALTH_CONDITIONS, v)}</option>)}
+                </Select>
+              </FormField>
+              {/* Kept, hidden, when the answer changes; the server drops it
+                  for anything but "With special needs". */}
+              {form.health_condition === SPECIAL_NEEDS && (
+                <FormField label="Specify the special needs" required error={fieldError('special_needs')}>
+                  <Input value={form.special_needs || ''} maxLength={300} placeholder="e.g. Hearing loss, in therapy"
+                    onChange={(e) => setForm({ ...form, special_needs: e.target.value })} />
+                </FormField>
+              )}
               {/* Moved here from Recommendation (24 Sep 2026): every child has
                   an answer, even if the answer is that they are not in school. */}
               <FormField label="Educational Placement" required error={fieldError('education_level')}
                 hint="The grade level, or “Not in school”.">
                 <Input value={form.education_level || ''} maxLength={100} placeholder="e.g. Grade 4"
                   onChange={(e) => setForm({ ...form, education_level: e.target.value })} />
+              </FormField>
+              {/* Taken off on 24 Sep 2026 and asked again on 7 Oct (owner): the
+                  SCSR's Part I lists it. */}
+              <FormField label="Current Whereabouts" required error={fieldError('current_placement')}>
+                <Input value={form.current_placement || ''} maxLength={150} placeholder="e.g. Foster family, residential facility"
+                  onChange={(e) => setForm({ ...form, current_placement: e.target.value })} />
               </FormField>
               {asksFor('type_of_adoption') && (
                 <FormField label="Type of Adoption" required error={fieldError('type_of_adoption')}>
@@ -703,8 +766,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 4 }}>Recommendation</div>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 10 }}>Details beyond the agency&apos;s intake interview.</div>
             <div className="racco-case-grid">
-              {/* A pick since 24 Sep 2026. Current Whereabouts, which sat
-                  beside it, was taken off the form the same day. */}
+              {/* A pick since 24 Sep 2026. */}
               <FormField label="Referral Source" error={fieldError('referral_source')}
                 hint="RACCO · LGU (local government unit) · CCA (child caring agency) · RCF (residential care facility)">
                 <Select value={form.referral_source || ''} onChange={(e) => setForm({ ...form, referral_source: e.target.value })}>
@@ -917,7 +979,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             <Button type="button" variant={isEdit ? 'secondary' : 'primary'} onClick={() => setStep((n) => n + 1)}>Next</Button>
           )}
           {(isEdit || step === FORM_STEPS.length) && (
-            <Button type="submit" variant="primary" disabled={blockers.length > 0} iconLeft={<Icon name="save" size={16} />}>Save Record</Button>
+            <Button type="submit" variant="primary" disabled={blockers.length > 0 || saving} aria-busy={saving || undefined} iconLeft={<Icon name="save" size={16} />}>{saving ? 'Saving…' : 'Save Record'}</Button>
           )}
         </div>
       </form>

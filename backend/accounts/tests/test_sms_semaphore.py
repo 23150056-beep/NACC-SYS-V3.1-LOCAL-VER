@@ -174,7 +174,8 @@ class SemaphoreRefusalTest(SimpleTestCase):
         result = self._send(json.dumps(
             {"sendername": ["The selected sendername is invalid."]}))
         self.assertFalse(result.ok)
-        self.assertIn("registered", result.detail)
+        self.assertIn("'NACC'", result.detail)
+        self.assertIn("Check the key", result.detail)
 
     def test_a_message_beginning_with_test_is_refused_before_the_network(self):
         # Semaphore would accept it, bill nothing, send nothing, say nothing.
@@ -209,6 +210,23 @@ class SemaphoreRefusalTest(SimpleTestCase):
         self.assertFalse(result.ok)
         self.assertIn("'NACC'", result.detail)
         self.assertIn("sendername is invalid", result.detail)
+
+    # Seen on 1 Oct 2026 from a live account whose sender name was approved.
+    NO_ACTIVE_SENDER = json.dumps([{"senderName": "No active sender name found. "
+                                    "Please apply for a sender name before "
+                                    "sending messages."}])
+
+    def test_no_active_sender_name_under_a_500_is_read_and_explained(self):
+        result = self._http_error(500, self.NO_ACTIVE_SENDER)
+        self.assertFalse(result.ok)
+        self.assertIn("No active sender name found", result.detail)
+        self.assertNotIn('[{"', result.detail)
+        self.assertIn("The name sent was 'NACC'", result.detail)
+
+    @override_settings(SMS_SENDER_NAME="")
+    def test_it_says_when_no_sender_name_was_sent_at_all(self):
+        result = self._http_error(500, self.NO_ACTIVE_SENDER)
+        self.assertIn("SMS_SENDER_NAME is not set", result.detail)
 
     def test_a_rate_limit_says_to_wait(self):
         result = self._http_error(429, "Too Many Attempts.")
@@ -257,6 +275,15 @@ class SemaphoreCheckTest(SimpleTestCase):
         result, _ = self._check(json.dumps({**self.ACCOUNT, "status": "Inactive"}))
         self.assertFalse(result.ok)
 
+    @override_settings(SMS_SENDER_NAME="NACC")
+    def test_an_account_sent_as_a_one_item_list_is_read(self):
+        with patch("accounts.sms.urllib.request.urlopen", side_effect=[
+                FakeResponse(json.dumps([self.ACCOUNT])),
+                FakeResponse(json.dumps([{"name": "NACC", "status": "Active"}]))]):
+            result = check_gateway()
+        self.assertTrue(result.ok, result.detail)
+        self.assertIn("RACCO I", result.detail)
+
     def test_an_answer_that_cannot_be_read_confirms_nothing(self):
         # A maintenance page or a proxy's error page, served as a 200.
         result, _ = self._check("<html>maintenance</html>")
@@ -277,3 +304,71 @@ class SemaphoreCheckTest(SimpleTestCase):
         self.assertFalse(result.ok)
         self.assertNotIn("sem-key", result.detail)
         self.assertIn("api.semaphore.co", result.detail)
+
+
+@override_settings(SMS_PROVIDER="semaphore", SMS_API_KEY="sem-key", SMS_ENDPOINT="",
+                   SMS_SENDER_NAME="NACC")
+class SemaphoreSenderNameCheckTest(SimpleTestCase):
+    """The key check also lists the account's sender names. "No active sender
+    name found" reads as "you have none", which an owner with an approved name
+    knows is false; what it means is that the name SENT is not an active one
+    on that account. The check is where that can be seen for free."""
+
+    ACCOUNT = json.dumps({"account_id": 1, "account_name": "RACCO I",
+                          "status": "Active", "credit_balance": 500})
+
+    def _check(self, senders, *, error=None):
+        replies = [FakeResponse(self.ACCOUNT)]
+        replies.append(error if error is not None else FakeResponse(json.dumps(senders)))
+        with patch("accounts.sms.urllib.request.urlopen", side_effect=replies) as opened:
+            result = check_gateway()
+            urls = [c[0][0].full_url for c in opened.call_args_list]
+        return result, urls
+
+    def test_it_asks_for_the_sender_names_after_the_account(self):
+        _, urls = self._check([{"name": "NACC", "status": "Active"}])
+        self.assertIn("/api/v4/account/sendernames", urls[1])
+
+    def test_an_active_matching_name_passes(self):
+        result, _ = self._check([{"name": "NACC", "status": "Active"}])
+        self.assertTrue(result.ok, result.detail)
+        self.assertIn("'NACC' is active", result.detail)
+        self.assertIn("500 credits", result.detail)
+
+    def test_a_pending_name_fails_and_says_so(self):
+        result, _ = self._check([{"name": "NACC", "status": "Pending"}])
+        self.assertFalse(result.ok)
+        self.assertIn("Pending", result.detail)
+
+    def test_no_active_name_at_all_fails(self):
+        result, _ = self._check([])
+        self.assertFalse(result.ok)
+        self.assertIn("No sender name on this account is active", result.detail)
+
+    @override_settings(SMS_SENDER_NAME="")
+    def test_an_unset_name_fails_and_names_the_active_ones(self):
+        result, _ = self._check([{"name": "RACCO1", "status": "Active"}])
+        self.assertFalse(result.ok)
+        self.assertIn("SMS_SENDER_NAME is not set", result.detail)
+        self.assertIn("RACCO1", result.detail)
+
+    @override_settings(SMS_SENDER_NAME="nacc")
+    def test_a_name_differing_only_in_capitals_is_pointed_out(self):
+        result, _ = self._check([{"name": "NACC", "status": "Active"}])
+        self.assertFalse(result.ok)
+        self.assertIn("capitals", result.detail)
+
+    @override_settings(SMS_SENDER_NAME="OTHER")
+    def test_a_name_not_on_the_account_suggests_the_wrong_key(self):
+        result, _ = self._check([{"name": "NACC", "status": "Active"}])
+        self.assertFalse(result.ok)
+        self.assertIn("not a sender name on this account", result.detail)
+
+    def test_a_rate_limited_list_does_not_fail_a_good_key(self):
+        error = urllib.error.HTTPError(
+            "https://api.semaphore.co/api/v4/account/sendernames", 429,
+            "slow down", {}, None)
+        error.read = lambda: b"Too Many Attempts."
+        result, _ = self._check(None, error=error)
+        self.assertTrue(result.ok, result.detail)
+        self.assertIn("could not be checked", result.detail)

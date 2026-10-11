@@ -11,12 +11,47 @@ export function caseRef(id) {
   return `C-${String(id).padStart(4, '0')}`;
 }
 
+/* A birth date as local [year, month, day], or null.
+ *
+ * `new Date('1996-10-10')` is UTC midnight, which is 8 AM on the 10th in
+ * Manila, so anything measured from that instant runs eight hours behind the
+ * calendar. A bare date is split into its parts and read as a LOCAL date;
+ * anything else (a Date, a full timestamp) is read as the instant it is and
+ * then taken as the local day it falls on. A date that does not exist
+ * ("2020-02-31") is null rather than the next month's 2nd.
+ */
+function birthParts(birth) {
+  const bare = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(birth).trim());
+  if (bare) {
+    const [y, m, d] = [Number(bare[1]), Number(bare[2]), Number(bare[3])];
+    const local = new Date(y, m - 1, d);
+    // Years 0-99 are read as 1900-1999 by the Date constructor; setFullYear
+    // is exact. Either way the round trip must give the same parts back.
+    local.setFullYear(y);
+    return local.getFullYear() === y && local.getMonth() === m - 1 && local.getDate() === d
+      ? [y, m, d] : null;
+  }
+  const at = new Date(birth);
+  return Number.isNaN(at.getTime()) ? null : [at.getFullYear(), at.getMonth() + 1, at.getDate()];
+}
+
+/* Whole years old today, as the calendar counts them: the birthday has to have
+ * come round this year before the year is added. Elapsed milliseconds over
+ * 365.25 days is close but not the calendar, and said 29 on the morning
+ * someone turned 30.
+ *
+ * Someone born on 29 February reaches the birthday on 1 March in a year with
+ * no 29 February, the same as the server (clinical/reports.py age_on).
+ */
 export function ageFrom(birth) {
   if (!birth) return null;
-  const d = new Date(birth);
-  if (Number.isNaN(d.getTime())) return null;
-  const diff = Date.now() - d.getTime();
-  return Math.max(0, Math.floor(diff / (365.25 * 24 * 3600 * 1000)));
+  const parts = birthParts(birth);
+  if (!parts) return null;
+  const [y, m, d] = parts;
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const reached = month > m || (month === m && now.getDate() >= d);
+  return Math.max(0, now.getFullYear() - y - (reached ? 0 : 1));
 }
 
 // Adviser-optimized age groups: Child 1-12, Teen 13-17.

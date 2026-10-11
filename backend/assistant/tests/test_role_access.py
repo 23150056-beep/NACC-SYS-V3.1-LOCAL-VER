@@ -91,12 +91,22 @@ class BriefBelongsToWhoeverDraftedItTest(RoleFixture):
         self.assertEqual(res.status_code, 200)
         return res
 
-    def test_an_administrators_brief_is_not_served_to_the_psychologist(self):
-        drafted = self._draft_as(self.admin)
-        self.assertIn("PREVIOUS PSYCHOLOGIST'S NOTE", drafted.data["draft"])
+    def _reassign(self, user):
+        self.child.assigned_psychologist = user
+        self.child.save()
 
-        res = self._latest(self.psy)
-        self.assertEqual(res.status_code, 404)
+    def test_a_brief_carrying_the_earlier_notes_is_not_served_to_the_new_psychologist(self):
+        # What the old test of an administrator's brief guarded, kept for the one
+        # way it can still happen: a brief drafted while the previous psychologist
+        # held the child quotes their notes, and the psychologist who takes over
+        # (history hidden) must not be handed it. An administrator can no longer
+        # draft one at all - see WrittenBriefIsThePsychologistsTest.
+        self._reassign(self.previous)
+        drafted = self._draft_as(self.previous)
+        self.assertIn("PREVIOUS PSYCHOLOGIST'S NOTE", drafted.data["draft"])
+        self._reassign(self.psy)
+
+        self.assertEqual(self._latest(self.psy).status_code, 404)
 
     def test_the_previous_psychologists_brief_is_not_served_after_reassignment(self):
         self.child.assigned_psychologist = self.previous
@@ -115,7 +125,10 @@ class BriefBelongsToWhoeverDraftedItTest(RoleFixture):
         self.assertNotIn("PREVIOUS PSYCHOLOGIST'S NOTE", res.data["draft"])
 
     def test_prefetch_drafts_the_psychologists_own_even_if_someone_else_briefed_today(self):
-        self._draft_as(self.admin)
+        # Someone else: the colleague who held the child this morning.
+        self._reassign(self.previous)
+        self._draft_as(self.previous)
+        self._reassign(self.psy)
         start = timezone.make_aware(datetime.combine(timezone.localdate(), time(12, 0)))
         Appointment.objects.create(child=self.child, psychologist=self.psy, start=start,
                                    status=Appointment.SCHEDULED)
@@ -288,6 +301,32 @@ class OnlyTheChatbotIsHostedTest(RoleFixture):
         res = self.client.post(f"/api/assistant/brief/child/{self.child.id}/")
         self.assertEqual(res.status_code, 503)
         self.assertIn("chatbot", res.data["detail"])
+        self.sent.assert_not_called()
+
+    def test_capabilities_say_drafting_is_off_for_every_role(self):
+        # The screens hide the brief's prose, polish, summary and narrative
+        # buttons on this one answer; the chatbot is still described.
+        for user in (self.psy, self.sw, self.admin):
+            with self.subTest(user=user.email):
+                self.client.force_authenticate(user)
+                res = self.client.get("/api/assistant/capabilities/")
+                self.assertEqual(res.status_code, 200)
+                self.assertIs(res.data["drafting"], False)
+                self.assertTrue(res.data["examples"])
+
+    def test_prefetch_is_refused_rather_than_queued(self):
+        # Every brief it queued would be refused by get_ai_client() and
+        # audited as a failure: a row per child per visit to the schedule.
+        Appointment.objects.create(
+            child=self.child, psychologist=self.psy, status=Appointment.SCHEDULED,
+            start=timezone.make_aware(datetime.combine(timezone.localdate(), time(12, 0))))
+        self.client.force_authenticate(self.psy)
+        with patch.object(views, "_start_prefetch_thread") as spawn:
+            res = self.client.post("/api/assistant/prefetch-briefs/")
+        self.assertEqual(res.status_code, 503)
+        self.assertIn("chatbot", res.data["detail"])
+        spawn.assert_not_called()
+        self.assertFalse(AssistantJob.objects.exists())
         self.sent.assert_not_called()
 
     def test_a_report_summary_is_refused_rather_than_sent(self):

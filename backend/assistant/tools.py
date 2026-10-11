@@ -1073,7 +1073,7 @@ def _resolve_concern(request, args):
 
 def _resolve_summary(request, args):
     from assistant.views import _brief_only_author, _role
-    from clinical.care_gaps import compute_alerts
+    from clinical.care_gaps import alerts_for
     from children.models import Child
 
     from django.db.models import Q
@@ -1109,7 +1109,7 @@ def _resolve_summary(request, args):
     only = _brief_only_author(child, request.user, _role(request))
     if only is not None:
         remarks = remarks.filter(author=only)
-    gaps = compute_alerts(Child.objects.filter(pk=child.pk))
+    gaps = alerts_for(request, Child.objects.filter(pk=child.pk))
     return {"kind": "summary", "match": "one", "child": {
         "id": child.id, "name": child.fullname, "status": child.status,
         "psychologist": display_name(child.assigned_psychologist) or None},
@@ -1118,20 +1118,31 @@ def _resolve_summary(request, args):
 
 
 def _resolve_care_gaps(request, args):
-    """Reuses the same alerts the Monitoring screen shows, so the chatbot can
-    never disagree with the table the user is looking at.
+    """The care gaps for the caller, by role: `clinical.care_gaps.alerts_for`,
+    which is the same call the Dashboard's care-gap card makes, so the chatbot
+    can never disagree with the card the user is looking at.
 
     `message` is carried through rather than `type`: the type is a slug
     ("consent_missing") that means nothing to a psychologist, while the message
-    is the sentence the screen already shows them.
+    is the sentence the screen already shows them. `child_id` is there so the
+    panel can link the row.
+
+    A social worker's answer carries its own empty sentence, as
+    `_resolve_unassigned_children` does: "Nobody is overdue" is not what their
+    rules check.
     """
-    from clinical.care_gaps import compute_alerts
-    alerts = compute_alerts(_scope(request))
-    return {"kind": "care_gaps", "items": [
-        {"child": a.get("child_name") or a.get("child"),
+    from accounts.models import Role
+    from accounts.scoping import role_of
+    from clinical.care_gaps import alerts_for
+    alerts = alerts_for(request, _scope(request))
+    out = {"kind": "care_gaps", "items": [
+        {"child_id": a.get("child_id"), "child": a.get("child_name") or a.get("child"),
          "type": a.get("type"), "message": a.get("message"),
          "severity": a.get("severity")}
         for a in alerts]}
+    if role_of(request) == Role.STAFF:
+        out["empty"] = "Nothing outstanding in your records."
+    return out
 
 
 # How many flags a single answer shows. The rest are counted, never silently

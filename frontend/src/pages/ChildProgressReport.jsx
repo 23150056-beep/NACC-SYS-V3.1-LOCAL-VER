@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import api from '../api/client';
@@ -6,17 +6,26 @@ import { ageFrom, caseRef } from '../utils/child';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
+import { useAssistant } from '../context/AssistantContext';
 import {
-  Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, Modal, PAGE, Select, Tabs,
+  Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, Modal, Note, PAGE, Select, Tabs,
 } from '../ui';
-import { PA_STATUS_TONES, caseDate, reportTypeLabel } from '../config/caseData';
+import { PA_STATUS_TONES, SPECIAL_NEEDS, caseDate, reportTypeLabel } from '../config/caseData';
 import { loadAll } from '../utils/load';
+import { useOpenFromLink } from '../utils/links';
 import { clock } from '../utils/time';
-import { polishRemark, sendFeedback, getLatestBrief, generateBrief, summarizeDocument, confirmSummary } from '../api/assistant';
+import { polishRemark, sendFeedback, getLatestBrief, generateBrief, getBriefFacts, summarizeDocument, confirmSummary } from '../api/assistant';
+import AssistantAccessLog from '../components/AssistantAccessLog';
+import BriefFacts from '../components/BriefFacts';
+import WrittenCaseBrief from '../components/WrittenCaseBrief';
 import ReportCheckNote from '../components/ReportCheckNote';
 import UploadDrawer from '../components/UploadDrawer';
 import PsychReportPrint from '../components/PsychReportPrint';
 import ReportViewer from '../components/ReportViewer';
+import { useSingleFlight } from '../utils/singleFlight';
+import CaseStudyTab from '../components/caseStudy/CaseStudyTab';
+import ScsrPrint from '../components/caseStudy/ScsrPrint';
+import { useCaseStudy, usePrintExtras, useScsrPrint } from '../components/caseStudy/useCaseStudy';
 
 // "In her own words" reads better than a label, but gender is blank=True on
 // the model and must never render as an empty string.
@@ -42,11 +51,31 @@ export default function ChildProgressReport() {
   const { user } = useAuth();
   const toast = useToast();
   const confirm = useConfirm();
+  // One write at a time on this page (a survey link, a remark, a result, a plan):
+  // a second press while the first is going added the row twice.
+  const [once, writing] = useSingleFlight();
+  // False on a hosted deployment, where the server refuses every drafting
+  // feature (the chatbot is unaffected). Above the early returns below: a hook
+  // under `if (!data) return` crashed this page once already.
+  const { drafting, brief: briefKind, caseBriefWriting } = useAssistant();
   const isPsych = user?.role_name === 'Psychologist';
+  // Which brief this person gets (owner, 8 Oct 2026): the psychologist's is the
+  // facts and a written brief; a social worker's is the case facts and, where
+  // the deployment drafts, a written part of its own (WrittenCaseBrief); the
+  // ISA's is the case facts alone, and never asks for either written one. The
+  // server says which; until it answers, the role does.
+  const caseBrief = (briefKind || (isPsych ? 'clinical' : 'case')) === 'case';
   const [data, setData] = useState(null);
   // Which section of the chart is showing. Every panel stays mounted — see
   // .racco-tabpanel in index.css for why the report still prints whole.
   const [tab, setTab] = useState('overview');
+  // `?tab=voice` opens the survey tab, for a link that points at it. (The
+  // social worker's "survey waiting" care gap used to; it was removed because
+  // a social worker cannot start a survey.) Above the early returns, with the
+  // other hooks.
+  useOpenFromLink('tab', 'voice', () => setTab('voice'));
+  // The case study's activity events link here (utils/activity.js).
+  useOpenFromLink('tab', 'casestudy', () => setTab('casestudy'));
   const [ackBusy, setAckBusy] = useState(null);
   const [remarkText, setRemarkText] = useState('');
   const [result, setResult] = useState(null); // add-result drawer
@@ -66,8 +95,29 @@ export default function ChildProgressReport() {
   // psychologist has a way back to their own words if the draft is worse.
   // Cleared once the remark is saved or the draft is reverted.
   const [preRemarkText, setPreRemarkText] = useState(null);
-  const [brief, setBrief] = useState(null);   // { draft, generatedAt, jobId }
+  // { childId, facts, factsFailed, prose: 'loading'|'ready'|'unavailable'|'failed'|'not_offered'|'none', draft, generatedAt, jobId }
+  // ('none' is the case brief: its written part, a social worker's only, is
+  // WrittenCaseBrief's own and is not waited for here.)
+  // childId is the child it was opened for: a reply for any other child is
+  // dropped, so a slow request cannot fill another child's modal.
+  const [brief, setBrief] = useState(null);
   const [briefBusy, setBriefBusy] = useState(false);
+  // The child this page is on, for replies to compare against when they land;
+  // the request counter, so a finished request can tell it is no longer the
+  // latest one; and the prose request still running, if any, so reopening the
+  // modal mid-draft waits for it instead of asking the model a second time.
+  const currentChild = useRef(id);
+  const briefSeq = useRef(0);
+  const briefFlight = useRef(null); // { childId, seq }
+  // Another child's route re-uses this component. Everything about the last
+  // child's brief goes, and any request still out for it is orphaned.
+  useEffect(() => {
+    currentChild.current = id;
+    briefSeq.current += 1;
+    briefFlight.current = null;
+    setBrief(null);
+    setBriefBusy(false);
+  }, [id]);
   const [summary, setSummary] = useState(null); // { kind, id, text, confirmed }
   const [summaryBusy, setSummaryBusy] = useState(false);
   // Re-summarising an already-confirmed document destroys the psychologist's
@@ -83,10 +133,39 @@ export default function ChildProgressReport() {
   const [upload, setUpload] = useState(null); // 'report' | 'case_referral'
   const [viewing, setViewing] = useState(null); // the report being read on screen
   const isStaffOrAdmin = ['Administrator', 'Staff'].includes(user?.role_name);
-  // Mirrors INSTRUMENT_MANAGER_ROLES on the server (accounts/permissions.py).
-  const canReadTemplates = ['Administrator', 'Psychologist'].includes(user?.role_name);
+  // The ISA's log of who had the assistant read this record; nobody else sees it.
+  const isAdmin = user?.role_name === 'Administrator';
+  // Whoever may start a survey asks the invite endpoint which forms it may use.
+  const canStartSurvey = ['Administrator', 'Staff', 'Psychologist'].includes(user?.role_name);
 
   const load = () => api.get(`/reports/child/${id}/`).then((r) => setData(r.data)).catch(() => setData('error'));
+
+  // Every case type has a case study (block A; blocks B and C are an
+  // adoption's), and the tab exists only if the server does not answer 404 for
+  // this reader (components/caseStudy/useCaseStudy.js). Above the early returns,
+  // like every hook here. `data` is still the last child's until the new one
+  // arrives (this component is re-used between routes), so it counts only once
+  // it is this child's.
+  const dataIsThisChild = !!data && data !== 'error' && String(data.child?.id) === String(id);
+  const caseStudy = useCaseStudy(id, dataIsThisChild);
+  const hasCaseStudyTab = caseStudy.phase === 'ready' || caseStudy.phase === 'error';
+  // Print follows the tab: on the Case study tab the social worker who holds
+  // the record prints the case study; everyone else, and every other tab, the
+  // psychological report. The agency header and the license are read only once
+  // there is a case study to put them on.
+  const printsCaseStudy = tab === 'casestudy' && user?.role_name === 'Staff'
+    && caseStudy.phase === 'ready' && !!caseStudy.study?.exists;
+  // What the print element holds: the newest FINAL copy once the case study is
+  // final (it carries its own preparer, license and agency, so nothing live is
+  // read for it), the saved draft otherwise - whose agency header and license
+  // are read only then.
+  const printTarget = useScsrPrint(id, caseStudy.study, printsCaseStudy);
+  const printExtras = usePrintExtras(printsCaseStudy && printTarget.mode === 'draft');
+  // Landed on the tab by a link, or left on it by a record that has none.
+  const caseStudyGone = caseStudy.phase === 'none';
+  useEffect(() => {
+    if (tab === 'casestudy' && caseStudyGone) setTab('overview');
+  }, [tab, caseStudyGone]);
 
   const resolveProblem = async () => {
     setResolveBusy(true);
@@ -121,14 +200,15 @@ export default function ChildProgressReport() {
   // additive - they fill the instrument picker and the opinionnaire list -
   // and a failure leaves those controls looking empty rather than broken.
   useEffect(() => {
+    setSurveyTemplates([]); // another child's forms are not this child's
     loadAll(toast, [
       isPsych && (() => api.get('/instruments/').then((r) => setInstruments(r.data))),
-      // Administrator or Psychologist only - CanManageInstruments. Staff are
-      // refused by design, so asking as Staff was a guaranteed 403.
-      canReadTemplates && (() => api.get('/form-templates/?type=self_report_gov')
+      // Not /form-templates/, which a social worker may not read: the invite
+      // endpoint answers with the forms this child's survey may use.
+      canStartSurvey && (() => api.get(`/opinionnaire-invites/templates/?child=${id}`)
         .then((r) => setSurveyTemplates(r.data))),
     ], 'Some options on this page could not load. Refresh to try again.');
-  }, [isPsych, canReadTemplates, toast]);
+  }, [isPsych, canStartSurvey, id, toast]);
 
   if (data === 'error') return <div style={PAGE}><Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>This report is unavailable.</Alert></div>;
   if (!data) return <div style={PAGE}><div style={{ color: 'var(--text-muted)' }}>Loading report…</div></div>;
@@ -140,9 +220,9 @@ export default function ChildProgressReport() {
   // write rule (assistant/views.py _DOC_KINDS): a report is its psychologist's
   // or an administrator's, a referral a social worker's or an administrator's.
   // Offered to anyone else, "Re-summarise" replaced another person's confirmed
-  // summary for good.
-  const canSummariseReport = canAdvance;
-  const canSummariseReferral = isStaffOrAdmin;
+  // summary for good. And only where this deployment drafts at all.
+  const canSummariseReport = canAdvance && drafting;
+  const canSummariseReferral = isStaffOrAdmin && drafting;
   const activePlan = (data.treatment_plans || []).find((p) => p.status === 'active') || (data.treatment_plans || [])[0];
   const csMeta = CASE_STATUS_META[child.case_status] || CASE_STATUS_META.pre_assessment;
 
@@ -163,15 +243,21 @@ export default function ChildProgressReport() {
     { id: 'remarks', label: 'Remarks', count: (data.remarks || []).length || undefined },
     { id: 'voice', label: "Child's voice", count: (data.opinionnaires || []).length || undefined },
     { id: 'casework', label: 'Casework', count: (data.case_referrals || []).length || undefined },
+    ...(hasCaseStudyTab ? [{ id: 'casestudy', label: 'Case study' }] : []),
+    ...(isAdmin ? [{ id: 'assistant', label: 'Assistant log' }] : []),
   ];
 
   const facts = [
     { k: 'Case reference', v: caseRef(child.id) },
-    { k: 'Age / date of birth', v: [age != null ? `${age} years` : null, child.birth_date].filter(Boolean).join(' · ') },
+    { k: 'Age / date of birth or given date of birth', v: [age != null ? `${age} years` : null, child.birth_date].filter(Boolean).join(' · ') },
+    ...(child.alias ? [{ k: 'Alias', v: child.alias }] : []),
     { k: 'Gender', v: child.gender },
     { k: 'Case type', v: child.case_type },
     { k: 'Category', v: child.case_category },
     { k: 'Legal status', v: child.legal_status },
+    ...(child.legal_status && child.legal_status_date ? [{ k: 'Date issued', v: child.legal_status_date }] : []),
+    { k: 'Health condition', v: child.health_condition === SPECIAL_NEEDS && child.special_needs ? `${child.health_condition}: ${child.special_needs}` : child.health_condition },
+    { k: 'Current whereabouts', v: child.current_placement },
     { k: 'Address', v: [[child.house_number, child.street].filter(Boolean).join(' '), child.barangay, child.municipality, child.province].filter(Boolean).join(', ') },
     { k: 'Assigned psychologist', v: child.psychologist_name },
     { k: caseDate(child)[0], v: caseDate(child)[1] },
@@ -186,24 +272,19 @@ export default function ChildProgressReport() {
     } catch (err) { toast.error(err.response?.data?.detail || 'Could not update the case status.'); }
   };
 
-  /* KNOWN GAP, and it predates the error reporting that exposed it.
-   *
-   * The button below is offered to `isStaffOrAdmin || canWrite`, so a member
-   * of STAFF is invited to create a QR survey - but the templates it needs
-   * come from /form-templates/, which is CanManageInstruments (Administrator
-   * or Psychologist). Staff are refused, surveyTemplates stays empty, and
-   * they land on the message below: go and create a template under
-   * Pre-Assessment Instruments. That screen is not one Staff can open
-   * either. So they are told to do something they cannot do, about a cause
-   * that is not theirs.
-   *
-   * Fixing it is a permissions decision rather than a cleanup - either Staff
-   * get read access to form templates, or the button stops being offered to
-   * them - so it is written down here rather than guessed at.
+  /* The forms come from /opinionnaire-invites/templates/ (shared ones, the
+   * child's psychologist's, and the viewer's own), so a social worker, who
+   * cannot read /form-templates/, can start a survey too. An empty list
+   * names who can fix it by role.
    */
-  const createInvite = async () => {
+  const createInvite = () => once(async () => {
     const tpl = surveyTemplates[0];
-    if (!tpl) { toast.error('Create a Self-Report (Government Form) template under Pre-Assessment Instruments first.'); return; }
+    if (!tpl) {
+      toast.error(user?.role_name === 'Staff'
+        ? 'No self-report template is set up yet. Ask the ISA to add one under Pre-Assessment Instruments.'
+        : 'Create a Self-Report (Government Form) template under Pre-Assessment Instruments first.');
+      return;
+    }
     if (!(await confirm({
       description: `This creates a QR survey link for ${child.fullname}. Anyone holding the link can answer it until it is used.`,
       confirmLabel: 'Yes, create the link',
@@ -214,7 +295,7 @@ export default function ChildProgressReport() {
       setQr({ token: inv.token, url: `${window.location.origin}/survey/${inv.token}`, title: tpl.title });
       load();
     } catch (err) { toast.error(JSON.stringify(err.response?.data || 'Could not create the survey link.')); }
-  };
+  });
 
   const polish = async () => {
     const raw = remarkText.trim();
@@ -246,22 +327,67 @@ export default function ChildProgressReport() {
   };
 
   const openBrief = async ({ regenerate = false } = {}) => {
+    const childId = id;
+    // Replies below belong to this child only.
+    const mine = (b) => (b && b.childId === childId ? b : null);
+    const stale = () => currentChild.current !== childId;
+    const flying = briefFlight.current && briefFlight.current.childId === childId;
+    // Opens at once with the facts: they are queries and arrive in well under
+    // a second, while the prose can take a minute or not come at all (the
+    // assistant off, or a hosted deployment, where drafting is refused).
+    if (!regenerate) {
+      setBrief((b) => ({
+        childId,
+        facts: mine(b)?.facts ?? null,
+        factsFailed: false,
+        // A draft still being written for this child fills the modal when it
+        // lands; nothing else is asked of the model.
+        prose: caseBrief ? 'none' : drafting ? 'loading' : 'not_offered',
+      }));
+    }
+    getBriefFacts(childId)
+      .then((facts) => setBrief((b) => (mine(b) ? { ...b, facts, factsFailed: false } : b)))
+      .catch(() => setBrief((b) => (mine(b) ? { ...b, factsFailed: !b.facts } : b)));
+    // Where the deployment does not draft, or the reader is not the child's
+    // psychologist, the facts are all there is: the prose is not requested at
+    // all, so nothing is refused and nothing is audited as a failed job.
+    if (caseBrief || !drafting) return;
+    if (!regenerate && flying) return;
+    const seq = briefSeq.current + 1;
+    briefSeq.current = seq;
+    briefFlight.current = { childId, seq };
     setBriefBusy(true);
     try {
       const data = regenerate
-        ? await generateBrief(id)
-        : await getLatestBrief(id).catch((err) => {
+        ? await generateBrief(childId)
+        : await getLatestBrief(childId).catch((err) => {
             // 404 just means nothing was drafted today — fall back to the slow path.
-            if (err.response?.status === 404) return generateBrief(id);
+            if (err.response?.status === 404) return generateBrief(childId);
             throw err;
           });
-      setBrief({ draft: data.draft, generatedAt: data.generated_at, jobId: data.job_id });
+      // `mine` throughout: closed while the prose was drafting stays closed,
+      // and a draft for another child is never shown.
+      setBrief((b) => (mine(b) ? { ...b, prose: 'ready', draft: data.draft, generatedAt: data.generated_at, jobId: data.job_id } : b));
     } catch (err) {
-      toast.error(err.response?.status === 503
-        ? 'The assistant is unavailable right now.'
-        : 'Could not prepare the brief.');
+      if (stale()) return;
+      const unavailable = err.response?.status === 503;
+      if (regenerate) {
+        // The draft already on screen stays, as it always did.
+        toast.error(unavailable ? 'The assistant is unavailable right now.' : 'Could not prepare the brief.');
+        // Unless the modal was closed and reopened meanwhile: it is waiting on
+        // this very request, and must not be left saying "drafting".
+        setBrief((b) => (mine(b) && b.prose === 'loading'
+          ? { ...b, prose: unavailable ? 'unavailable' : 'failed' } : b));
+      } else {
+        setBrief((b) => (mine(b) ? { ...b, prose: unavailable ? 'unavailable' : 'failed' } : b));
+      }
     } finally {
-      setBriefBusy(false);
+      // Only the latest request may clear these: an old one finishing must
+      // not unlock the button, or forget a newer draft, for a newer request.
+      if (briefSeq.current === seq) {
+        briefFlight.current = null;
+        setBriefBusy(false);
+      }
     }
   };
 
@@ -292,7 +418,7 @@ export default function ChildProgressReport() {
     }
   };
 
-  const addRemark = async () => {
+  const addRemark = () => once(async () => {
     if (!remarkText.trim()) return;
     const saved = remarkText.trim();
     if (!(await confirm({
@@ -310,9 +436,9 @@ export default function ChildProgressReport() {
       setPreRemarkText(null);
       setRemarkText(''); load(); toast.success('Remark added');
     } catch (err) { toast.error(err.response?.data?.detail || 'Could not add the remark.'); }
-  };
+  });
 
-  const saveResult = async () => {
+  const saveResult = () => once(async () => {
     if (!(await confirm({
       description: `This saves the result entry on ${child.fullname}'s record.`,
       confirmLabel: 'Yes, save the entry',
@@ -326,9 +452,9 @@ export default function ChildProgressReport() {
       });
       setResult(null); load(); toast.success('Result entry saved');
     } catch (err) { toast.error(JSON.stringify(err.response?.data || 'Could not save.')); }
-  };
+  });
 
-  const savePlan = async () => {
+  const savePlan = () => once(async () => {
     if (!(await confirm({
       description: plan.id ? `This saves your changes to ${child.fullname}'s treatment plan.`
         : `This starts a treatment plan for ${child.fullname}.`,
@@ -340,6 +466,17 @@ export default function ChildProgressReport() {
       else await api.post('/treatment-plans/', { child: Number(id), objectives: plan.objectives, interventions: plan.interventions, review_date: plan.review_date || null });
       setPlan(null); load(); toast.success('Treatment plan saved');
     } catch (err) { toast.error(JSON.stringify(err.response?.data || 'Could not save.')); }
+  });
+
+  // A draft prints what is saved. Say so before printing over typing that has
+  // not been saved yet. A final prints its newest final copy.
+  const printPage = async () => {
+    if (!printsCaseStudy) { window.print(); return; }
+    if (printTarget.mode === 'draft' && caseStudy.unsaved > 0 && !(await confirm({
+      description: 'Some boxes have changes that are not saved. The printed case study shows what is saved, not what is in the boxes.',
+      confirmLabel: 'Yes, print what is saved',
+    }))) return;
+    await printTarget.printDefault();
   };
 
   const download = async (f) => {
@@ -356,7 +493,12 @@ export default function ChildProgressReport() {
     <div style={PAGE} className="racco-print-area racco-psych-print-root">
       {/* What Print puts on paper: the psychological report, not this screen
           (index.css hides the page's other children when printing). */}
-      <PsychReportPrint data={data} />
+      {printsCaseStudy
+        ? (printTarget.mode === 'final' && !printTarget.copy
+          // The final copy is on its way; nothing live stands in for it.
+          ? <div className="racco-print-only" />
+          : <ScsrPrint child={child} study={caseStudy.study} copy={printTarget.copy} agency={printExtras.agency} license={printExtras.license} preparedBy={user?.fullname} />)
+        : <PsychReportPrint data={data} />}
       {/* Hero. Back out to Records, who this child is, and the three things
           you came here to do — above the tab strip, so they stay put whichever
           section you are reading. */}
@@ -406,10 +548,20 @@ export default function ChildProgressReport() {
             </div>
           </div>
           <div className="racco-no-print" style={{ display: 'flex', gap: 8, flex: 'none', flexWrap: 'wrap' }}>
-            <Button variant="secondary" onClick={() => openBrief()} disabled={briefBusy} iconLeft={<Icon name="sparkles" size={17} />}>
-              {briefBusy ? 'Preparing…' : 'Pre-session brief'}
+            {/* Stays where drafting is off: the facts need no model. A social
+                worker's and the ISA's is the case brief, facts only. */}
+            <Button variant="secondary" onClick={() => openBrief()} iconLeft={<Icon name="sparkles" size={17} />}>
+              {briefBusy ? 'Preparing…' : caseBrief ? 'Case brief' : 'Pre-session brief'}
             </Button>
-            <Button variant="secondary" onClick={() => window.print()} title="Print this child's psychological report" iconLeft={<Icon name="printer" size={17} />}>Print</Button>
+            <Button variant="secondary" onClick={printPage}
+              disabled={printsCaseStudy && !printTarget.ready}
+              title={!printsCaseStudy ? "Print this child's psychological report"
+                : !printTarget.ready ? 'Getting the final copy ready to print…'
+                  : printTarget.mode === 'final' ? "Print this child's social case study report as it was made final"
+                    : "Print this child's social case study report as a draft"}
+              iconLeft={<Icon name="printer" size={17} />}>
+              {printsCaseStudy ? (printTarget.mode === 'final' ? 'Print final copy' : 'Print case study') : 'Print'}
+            </Button>
             {/* Booking a session is the thing you most often want next while
                 reading a child's record, and it used to mean leaving for the
                 Calendar and picking the same child out of a list again. The
@@ -728,12 +880,14 @@ export default function ChildProgressReport() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: data.remarks.length ? 18 : 0 }} className="racco-no-print">
             <textarea value={remarkText} onChange={(e) => setRemarkText(e.target.value)} rows={3} placeholder="Add a dated remark for this child…" style={textarea} />
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-              <Button variant="ghost" onClick={polish}
-                      disabled={!remarkText.trim() || polishing}
-                      iconLeft={<Icon name="sparkles" size={16} />}>
-                {polishing ? 'Polishing…' : 'Polish writing'}
-              </Button>
-              <Button variant="primary" onClick={addRemark} iconLeft={<Icon name="plus" size={16} />} disabled={!remarkText.trim()}>Add remark</Button>
+              {drafting && (
+                <Button variant="ghost" onClick={polish}
+                        disabled={!remarkText.trim() || polishing}
+                        iconLeft={<Icon name="sparkles" size={16} />}>
+                  {polishing ? 'Polishing…' : 'Polish writing'}
+                </Button>
+              )}
+              <Button variant="primary" onClick={addRemark} iconLeft={<Icon name="plus" size={16} />} disabled={!remarkText.trim() || writing}>Add remark</Button>
             </div>
             {polishJob && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 4 }}>
@@ -774,7 +928,7 @@ export default function ChildProgressReport() {
             psychologist.
           </p>
           {(isStaffOrAdmin || canWrite) && child.status === 'active' && (
-            <Button variant="primary" onClick={createInvite} iconLeft={<Icon name="qr-code" size={16} />} className="racco-no-print">New QR Survey</Button>
+            <Button variant="primary" onClick={createInvite} disabled={writing} iconLeft={<Icon name="qr-code" size={16} />} className="racco-no-print">New QR Survey</Button>
           )}
         </div>
         {(data.opinionnaires || []).length > 0 && (
@@ -881,6 +1035,21 @@ export default function ChildProgressReport() {
 
       </div>
 
+      {/* The Social Case Study Report (every case type). Mounted as soon as the
+          server has answered, like every other panel, so what is half-typed in
+          it survives a visit to another tab. */}
+      {hasCaseStudyTab && (
+        <div className="racco-stack racco-tabpanel" hidden={tab !== 'casestudy'}>
+          <CaseStudyTab key={child.id} child={child} cs={caseStudy} print={printTarget} />
+        </div>
+      )}
+
+      {isAdmin && (
+        <div className="racco-stack racco-tabpanel" hidden={tab !== 'assistant'}>
+          <AssistantAccessLog childId={child.id} active={tab === 'assistant'} />
+        </div>
+      )}
+
       <Alert disclaimer title="Note.">All clinical findings are the licensed psychologist&apos;s own professional judgment.</Alert>
 
       {/* Add-result drawer */}
@@ -907,7 +1076,7 @@ export default function ChildProgressReport() {
             <FormField label="Classification (your own words)">
               <textarea value={result.classification} onChange={(e) => setResult({ ...result, classification: e.target.value })} rows={2} style={textarea} />
             </FormField>
-            <Button variant="primary" onClick={saveResult} disabled={!result.summary.trim()} iconLeft={<Icon name="save" size={16} />}>Save entry</Button>
+            <Button variant="primary" onClick={saveResult} disabled={!result.summary.trim() || writing} iconLeft={<Icon name="save" size={16} />}>Save entry</Button>
             <div style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>Manual input only — the system never computes scores.</div>
           </div>
         </div>
@@ -956,7 +1125,7 @@ export default function ChildProgressReport() {
                   style={{ width: '100%', padding: '9px 12px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', fontFamily: 'var(--font-sans)', fontSize: 14 }} />
               </FormField>
             </div>
-            <Button variant="primary" onClick={savePlan} disabled={!plan.objectives.trim()} iconLeft={<Icon name="save" size={16} />}>Save plan</Button>
+            <Button variant="primary" onClick={savePlan} disabled={!plan.objectives.trim() || writing} iconLeft={<Icon name="save" size={16} />}>Save plan</Button>
           </div>
         </div>
       )}
@@ -1006,27 +1175,73 @@ export default function ChildProgressReport() {
         />
       )}
 
-      {/* Pre-session brief modal */}
+      {/* Pre-session brief modal. The case brief is the facts panel and a Close
+          button for the ISA, and never reaches the endpoints that draft the
+          psychologist's brief. A social worker, where the deployment drafts,
+          gets WrittenCaseBrief under the facts: its own draft, disclaimer and
+          buttons, keyed to the child the modal was opened for. */}
       {brief && (
-        <Modal open onClose={() => setBrief(null)} title="Pre-session brief"
-               subtitle={`Drafted ${clock(brief.generatedAt)}`}
+        <Modal open onClose={() => setBrief(null)} title={caseBrief ? 'Case brief' : 'Pre-session brief'}
+               subtitle={brief.prose === 'ready' ? `Drafted ${clock(brief.generatedAt)}` : null}
                width={560}>
-          <Alert tone="info" disclaimer style={{ marginBottom: 12 }}>
-            AI-drafted decision support, not a diagnosis. The licensed psychologist
-            reviews, edits, and approves all content.
-          </Alert>
-          <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6 }}>{brief.draft}</div>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
-            <Button variant="ghost" onClick={() => { sendFeedback(brief.jobId, 'discarded').catch(() => {}); setBrief(null); }}>
-              Not useful
-            </Button>
-            <Button variant="ghost" onClick={() => openBrief({ regenerate: true })} disabled={briefBusy}>
-              Regenerate (slow)
-            </Button>
-            <Button variant="primary" onClick={() => { sendFeedback(brief.jobId, 'accepted').catch(() => {}); setBrief(null); }}>
-              Useful
-            </Button>
-          </div>
+          <BriefFacts facts={brief.facts} failed={brief.factsFailed} />
+          {caseBrief && caseBriefWriting ? (
+            <WrittenCaseBrief key={brief.childId} childId={brief.childId}
+                              onClose={() => setBrief(null)} />
+          ) : (
+            <>
+              {brief.prose !== 'none' && (
+                <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0 12px' }} />
+              )}
+              {brief.prose === 'loading' && (
+                <p role="status" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+                  Drafting the written brief… this can take up to a minute.
+                </p>
+              )}
+              {brief.prose === 'not_offered' && (
+                <Note icon="info">A written brief is not available on this deployment.</Note>
+              )}
+              {brief.prose === 'unavailable' && (
+                <Note icon="info">
+                  The written brief is unavailable right now. The facts above come straight from the record.
+                </Note>
+              )}
+              {brief.prose === 'failed' && (
+                <Note tone="warning" icon="alert-triangle">Could not prepare the written brief.</Note>
+              )}
+              {brief.prose === 'ready' && (
+                <>
+                  <Alert tone="info" disclaimer style={{ marginBottom: 12 }}>
+                    AI-drafted decision support, not a diagnosis. The licensed psychologist
+                    reviews, edits, and approves all content.
+                  </Alert>
+                  <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6 }}>{brief.draft}</div>
+                </>
+              )}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+                {brief.prose === 'ready' ? (
+                  <>
+                    <Button variant="ghost" onClick={() => { sendFeedback(brief.jobId, 'discarded').catch(() => {}); setBrief(null); }}>
+                      Not useful
+                    </Button>
+                    <Button variant="ghost" onClick={() => openBrief({ regenerate: true })} disabled={briefBusy}>
+                      {briefBusy ? 'Drafting…' : 'Regenerate (slow)'}
+                    </Button>
+                    <Button variant="primary" onClick={() => { sendFeedback(brief.jobId, 'accepted').catch(() => {}); setBrief(null); }}>
+                      Useful
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    {brief.prose === 'failed' && (
+                      <Button variant="ghost" onClick={() => openBrief()} disabled={briefBusy}>Try again</Button>
+                    )}
+                    <Button variant="primary" onClick={() => setBrief(null)}>Close</Button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
         </Modal>
       )}
 

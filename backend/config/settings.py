@@ -77,6 +77,7 @@ INSTALLED_APPS = [
     "scheduling",
     "activity",
     "assistant",
+    "case_study",
 ]
 
 MIDDLEWARE = [
@@ -146,6 +147,12 @@ else:
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
             "NAME": BASE_DIR / "db.sqlite3",
+            # Take the write lock when a transaction BEGINS. The default
+            # starts deferred and upgrades on the first write, and SQLite
+            # refuses an upgrade while another connection holds the lock
+            # ("database is locked", at once, with no wait) - which is how
+            # two quick requests turned into a 500 on the local copy.
+            "OPTIONS": {"transaction_mode": "IMMEDIATE"},
         }
     }
 
@@ -248,6 +255,14 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # Django REST Framework
 _TESTING = "test" in sys.argv
 
+# The test suite creates thousands of users in setUp, and each create_user
+# hashes a password: PBKDF2 at Django's default iteration count is ~0.25 s a
+# hash, which was a large share of the run. MD5 is instant. This applies ONLY
+# while `manage.py test` runs; every other process keeps Django's default
+# hashers, so production hashing, and the hashes already stored, are unchanged.
+if _TESTING:
+    PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (
         "accounts.authentication.ForcePasswordChangeJWTAuthentication",
@@ -319,6 +334,8 @@ LOGIN_LOCKOUT_MINUTES = 15   # both the rolling counting window and the lock dur
 SIGNUP_MAX_PER_IP = 5        # new access requests from one IP per window
 SIGNUP_WINDOW_MINUTES = 60
 SIGNUP_MAX_PENDING = 50      # global ceiling on outstanding requests (DB-counted)
+SIGNUP_RESEND_MAX_PER_IP = 20  # requests for a new email code from one IP per window
+SIGNUP_CONFIRM_MAX_PER_IP = 30  # wrong email codes from one IP per window
 
 CORS_ALLOWED_ORIGINS = env_list(
     "CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173"

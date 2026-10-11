@@ -32,6 +32,59 @@ model name anywhere in a commit message, PR body, or code comment. If a hook
 asks for the commits to be reauthored, decline — this rule is the owner's and
 it stands.
 
+## Two models a session, ultracode on
+
+Owner's decision, 3 Oct 2026, for every session from then on: **Opus 5.5
+plans, Sonnet 5.5 executes**, and ultracode is on by default.
+
+- **Opus 5.5 (`claude-opus-5-5`) is the main session.** Talking with the
+  owner, brainstorming, reading the code to decide what should change, the
+  plan, the design notes under `docs/superpowers/specs/`, and reading what a
+  worker hands back before anything is committed.
+- **Sonnet 5.5 (`claude-sonnet-5-5`) does everything that executes.** Writing
+  and editing code, migrations, running the tests, lint and build, and the
+  mechanical end of a commit. The main session hands this to a subagent or a
+  workflow worker rather than doing it itself, and does not wait to be asked
+  each time; this is the standing request. A worker starts cold, so the
+  hand-over carries the plan written out: the files, the rule being enforced,
+  and what done looks like.
+- **Ultracode is standing multi-agent orchestration**, the main session
+  directing workers. That is what keeps the planner planning and the workers
+  on the code.
+
+**Name the model on every spawn: `model: "sonnet"`.** That goes on the Agent
+tool and on a workflow's `agent()` alike. Nothing else is reliable. A worker
+with no model given inherits the main session's, so it runs on Opus and the
+split silently does not happen. Measured on 3 Oct in a cloud session, by
+reading the `"model"` field in each subagent's transcript under
+`~/.claude/projects/<project>/<session>/subagents/`: a probe with no model ran
+on `claude-opus-5-5`, and the same probe with `model: "sonnet"` ran on
+`claude-sonnet-5-5`. A planning subagent that should think in Opus says
+`model: "opus"`.
+
+**`.claude/settings.json` holds the defaults**: `model` is Opus 5.5,
+`ultracode: true`, and `CLAUDE_CODE_SUBAGENT_MODEL` is Sonnet 5.5. That last
+one did NOT reach the cloud session. The variable was unset there, and the
+probe above ran on Opus. It may work in the local CLI, but nobody has checked,
+so the named model above is the rule and the variable is only a backstop. The
+file pins IDs, not the `opus`/`sonnet` aliases, because an alias follows
+whatever is newest. The Agent tool takes only the alias, and on 3 Oct
+`sonnet` meant 5.5. Check that again when a new Sonnet ships.
+
+- **Ultracode needs Workflows enabled and a model that supports it**, and
+  where either is missing it stays off without complaint. `enableWorkflows`
+  is in the settings file too, but a plan that does not include Workflows
+  cannot be switched on from a repo. `/effort` offers `ultracode` only where
+  it can run; `/config` → Dynamic workflows is the switch. On 3 Oct the file
+  turned Workflows on in the cloud session that wrote it, mid-session, but
+  ultracode is read when a session STARTS - it applies from the next one.
+- **Check the model rather than assume it.** `/model` names the main
+  session's. Runtime fallbacks exist, so when output looks off, ask which
+  model produced it.
+- The model names belong here and in the settings file only. The authorship
+  rule above still keeps them out of every commit message, PR body and code
+  comment.
+
 ## Getting changes onto GitHub
 
 **What is safe is the REPOSITORY, not the remote name.** Corrected 20 Sep
@@ -335,6 +388,41 @@ Declaring leave never cancels what is booked inside it, and removing an
 availability window never does either. Those sessions were agreed with
 somebody; both screens report the count and change nothing.
 
+**The calendar screen** (`pages/Schedule.jsx`, tested in a browser as a SW, a
+psychologist and the ISA on 2 Oct 2026):
+
+- **Away days are shaded** (`dayPropGetter`), but only on ONE person's
+  calendar - a psychologist's own, or the one picked in "Show one
+  psychologist". With everyone showing, a day is not closed because one person
+  is away, so there it is only NAMED ("Away: M. Bulan") in the month cell. Only
+  upcoming leave is fetched (`?upcoming=true`), so past leave is not shaded.
+- **A psychologist records their own leave** from "Away & leave" on their
+  availability card, which opens the same page the ISA gets for them
+  (`canRecordLeave`: the ISA for anybody, a psychologist for themselves - the
+  server's rule). That page used to be admin-only, so they could not record
+  leave or see what the ISA had recorded for them. The leave serializer does
+  not require `psychologist`; the view fills in the psychologist's own and
+  asks anybody else "Whose leave is this?".
+- **The drawers and the appointment card are the shared `Drawer` and `Modal`**
+  from `ui`, so Escape, a close button, a focus trap and focus return come
+  with them. Hand-built overlays had none of those. The card closes when
+  Reschedule opens the drawer, or the first click only dismissed it.
+- **An edit says it is an edit.** A weekly pattern is edited with no block id
+  (`blockForm.byDay`), so "is there an id" read as "add": the title, button and
+  toast said "Add Availability". `editingBlock` covers both. The weekday
+  ticks still key off the id - editing a pattern needs them.
+- **An edit is checked against whose it is BEING MADE, not only whose it
+  was** (`perform_update` on availability and leave). It checked the current
+  owner only, so a psychologist could PATCH their own window or leave onto a
+  colleague - and mark THEM as away. Naming themselves again stays fine: the
+  pattern editor resends the owner with every block.
+- The "Away" tag in a month cell becomes a dot under 640px (`.racco-away-tag`):
+  the cell is ~50px wide and the word showed as a lone "A".
+- Refusals read as sentences (`firstError`), never `{"end_time": [...]}`.
+- axe-core on `/schedule`: one `aria-required-children` violation remains, on
+  react-big-calendar's own "+n more" button inside its row. It is identical on
+  the unmodified page; the drawers and the availability page audit clean.
+
 ## Removed: the adoption tracker and SAMD readiness
 
 Both were removed on 17 Sep 2026 at the owner's request — the `adoption` and
@@ -387,13 +475,32 @@ the only access control the system has.
 - **Both doors share one abuse budget** (`accounts/signup_limit.py`): a per-IP
   cache counter plus a durable ceiling on outstanding PENDING rows. Two doors
   with separate budgets just means the cheaper one is what an abuser uses.
+  Asking for a new email code and typing one in write no request, so each has
+  its own per-IP counter beside it (`resend_is_throttled`,
+  `confirm_is_throttled`; 4 Oct 2026). Charging them to the creation counter
+  would let a few resends use up a colleague's sign-up from the same office.
 - **Declining archives rather than deletes.** An archived address cannot
   register again, so a refused applicant cannot loop until a distracted
   administrator approves them.
-- **The form verifies nothing.** No confirmation mail is sent, so a typed
-  address is only what someone typed — unlike a Google one, which Google
+- **A typed address is proved by a six-digit code** (`accounts/email_verification.py`).
+  Until it is, it is only what someone typed, unlike a Google one, which Google
   verified. The queue says which door each request came through for exactly
   that reason.
+- **The code is an `EmailVerification` row** (4 Oct 2026, accounts 0012), not
+  a cache entry, for the reason the phone code is: a code stored by one
+  gunicorn worker was "expired" to the next. One row per request, gone with
+  the account. It vouches only for the address it was mailed to, only while
+  the request is pending. Five guesses, fifteen minutes, and a wrong guess no
+  longer extends them. Every refusal reads the same.
+- **An applicant can ask for a new code** (`POST /api/auth/signup/verify-email/resend/`).
+  It always answers 202 with one fixed sentence, mails only a pending typed
+  request, and holds the phone code's limits per request: a minute apart, five
+  an hour. A resend while a code is outstanding re-mails THAT code, so a
+  stranger asking for one cannot void the code the applicant holds. The way
+  back is "Already asked for access? Confirm your email" on `/signup`, linked
+  from `/login`; the confirm step used to exist only in the tab that signed
+  up. Accepted, not fixed: a resend for a real pending address takes the mail
+  gateway's time, so timing can tell one apart. The limits bound the probing.
 
 ## Signing in
 
@@ -413,6 +520,12 @@ the only access control the system has.
   password and a mistyped address sends it to whoever owns the typo. Google
   requests arrive verified; typed ones confirm a six-digit code. Migration 0010
   backfilled the Google accounts already in the queue.
+- **Approval is the only way in** (4 Oct 2026, `UserWriteSerializer.validate`):
+  an edit cannot move an account from PENDING to ACTIVE ("Approve it from
+  Access Requests"). An edit that changes a pending typed request's address
+  clears `email_verified`, so the new address must be proved too. A pending
+  Google request's address cannot be edited at all: it is the Google
+  account's, and with no code door it could never be proved again.
 
 ## The assistant app
 
@@ -450,6 +563,69 @@ Settings, no per-feature flags.
 - **`manage.py ai_eval` measures all of that**; `manage.py ai_check` says
   whether the runtime is reachable. Neither runs in the test suite — both need
   a live Ollama. Never claim the output is fine without running `ai_eval`.
+  `ai_eval` sends real notes and reports to the model and writes no
+  `AssistantJob`, so its reads are not in the access log below.
+- **A brief opens with facts from plain queries** (4 Oct 2026,
+  `assistant/brief_facts.py`, `GET /api/assistant/brief/child/<id>/facts/`,
+  shown by `components/BriefFacts.jsx` above the prose): next session and
+  purpose, days since the last completed one, open problems, the active plan's
+  objectives, the COUNT of unreviewed self-report answers (never their words),
+  and the child's care gaps by the viewer's role. Not gated, not throttled, no
+  model, so they show when the assistant is off, hosted or slow. The prompt is
+  unchanged; feeding these facts INTO it is next step 5 and needs `ai_eval`.
+  The modal keys every reply to the child it was opened for: a page that stays
+  mounted across children once showed one child's facts on another's page.
+- **The written brief is the psychologist's only** (owner, 8 Oct 2026).
+  `PreSessionBriefView`, `LatestBriefView` and prefetch answer 403 to Staff and
+  the ISA BEFORE `gate()`, so nothing reaches the model and no job is written.
+  Its instructions say "for a licensed psychologist" and it is built from
+  remarks, which a SW cannot write - for them it was always empty. The ISA is
+  the agency's IT support and has no case reason to have the model read a
+  child's notes. **Both get the "Case brief"**: the same facts endpoint with
+  `kind: "case"` and rows made for a SW - the case referral and its CONFIRMED
+  summary, the psychologist (assigned / asked n days ago / declined and why /
+  none), consent, custodian texts (`custodian.status_of`, never the name or
+  number), the newest survey; every care gap a row already says is
+  dropped, for both role lists (the ISA's consent gap is `consent_missing`
+  from `compute_alerts`, a SW's `no_signed_consent`; a guard test fails on a
+  gap type nobody has decided). `/assistant/capabilities/` says `brief: "clinical" | "case"`.
+- **A SW's Case brief has a written part** (10 Oct 2026, job type
+  `case_brief`, assistant 0007): `POST /api/assistant/case-brief/child/<id>/`,
+  the record's SW only - the ISA and psychologists get 403 before `gate()`, so
+  nothing reaches the model. The prompt (`build_case_brief_prompt`) is built
+  from the SAME dict the facts panel shows, static prefix first, dates in
+  words worked out in Python; it never carries remarks, self-report words,
+  case study text, an unconfirmed summary, the custodian's name or number, or
+  the psychologist's name (only the decline reason, cut to 200 characters,
+  and the CONFIRMED referral summary, ~1,500). `latest/` serves today's draft
+  only while `AssistantJob.prompt_sha` equals the prompt built now, so a new
+  next session, consent or referral makes it stale; a second booking that
+  does not change the next session does not. Hosted: never offered
+  (`case_brief_writing` false). The access log selects job types from
+  `ACCESS_LOGGED_JOB_TYPES`, and a guard test fails on a `TYPE_CHOICES` entry
+  that is neither logged nor in `NOT_A_CHILD_READ` - the "nothing checks
+  this" gap below, closed for job types.
+- **`ai_eval --feature case_brief`** (10 children x 3 reps by default; the
+  older features keep 3 x 2) counts invented names, invented dates and
+  invented numbers (scored against the FACTS part of the prompt - the
+  instructions contain digits), over 150 words, repeats, drift. It prints 5
+  drafts in full and ends with one verdict line: PASS needs zero invented
+  names and dates over at least 30 drafts from at least 10 children; fewer
+  than 10 children prints counts, never rates. **`invented_names` cannot see a
+  name at the start of a sentence or line** (it needs a lowercase word before
+  the capital) - the printed samples are the control for that, so read them.
+  Not yet run on the owner's PC as of 10 Oct 2026.
+- **The ISA can see who had the model read a child**: the Assistant log tab
+  on the child's page, administrators only (`ChildAccessLogView`). Briefs,
+  report and referral summaries, the self-report check; who, when, what kind,
+  status, never the text. `AssistantJob.child` (assistant 0006, nullable,
+  backfilled from `input_ref`) says whose record it was, because a summary's
+  `input_ref` names a document and documents are hard-deleted. **A new feature
+  that sends a child's record to the model must pass `run_job(..., child=)`**,
+  or its reads silently stay out of the log; nothing checks this
+  automatically. A check refused before anything was sent (hosted, or the
+  assistant switched off) is not attributed: a read that never happened is
+  not a read.
 - **A brief belongs to whoever drafted it** (27 Sep 2026). It is written from
   what its requester may see, so `LatestBriefView` and prefetch look up
   today's brief by user AND child. Keyed by child alone it handed an ISA's
@@ -465,7 +641,13 @@ Settings, no per-feature flags.
 - **`get_ai_client()` refuses a hosted model unless the caller passes
   `allow_hosted=True`.** Only the chatbot, the two administrator probes,
   `ai_check` and `ai_eval` do. Everything else drafts from case records and
-  answers 503 on a hosted deployment. Audit and next steps:
+  answers 503 on a hosted deployment. There `/api/assistant/capabilities/`
+  says `drafting: false` (`services.drafting_available()`, the same
+  condition), and the screens hide Polish, both AI summary buttons and the
+  census narrative card (`useAssistant().drafting`). The brief button stays and
+  shows its facts with one line saying a written brief is not available. The
+  flag fails open until the answer arrives; the server stays the authority.
+  Audit and next steps:
   `docs/superpowers/specs/2026-09-27-assistant-role-access-design.md`.
 
 ## The chatbot
@@ -636,6 +818,108 @@ none of the real ones has been seen.
   fell in step with the seeder's round-robin and each psychologist saw one.
   Exactly one carries another child's name, for the check to find.
 
+## The case study (the SCSR on the child's record)
+
+Built from 8 Oct 2026; design in
+`docs/superpowers/specs/2026-10-07-scsr-parts-2-5-design.md`. The owner's aim:
+the Social Case Study Report "digitally on the child record module" - a Case
+study tab on the child's page that prints the SCSR. No Word export.
+App `case_study` (never `adoption`, see "Removed").
+
+- **Block A is every child's; B and C are adoptions'** (owner, 10 Oct 2026).
+  The child's background - referral, description, medical history,
+  immunizations, development, birth family, surrender or abandonment - is the
+  child's profile whatever the case type, so the tab shows for Foster Care and
+  the rest with block A only. `sections.applies()` gates B and C on
+  `case_type == "Adoption"` (mirrored in `scsr.js appliesTo`); completeness,
+  Final and the snapshot all read `applies`, so a non-adoption Final is block
+  A. Moving a record away from Adoption HIDES B and C - their rows stay and
+  come back if it moves back. Reopen works on any active record, or a final
+  made as an adoption would be stuck after a case-type change. A
+  non-adoption record reads "The Child" (not "/Adoptee"), shows "Case type" in
+  Part I, and prints block A without the adoption subtitle; a final copy
+  prints by the case type it was MADE with.
+
+- **Numbering is the template's**: A (the child, I-V), B (the PAPs, I-XVII),
+  C (placement, I-VI), roman numbers restarting in each block. Part I is the
+  record form, read live and frozen at Final; everything else is one row per
+  section (`CaseStudySection`, unique on case study + key, JSON value).
+- **The catalogue is `case_study/sections.py` and `config/scsr.js`**, pinned
+  by `test_catalogue.py` the way `test_intake.py` pins caseData.js. **A key is
+  never renamed or reused**: `ALL_KEYS_EVER` keeps every one ever issued. A
+  JSON key rename is the 0020 trap in another form - stored text would stop
+  matching any section.
+- **Access lives in `case_study/access.py`, not the clinical base class**,
+  where "Administrators see everything" would hand IT support every case
+  study, the adoptive parents' incomes included. The record's SW reads and
+  writes; the ASSIGNED psychologist reads block A, drafts included (a pending
+  one is nobody), minus the psychological-evaluation highlights where the
+  history is not carried to them - otherwise the previous psychologist's
+  findings reach them through the SW's text; the ISA gets status only (exists,
+  state, holder, "(inactive)", how much is missing) - never text, never print;
+  anyone else 404. Not registered in Django admin, where the seeded ISA is a
+  superuser. No chatbot tool, prompt, export of counts or duplicate check
+  reads it.
+- **Each section saves on its own with the version the writer saw**: a
+  conditional UPDATE, 409 with the saved text on a stale version. Sessions are
+  per tab, so the commonest conflict is the same person in two tabs.
+- **Not applicable hides, never deletes**: a ticked box keeps its text and
+  unticking brings it back; a PUT without a `value` key leaves the text alone.
+  The psychologist's read sends null for a ticked box.
+- **Pre-fills are offered, never saved**: referral source and reason, medical
+  notes, and the latest psychological report's summary ONLY if confirmed.
+- **Ages are as of Date prepared**, not today. Domestic Relative asks whether
+  the PAPs had the child more than two years (pre-answered from the placement
+  date; unknown when there is none); a yes hides Placement History, as for
+  Adult.
+- **Nobody in the system approves.** The ISA is IT support, not the Head of
+  Office. The SW marks the case study **Final** and the printed copy is signed
+  on paper. The Head of Office's name comes from `AgencyProfile` (Settings,
+  ISA-edited - the card that used to be a fake "RCPC" field) and the SW's PRC
+  license number and validity from their own profile (`UserProfile`, Staff and
+  Psychologists; an administrator has none).
+- **Final writes an immutable copy** (`case_study/finalize.py`, the one path
+  the endpoint AND the demo seeder use, so a seeded final can only exist if it
+  passed `missing_sections()`): Part I as of Date prepared, every section that
+  applies, the preparer's license and the agency details OF THAT DAY. A
+  reprint shows what was signed even after a license renewal or a record edit.
+  A ticked Not applicable box is copied without its hidden text. Final is a
+  conditional update on `status=draft` AND the `updated_at` the screen saw, so
+  a double click or another tab's newer save is a 409, never a final of text
+  nobody reviewed; a box save that loses that race is rolled back. The box-save
+  response carries `case_study_updated_at` for that reason.
+- **Reopen** puts it back to draft; every final stays on file ("Finals on
+  file", each printable). A closed case cannot be reopened - its finals still
+  print. Finalized is addressed to the ASSIGNED psychologist
+  (a pending one is told nothing); Reopened to nobody; neither carries text.
+- **Demo data**: about a third of the active Adoption children get a draft and
+  a few others a final (`case_study/demo_case_studies.py`). The export blanks
+  the preparer's license and every phone, email and employer address in the
+  PAP table, live and in snapshots, so the fixture file never carries them;
+  the import re-homes user fields and the snapshot's preparer to the child's
+  SW and takes the agency block from the importing machine's `AgencyProfile`.
+- **The screen** (`components/caseStudy/`): one editor per section kind, so
+  all three blocks are editable. Each box saves with `useConfirm()`; "Save
+  all" confirms once and stops at the first refusal. Unsaved typing is kept in
+  `localStorage` under `nacc-draft:case-study:<user>:<child>:<key>` and offered
+  back; logout clears the `nacc-draft:` prefix. On a 409 the SW chooses "Load
+  the saved version" or "Keep mine" - neither text is lost without a choice.
+- **Print follows the tab**: on the Case study tab the page's Print button
+  prints the SCSR (`ScsrPrint`) - the newest final's copy when the case study
+  is final, the saved draft marked DRAFT otherwise (asking first when
+  something is unsaved); anywhere else it prints the psychological report.
+  Only the SW gets it.
+- **Every print used to come out ONE PAGE long** (found 8 Oct 2026). The app
+  shell is a fixed 100vh with hidden overflow so only `<main>` scrolls, and on
+  paper that clipped everything after page one - the psychological report had
+  been losing its recommendations and signature block. index.css now lets
+  `#root`, `.racco-shell` and `.racco-shell-row` go to auto height in print.
+  Check a printed page COUNT, not just the first page.
+- `/children?edit=<id>` opens the record form for that child ("Edit on the
+  record" from Part I). Activity reads "Started a case study for X" and opens
+  `?tab=casestudy`; "Finalized ..." and "Reopened ..." the same way
+  (`ActivityLog` actions `finalized` and `reopened`, activity 0005).
+
 ## The record form (Add Record)
 
 Rebuilt 24 Sep 2026 at the owner's request: Identity and Case merged into one
@@ -674,7 +958,7 @@ middle name, a date found, and every question that applies made mandatory.
   server's own rule (`refusedIfBlank` mirrors `_require`; `DYNAMIC` is pinned
   in test_intake). The custodian is never asked of a psychologist, who cannot
   record one. The fullname-only create path the older tests use stays exempt.
-- **The form checks what the server checks, as it is typed**: the 5-17 age,
+- **The form checks what the server checks, as it is typed**: the age,
   dates not in the future or before the birth, the category pairing. A moved
   birth date is checked against the dates already recorded that the case
   shows - server and form alike - but not against a hidden older date nobody
@@ -690,9 +974,10 @@ middle name, a date found, and every question that applies made mandatory.
   kept as written so no existing name changes shape on its next save.
 - **Renamed values were migrated** (children 0021): Orphan -> Orphaned, N/A ->
   Unknown, and the demo seeder's misspelt "Stepparent" -> "Step-parent".
-  **Retired values were not**: birth status "Child", SIBRA, ICA Relative, and
-  the seeder's "Domestic"/"Relative" stay on the records that hold them, shown
-  as "(no longer offered)". The serializer accepts them unchanged and refuses
+  **Retired values were not**: the seeder's "Domestic"/"Relative" stay on the
+  records that hold them, shown as "(no longer offered)". (Birth status
+  "Child", SIBRA and ICA Relative were retired the same way on 24 Sep and are
+  offered again since 7 Oct - see the SCSR bullet below.) The serializer accepts them unchanged and refuses
   them as a new pick - the same change-only rule as the old categories. The
   record's own value stays in its list for the whole edit (`withRetired` is
   passed `form._record`'s), so a different pick can be taken back; it used to
@@ -707,8 +992,49 @@ middle name, a date found, and every question that applies made mandatory.
 - **Educational Placement moved to Child's Profile and is required** there
   ("Not in school" is an answer); **Referral Source is a pick** from RACCO /
   LGU / CCA / RCF (children 0023), with typed text on older records kept by
-  the same change-only rule; **Current Whereabouts left the form and every
-  screen** (owner, 24 Sep 2026) - the column and what it holds are kept.
+  the same change-only rule. Current Whereabouts left the form on 24 Sep and
+  came back on 7 Oct (below).
+- **Part I of the Social Case Study Report is the model for the form**
+  (owner, 7 Oct 2026; the blank NACC template is
+  `docs/agency-forms/SCSR_Non-Relative_Regular_Placement.docx`). The SCSR is
+  the adoption case report written after the PAPA or supervised trial
+  custody; only its Part I (Identifying Information) is intake. Parts II-V
+  (background, family, the prospective adoptive parents, placement,
+  assessment) are a separate module still to be designed, not form fields.
+  - Birth status "Child" and adoption types SIBRA and ICA Relative are
+    offered again, in the SCSR's order, with "Relative (Without 2-yr
+    custody)" kept and "Orphaned" kept as written (owner's choice). Only a
+    Regular adoption records the Date of Admission, so SIBRA and ICA
+    Relative take the Date of Placement.
+  - **Current Whereabouts** (`current_placement`) is back on Child's Profile,
+    the record drawer and the child's page, and always asked.
+  - **Health Condition** (Healthy / With special needs) is always asked;
+    "Specify the special needs" is required only for special needs
+    (`intake.required_fields(..., health_condition)`, mirrored in
+    `requiredFields`), and the server blanks it for any other answer.
+  - Both are new questions, so records from before keep their blanks through
+    an unrelated edit, by the usual edit rule.
+  - **Alias** is optional and shown only for the Without Known Parents
+    category (the SCSR: "the given first and last name and alias"). Changing
+    the category hides it, never deletes it; the server never clears it.
+  - **Age follows the adoption type** (7 Oct 2026): 5-17 for every record
+    except an Adoption of type Adult, which is 18 or older with no upper
+    limit. One rule, `intake.age_range(case_type, type_of_adoption)`,
+    mirrored in `caseData.js ageRange` and pinned by `TheAgeRuleTest`. It is
+    judged where the birth date is set and again where the case type or
+    adoption type changes (`ChildSerializer._check_age`); an unchanged birth
+    date on an unrelated edit is not. The refusal sits on `birth_date`, and
+    `CHECKED_AGAINST` clears it when either type changes.
+  - **Legal Status has an optional "Date Issued"** (`legal_status_date`,
+    children 0030; the SCSR asks for the CDCLAA issuance date). It is shown
+    only once a status is picked, refused in the future or before the birth
+    (moving the birth date past it is refused too), and cleared by the server
+    when the status is blank.
+  - The birth date reads "Date of Birth or Given Date of Birth", the SCSR's
+    words, on the form and the printed reports.
+  - Children 0029 is additive. `children/demo_profiles.py` gives demo
+    children a health condition and whereabouts, from `seed_demo_data` and
+    `import_demo_data` only.
 - **A rename cannot ride along with a deploy the old release survives.** On
   24 Sep the demo API's first deploy of 0020 failed on Render's side after the
   web had gone live; had the migration run first, the old API - still serving
@@ -716,6 +1042,54 @@ middle name, a date found, and every question that applies made mandatory.
   `middle_initial`. Replayed on PostgreSQL 16 it does exactly that. A manual
   redeploy of the same commit went through in two minutes. Prefer additive
   migrations (add, copy, drop later); widening a column, as 0022 does, is safe.
+
+## One child, one record
+
+Found 9 Oct 2026: the owner pressed Save Record again while the first save
+was still going, and the same child was added twice (C-0049 and C-0050), each
+with its own request to the psychologist. Three layers now, because each
+covers a hole the others leave:
+
+- **One save at a time** (`savingRef` in `Children.jsx save()`): from the press
+  until the confirm, the request, the referral upload and the end dialog are
+  over; the button reads "Saving…". A literal double click never got through
+  - the confirm dialog's backdrop takes the second click and cancels - the
+  window was pressing Save again DURING the request. The draft autosave stands
+  down while saving, or it rewrote the draft after a successful save and Add
+  Record offered the child back. Other create buttons with no busy state got
+  `useSingleFlight` (`utils/singleFlight.js`, a ref set before any await);
+  leave was the one the server would not have refused.
+- **The server recognises a submission it already saved**: each new-record
+  form carries a `crypto.randomUUID()` (`Child.intake_token`, children 0031,
+  unique), kept with the draft. A repeat answers 409 "already saved" with the
+  id only if the requester can see it, and a near-simultaneous pair is settled
+  by the unique column. Covers a lost response and a retry, not just a click.
+- **The same child cannot be added twice by any route**
+  (`children/duplicates.py`, POST only): same first name, last name AND birth
+  date as any record, active or closed, whoever holds it. Names compared
+  trimmed, case-folded and NFC-normalised in Python - SQLite's `iexact` folds
+  ASCII only and would call PEÑA and Peña two children. First and last name
+  alone are NOT enough: two children share common names. The refusals follow
+  the duplicate check's disclosure rules (no id for another SW's record).
+- **The ISA can remove a duplicate made by mistake**
+  (`POST /children/<id>/remove-duplicate/`, "Remove duplicate record…" in the
+  record drawer): both must match, the removed record's case number is typed
+  to confirm, and the record must hold nothing but what Add Record makes - its
+  referral files and any pending, withdrawn or declined request go with it (a
+  psychologist shown two identical requests declines one as a duplicate, and
+  a decline holds only a reason; only a still-pending one is notified); any
+  appointment, clinical record, case study, accepted request, assigned
+  psychologist or assistant job blocks it.
+  Every model with a FK to Child is named in `KEEPS_IT` or `TAKEN_ALONG`, and
+  a test reading `Child._meta.related_objects` fails on one that is not - a
+  new relation must be decided, never deleted along by default. Children
+  still have no delete otherwise.
+- **A name with a replacement character (U+FFFD) is refused** at sign-up, the
+  user form and a new record (`accounts/names.py`): a Latin-1 form-encoded body
+  (curl, PowerShell 5.1) turns Ñ into `%D1`, which Django decodes to U+FFFD,
+  and "PEÑAMORA" was stored as "PE�AMORA". A value a record already holds
+  passes unchanged; the ISA corrects it from Users. The code paths themselves
+  carry Ñ end to end (`accounts/tests/test_accented_names.py`).
 
 ## Each social worker's own records
 
@@ -763,6 +1137,29 @@ are unchanged (their assigned children).
 - **Dashboard is their own; Agency Summary stays agency-wide** (the owner's
   choice): the Summary holds counts with no names and mirrors the agency's own
   report form. The assistant answers a SW about their own records.
+- **Care gaps follow the role** (4 Oct 2026, `clinical/care_gaps.alerts_for`,
+  used by the Dashboard, `list_care_gaps`, the one-child summary and the brief
+  facts, so all four agree). A SW's: no case referral, no psychologist (a
+  pending request counts as asked for 7 days, then is a gap again; declined
+  or withdrawn is a gap at once), no signed consent, unread self-report
+  answers, and the two booking gaps, because booking is a SW's job. Not the
+  stalled pre-assessment or report due, which they cannot act on. Survey
+  unanswered (link sent, unanswered 7+ days, newest link only,
+  `SURVEY_UNANSWERED_DAYS`) was taken out on 4 Oct while a SW could not start
+  a survey, and is back since 5 Oct, when they can (next bullet). A gap
+  nobody can close is noise. Psychologists and the ISA keep `compute_alerts` unchanged; the ISA's
+  consent and pre-assessment gaps link to the child's page, not the
+  psychologist-only `/pre-assessment`.
+- **A SW starts a QR survey from their own child's page** (5 Oct 2026). The
+  self-report forms come from `GET /api/opinionnaire-invites/templates/?child=<id>`
+  (`clinical/views.py survey_templates_for`), NOT `/form-templates/`, which
+  stays Administrator/Psychologist-only because it shows every psychologist's
+  private templates. The list: active Self-Report (Government Form) templates
+  that are shared, the child's psychologist's, or the requester's own (the
+  ISA: any). Id and title only, for a child the requester can see and write.
+  Invite create refuses any template outside that same list, so the picker
+  and the refusal cannot drift. With none set up, a SW is told to ask the
+  ISA. `clinical/tests/test_survey_templates.py`.
 - **The calendar still shows every session**, other SWs' children as "C-0042 ·
   Ref. E. Pascua" (`scheduling/visibility.py`): booking needs the
   psychologist's real day. A SW acts only on their own children's sessions;
@@ -1004,8 +1401,20 @@ is not a system user; see "The custodian and their texts".
   gunicorn each worker had its own cache, so a code stored by one worker was
   "expired" to the next and the limits multiplied by the worker count.
 - `send_session_reminders` exits non-zero when any reminder was refused.
-  The sign-up email code (`accounts/email_verification.py`) is still in the
-  cache, with the same multi-worker weakness.
+  The sign-up email code moved to a database row for the same reason on
+  4 Oct 2026 (see "Getting an account").
+- **"No active sender name found" does not mean the account has none.** The
+  owner's live account, sender name approved, answered with it under HTTP 500
+  on 1 Oct 2026. It means the name SENT is not an Active name on the key's
+  account: unset, misspelt (exact match, capitals included), still pending,
+  or another account's key. Check the key reads `account/sendernames` and
+  says which; a sender error at any HTTP status gets that hint.
+- **The ISA has a profile page too** (1 Oct 2026). The Settings test text
+  goes to the caller's own verified number, and `/profile` used to admit
+  only Staff and Psychologists, so an administrator could never verify one
+  and the button could never work. The ISA sees the personal column only:
+  the right-hand column reads `/children/`, `/appointments/` and
+  `/activity/`, which for an administrator are the whole agency's.
 
 ## Role names on screen
 
@@ -1104,6 +1513,13 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   every boot). A refresh in that minute used to show a bare "Loading…" that
   read as broken; `ProtectedRoute`'s `WaitingForServer` now says the server is
   waking after 3 s and offers "Try again" after 75 s. Not a fault to debug.
+- **A deploy that times out on the health check is usually Render, not the
+  code.** It happened on 24 Sep and again on 5 Oct, both times on a deploy
+  that carried new migrations; each time a manual redeploy of the same commit
+  went through. The free instance runs migrate, `seed_psgc` and
+  `backfill_psgc` before Gunicorn answers, and that is close to the limit.
+  Redeploy once before debugging; if it fails again, the deploy log's last
+  `==>` line says which step is too slow.
 - **Cloudflare retires models** — `llama-3.1-8b` returns 410. Check
   `/api/assistant/model-health/` before assuming the code broke.
 
@@ -1136,9 +1552,26 @@ react-big-calendar's own `role="rowgroup"` markup rather than ours.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 855 tests, ~16 min
+cd backend && .venv/Scripts/python.exe manage.py test   # 2,508 tests, ~1 min
 cd frontend && npm run lint && npm run build
 ```
+
+**Tests hash passwords with MD5** (`settings.py`, only `if _TESTING`; 10 Oct
+2026). PBKDF2 at Django's default costs ~0.22 s a hash and the suite hashes
+thousands in setUp: the full run went from ~23 minutes to ~50 seconds.
+Production hashing is unchanged - check `manage.py shell` still reports
+PBKDF2 if this is ever touched. Nothing asserts a hash prefix; a test that
+genuinely needs PBKDF2 sets it with `override_settings`.
+
+**A test never reads the wall clock** (4 Oct 2026). Three failed only between
+11 PM and midnight, Manila time (`TIME_ZONE`), and a run that straddles that
+window fails them. A late-evening availability window, "now minus five
+minutes" as today, and `next_weekday()` disagreeing with itself across one
+morning. A test that needs a time pins `django.utils.timezone.now` with
+`patch` (`localtime`/`localdate` follow it). To prove a test does not depend
+on the clock, run it with the clock faked to Sat 23:58, Sun 00:02 and Wed
+09:30. A faked-clock runner must keep "test" in `sys.argv`, or settings.py
+turns throttling on and ~43 unrelated assistant tests fail.
 
 **`npm run build` is not enough on its own.** Vite only reports syntax errors —
 a reference to a deleted variable, or a hook left below an early return, builds

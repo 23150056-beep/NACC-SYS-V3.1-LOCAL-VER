@@ -4,8 +4,8 @@ from accounts.token_auth import PasswordBoundTokenRefreshView
 from accounts.views import (
     LoginView, MeView, ChangePasswordView, UserViewSet, RoleListView, PsychologistListView,
     GoogleLoginView, EmailConfigTestView, GoogleAuthConfigView, SignupView,
-    VerifySignupEmailView,
-    MyProfileView, MyPhoneView, SmsConfigTestView,
+    VerifySignupEmailView, ResendSignupEmailCodeView,
+    MyProfileView, MyPhoneView, SmsConfigTestView, AgencyProfileView,
 )
 
 router = DefaultRouter()
@@ -16,6 +16,8 @@ urlpatterns = [
     path("auth/signup/", SignupView.as_view(), name="signup"),
     path("auth/signup/verify-email/", VerifySignupEmailView.as_view(),
          name="signup-verify-email"),
+    path("auth/signup/verify-email/resend/", ResendSignupEmailCodeView.as_view(),
+         name="signup-verify-email-resend"),
     # Google Sign-In (staff and psychologists only — see accounts/google_auth.py)
     path("auth/google/", GoogleLoginView.as_view(), name="google-login"),
     path("auth/google/config/", GoogleAuthConfigView.as_view(), name="google-config"),
@@ -27,6 +29,8 @@ urlpatterns = [
     path("auth/me/profile/", MyProfileView.as_view(), name="my-profile"),
     # Your own mobile number and its verification. No id, same rule.
     path("auth/me/phone/", MyPhoneView.as_view(), name="my-phone"),
+    # The agency's name, address and head of office. Anyone reads, the ISA writes.
+    path("agency-profile/", AgencyProfileView.as_view(), name="agency-profile"),
     path("auth/change-password/", ChangePasswordView.as_view(), name="change-password"),
     path("roles/", RoleListView.as_view(), name="role-list"),
     path("psychologists/", PsychologistListView.as_view(), name="psychologists"),

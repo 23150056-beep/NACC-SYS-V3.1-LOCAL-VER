@@ -216,18 +216,24 @@ SMS_API_KEY=<the key from your Semaphore dashboard>
 SMS_SENDER_NAME=NACC
 ```
 
-`SMS_SENDER_NAME` must be a name Semaphore has **approved** for your account;
-leave it out to use their default sender. Leave `SMS_ENDPOINT` unset.
+`SMS_SENDER_NAME` must be a sender name that is **Active** on the same
+Semaphore account the key comes from, spelt exactly as Semaphore shows it,
+capitals included. Leave it out and Semaphore may refuse every message with
+"No active sender name found". Leave `SMS_ENDPOINT` unset.
 
 **Restart the API window**, then, in this order:
 
 1. **Settings → Text messages → Check the key.** Asks Semaphore for the
-   account and balance and sends nothing. It fails — rather than printing a
-   zero under a green tick — when the account is inactive or has no credit.
-   Semaphore allows only one or two of these a minute; a second press can
-   answer "wait a minute".
-2. **My Profile → Mobile number.** Add your own number and enter the code
-   that arrives. Only a verified number ever receives anything.
+   account, the balance and the sender names, and sends nothing. It fails —
+   rather than printing a zero under a green tick — when the account is
+   inactive, has no credit, or `SMS_SENDER_NAME` is not one of its Active
+   sender names; it lists the names it found and their status. Semaphore
+   allows only one or two of these a minute; a second press can answer
+   "wait a minute".
+2. **Your profile → Mobile number**: the account menu at the top right, then
+   **See your profile**. Every role has it, the ISA included. Add your own
+   number and enter the code that arrives. Only a verified number ever
+   receives anything.
 3. **Settings → Text messages → Send a test text.** Goes to your own verified
    number and prints exactly what Semaphore replied, including its message id.
 
@@ -299,6 +305,24 @@ and a closed case is never texted. What each text costs is below.
   Semaphore silently discards those — accepted, not sent, nothing said.
 - **No links.** Carriers block SMS containing a URL after the gateway has
   accepted and billed it. The messages say "Sign in" instead.
+
+### "No active sender name found"
+
+Semaphore's wording, and it can appear even when your sender name IS approved.
+It means the name sent with the message is not an **Active** sender name on the
+account the API key belongs to. In practice, one of:
+
+- `SMS_SENDER_NAME` is not set, so no name was sent at all.
+- It is spelt differently from the dashboard — `Nacc` is not `NACC`.
+- The name is approved but not yet **Active** in Semaphore's Sender Names list
+  (still Pending, or awaiting activation).
+- The API key is from a different Semaphore account or sub-account than the
+  one holding the name.
+- The API window was not restarted after `.env` was changed.
+
+**Check the key** tells you which: it lists every sender name on the key's
+account with its status, and says whether `SMS_SENDER_NAME` matches an active
+one.
 
 ## Starting over
 

@@ -8,6 +8,32 @@ from the same map. frontend/src/config/caseData.js holds the browser's copy;
 children/tests/test_intake.py pins the two together.
 """
 
+HEALTH_CONDITIONS = ["Healthy", "With special needs"]
+SPECIAL_NEEDS = "With special needs"
+# Alias is asked of a child without known parents only (the SCSR, Part I).
+ALIAS_CATEGORY = "Without Known Parents"
+
+# The age the agency serves. A child is 5-17; an Adult adoption (the SCSR
+# covers it) is for a person of 18 or older, with no upper limit.
+ADULT_ADOPTION = "Adult"
+CHILD_AGES = (5, 17)
+ADULT_AGES = (18, None)
+
+
+def age_range(case_type, type_of_adoption=""):
+    """(youngest, oldest) a record may be born into; oldest is None for no limit."""
+    if case_type == "Adoption" and type_of_adoption == ADULT_ADOPTION:
+        return ADULT_AGES
+    return CHILD_AGES
+
+
+def age_refusal(case_type, type_of_adoption=""):
+    low, high = age_range(case_type, type_of_adoption)
+    if high is None:
+        return f"The person must be {low} or older for an Adult adoption."
+    return f"The child must be between {low} and {high} years old."
+
+
 ADMISSION = "date_of_admission"
 PLACEMENT = "date_of_placement_to_custodian"
 
@@ -83,7 +109,8 @@ def intake_date(child):
 ALWAYS_REQUIRED = [
     "case_category", "case_type",
     "first_name", "last_name", "birth_date", "gender",
-    "place_of_birth_or_found", "birth_status", "education_level",
+    "place_of_birth_or_found", "birth_status", "health_condition",
+    "education_level", "current_placement",
     # In the form's order, which is what the "Still needed" line lists them in:
     # province first, because the municipality and barangay lists follow it.
     "house_number", "street", "province", "municipality", "barangay",
@@ -94,8 +121,11 @@ ALWAYS_REQUIRED = [
 DYNAMIC = {"custodian_name", "type_of_adoption", ADMISSION, PLACEMENT}
 
 
-def required_fields(case_type, type_of_adoption=""):
+def required_fields(case_type, type_of_adoption="", health_condition=""):
     fields = list(ALWAYS_REQUIRED) + list(CASE_TYPE_FIELDS.get(case_type, []))
+    # What the special needs are, once "With special needs" is the answer.
+    if health_condition == SPECIAL_NEEDS:
+        fields.append("special_needs")
     date = date_field_for(case_type, type_of_adoption)
     if date:
         fields.append(date)

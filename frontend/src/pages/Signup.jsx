@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, Input, PasswordInput, FormField, Alert, Icon, ROLE_META, roleLabel } from '../ui';
 import AuthLayout, { AuthLink } from '../components/AuthLayout';
 import GoogleSignInButton from '../components/GoogleSignInButton';
@@ -24,6 +24,11 @@ import api from '../api/client';
 // administrator, so a public queue for it is not a queue but a target. The
 // server refuses it too — this list is the explanation, not the enforcement.
 const REQUESTABLE = ['Staff', 'Psychologist'];
+
+// How long "Send a new code" stays disabled. The server allows one a minute
+// (accounts/email_verification.py RESEND_SECONDS), and the sign-up's own mail
+// counts as the first, so asking sooner would only be told it had been sent.
+const RESEND_WAIT_SECONDS = 60;
 
 // Mirrors Django's default validators so the form can say what is wrong
 // before a round trip. The server remains the authority; this only spares
@@ -52,6 +57,7 @@ export default function Signup() {
   const navigate = useNavigate();
   const confirm = useConfirm();
   const { loginWithGoogle } = useAuth();
+  const [searchParams] = useSearchParams();
   const [form, setForm] = useState({
     first_name: '', last_name: '', email: '', password: '',
   });
@@ -74,6 +80,25 @@ export default function Signup() {
   const [codeError, setCodeError] = useState('');
   const [verified, setVerified] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  // Only the typed route mails a code. A Google request arrives verified, so
+  // it must not be shown the confirm step - there is no code for it.
+  const [needsCode, setNeedsCode] = useState(false);
+  const [resendNote, setResendNote] = useState('');
+  const [resending, setResending] = useState(false);
+  const [resendWait, setResendWait] = useState(0);
+  // The way back to the confirm step for somebody who is not in the tab that
+  // signed up: they closed it, or an administrator corrected their address.
+  // The confirm step above is otherwise reached only from this tab's own
+  // memory of having just applied. /login links here with ?confirm=1.
+  const [recovering, setRecovering] = useState(searchParams.get('confirm') === '1');
+
+  // Counts the "Send a new code" lock down once a second. Above every early
+  // return below, as a hook has to be.
+  useEffect(() => {
+    if (resendWait <= 0) return undefined;
+    const t = setTimeout(() => setResendWait((n) => n - 1), 1000);
+    return () => clearTimeout(t);
+  }, [resendWait]);
 
   const set = (k) => (e) => {
     const value = k === 'password' ? e.target.value.replace(/\s/g, '') : e.target.value;
@@ -102,6 +127,8 @@ export default function Signup() {
       // requested_role is optional server-side. An unanswered question is
       // sent as blank and recorded as "none stated" rather than guessed at.
       await api.post('/auth/signup/', { ...form, requested_role: role || '' });
+      setNeedsCode(true);
+      setResendWait(RESEND_WAIT_SECONDS);
       setDone(true);
     } catch (err) {
       const data = err.response?.data;
@@ -151,6 +178,9 @@ export default function Signup() {
     try {
       await api.post('/auth/signup/verify-email/', { email: form.email, code });
       setVerified(true);
+      // Somebody who came back through "Confirm your email" never saw the
+      // sent-and-waiting screen, which is where a confirmed address belongs.
+      setDone(true);
     } catch (err) {
       setCodeError(err.response?.data?.detail
         || 'That code is not right, or it has expired.');
@@ -159,7 +189,59 @@ export default function Signup() {
     }
   };
 
-  if (done && !verified) {
+  // Asks for another code. The server answers 202 with one sentence whatever
+  // the address and whatever it did - it will not say whether this address has
+  // applied - so that sentence is shown as it comes, and the button waits out
+  // the minute either way.
+  const resend = async () => {
+    if (resending || resendWait > 0) return;
+    setCodeError('');
+    setResendNote('');
+    setResending(true);
+    try {
+      const { data } = await api.post('/auth/signup/verify-email/resend/', { email: form.email });
+      setResendNote(data?.detail || 'If that address has a request waiting to be confirmed, a code has been sent to it.');
+    } catch (err) {
+      setResendNote(err.response?.data?.detail || 'Could not ask for a new code. Please try again in a minute.');
+    } finally {
+      setResending(false);
+      setResendWait(RESEND_WAIT_SECONDS);
+    }
+  };
+
+  // Already applied, and asking for the confirm step by address. The server
+  // never says whether an address has applied, so this only moves on; a wrong
+  // address shows up as codes that never work.
+  if (recovering && !needsCode) {
+    return (
+      <AuthLayout
+        title="Confirm your email"
+        heading="Confirm your email"
+        subheading="Already asked for access? Enter the address you used."
+        footer={<button type="button" onClick={() => setRecovering(false)}
+                        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                                 fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 700,
+                                 color: 'var(--blue-600)' }}>
+          &larr; Back to request access
+        </button>}
+      >
+        <form onSubmit={(e) => { e.preventDefault(); if (form.email.trim()) { setCodeError(''); setNeedsCode(true); } }}
+              className="racco-auth-stack"
+              style={{ marginTop: 'clamp(12px, 2vh, 22px)', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <FormField label="Email you applied with">
+            <Input type="email" value={form.email} onChange={set('email')}
+                   placeholder="you@racco1.gov.ph" autoComplete="email"
+                   leading={<Icon name="mail" size={16} />} required />
+          </FormField>
+          <Button type="submit" variant="primary" fullWidth disabled={!form.email.trim()}>
+            Continue
+          </Button>
+        </form>
+      </AuthLayout>
+    );
+  }
+
+  if (needsCode && !verified) {
     return (
       <AuthLayout
         title="Confirm your email"
@@ -187,6 +269,23 @@ export default function Signup() {
           <Button type="submit" variant="primary" fullWidth disabled={verifying || code.length < 6}>
             {verifying ? 'Checking…' : 'Confirm my email'}
           </Button>
+          <Button type="button" variant="secondary" fullWidth
+                  disabled={resending || resendWait > 0} onClick={resend}>
+            {resending ? 'Sending…'
+              : resendWait > 0 ? `Send a new code (${resendWait}s)` : 'Send a new code'}
+          </Button>
+          {resendNote && (
+            <div role="status" aria-live="polite">
+              <Alert tone="info" icon={<Icon name="mail" size={18} />}>{resendNote}</Alert>
+            </div>
+          )}
+          <button type="button"
+                  onClick={() => { setNeedsCode(false); setRecovering(true); setCode(''); setCodeError(''); setResendNote(''); }}
+                  style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                           fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 700,
+                           color: 'var(--blue-600)', alignSelf: 'center' }}>
+            Not your address? Change it
+          </button>
         </form>
       </AuthLayout>
     );
@@ -369,6 +468,12 @@ export default function Signup() {
           This system holds children&rsquo;s records. Requests are reviewed before
           any access is granted.
         </div>
+        <button type="button" onClick={() => setRecovering(true)}
+                style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
+                         fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 700,
+                         color: 'var(--blue-600)', alignSelf: 'center' }}>
+          Already asked for access? Confirm your email
+        </button>
       </div>
     </AuthLayout>
   );

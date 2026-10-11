@@ -61,13 +61,20 @@ class Child(models.Model):
     ]
 
     # New fields below match the agency's official "I. Identifying
-    # Information" intake form (2026-07). "N/A" became "Unknown" and "Child"
-    # was retired on 24 Sep 2026; a record still holding "Child" keeps it
-    # (see ChildSerializer._current_or_unchanged).
+    # Information" intake form (2026-07), which the agency's Social Case Study
+    # Report (SCSR) repeats as its Part I. "N/A" became "Unknown" on 24 Sep
+    # 2026; "Child" was retired that day and offered again on 7 Oct 2026, the
+    # SCSR listing it (owner). "Unknown" stays.
     BIRTH_STATUS_CHOICES = [
         ("Marital", "Marital"),
         ("Non-Marital", "Non-Marital"),
+        ("Child", "Child"),
         ("Unknown", "Unknown"),
+    ]
+    # The SCSR's "Health Condition (healthy or with special needs, specify)".
+    HEALTH_CONDITION_CHOICES = [
+        ("Healthy", "Healthy"),
+        ("With special needs", "With special needs"),
     ]
     LEGAL_STATUS_CHOICES = [
         ("With Issued CDCLAA", "With Issued CDCLAA"),
@@ -81,14 +88,17 @@ class Child(models.Model):
         ("CCA", "CCA"),
         ("RCF", "RCF"),
     ]
-    # SIBRA and ICA Relative were retired on 24 Sep 2026, the same way as
-    # birth status "Child": kept on records that hold them, no longer offered.
+    # In the SCSR's order. SIBRA and ICA Relative were retired on 24 Sep 2026
+    # and offered again on 7 Oct 2026 (owner); "Relative (Without 2-yr
+    # custody)" is the agency's own addition and stays.
     TYPE_OF_ADOPTION_CHOICES = [
         ("Regular", "Regular"),
         ("Domestic Relative", "Domestic Relative"),
         ("Relative (Without 2-yr custody)", "Relative (Without 2-yr custody)"),
         ("Step-parent", "Step-parent"),
         ("Adult", "Adult"),
+        ("SIBRA", "SIBRA"),
+        ("ICA Relative", "ICA Relative"),
         ("IP", "IP"),
         ("Foster-Adopt", "Foster-Adopt"),
     ]
@@ -171,6 +181,9 @@ class Child(models.Model):
     place_of_birth_or_found = models.CharField(max_length=150, blank=True)
     birth_status = models.CharField(max_length=20, blank=True, choices=BIRTH_STATUS_CHOICES)
     legal_status = models.CharField(max_length=50, blank=True, choices=LEGAL_STATUS_CHOICES)
+    # When that status was issued (the SCSR asks for the CDCLAA's date).
+    # Optional, and blank whenever there is no legal status.
+    legal_status_date = models.DateField(null=True, blank=True)
     date_of_admission = models.DateField(null=True, blank=True)
     date_of_placement_to_custodian = models.DateField(null=True, blank=True)
     type_of_adoption = models.CharField(max_length=50, blank=True, choices=TYPE_OF_ADOPTION_CHOICES)
@@ -188,12 +201,31 @@ class Child(models.Model):
     # since 24 Sep 2026. "Not in school" is an answer.
     education_level = models.CharField(max_length=100, blank=True)
     # "Current Whereabouts". Taken off the form and every screen on 24 Sep
-    # 2026 at the owner's request; what was recorded is kept, not deleted.
+    # 2026, and asked again from 7 Oct 2026 (owner), as the SCSR does; what was
+    # recorded in between was kept, so it shows again.
     current_placement = models.CharField(max_length=150, blank=True)
+    # The SCSR's Health Condition, and what the special needs are when there
+    # are any (children/intake.py: required with "With special needs", cleared
+    # otherwise).
+    health_condition = models.CharField(
+        max_length=30, blank=True, choices=HEALTH_CONDITION_CHOICES)
+    special_needs = models.CharField(max_length=300, blank=True)
+    # Beside the name, for a child without known parents: the SCSR asks for the
+    # given first and last name "and alias, if applicable". The form shows it
+    # for that category only; a value saved stays if the category changes.
+    alias = models.CharField(max_length=150, blank=True)
     medical_notes = models.TextField(blank=True)
     # Free-text recommendations + fields not part of the agency's intake
     # interview live under the "Recommendation" section in the UI.
     recommendation = models.TextField(blank=True)
+    # Which submission of Add Record made this row (children/duplicates.py).
+    # The form makes one token when it opens and sends it with every attempt
+    # to save, so the same submission arriving twice - a double click, or a
+    # retry after a response that never came back - is recognised instead of
+    # adding the child twice. Null for every record made any other way, and
+    # unique, which is what settles two requests that arrive together.
+    intake_token = models.CharField(
+        max_length=64, null=True, blank=True, unique=True, editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

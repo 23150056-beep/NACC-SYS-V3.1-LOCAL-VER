@@ -44,9 +44,9 @@ import Survey from './pages/Survey';
 function Shell({ children }) {
   const layout = useLayout();
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-app)', overflow: 'hidden' }}>
+    <div className="racco-shell" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-app)', overflow: 'hidden' }}>
       <AppHeader />
-      <div style={{ flex: 1, minHeight: 0, display: 'flex', gap: layout.gap, padding: layout.pad, overflow: 'hidden' }}>
+      <div className="racco-shell-row" style={{ flex: 1, minHeight: 0, display: 'flex', gap: layout.gap, padding: layout.pad, overflow: 'hidden' }}>
         {layout.leftRailOn && <Sidebar />}
         <main className="racco-scroll" style={{ flex: 1, minWidth: 0, overflowX: 'hidden', overflowY: 'auto', paddingRight: 2 }}>
           {children}
@@ -92,8 +92,10 @@ export default function App() {
           <Route path="/reports/summary" element={<ProtectedRoute roles={['Administrator', 'Staff']}><Shell><AgencySummary /></Shell></ProtectedRoute>} />
           <Route path="/users" element={<ProtectedRoute roles={['Administrator']}><Shell><Users /></Shell></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute roles={['Administrator']}><Shell><Settings /></Shell></ProtectedRoute>} />
-          {/* Demo-only profile prototype for Social Worker / Psychologist. */}
-          <Route path="/profile" element={<ProtectedRoute roles={['Staff', 'Psychologist']}><Shell><MyProfile /></Shell></ProtectedRoute>} />
+          {/* Your own profile. The ISA gets it too (1 Oct 2026): it holds the
+              mobile number the Settings test text goes to, and without it an
+              administrator could never verify one. */}
+          <Route path="/profile" element={<ProtectedRoute roles={['Staff', 'Psychologist', 'Administrator']}><Shell><MyProfile /></Shell></ProtectedRoute>} />
           {/* Anything unmatched — a stale bookmark, a typo, a link to a page a
               role cannot reach — lands on sign-in rather than rendering nothing. */}
           <Route path="*" element={<Navigate to="/login" replace />} />

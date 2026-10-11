@@ -355,7 +355,7 @@ class DashboardView(generics.GenericAPIView):
 
     def get(self, request):
         from django.utils import timezone as tz
-        from clinical.care_gaps import compute_alerts
+        from clinical.care_gaps import alerts_for
         from scheduling.models import Appointment, AvailabilityBlock
 
         role = _role(request)
@@ -433,11 +433,13 @@ class DashboardView(generics.GenericAPIView):
         } for b in blocks
             if (b.date == tz.localdate()) or (b.date is None and b.weekday == today_weekday)]
 
+        today = tz.localdate()
+
         def age(c):
-            if not c.birth_date:
-                return None
-            days = (tz.localdate() - c.birth_date).days
-            return max(0, days // 365)
+            # A calendar age (reports.age_on). Days over 365 ran a few days
+            # ahead of every birthday, one leap day per four years.
+            years = reports.age_on(c.birth_date, today)
+            return None if years is None else max(0, years)
 
         # The same rule as the calendar (scheduling/visibility.py). Staff see
         # only their own children here, so it names every one of them.
@@ -473,5 +475,5 @@ class DashboardView(generics.GenericAPIView):
             "trend": agg["trend"][-6:],
             "per_psychologist": agg["per_psychologist"],
             "by_case_type": agg["by_case_type"],
-            "care_gaps": compute_alerts(scoped_children),
+            "care_gaps": alerts_for(request, scoped_children),
         })

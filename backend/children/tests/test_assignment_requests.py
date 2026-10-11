@@ -97,6 +97,8 @@ class NotInTheirRecordsUntilAcceptedTest(AssignmentBase):
             f"/api/appointments/next-slots/?child={self.child.id}").status_code)
         self.assertEqual(404, client.get(
             f"/api/availability/openings/?child={self.child.id}").status_code)
+        self.assertEqual(404, client.get(
+            f"/api/assistant/brief/child/{self.child.id}/facts/").status_code)
 
     def test_but_the_request_is_in_their_queue_with_what_they_need_to_decide(self):
         self._ask(self.psy)

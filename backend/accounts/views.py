@@ -9,6 +9,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.db import DatabaseError
 from django.db.models import Count, Q
 
 from accounts.google_auth import (
@@ -18,13 +19,13 @@ from accounts.google_auth import (
 from accounts.display import display_name
 from accounts import email_verification
 from accounts.lockout import client_ip, clear_failures, is_locked, register_failure
-from accounts.models import Role, UserProfile
+from accounts.models import AgencyProfile, Role, UserProfile
 from accounts import signup_limit
 from accounts.permissions import IsAdministrator, IsAdminOrStaff
 from children.models import Child
 from accounts.serializers import (
     LoginSerializer, UserSerializer, UserWriteSerializer, RoleSerializer,
-    ChangePasswordSerializer, UserProfileSerializer,
+    AgencyProfileSerializer, ChangePasswordSerializer, UserProfileSerializer,
     SignupSerializer,
 )
 from activity.models import ActivityLog
@@ -149,6 +150,13 @@ class GoogleLoginView(generics.GenericAPIView):
         }, status=status.HTTP_200_OK)
 
 
+def _posted(request, name):
+    """One field of a body that anyone on the internet may have sent: a JSON
+    list or a bare string has no .get(), and would otherwise be a 500."""
+    data = request.data
+    return data.get(name) if hasattr(data, "get") else None
+
+
 class VerifySignupEmailView(generics.GenericAPIView):
     """Confirm a typed address by the code mailed to it.
 
@@ -167,18 +175,62 @@ class VerifySignupEmailView(generics.GenericAPIView):
     serializer_class = None
 
     def post(self, request):
-        email = (request.data.get("email") or "").strip().lower()
-        ok, message = email_verification.confirm(email, request.data.get("code"))
+        ip = client_ip(request)
+        if signup_limit.confirm_is_throttled(ip):
+            # Over this address's allowance of wrong codes: the same refusal,
+            # without looking at the code.
+            return Response({"detail": email_verification.REFUSAL},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            ok, message = email_verification.confirm(
+                _posted(request, "email"), _posted(request, "code"))
+        except DatabaseError:
+            # A locked or briefly unreachable database must not read
+            # differently from any other refusal - a 500 here would tell a
+            # stranger that the address has a request.
+            logger.exception("Could not check a sign-up email code")
+            ok, message = False, email_verification.REFUSAL
         if not ok:
-            return Response({"detail": message}, status=status.HTTP_400_BAD_REQUEST)
-        user = User.objects.filter(email__iexact=email).first()
-        if user is None:
-            # A confirmed code with no row behind it: nothing to mark, and
-            # saying so would leak which addresses exist.
-            return Response({"detail": message}, status=status.HTTP_200_OK)
-        user.email_verified = True
-        user.save(update_fields=["email_verified", "updated_at"])
-        return Response({"detail": message}, status=status.HTTP_200_OK)
+            signup_limit.register_confirm_failure(ip)
+        return Response({"detail": message},
+                        status=status.HTTP_200_OK if ok
+                        else status.HTTP_400_BAD_REQUEST)
+
+
+class ResendSignupEmailCodeView(generics.GenericAPIView):
+    """Send a new confirmation code to a request that is still waiting for one.
+
+    The confirm screen tells an applicant to "Ask for a new one" when a code
+    is wrong or has expired, and with the guess limit shared by every worker a
+    third party can burn somebody's code on purpose - so without this door an
+    applicant is stuck for good: signing up again is refused, and approval
+    refuses an unconfirmed address.
+
+    Open, for the reason the confirm door is. It ALWAYS answers 202 with the
+    same sentence, whatever the address and whatever happened - no such
+    request, already confirmed, declined, a Google one, too soon, too often,
+    this IP over its allowance - because anything else would turn it into a
+    way to ask whether somebody has applied. What stops it being a way to mail
+    an address on a loop is the limit on each request (once a minute, five an
+    hour, in email_verification.start) and the per-IP one beside it.
+    """
+
+    permission_classes = [permissions.AllowAny]
+    authentication_classes = []
+    serializer_class = None
+
+    def post(self, request):
+        ip = client_ip(request)
+        if not signup_limit.resend_is_throttled(ip):
+            signup_limit.register_resend(ip)
+            try:
+                email_verification.resend(_posted(request, "email"))
+            except DatabaseError:
+                # Answered as ever: a 500 would give away that the address
+                # has a request waiting.
+                logger.exception("Could not send a sign-up email code")
+        return Response({"detail": email_verification.RESEND_REPLY},
+                        status=status.HTTP_202_ACCEPTED)
 
 
 class SignupView(generics.GenericAPIView):
@@ -221,7 +273,7 @@ class SignupView(generics.GenericAPIView):
         # A typed address is only what somebody typed. Approval emails a
         # temporary password, so the address has to be proved before an
         # administrator can hand a credential to a typo.
-        email_verification.start(user.email)
+        email_verification.start(user)
         log_activity(
             None, ActivityLog.CREATED, ActivityLog.SECURITY,
             entity_type="User",
@@ -333,6 +385,26 @@ class MyProfileView(generics.RetrieveUpdateAPIView):
     def get_object(self):
         profile, _ = UserProfile.objects.get_or_create(user=self.request.user)
         return profile
+
+
+class AgencyProfileView(generics.RetrieveUpdateAPIView):
+    """The agency's own details, as printed on its reports.
+
+    One row, so no id in the path. Anyone signed in may read it - a printed
+    report is assembled in the reader's browser and needs the head of office's
+    name - but only an administrator writes it, the same split as the rest of
+    Settings. Nothing here is about a child or a person's account.
+    """
+
+    serializer_class = AgencyProfileSerializer
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            return [permissions.IsAuthenticated()]
+        return [IsAdministrator()]
+
+    def get_object(self):
+        return AgencyProfile.load()
 
 
 class MyPhoneView(generics.GenericAPIView):
@@ -447,9 +519,10 @@ class SmsConfigTestView(generics.GenericAPIView):
         if not user.phone or not user.phone_verified:
             return Response(
                 {"ok": False,
-                 "detail": "Add and verify your own mobile number in My "
-                           "Profile first — this sends the test to you, not "
-                           "to anyone else."},
+                 "detail": "Add and verify your own mobile number first, "
+                           "under your profile (the account menu, top right "
+                           "> See your profile > Mobile number). This sends "
+                           "the test to you, not to anyone else."},
                 status=status.HTTP_400_BAD_REQUEST)
         # A different reference each time. The gateway's own guidance is that
         # repeatedly sending nearly identical text to one number is classified
@@ -667,7 +740,8 @@ class UserViewSet(viewsets.ModelViewSet):
                 {"detail": "This applicant has not confirmed their email "
                            "address yet, and approving would send a temporary "
                            "password to an address nobody has verified. Ask "
-                           "them to enter the code sent when they registered."},
+                           "them to confirm their address from the sign-up "
+                           "page; they can ask for a new code there."},
                 status=status.HTTP_400_BAD_REQUEST)
 
         role_id = request.data.get("role")

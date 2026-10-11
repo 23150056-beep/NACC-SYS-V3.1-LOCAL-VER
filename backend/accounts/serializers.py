@@ -3,7 +3,9 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
-from accounts.models import Role, UserProfile
+from accounts.models import AgencyProfile, Role, UserProfile
+from accounts.names import refuse_unreadable
+from accounts.scoping import role_of
 from activity.models import ActivityLog
 from accounts.token_claims import stamp
 from activity.services import log_activity
@@ -72,6 +74,20 @@ class UserWriteSerializer(serializers.ModelSerializer):
             "middle_initial", "contact_details", "role", "status",
         ]
 
+    # Names are refused with a replacement character in them (accounts/names.py);
+    # one the record already holds passes, so it can be edited around.
+    def _name(self, field, value):
+        return refuse_unreadable(value, getattr(self.instance, field, None))
+
+    def validate_first_name(self, value):
+        return self._name("first_name", value)
+
+    def validate_last_name(self, value):
+        return self._name("last_name", value)
+
+    def validate_middle_initial(self, value):
+        return self._name("middle_initial", value)
+
     def validate(self, attrs):
         """An account may not be saved into the roleless state.
 
@@ -96,6 +112,23 @@ class UserWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"role": "Removing the role would lock this account out. "
                          "Deactivate the account instead."})
+        if self.instance is not None and self.instance.status == User.PENDING:
+            # A request is let in by approve/ and nowhere else: it asks for a
+            # role, refuses an unconfirmed address and refuses Administrator.
+            # Flipping the status here would skip all three.
+            if attrs.get("status") == User.ACTIVE:
+                raise serializers.ValidationError(
+                    {"status": "Approve it from Access Requests."})
+            # A Google request's address is the one Google verified, and
+            # resend never serves it, so a corrected address could not be
+            # confirmed again and the request could never be approved.
+            new_email = attrs.get("email")
+            if (self.instance.google_sub and new_email
+                    and new_email.strip().lower()
+                    != (self.instance.email or "").strip().lower()):
+                raise serializers.ValidationError(
+                    {"email": "A Google request's address is the Google "
+                              "account's. Decline it and ask them to apply again."})
         # `status` is writable here, so this endpoint is a second way to
         # deactivate the last administrator — the one account the system
         # cannot replace. Any move off ACTIVE counts: is_active follows
@@ -152,8 +185,19 @@ class UserWriteSerializer(serializers.ModelSerializer):
     def update(self, instance, validated_data):
         previous_role = instance.role
         new_role = validated_data.get("role", previous_role)
+        # Correcting the address of a request still waiting for approval
+        # leaves nothing proved about the new one: the code was mailed to the
+        # old one, and approval emails a temporary password to whatever is
+        # here. Judged on the status it HAD, so an account that is already
+        # active is not touched. A change of letter case is not a new address.
+        new_email = validated_data.get("email")
+        address_changed = (
+            instance.status == User.PENDING and bool(new_email)
+            and new_email.strip().lower() != (instance.email or "").strip().lower())
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
+        if address_changed:
+            instance.email_verified = False
         # Keep username in sync with email (email is the username).
         if validated_data.get("email"):
             instance.username = validated_data["email"]
@@ -274,6 +318,12 @@ class SignupSerializer(serializers.Serializer):
     GENERIC = ("This address cannot be registered. If you already have an "
                "account, sign in instead, or ask an administrator.")
 
+    def validate_first_name(self, value):
+        return refuse_unreadable(value)
+
+    def validate_last_name(self, value):
+        return refuse_unreadable(value)
+
     def validate_email(self, value):
         email = value.strip().lower()
         if User.objects.filter(email__iexact=email).exists():
@@ -328,14 +378,42 @@ _SOCIAL_HOSTS = {
 }
 
 
+LICENSE_FIELDS = ("license_number", "license_valid_until")
+
+
 class UserProfileSerializer(serializers.ModelSerializer):
     """A person's own optional details. Never anybody else's — the view binds
     this to request.user and takes no id."""
 
     class Meta:
         model = UserProfile
-        fields = ["facebook", "twitter", "instagram", "updated_at"]
+        fields = ["facebook", "twitter", "instagram",
+                  "license_number", "license_valid_until", "updated_at"]
         read_only_fields = ["updated_at"]
+
+    def _holds_a_license(self):
+        """Social workers and psychologists are licensed; an administrator is
+        the agency's IT support and has no PRC license to record."""
+        request = self.context.get("request")
+        return role_of(request) in (Role.STAFF, Role.PSYCHOLOGIST)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Not offered, rather than offered blank: a blank would read as a
+        # license somebody has yet to fill in.
+        if not self._holds_a_license():
+            for name in LICENSE_FIELDS:
+                data.pop(name, None)
+        return data
+
+    def validate(self, attrs):
+        if not self._holds_a_license():
+            sent = [name for name in LICENSE_FIELDS if name in attrs]
+            if sent:
+                raise serializers.ValidationError({
+                    sent[0]: "An administrator account has no PRC license to record. "
+                             "Only social workers and psychologists do."})
+        return attrs
 
     def _normalise(self, field, value):
         raw = (value or "").strip()
@@ -383,3 +461,15 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
     def validate_instagram(self, value):
         return self._normalise("instagram", value)
+
+
+class AgencyProfileSerializer(serializers.ModelSerializer):
+    """The agency's name, address and head of office. Every field is optional
+    and trimmed; the lengths are the model's, which the serializer enforces
+    because a TextField's max_length is otherwise only a hint."""
+
+    class Meta:
+        model = AgencyProfile
+        fields = ["agency_name", "office_address", "contact_details",
+                  "head_of_office_name", "head_of_office_title", "updated_at"]
+        read_only_fields = ["updated_at"]

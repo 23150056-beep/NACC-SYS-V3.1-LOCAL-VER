@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -14,9 +14,10 @@ import { ALL_CLOSURE_REASONS, unaskedAnswers } from '../config/caseData';
 import { loadAll } from '../utils/load';
 import { firstError } from '../utils/errors';
 import ChildForm from './children/ChildForm';
-import { EMPTY, formFromRecord } from './children/recordForm';
+import { EMPTY, NOT_AN_ANSWER, formFromRecord, newIntakeToken } from './children/recordForm';
 import ChildDrawer, { TerminateModal } from './children/ChildDrawer';
 import CaseloadCard from './children/CaseloadCard';
+import RemoveDuplicateDialog from './children/RemoveDuplicateDialog';
 import { fmtDay, fmtTime, localDate } from './children/shared';
 import { ageFrom, ageGroup, caseRef } from '../utils/child';
 import { shortDate } from '../utils/time';
@@ -75,10 +76,20 @@ function ScheduleChip({ appts = [] }) {
  * records only when they accept - so between the pick and the answer the row
  * has to say so, or it reads as "nobody" and gets picked again. A decline
  * shows until someone else is asked, with the reason on hover. */
+// How long a psychologist may sit on a request before it counts as unanswered:
+// ASSIGNMENT_ANSWER_DAYS in backend/clinical/care_gaps.py, which lists the
+// child as a care gap from that moment. The row offers someone else to the
+// same people from the same moment.
+const ASSIGNMENT_ANSWER_MS = 7 * 24 * 60 * 60 * 1000;
+
 function PsychologistCell({ child: c, canManage, onAssign }) {
   const pending = c.pending_assignment;
   const declined = !pending && !c.psychologist ? c.declined_assignment : null;
-  const assign = canManage && c.status === 'active' && !c.psychologist && !pending;
+  const unanswered = Boolean(pending?.created_at)
+    && Date.now() - new Date(pending.created_at).getTime() >= ASSIGNMENT_ANSWER_MS;
+  // Also when the request has gone unanswered for a week: the care gap says to
+  // ask someone else, and without a button here that is a dead end.
+  const assign = canManage && c.status === 'active' && !c.psychologist && (!pending || unanswered);
   return (
     <span style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'flex-start', gap: 3 }}>
       {c.psychologist_name && <span>{c.psychologist_name}</span>}
@@ -93,10 +104,11 @@ function PsychologistCell({ child: c, canManage, onAssign }) {
         </span>
       )}
       {assign && (
-        <button title={`Assign a psychologist to ${c.fullname}`} aria-label={`Assign psychologist to ${c.fullname}`}
+        <button title={pending ? `${pending.psychologist_name} has not answered - ask someone else for ${c.fullname}` : `Assign a psychologist to ${c.fullname}`}
+          aria-label={pending ? `Ask another psychologist about ${c.fullname}` : `Assign psychologist to ${c.fullname}`}
           onClick={(e) => { e.stopPropagation(); onAssign(); }} {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '3px 10px', borderRadius: 'var(--radius-pill)', border: '1px dashed var(--blue-300)', background: 'var(--blue-50)', color: 'var(--blue-700)', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 11.5, cursor: 'pointer' }}>
-          <Icon name="user-plus" size={13} /> Assign
+          <Icon name="user-plus" size={13} /> {pending ? 'Ask someone else' : 'Assign'}
         </button>
       )}
       {!c.psychologist_name && !pending && !declined && !assign && '—'}
@@ -116,8 +128,6 @@ export default function Children() {
   const isAdmin = user?.role_name === 'Administrator';
   const isPsych = user?.role_name === 'Psychologist';
   const [children, setChildren] = useState([]);
-  // The list has arrived at least once (an empty caseload included).
-  const [listed, setListed] = useState(false);
   const [psychologists, setPsychologists] = useState([]);
   // Social worker accounts, for the ISA's filter and the form's owner field.
   // Each SW sees only the records they hold (accounts/scoping.py), so only
@@ -135,6 +145,7 @@ export default function Children() {
   const [sel, setSel] = useState(null); // detail drawer record
   const [form, setForm] = useState(null); // add/edit drawer
   const [terminating, setTerminating] = useState(null); // terminate modal record
+  const [removing, setRemoving] = useState(null); // remove-duplicate dialog record (the ISA)
   // The child awaiting a reopen confirmation. This was a native browser
   // confirm, and the same 180-character string was written out at both call
   // sites - the row button and the drawer - which is two copies of one
@@ -159,7 +170,7 @@ export default function Children() {
     const weekAhead = new Date(today); weekAhead.setDate(today.getDate() + 7);
     return loadAll(toast, [
       // Include inactive (terminated) cases — the V2 roster shows them with chips.
-      () => api.get('/children/?include_archived=true').then((r) => { setChildren(r.data); setListed(true); }),
+      () => api.get('/children/?include_archived=true').then((r) => setChildren(r.data)),
       // Active psychologists + current caseload. Admin/staff only, at both
       // ends: the endpoint is IsAdminOrStaff, and the list is only rendered
       // behind canManage. Asking as a psychologist earned a guaranteed 403.
@@ -291,8 +302,9 @@ export default function Children() {
     setError(''); setFieldErrors(null); setRefusedWith(null);
     let draft = null;
     try { draft = JSON.parse(localStorage.getItem(draftKey) || 'null'); } catch { /* corrupt draft */ }
-    const meaningful = draft && Object.entries(draft).some(([k, v]) => k !== 'assignee_sees_history' && v);
-    setForm({ ...EMPTY, _draft: meaningful ? draft : null });
+    const meaningful = draft && Object.entries(draft).some(([k, v]) => !NOT_AN_ANSWER.includes(k) && v);
+    // A new token for this submission; a restored draft brings its own back.
+    setForm({ ...EMPTY, intake_token: newIntakeToken(), _draft: meaningful ? draft : null });
   };
   // What the form holds for a record is worked out in one place, which the
   // form's own "Load latest" uses too (ChildForm.jsx formFromRecord).
@@ -317,26 +329,51 @@ export default function Children() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenCreate, form]);
 
-  /* /children?edit=12 opens that record's form: the header search's "Edit
-   * record" (components/GlobalSearch). It waits for the list, opens the form
-   * only where this account may edit the record - the same canEditRecord the
-   * screen uses - and clears the parameter either way. */
-  const editId = searchParams.get('edit');
+  /* /children?edit=<id> opens that record's edit form, the way the case study's
+   * "Edit on the record" asks. Waits for the list, opens it once, and clears the
+   * parameter whether or not the record turned out to be editable here. */
+  const editParam = searchParams.get('edit');
   useEffect(() => {
-    if (!editId || form || !listed) return;
-    const c = children.find((x) => String(x.id) === editId);
-    if (c && canEditRecord(c)) openEdit(c);
-    else toast.error('That record is not one this account can edit.');
+    if (!editParam || form || children.length === 0) return;
+    const target = children.find((c) => String(c.id) === editParam);
     const next = new URLSearchParams(searchParams);
     next.delete('edit');
     setSearchParams(next, { replace: true });
-    // A one-shot like openCreate above; canEditRecord and openEdit are
-    // redefined every render.
+    if (target && canEditRecord(target)) openEdit(target);
+    else toast.error('That record cannot be edited from here.');
+    // One-shot, like openCreate above: depending on the helpers would reopen
+    // the form each time it was closed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editId, form, listed]);
+  }, [editParam, form, children]);
 
+  /* One save at a time, from the moment Save is pressed until the whole of it
+   * is over: the confirmation, the POST or PUT, the referral upload and the end
+   * dialog. A double click, or Enter held down, used to start the save twice
+   * and add the child twice (9 Oct 2026: C-0049 and C-0050, one child, two
+   * requests for the psychologist to answer). The ref is the guard - it is set
+   * in the same tick as the click, before any await, which state is not.
+   * `saving` is only what the button shows: it comes on once the request is
+   * really going, so the button does not say "Saving…" behind the question.
+   *
+   * Cancelling the confirmation returns from saveRecord like any other exit,
+   * so the guard is released by the finally below. So is a second confirm()
+   * opening while this one is up (the form's own "Close without saving?"):
+   * the provider settles the first as "no", and it lands here the same way. */
+  const savingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
   const save = async (e) => {
     e.preventDefault();
+    if (savingRef.current) return;
+    savingRef.current = true;
+    try {
+      await saveRecord();
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
+  };
+
+  const saveRecord = async () => {
     const name = form.id ? form.fullname
       : [form.first_name, form.middle_name, form.last_name].filter(Boolean).join(' ');
     // A pick ASKS the psychologist (children/assignment.py): say so before
@@ -368,10 +405,11 @@ export default function Children() {
         ? [['Asks to take the case', asking ? assignee : null], ['Withdraws the request to', withdrawing ? wasAsked : null],
            ['Stays with', withdrawing ? holderName : null], ['Psychologist', clearing ? 'Unassigned' : null]]
         : [['Category', form.case_category], ['Case type', form.case_type],
-           ['Date of birth', form.birth_date], ['Psychologist', asking ? `${assignee} (asked to accept)` : 'Unassigned'],
+           ['Date of birth or given date of birth', form.birth_date], ['Psychologist', asking ? `${assignee} (asked to accept)` : 'Unassigned'],
            ['Case referral', form.referralFile?.name]],
     });
     if (!ok) return;
+    setSaving(true);
     setError('');
     setFieldErrors(null);
     setRefusedWith(null);
@@ -405,10 +443,12 @@ export default function Children() {
     if (!payload.birth_date) delete payload.birth_date;
     // Sent as null, not left out: the form clears the date a case no longer
     // asks for, and leaving it out of the request would keep it on the record.
-    for (const f of ['date_of_admission', 'date_of_placement_to_custodian', 'date_found']) {
+    for (const f of ['date_of_admission', 'date_of_placement_to_custodian', 'date_found', 'legal_status_date']) {
       if (!payload[f]) payload[f] = null;
     }
-    if (form.id) delete payload.fullname;
+    // The date issued goes with the legal status.
+    if (!payload.legal_status) payload.legal_status_date = null;
+    if (form.id) { delete payload.fullname; delete payload.intake_token; }
     try {
       let saved;
       if (form.id) saved = (await api.put(`/children/${form.id}/`, payload)).data;
@@ -474,6 +514,27 @@ export default function Children() {
         });
       }
     } catch (err) {
+      /* A new record the server already holds - this very submission, by its
+         token. The first attempt got through (a response that never arrived,
+         then a retry), so there is nothing to add and nothing to upload: the
+         referral went, or failed, with that attempt. */
+      if (err.response?.status === 409 && !form.id) {
+        const body = err.response.data || {};
+        if (body.id) {
+          try { localStorage.removeItem(draftKey); } catch { /* private browsing */ }
+          setForm(null);
+          load();
+          refreshActivity();
+          toast.success(referralFile
+            ? 'Already saved. Open the record and check its case referral is on file.'
+            : 'Already saved');
+          return;
+        }
+        const said = body.detail || 'This record was already saved.';
+        setError(String(said));
+        toast.error(String(said));
+        return;
+      }
       if (err.response?.status === 409) {
         const fresh = err.response.data.current;
         setError('');
@@ -492,7 +553,8 @@ export default function Children() {
       setError(perField
         ? (perField.detail || perField.non_field_errors?.join(' ') || '')
         : 'Save failed. Please try again.');
-      toast.error('Could not save the record. Please check the marked fields.');
+      toast.error(typeof perField?.detail === 'string' ? perField.detail
+        : 'Could not save the record. Please check the marked fields.');
     }
   };
 
@@ -551,6 +613,26 @@ export default function Children() {
       details: [['Child', `${c.fullname} (${caseRef(c.id)})`], ['Reason', reason],
         ['Closing summary', note.length > 160 ? `${note.slice(0, 157)}…` : note],
         ['Closed on', shortDate(new Date())]],
+    });
+  };
+
+  /* The duplicate is gone: close the drawer behind the dialog, reload, and say
+   * what happened and what comes next. `kept` is the record it repeated. */
+  const duplicateRemoved = async (c, result, kept) => {
+    setRemoving(null);
+    setSel(null);
+    load();
+    refreshActivity();
+    await notice({
+      title: 'Duplicate record removed',
+      icon: 'trash-2',
+      description: `${c.fullname}'s second record (${result.removed}) is deleted. The record to keep is ${result.duplicate_of}.`,
+      details: [['Removed', `${result.removed} · ${c.fullname}`],
+        ['Kept', kept ? `${result.duplicate_of} · ${kept.fullname}` : result.duplicate_of],
+        ['Request to a psychologist', c.pending_assignment
+          ? `${c.pending_assignment.psychologist_name} — withdrawn, and they are told why` : null],
+        ['Case referral file', c.has_case_referral ? 'Deleted with it' : null],
+        ['Recorded', 'In the audit trail']],
     });
   };
 
@@ -750,9 +832,10 @@ export default function Children() {
 
       {canManage && psychologists.length > 0 && <CaseloadCard psychologists={psychologists} />}
 
-      {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} canReopen={canManage} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => setReopening(sel)} onClose={() => setSel(null)} />}
-      {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} socialWorkers={isAdmin ? socialWorkers : null} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} fieldErrors={fieldErrors} refusedWith={refusedWith} onSubmit={save} onWithdraw={withdrawRequest} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
+      {sel && <ChildDrawer child={sel} upcoming={apptsByChild[sel.id] || []} canEdit={canEditRecord(sel)} canTerminate={canTerminate(sel)} canReopen={canManage} canRemoveDuplicate={isAdmin} others={others} onEdit={() => { openEdit(sel); setSel(null); }} onTerminate={() => setTerminating(sel)} onReopen={() => setReopening(sel)} onRemoveDuplicate={() => setRemoving(sel)} onClose={() => setSel(null)} />}
+      {form && <ChildForm form={form} setForm={setForm} draftKey={draftKey} psychologists={psychologists} socialWorkers={isAdmin ? socialWorkers : null} blocks={blocks} error={error} isPsych={isPsych} canReopen={canManage} others={others} fieldErrors={fieldErrors} refusedWith={refusedWith} saving={saving} onSubmit={save} onWithdraw={withdrawRequest} onClose={() => setForm(null)} onReopen={onDupReopen} onOpenExisting={onDupOpenExisting} />}
       {terminating && <TerminateModal child={terminating} onConfirm={terminate} onClose={() => setTerminating(null)} />}
+      {removing && <RemoveDuplicateDialog child={removing} onClose={() => setRemoving(null)} onRemoved={(result, kept) => duplicateRemoved(removing, result, kept)} />}
       {reopening && (
         <ConfirmDialog
           onClose={() => setReopening(null)}

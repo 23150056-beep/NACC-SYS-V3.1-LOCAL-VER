@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import { useToast } from '../context/ToastContext';
+import { useAssistant } from '../context/AssistantContext';
 import {
   Badge, Button, Card, Icon, MiniBar, Note, PAGE, PageHeader, Segmented, StatCard,
   TD, TH, THEAD_ROW, TR,
@@ -54,6 +55,8 @@ function MedianDaysCard({ eyebrow, title, median, caption, facts, rule, empty })
 
 export default function AgencySummary() {
   const toast = useToast();
+  // False on a hosted deployment, where the server refuses the narrative.
+  const { drafting } = useAssistant();
   const [range, setRange] = useState('monthly');
   const [data, setData] = useState(null);
   const [narrative, setNarrative] = useState(null); // { text, jobId }
@@ -178,50 +181,54 @@ export default function AgencySummary() {
         </Card>
       </div>
 
-      <Card
-        title="Narrative summary"
-        actions={(
-          <Button variant="secondary" size="sm" onClick={writeNarrative} disabled={narrativeBusy} className="racco-no-print">
-            {narrativeBusy ? 'Writing…' : narrative ? 'Re-draft' : 'Draft narrative'}
-          </Button>
-        )}
-        padding="0"
-      >
-        <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 11, padding: '10px 12px', background: 'var(--ink-50)', borderLeft: '3px solid var(--border-strong)', borderRadius: '0 8px 8px 0' }}>
-            <Icon name="file-pen" size={17} style={{ color: 'var(--text-muted)', flex: 'none', marginTop: 1 }} />
-            <p style={{ fontStyle: 'italic', fontSize: 11.5, lineHeight: 1.55, color: 'var(--text-muted)' }}>
-              Drafted from the figures above. Every number is computed by the system; the assistant only writes the
-              prose around them. Review before it goes in any report.
-            </p>
-          </div>
-          {narrative ? (
-            <>
-              <p style={{ whiteSpace: 'pre-wrap', fontSize: 13.5, lineHeight: 1.7, color: 'var(--text-body)' }}>{narrative.text}</p>
-              <div className="racco-no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
-                <span style={{ flex: 1, fontWeight: 600, fontSize: 11.5, color: 'var(--text-faint)' }}>
-                  Your answer trains nothing — it is counted so the feature can be judged.
-                </span>
-                <Button
-                  variant="secondary" size="sm"
-                  onClick={() => { sendFeedback(narrative.jobId, 'discarded').catch(() => {}); setNarrative(null); }}
-                >
-                  Not useful
-                </Button>
-                <Button
-                  variant="secondary" size="sm"
-                  style={{ background: 'var(--success-50)', borderColor: 'var(--success-100)', color: 'var(--success-700)' }}
-                  onClick={() => sendFeedback(narrative.jobId, 'accepted').catch(() => {})}
-                >
-                  Useful
-                </Button>
-              </div>
-            </>
-          ) : (
-            <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>No narrative drafted yet.</p>
+      {/* The whole card, not just its button: hiding only the button would
+          leave "No narrative drafted yet." with no way to draft one. */}
+      {drafting && (
+        <Card
+          title="Narrative summary"
+          actions={(
+            <Button variant="secondary" size="sm" onClick={writeNarrative} disabled={narrativeBusy} className="racco-no-print">
+              {narrativeBusy ? 'Writing…' : narrative ? 'Re-draft' : 'Draft narrative'}
+            </Button>
           )}
-        </div>
-      </Card>
+          padding="0"
+        >
+          <div style={{ padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', gap: 11, padding: '10px 12px', background: 'var(--ink-50)', borderLeft: '3px solid var(--border-strong)', borderRadius: '0 8px 8px 0' }}>
+              <Icon name="file-pen" size={17} style={{ color: 'var(--text-muted)', flex: 'none', marginTop: 1 }} />
+              <p style={{ fontStyle: 'italic', fontSize: 11.5, lineHeight: 1.55, color: 'var(--text-muted)' }}>
+                Drafted from the figures above. Every number is computed by the system; the assistant only writes the
+                prose around them. Review before it goes in any report.
+              </p>
+            </div>
+            {narrative ? (
+              <>
+                <p style={{ whiteSpace: 'pre-wrap', fontSize: 13.5, lineHeight: 1.7, color: 'var(--text-body)' }}>{narrative.text}</p>
+                <div className="racco-no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
+                  <span style={{ flex: 1, fontWeight: 600, fontSize: 11.5, color: 'var(--text-faint)' }}>
+                    Your answer trains nothing — it is counted so the feature can be judged.
+                  </span>
+                  <Button
+                    variant="secondary" size="sm"
+                    onClick={() => { sendFeedback(narrative.jobId, 'discarded').catch(() => {}); setNarrative(null); }}
+                  >
+                    Not useful
+                  </Button>
+                  <Button
+                    variant="secondary" size="sm"
+                    style={{ background: 'var(--success-50)', borderColor: 'var(--success-100)', color: 'var(--success-700)' }}
+                    onClick={() => sendFeedback(narrative.jobId, 'accepted').catch(() => {})}
+                  >
+                    Useful
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <p style={{ fontSize: 12.5, color: 'var(--text-muted)' }}>No narrative drafted yet.</p>
+            )}
+          </div>
+        </Card>
+      )}
 
       <Card eyebrow="NACC-SAMD reporting" title="Service users (current)" padding="0">
         <div className="racco-scroll" style={{ overflowX: 'auto' }}>

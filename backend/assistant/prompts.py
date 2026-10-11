@@ -5,7 +5,12 @@ never the other way round. The static half is a module constant so it is
 literally the same bytes on every call, which keeps the runtime's prefix cache
 warm — the difference between a 0.37s and a 17s prefill.
 """
+import hashlib
+from datetime import date, datetime
+
 from django.utils import timezone
+
+from config.clock import clock
 
 # --- systems -------------------------------------------------------------
 
@@ -18,6 +23,11 @@ REMARK_POLISH_SYSTEM = (
 BRIEF_SYSTEM = (
     "You prepare short factual briefs for a licensed psychologist before a "
     "session with a child. You use only the facts you are given."
+)
+
+CASE_BRIEF_SYSTEM = (
+    "You prepare short factual case briefs for a social worker at a child "
+    "protection agency. You use only the facts you are given."
 )
 
 SUMMARY_SYSTEM = (
@@ -48,6 +58,23 @@ BRIEF_INSTRUCTIONS = (
     "detail not given. Refer to the child by first name only.\n"
     "Do not diagnose and do not suggest a score or rating.\n"
     "Keep it under 200 words.\n\n"
+    "FACTS:\n"
+)
+
+CASE_BRIEF_INSTRUCTIONS = (
+    "Write a short case brief for the social worker from the facts below. "
+    "They will read it before a home visit, a case conference or the next "
+    "contact with the child's family or custodian.\n"
+    "Write three short parts, numbered 1 to 3:\n"
+    "1. Why the child was referred. Use the referral summary if one is given. "
+    "If there is none, write only: No referral summary yet.\n"
+    "2. What is booked, and what is waiting on whom.\n"
+    "3. What to bring or ask at the next contact, taken from what is missing "
+    "or waiting in the facts.\n"
+    "Use only the facts given. Never write a name, date, number or place that "
+    "is not in the facts. Refer to the child by first name only. Write plain "
+    "English. Do not diagnose and do not guess.\n"
+    "Keep it under 150 words.\n\n"
     "FACTS:\n"
 )
 
@@ -228,6 +255,165 @@ def fit_document(text, budget=SUMMARY_BUDGET_CHARS):
 def build_census_prompt(figures):
     lines = [f"{key}: {value}" for key, value in sorted(figures.items())]
     return CENSUS_INSTRUCTIONS + "\n".join(lines)
+
+
+# --- the case brief --------------------------------------------------------
+#
+# A social worker's written brief (owner, 8 Oct 2026; the ISA gets the facts
+# and never this). It is drafted from the SAME dict the facts panel shows,
+# brief_facts(request, child) for kind "case", in a fixed order, one labelled
+# line each - so what the model was given is what the screen above the draft
+# says, and the worker can check the one against the other.
+#
+# What it never reads, by construction rather than by instruction: case
+# remarks, a child's own self-report words (a COUNT of unread answers is all
+# there is), the case study's text, a referral summary nobody has confirmed
+# (brief_facts already withholds it), and the custodian's name or number
+# (brief_facts never carries them). The open problems are counted, never
+# quoted, and the treatment plan is left out altogether.
+#
+# The model does no date arithmetic and no counting: every "n days ago" is
+# worked out here, dates are written in words, and the times are on the
+# 12-hour clock, so the only numbers and dates it can state are ones it was
+# handed.
+
+REFERRAL_SUMMARY_CHARS = 1500
+DECLINE_REASON_CHARS = 200
+
+_WEEKDAYS = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+             "Sunday")
+_MONTHS = ("January", "February", "March", "April", "May", "June", "July",
+           "August", "September", "October", "November", "December")
+
+
+def long_date(d):
+    """"Friday 3 October 2026". Built by hand, so the locale of the machine the
+    model runs on cannot change a word of it."""
+    return f"{_WEEKDAYS[d.weekday()]} {d.day} {_MONTHS[d.month - 1]} {d.year}"
+
+
+def _relative(days):
+    if days == 0:
+        return "today"
+    if days == 1:
+        return "tomorrow"
+    if days > 0:
+        return f"in {days} days"
+    return "1 day ago" if days == -1 else f"{-days} days ago"
+
+
+def _dated(d, today):
+    """"Friday 3 October 2026 (5 days ago)": the date in words, with the
+    arithmetic already done."""
+    return f"{long_date(d)} ({_relative((d - today).days)})"
+
+
+def first_name(child):
+    """What the brief calls the child: the first name, never the full one."""
+    name = (child.first_name or "").strip() or (child.fullname or "").strip().split(" ")[0]
+    return name or "the child"
+
+
+def _referral_line(referral, today):
+    if not referral:
+        return "Case referral: none on file."
+    filed = _dated(date.fromisoformat(referral["latest_uploaded_on"]), today)
+    return f"Case referral: {referral['count']} on file, the latest filed {filed}."
+
+
+def _psychologist_line(row):
+    state = row.get("state")
+    if state == "assigned":
+        return "Psychologist: assigned."
+    if state == "asked":
+        when = "today" if row["days_ago"] == 0 else _relative(-row["days_ago"])
+        return f"Psychologist: asked {when}, no answer yet."
+    if state == "declined":
+        reason = _cut((row.get("reason") or "").strip(), DECLINE_REASON_CHARS)
+        if not reason:
+            return "Psychologist: the one asked declined."
+        # A full stop only where the reason does not already end in one.
+        return ("Psychologist: the one asked declined. Reason given: " + reason
+                + ("." if reason[-1].isalnum() else ""))
+    return "Psychologist: none yet, and nobody has been asked."
+
+
+def _consent_line(consent, today):
+    if not consent:
+        return "Consent: none on file."
+    when = _dated(date.fromisoformat(consent["date"]), today)
+    return f"Consent: {consent['status']}, dated {when}."
+
+
+def _next_session_line(row, today):
+    if not row:
+        return "Next session: none booked."
+    start = datetime.fromisoformat(row["start"])
+    return (f"Next session: {_dated(start.date(), today)} at {clock(start)}, "
+            f"{row['purpose']}.")
+
+
+def _last_session_line(row):
+    if not row:
+        return "Last session held: none yet."
+    return f"Last session held: {_relative(-row['days_ago'])}."
+
+
+def _survey_line(row, today):
+    if not row:
+        return "Survey: none sent."
+    when = _dated(date.fromisoformat(row["date"]), today)
+    if row["state"] == "answered":
+        return f"Survey: answered {when}."
+    if row["state"] == "expired":
+        return f"Survey: sent {when}, the link has expired unanswered."
+    return f"Survey: sent {when}, no answer yet."
+
+
+def build_case_brief_prompt(facts, child):
+    """CASE_BRIEF_INSTRUCTIONS + the facts of one child, as a social worker
+    reads them. `facts` is brief_facts(request, child) of kind "case"; nothing
+    else about the child is read, apart from the name, age and case type that
+    the facts panel's own header shows."""
+    today = timezone.localdate()
+    referral = facts.get("case_referral")
+    gaps = [g["message"] for g in facts.get("care_gaps") or []]
+    lines = [
+        f"First name: {first_name(child)}",
+        f"Age: {child_age(child)}",
+        f"Case type: {child.case_type or 'not recorded'}",
+        f"Category: {child.case_category or 'not recorded'}",
+        _referral_line(referral, today),
+        _psychologist_line(facts.get("psychologist") or {}),
+        _consent_line(facts.get("consent"), today),
+    ]
+    # Not asked for every case type: no line where there is no custodian.
+    if facts.get("custodian_texts"):
+        lines.append(f"Custodian texts: {facts['custodian_texts']}")
+    lines += [
+        _next_session_line(facts.get("next_session"), today),
+        _last_session_line(facts.get("last_session")),
+        _survey_line(facts.get("survey"), today),
+        # Counted. What the child wrote, and what the problems say, is not here.
+        f"Self-report answers waiting to be read: {facts.get('unreviewed_self_reports', 0)}",
+        f"Open problems on file: {len(facts.get('open_problems') or [])}",
+        "Care gaps still open:" + (" none." if not gaps else ""),
+    ]
+    lines.extend(f"- {message}" for message in gaps)
+    # Last, so a long summary can only push the cut end of itself out. Only a
+    # summary a person has confirmed: brief_facts withholds a draft, and the
+    # flag is asked again here so that a facts dict made some other way cannot
+    # carry the model's own wording back into its prompt.
+    if referral and referral.get("summary_confirmed") and (referral.get("summary") or "").strip():
+        lines.append("Referral summary:\n"
+                     + _cut(referral["summary"].strip(), REFERRAL_SUMMARY_CHARS))
+    return CASE_BRIEF_INSTRUCTIONS + "\n".join(lines)
+
+
+def prompt_sha(system, prompt):
+    """What a draft is stamped with: the SHA-256 of everything the model was
+    given. The system text is a constant, so only the prompt varies."""
+    return hashlib.sha256((system + prompt).encode("utf-8")).hexdigest()
 
 
 # --- chatbot --------------------------------------------------------------

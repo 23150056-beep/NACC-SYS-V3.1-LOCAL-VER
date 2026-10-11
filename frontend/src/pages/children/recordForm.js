@@ -9,11 +9,37 @@ export const EMPTY = {
   province: '', municipality: '', barangay: '', psgc_province: '', psgc_municipality: '', psgc_barangay: '',
   case_type: '', case_category: '', custodian_name: '', psychologist: '', assignee_sees_history: true,
   custodian_contact: '', custodian_sms_consent: false,
-  place_of_birth_or_found: '', birth_status: '', legal_status: '',
+  place_of_birth_or_found: '', birth_status: '', legal_status: '', legal_status_date: '',
+  health_condition: '', special_needs: '', alias: '',
   date_of_admission: '', date_of_placement_to_custodian: '', type_of_adoption: '',
   referral_source: '', referral_reason: '', education_level: '', current_placement: '', medical_notes: '',
   recommendation: '',
 };
+
+/* One token for one submission of Add Record (backend children/duplicates.py).
+ * The form makes it when it opens a NEW record, keeps it with the draft, and
+ * sends it with every attempt to save: a second attempt - a double click that
+ * got past the button, or a retry after a response that never arrived - is
+ * then told the record was already saved instead of adding the child again.
+ * crypto.randomUUID() exists only on https and localhost; a workstation
+ * reaching the app by its address on the office network has just
+ * getRandomValues, which is enough for a token. */
+export function newIntakeToken() {
+  const c = globalThis.crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  const b = new Uint8Array(16);
+  if (c?.getRandomValues) c.getRandomValues(b);
+  else for (let i = 0; i < b.length; i += 1) b[i] = Math.floor(Math.random() * 256);
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/* What a form holds that is not something the person typed. A draft is worth
+ * keeping, and offering back, only when an answer was; the token and the
+ * history tick are there from the moment the form opens. */
+export const NOT_AN_ANSWER = ['assignee_sees_history', 'intake_token'];
 
 /* Who, and which number, texting consent was given for. Consent belongs to
  * that pair (pages/children/CustodianFields.jsx): change either and it is

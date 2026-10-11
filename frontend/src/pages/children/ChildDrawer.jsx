@@ -5,7 +5,7 @@ import { useToast } from '../../context/ToastContext';
 import {
   Alert, Avatar, Badge, Button, ConfirmDialog, FormField, Icon, iconBtn, hoverLift, Select, roleLabel,
 } from '../../ui';
-import { ADMISSION, CASE_TYPE_FIELDS, PLACEMENT, dateFieldFor } from '../../config/caseData';
+import { ADMISSION, CASE_TYPE_FIELDS, PLACEMENT, SPECIAL_NEEDS, dateFieldFor } from '../../config/caseData';
 import { PURPOSE_LABEL, StatusChip, fmtDay, fmtTime, localDate } from './shared';
 import { clock, clockRange } from '../../utils/time';
 
@@ -24,7 +24,7 @@ const TYPED_TEXT = { fontSize: 13, color: 'var(--text-body)', margin: 0, lineHei
  * Nothing in either body changed.
  */
 
-export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminate, canReopen = false, others = [], onEdit, onTerminate, onReopen, onClose }) {
+export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminate, canReopen = false, canRemoveDuplicate = false, others = [], onEdit, onTerminate, onReopen, onRemoveDuplicate, onClose }) {
   const toast = useToast();
   const navigate = useNavigate();
   useEffect(() => {
@@ -153,11 +153,16 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
   const fields = [
     ['Category', child.case_category || '—'],
     ['Middle Name', child.middle_name || '—'],
+    ...(child.alias ? [['Alias', child.alias]] : []),
     ['Sex', child.gender || '—'],
     ...(child.date_found ? [['Date Found', child.date_found]] : []),
     ['Place of Birth or Place Found', child.place_of_birth_or_found || '—'],
     ['Birth Status', child.birth_status || '—'],
     ['Legal Status', child.legal_status || '—'],
+    ...(child.legal_status && child.legal_status_date ? [['Date Issued', child.legal_status_date]] : []),
+    ['Health Condition', child.health_condition
+      ? `${child.health_condition}${child.health_condition === SPECIAL_NEEDS && child.special_needs ? `: ${child.special_needs}` : ''}` : '—'],
+    ['Current Whereabouts', child.current_placement || '—'],
     ['Educational Placement', child.education_level || '—'],
     ['Assigned Psychologist', child.psychologist_name || '—'],
     // Asked, not yet accepted (backend children/assignment.py) - and the last
@@ -384,15 +389,20 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
             </div>
           </div>
         </div>
-        {(canEdit || canTerminate || showReopen) && (
+        {(canEdit || canTerminate || showReopen || canRemoveDuplicate) && (
           <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 10 }}>
             {showReopen && (
               <Button variant="primary" fullWidth onClick={onReopen} iconLeft={<Icon name="rotate-ccw" size={16} />}>Reopen Case</Button>
             )}
-            {(canEdit || canTerminate) && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-                {canEdit && <Button variant="secondary" onClick={onEdit} iconLeft={<Icon name="pencil" size={16} />}>Edit</Button>}
-                {canTerminate && <Button variant="danger" onClick={onTerminate} iconLeft={<Icon name="archive" size={16} />}>Terminate Case</Button>}
+            {(canEdit || canTerminate || canRemoveDuplicate) && (
+              <div style={{ display: 'flex', justifyContent: canRemoveDuplicate ? 'space-between' : 'flex-end', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
+                {/* The ISA only, and only for a record added by mistake; the
+                    server says whether this one may go. */}
+                {canRemoveDuplicate && <Button variant="ghost" onClick={onRemoveDuplicate} iconLeft={<Icon name="trash-2" size={16} />}>Remove duplicate record…</Button>}
+                <span style={{ display: 'inline-flex', gap: 10 }}>
+                  {canEdit && <Button variant="secondary" onClick={onEdit} iconLeft={<Icon name="pencil" size={16} />}>Edit</Button>}
+                  {canTerminate && <Button variant="danger" onClick={onTerminate} iconLeft={<Icon name="archive" size={16} />}>Terminate Case</Button>}
+                </span>
               </div>
             )}
           </div>

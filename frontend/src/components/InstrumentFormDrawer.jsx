@@ -19,7 +19,7 @@ export const EMPTY_INSTRUMENT = { title: '', publisher: '', category: 'other', a
 // Add/edit drawer for an InstrumentCatalog entry. Reused by the admin/psychologist
 // catalog page (Instruments.jsx) and by the instrument module embedded in the
 // Pre-Assessment wizard's step 4 — both simply supply their own save/close handlers.
-export default function InstrumentFormDrawer({ form, setForm, psychologists = [], isAdmin = false, error, onSave, onClose }) {
+export default function InstrumentFormDrawer({ form, setForm, psychologists = [], isAdmin = false, error, saving = false, onSave, onClose }) {
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.32)', display: 'flex', justifyContent: 'flex-end', zIndex: 70, animation: 'racco-fade-in var(--dur-base) var(--ease-out)' }}>
       <div onClick={(e) => e.stopPropagation()} style={{ width: 460, maxWidth: '94%', height: '100%', background: 'var(--surface)', boxShadow: 'var(--shadow-xl)', display: 'flex', flexDirection: 'column', animation: 'racco-slide-left var(--dur-slow) var(--ease-out)' }}>
@@ -57,7 +57,7 @@ export default function InstrumentFormDrawer({ form, setForm, psychologists = []
           )}
         </div>
         <div style={{ padding: 16, borderTop: '1px solid var(--border)' }}>
-          <Button variant="primary" fullWidth onClick={onSave} iconLeft={<Icon name="save" size={16} />}>Save</Button>
+          <Button variant="primary" fullWidth onClick={onSave} disabled={saving} iconLeft={<Icon name="save" size={16} />}>Save</Button>
         </div>
       </div>
     </div>

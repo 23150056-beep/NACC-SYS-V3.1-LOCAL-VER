@@ -169,3 +169,135 @@ class ProfileNormalisesWhatPeopleTypeTest(ProfileBase):
         resp = self.client.patch(URL, {"facebook": "   "}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
         self.assertEqual(resp.data["facebook"], "")
+
+
+class ProfileLicenseTest(ProfileBase):
+    """The PRC license the Social Case Study Report's signature block prints.
+
+    Staff and Psychologist hold one; the ISA is IT support and does not. It is
+    the person's own statement about themselves, so it travels the same
+    caller-bound endpoint as the links and appears nowhere else.
+    """
+
+    def setUp(self):
+        super().setUp()
+        staff_role = Role.objects.create(role_name=Role.STAFF)
+        self.sw = User.objects.create_user(
+            email="sw@racco1.gov.ph", username="sw", password="pass1234",
+            role=staff_role)
+
+    def test_a_psychologist_round_trips_their_license(self):
+        self._auth("me@racco1.gov.ph")
+        resp = self.client.patch(URL, {
+            "license_number": "  0012345  ", "license_valid_until": "2027-03-14"},
+            format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["license_number"], "0012345")
+        self.assertEqual(resp.data["license_valid_until"], "2027-03-14")
+        again = self.client.get(URL).data
+        self.assertEqual(again["license_number"], "0012345")
+        self.assertEqual(again["license_valid_until"], "2027-03-14")
+        p = UserProfile.objects.get(user=self.me)
+        self.assertEqual(p.license_number, "0012345")
+        self.assertEqual(str(p.license_valid_until), "2027-03-14")
+
+    def test_a_social_worker_round_trips_theirs(self):
+        self._auth("sw@racco1.gov.ph")
+        resp = self.client.put(URL, {
+            "license_number": "SW-778", "license_valid_until": "2028-01-31"},
+            format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(self.client.get(URL).data["license_number"], "SW-778")
+
+    def test_an_unset_license_reads_blank_and_null(self):
+        self._auth("sw@racco1.gov.ph")
+        data = self.client.get(URL).data
+        self.assertEqual(data["license_number"], "")
+        self.assertIsNone(data["license_valid_until"])
+
+    def test_a_lapsed_license_is_a_fact_not_an_error(self):
+        self._auth("me@racco1.gov.ph")
+        resp = self.client.patch(
+            URL, {"license_valid_until": "2019-06-30"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["license_valid_until"], "2019-06-30")
+
+    def test_the_validity_can_be_cleared(self):
+        self._auth("me@racco1.gov.ph")
+        self.client.patch(URL, {"license_valid_until": "2027-03-14"}, format="json")
+        resp = self.client.patch(
+            URL, {"license_valid_until": None, "license_number": ""}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertIsNone(resp.data["license_valid_until"])
+
+    def test_the_number_is_capped_at_fifty_characters(self):
+        self._auth("me@racco1.gov.ph")
+        resp = self.client.patch(URL, {"license_number": "9" * 51}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("license_number", resp.data)
+        ok = self.client.patch(URL, {"license_number": "9" * 50}, format="json")
+        self.assertEqual(ok.status_code, 200, ok.data)
+
+    def test_a_bad_date_is_refused(self):
+        self._auth("me@racco1.gov.ph")
+        resp = self.client.patch(
+            URL, {"license_valid_until": "next year"}, format="json")
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("license_valid_until", resp.data)
+
+    def test_an_administrator_is_not_offered_the_fields(self):
+        self._auth("admin@racco1.gov.ph")
+        data = self.client.get(URL).data
+        self.assertNotIn("license_number", data)
+        self.assertNotIn("license_valid_until", data)
+
+    def test_an_administrator_who_writes_one_is_told_why(self):
+        self._auth("admin@racco1.gov.ph")
+        for body in ({"license_number": "0012345"},
+                     {"license_valid_until": "2027-03-14"},
+                     {"license_number": ""}):
+            with self.subTest(body=body):
+                resp = self.client.patch(URL, body, format="json")
+                self.assertEqual(resp.status_code, 400, resp.data)
+                field = next(iter(body))
+                self.assertIn("no PRC license", str(resp.data[field][0]))
+        self.assertFalse(UserProfile.objects.filter(
+            user=self.admin).exclude(license_number="").exists())
+
+    def test_an_administrator_can_still_save_their_links(self):
+        self._auth("admin@racco1.gov.ph")
+        resp = self.client.patch(URL, {"facebook": "isa.support"}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(resp.data["facebook"], "facebook.com/isa.support")
+
+    def test_nobody_reads_another_persons_license(self):
+        """The endpoint is bound to the caller and takes no id, so the only
+        way to see someone's license is to be them."""
+        self._auth("me@racco1.gov.ph")
+        self.client.patch(URL, {
+            "license_number": "MINE-1", "license_valid_until": "2027-03-14"},
+            format="json")
+
+        for email in ("them@racco1.gov.ph", "sw@racco1.gov.ph", "admin@racco1.gov.ph"):
+            with self.subTest(reader=email):
+                self._auth(email)
+                self.assertNotIn("MINE-1", str(self.client.get(URL).data))
+        # And naming the account in the body or the query changes nothing.
+        self._auth("them@racco1.gov.ph")
+        resp = self.client.get(URL, {"user": self.me.id})
+        self.assertEqual(resp.data["license_number"], "")
+        resp = self.client.patch(
+            URL, {"license_number": "THEIRS-9", "user": self.me.id}, format="json")
+        self.assertEqual(resp.status_code, 200, resp.data)
+        self.assertEqual(UserProfile.objects.get(user=self.me).license_number, "MINE-1")
+        self.assertEqual(UserProfile.objects.get(user=self.them).license_number, "THEIRS-9")
+
+    def test_it_is_in_neither_the_directory_nor_the_me_endpoint(self):
+        self._auth("me@racco1.gov.ph")
+        self.client.patch(URL, {
+            "license_number": "MINE-1", "license_valid_until": "2027-03-14"},
+            format="json")
+        self.assertNotIn("license", str(self.client.get("/api/auth/me/").data))
+        self._auth("admin@racco1.gov.ph")
+        self.assertNotIn("MINE-1", str(self.client.get("/api/users/").data))
+        self.assertNotIn("license", str(self.client.get("/api/users/").data))

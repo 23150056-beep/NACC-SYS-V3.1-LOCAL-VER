@@ -119,7 +119,13 @@ export default function Login() {
   // two dead ends it is the way back, because a screen someone lands on with
   // nothing to click is where they decide the system is broken.
   const footer = view === 'login'
-    ? <>No account yet? <AuthLink to="/signup">Request access</AuthLink></>
+    ? (
+      <>
+        No account yet? <AuthLink to="/signup">Request access</AuthLink>
+        <br />
+        Already asked for access? <AuthLink to="/signup?confirm=1">Confirm your email</AuthLink>
+      </>
+    )
     : (
       <button type="button"
               onClick={() => { setCredential(null); setError(''); setView('login'); }}

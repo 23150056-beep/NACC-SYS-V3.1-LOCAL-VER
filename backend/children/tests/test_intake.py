@@ -74,7 +74,8 @@ class TheFormAndTheServerAgreeTest(SimpleTestCase):
         self.assertEqual(intake.CASE_TYPE_FIELDS, _js_map(self.js, "CASE_TYPE_FIELDS", {}))
 
     def test_the_lists_that_changed(self):
-        self.assertEqual(["Marital", "Non-Marital", "Unknown"], _js_array(self.js, "BIRTH_STATUSES"))
+        self.assertEqual(["Marital", "Non-Marital", "Child", "Unknown"],
+                         _js_array(self.js, "BIRTH_STATUSES"))
         self.assertEqual(_js_array(self.js, "BIRTH_STATUSES"),
                          [c for c, _ in Child.BIRTH_STATUS_CHOICES])
         adoption = _js_array(self.js, "TYPES_OF_ADOPTION")
@@ -82,8 +83,25 @@ class TheFormAndTheServerAgreeTest(SimpleTestCase):
         self.assertIn("Relative (Without 2-yr custody)", adoption)
         self.assertEqual(adoption.index("Domestic Relative") + 1,
                          adoption.index("Relative (Without 2-yr custody)"))
-        for retired in ("SIBRA", "ICA Relative"):
-            self.assertNotIn(retired, adoption)
+        # The SCSR's order, with the agency's own "Relative (Without 2-yr
+        # custody)" after Domestic Relative.
+        self.assertEqual(["Regular", "Domestic Relative", "Relative (Without 2-yr custody)",
+                          "Step-parent", "Adult", "SIBRA", "ICA Relative", "IP", "Foster-Adopt"],
+                         adoption)
+
+    def test_the_health_conditions(self):
+        self.assertEqual(intake.HEALTH_CONDITIONS, _js_array(self.js, "HEALTH_CONDITIONS"))
+        self.assertEqual(intake.HEALTH_CONDITIONS,
+                         [c for c, _ in Child.HEALTH_CONDITION_CHOICES])
+        self.assertIn(f"export const SPECIAL_NEEDS = '{intake.SPECIAL_NEEDS}';", self.js)
+        self.assertIn(f"export const ALIAS_CATEGORY = '{intake.ALIAS_CATEGORY}';", self.js)
+
+    def test_the_special_needs_are_asked_only_with_special_needs(self):
+        asked = intake.required_fields("Foster Care", "", intake.SPECIAL_NEEDS)
+        self.assertIn("special_needs", asked)
+        self.assertNotIn("special_needs", intake.required_fields("Foster Care", "", "Healthy"))
+        self.assertIn("special_needs", re.search(
+            r"export const requiredFields = .*?\n\};?\n", self.js, re.S).group(0))
 
     def test_what_is_always_required(self):
         self.assertEqual(intake.ALWAYS_REQUIRED, _js_array(self.js, "ALWAYS_REQUIRED"))
@@ -108,6 +126,39 @@ class TheFormAndTheServerAgreeTest(SimpleTestCase):
         for case_type in re.findall(r"'([^']+)'", admitted.group(1)):
             self.assertEqual(intake.ADMISSION, intake.date_field_for(case_type))
         self.assertIn("typeOfAdoption === 'Regular' ? ADMISSION : PLACEMENT", self.js)
+
+
+class TheAgeRuleTest(SimpleTestCase):
+    def test_the_form_and_the_server_hold_the_same_rule(self):
+        js = CASE_DATA_JS.read_text(encoding="utf-8")
+        self.assertIn("export const CHILD_AGES = [5, 17];", js)
+        self.assertIn("export const ADULT_AGES = [18, null];", js)
+        self.assertIn("export const ADULT_ADOPTION = 'Adult';", js)
+        self.assertIn("caseType === 'Adoption' && typeOfAdoption === ADULT_ADOPTION ? ADULT_AGES : CHILD_AGES", js)
+        self.assertEqual((5, 17), intake.CHILD_AGES)
+        self.assertEqual((18, None), intake.ADULT_AGES)
+        self.assertEqual("Adult", intake.ADULT_ADOPTION)
+        self.assertIn("The person must be ${low} or older for an Adult adoption.", js)
+        self.assertIn("The child must be between ${low} and ${high} years old.", js)
+
+    def test_only_an_adult_adoption_is_18_and_over(self):
+        self.assertEqual((18, None), intake.age_range("Adoption", "Adult"))
+        for case_type, adoption in (("Adoption", "Regular"), ("Adoption", ""),
+                                    ("Foster Care", "Adult"), ("Residential Care", "")):
+            self.assertEqual((5, 17), intake.age_range(case_type, adoption))
+        self.assertEqual("The person must be 18 or older for an Adult adoption.",
+                         intake.age_refusal("Adoption", "Adult"))
+        self.assertEqual("The child must be between 5 and 17 years old.",
+                         intake.age_refusal("Foster Care"))
+
+
+def _born(years, extra_days=0):
+    """The birth date of somebody who is `years` old today (plus extra_days
+    short of the next birthday), by the same arithmetic the server uses."""
+    today = timezone.localdate()
+    born = date(today.year - years, today.month, 1) if today.day == 29 and today.month == 2 \
+        else date(today.year - years, today.month, today.day)
+    return (born - timedelta(days=extra_days)).isoformat()
 
 
 class TheDateRuleTest(SimpleTestCase):
@@ -210,15 +261,71 @@ class CreatingARecordTest(_Staff):
         self.assertIn("case_category", r.data)
 
     def test_renamed_and_retired_values_cannot_be_picked(self):
-        for field, value in (("case_category", "Orphan"), ("birth_status", "N/A"),
-                             ("birth_status", "Child")):
+        for field, value in (("case_category", "Orphan"), ("birth_status", "N/A")):
             r = self.post(**{field: value})
             self.assertEqual(400, r.status_code, value)
             self.assertIn(field, r.data)
-        for retired in ("SIBRA", "ICA Relative"):
-            r = self.post(case_type="Adoption", type_of_adoption=retired)
-            self.assertEqual(400, r.status_code, retired)
-            self.assertIn("type_of_adoption", r.data)
+        r = self.post(case_type="Adoption", type_of_adoption="Stepparent")
+        self.assertEqual(400, r.status_code)
+        self.assertIn("type_of_adoption", r.data)
+
+    def test_the_choices_offered_again_on_7_oct_are_new_picks(self):
+        """Birth status Child, and the adoption types SIBRA and ICA Relative
+        (SCSR Part I), were retired on 24 Sep 2026 and are offered again."""
+        r = self.post(birth_status="Child", last_name="Pick1")
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertEqual("Child", r.data["birth_status"])
+        for n, kind in enumerate(("SIBRA", "ICA Relative")):
+            r = self.post(case_type="Adoption", type_of_adoption=kind, last_name=f"Pick{n + 2}")
+            self.assertEqual(201, r.status_code, (kind, r.data))
+            self.assertEqual(kind, r.data["type_of_adoption"])
+            # Only a Regular adoption records the admission; these, the placement.
+            self.assertEqual(intake.PLACEMENT, intake.date_field_for("Adoption", kind))
+        r = self.post(case_type="Adoption", type_of_adoption="SIBRA",
+                      date_of_placement_to_custodian=None, last_name="NoDate")
+        self.assertEqual(400, r.status_code)
+        self.assertEqual({"date_of_placement_to_custodian"}, set(r.data))
+
+    def test_health_condition_is_always_asked(self):
+        for blank in ("", None):
+            r = self.post(health_condition=blank)
+            self.assertEqual(400, r.status_code, blank)
+            self.assertIn("health_condition", r.data)
+        r = self.post(health_condition="Sickly")
+        self.assertEqual(400, r.status_code)
+        self.assertIn("health_condition", r.data)
+        r = self.post(health_condition="Healthy", last_name="Fine")
+        self.assertEqual(201, r.status_code, r.data)
+
+    def test_the_special_needs_are_required_only_for_special_needs(self):
+        r = self.post(health_condition="With special needs", last_name="Needs1")
+        self.assertEqual(400, r.status_code)
+        self.assertEqual({"special_needs"}, set(r.data))
+        r = self.post(health_condition="With special needs", special_needs="   ", last_name="Needs2")
+        self.assertEqual(400, r.status_code, "spaces are a blank")
+        r = self.post(health_condition="With special needs", special_needs="Asthma",
+                      last_name="Needs3")
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertEqual("Asthma", r.data["special_needs"])
+        # Healthy takes none: what was typed beside it is not kept.
+        r = self.post(health_condition="Healthy", special_needs="Asthma", last_name="Needs4")
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertEqual("", r.data["special_needs"])
+
+    def test_current_whereabouts_is_asked(self):
+        r = self.post(current_placement="")
+        self.assertEqual(400, r.status_code)
+        self.assertIn("current_placement", r.data)
+        r = self.post(current_placement="With the maternal aunt", last_name="Where")
+        self.assertEqual(201, r.status_code, r.data)
+
+    def test_the_alias_is_optional_and_saved(self):
+        r = self.post(case_category="Without Known Parents", alias="Bunso", last_name="Alias1")
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertEqual("Bunso", r.data["alias"])
+        r = self.post(last_name="Alias2")
+        self.assertEqual(201, r.status_code, "no alias is fine")
+        self.assertEqual("", r.data["alias"])
 
     def test_the_new_values_can(self):
         r = self.post(case_category="Orphaned", birth_status="Unknown")
@@ -248,7 +355,9 @@ class CreatingARecordTest(_Staff):
         }, format="json")
         self.assertEqual(200, r.status_code, r.data)
         old.refresh_from_db()
-        # Current Whereabouts left the form, and what it held is kept.
+        # Whereabouts and health condition did not exist when this record was
+        # made: its blanks are not held against an unrelated edit, and what it
+        # held is kept.
         self.assertEqual(("MSWDO San Fernando", "Bahay Kalinga"),
                          (old.referral_source, old.current_placement))
 
@@ -339,25 +448,194 @@ class EditingARecordTest(_Staff):
         self.assertEqual(200, r.status_code, r.data)
 
     def test_a_retired_value_on_record_survives_an_unrelated_edit(self):
+        # "N/A" and "Stepparent" are the values a later list renamed away.
         old = Child.objects.create(social_worker=self.staff, 
             first_name="Old", last_name="Adoption", birth_date=date(2015, 5, 5),
             gender="Male", case_type="Adoption", case_category="Surrendered",
-            birth_status="Child", type_of_adoption="SIBRA")
+            birth_status="N/A", type_of_adoption="Stepparent")
         r = self.client.put(f"/api/children/{old.id}/", {
             "birth_date": "2015-05-05", "gender": "Male", "case_type": "Adoption",
-            "case_category": "Surrendered", "birth_status": "Child",
-            "type_of_adoption": "SIBRA", "education_level": "Grade 5",
+            "case_category": "Surrendered", "birth_status": "N/A",
+            "type_of_adoption": "Stepparent", "education_level": "Grade 5",
         }, format="json")
         self.assertEqual(200, r.status_code, r.data)
         old.refresh_from_db()
-        self.assertEqual(("Child", "SIBRA", "Grade 5"),
+        self.assertEqual(("N/A", "Stepparent", "Grade 5"),
                          (old.birth_status, old.type_of_adoption, old.education_level))
+
+    def test_an_older_blank_whereabouts_and_health_are_kept_through_an_unrelated_edit(self):
+        old = Child.objects.create(social_worker=self.staff,
+            first_name="Old", last_name="Blanks", birth_date=date(2015, 5, 5),
+            gender="Male", case_type="Foster Care", case_category="Dependent",
+            education_level="Grade 5")
+        body = {"birth_date": "2015-05-05", "gender": "Male", "case_type": "Foster Care",
+                "case_category": "Dependent", "education_level": "Grade 6"}
+        r = self.client.put(f"/api/children/{old.id}/", body, format="json")
+        self.assertEqual(200, r.status_code, r.data)
+        old.refresh_from_db()
+        self.assertEqual(("", "", "Grade 6"),
+                         (old.current_placement, old.health_condition, old.education_level))
+        # Once it holds an answer, the answer cannot be taken away.
+        self.assertEqual(200, self.client.patch(
+            f"/api/children/{old.id}/", {"current_placement": "With an aunt",
+                                         "health_condition": "Healthy"}, format="json").status_code)
+        for field in ("current_placement", "health_condition"):
+            r = self.client.patch(f"/api/children/{old.id}/", {field: ""}, format="json")
+            self.assertEqual(400, r.status_code, field)
+            self.assertIn(field, r.data)
+
+    def test_an_answer_cannot_be_taken_away_whereabouts_and_health(self):
+        for field in ("current_placement", "health_condition"):
+            r = self.put(**{field: ""})
+            self.assertEqual(400, r.status_code, field)
+            self.assertIn(field, r.data)
+
+    def test_special_needs_on_an_edit(self):
+        r = self.put(health_condition="With special needs")
+        self.assertEqual(400, r.status_code)
+        self.assertEqual({"special_needs"}, set(r.data))
+        r = self.put(health_condition="With special needs", special_needs="Hearing loss")
+        self.assertEqual(200, r.status_code, r.data)
+        # Back to Healthy drops them.
+        r = self.put(health_condition="Healthy", special_needs="Hearing loss")
+        self.assertEqual(200, r.status_code, r.data)
+        self.child.refresh_from_db()
+        self.assertEqual(("Healthy", ""), (self.child.health_condition, self.child.special_needs))
+
+    def test_an_alias_survives_a_change_of_category(self):
+        """Hidden by the form when the category is not Without Known Parents,
+        never deleted (the same rule as the case-type answers)."""
+        self.assertEqual(200, self.put(case_category="Without Known Parents",
+                                       alias="Bunso").status_code)
+        r = self.put(case_category="Neglected", alias="Bunso")
+        self.assertEqual(200, r.status_code, r.data)
+        self.child.refresh_from_db()
+        self.assertEqual("Bunso", self.child.alias)
+        # And an edit that leaves it out does not take it either.
+        r = self.client.patch(f"/api/children/{self.child.id}/",
+                              {"medical_notes": "Seen."}, format="json")
+        self.assertEqual(200, r.status_code, r.data)
+        self.child.refresh_from_db()
+        self.assertEqual("Bunso", self.child.alias)
 
     def test_the_name_including_the_middle_name_stays_locked(self):
         r = self.client.patch(f"/api/children/{self.child.id}/",
                               {"middle_name": "Reyes"}, format="json")
         self.assertEqual(400, r.status_code)
         self.assertIn("middle_name", r.data)
+
+
+class TheAgeRuleByAdoptionTypeTest(_Staff):
+    def adult(self, **over):
+        return self.post(case_type="Adoption", type_of_adoption="Adult", **over)
+
+    def test_an_adult_adoption_takes_18_and_over_with_no_upper_limit(self):
+        for years in (18, 30, 75):
+            r = self.adult(birth_date=_born(years))
+            self.assertEqual(201, r.status_code, f"{years}: {r.data}")
+
+    def test_an_adult_adoption_refuses_17(self):
+        r = self.adult(birth_date=_born(17))
+        self.assertEqual(400, r.status_code)
+        self.assertEqual(["The person must be 18 or older for an Adult adoption."],
+                         [str(e) for e in r.data["birth_date"]])
+
+    def test_every_other_case_is_still_5_to_17(self):
+        # A different child for each case: the same name and birth date twice is
+        # refused as a second record (children/duplicates.py), and the ages
+        # that are accepted repeat from one case to the next.
+        for first, kwargs in zip(("Ana", "Bea", "Cora", "Dina"), (
+                {}, {"case_type": "Adoption", "type_of_adoption": "Regular",
+                     "date_of_admission": "2026-03-01", "date_of_placement_to_custodian": None},
+                {"case_type": "Adoption", "type_of_adoption": "Step-parent"},
+                {"case_type": "Residential Care", "custodian_name": "",
+                 "date_of_placement_to_custodian": None,
+                 "date_of_admission": "2026-03-01"})):
+            for years, ok in ((4, False), (5, True), (17, True), (18, False), (30, False)):
+                r = self.post(birth_date=_born(years), first_name=first, **kwargs)
+                self.assertEqual(201 if ok else 400, r.status_code, f"{kwargs} {years}: {r.data}")
+                if not ok:
+                    self.assertEqual("The child must be between 5 and 17 years old.",
+                                     str(r.data["birth_date"][0]), f"{kwargs} {years}: {r.data}")
+
+    def test_changing_the_type_re_judges_the_birth_date(self):
+        adult = Child.objects.get(pk=self.adult(birth_date=_born(30)).data["id"])
+        body = complete(case_type="Adoption", type_of_adoption="Regular", birth_date=_born(30),
+                        date_of_admission="2026-03-01", date_of_placement_to_custodian=None)
+        for f in ("first_name", "middle_name", "last_name"):
+            body.pop(f)
+        url = f"/api/children/{adult.id}/"
+        r = self.client.put(url, body, format="json")
+        self.assertEqual(400, r.status_code)
+        self.assertIn("birth_date", r.data)
+        # The other way round: a child's record turned into an Adult adoption.
+        body["birth_date"] = _born(10)
+        self.assertEqual(200, self.client.put(url, body, format="json").status_code)
+        body.update(type_of_adoption="Adult", date_of_admission=None,
+                    date_of_placement_to_custodian="2026-03-01")
+        r = self.client.put(url, body, format="json")
+        self.assertEqual(400, r.status_code)
+        self.assertIn("birth_date", r.data)
+
+    def test_an_unchanged_birth_date_on_an_old_record_is_not_re_judged(self):
+        old = Child.objects.create(
+            social_worker=self.staff, first_name="Old", last_name="Teen",
+            birth_date=date(2000, 1, 1), gender="Male", case_type="Foster Care",
+            case_category="Dependent")
+        r = self.client.put(f"/api/children/{old.id}/", {
+            "birth_date": "2000-01-01", "case_type": "Foster Care",
+            "case_category": "Dependent", "medical_notes": "Seen."}, format="json")
+        self.assertEqual(200, r.status_code, r.data)
+
+
+class TheLegalStatusDateTest(_Staff):
+    def test_a_date_issued_is_optional_and_saved(self):
+        r = self.post(legal_status="With IVC")
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertIsNone(r.data["legal_status_date"])
+        # Another child: the same name and birth date again would be refused.
+        r = self.post(legal_status="With IVC", legal_status_date="2024-05-06", first_name="Bea")
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertEqual("2024-05-06", r.data["legal_status_date"])
+
+    def test_not_in_the_future_and_not_before_the_birth(self):
+        tomorrow = (timezone.localdate() + timedelta(days=1)).isoformat()
+        for bad in (tomorrow, "2015-12-31"):
+            r = self.post(legal_status="With IVC", legal_status_date=bad)
+            self.assertEqual(400, r.status_code, bad)
+            self.assertIn("legal_status_date", r.data)
+
+    def test_it_goes_with_the_legal_status(self):
+        r = self.post(legal_status="", legal_status_date="2024-05-06")
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertIsNone(r.data["legal_status_date"])
+        # Another child: the same name and birth date again would be refused.
+        child = Child.objects.get(pk=self.post(
+            legal_status="With IVC", legal_status_date="2024-05-06",
+            first_name="Bea").data["id"])
+        body = complete(legal_status="", legal_status_date="2024-05-06")
+        for f in ("first_name", "middle_name", "last_name"):
+            body.pop(f)
+        r = self.client.put(f"/api/children/{child.id}/", body, format="json")
+        self.assertEqual(200, r.status_code, r.data)
+        child.refresh_from_db()
+        self.assertEqual("", child.legal_status)
+        self.assertIsNone(child.legal_status_date)
+
+    def test_clearing_the_status_with_a_patch_clears_the_date(self):
+        child = Child.objects.get(pk=self.post(
+            legal_status="With IVC", legal_status_date="2024-05-06").data["id"])
+        r = self.client.patch(f"/api/children/{child.id}/", {"legal_status": ""}, format="json")
+        self.assertEqual(200, r.status_code, r.data)
+        child.refresh_from_db()
+        self.assertIsNone(child.legal_status_date)
+
+    def test_moving_the_birth_date_past_the_date_issued_is_refused(self):
+        child = Child.objects.get(pk=self.post(
+            legal_status="With IVC", legal_status_date="2016-06-01").data["id"])
+        r = self.client.patch(f"/api/children/{child.id}/", {"birth_date": "2017-01-01"}, format="json")
+        self.assertEqual(400, r.status_code)
+        self.assertIn("legal_status_date", r.data)
 
 
 class RenamingMigrationTest(TestCase):
@@ -400,6 +678,10 @@ class AnOlderDemoFixtureStillLoadsTest(TestCase):
         self.assertEqual(("R", "Orphaned", "Unknown"),
                          (child.middle_name, child.case_category, child.birth_status))
         self.assertIn("upgraded", out.getvalue())
+        # The fixture predates both questions; the import answers them, or the
+        # record would be one the form refuses to create.
+        self.assertIn(child.health_condition, intake.HEALTH_CONDITIONS)
+        self.assertTrue(child.current_placement.strip())
 
 
 MEDIA = Path(tempfile.gettempdir()) / "intake-seeder-media"
@@ -420,12 +702,18 @@ class TheSeederFillsTheFormTest(TestCase):
         call_command("seed_demo_data", children=18, stdout=StringIO())
         children = list(Child.objects.all())
         self.assertEqual(18, len(children))
+        self.assertTrue(any(c.health_condition == intake.SPECIAL_NEEDS for c in children),
+                        "the demo should show a child with special needs")
         for child in children:
-            for field in intake.required_fields(child.case_type, child.type_of_adoption):
+            for field in intake.required_fields(child.case_type, child.type_of_adoption,
+                                               child.health_condition):
                 self.assertTrue(str(getattr(child, field) or "").strip(),
                                 f"{child.fullname} ({child.case_type}) has no {field}")
             self.assertIn(child.case_category, intake.CATEGORY_OPTIONS[child.case_type])
             self.assertIn(child.birth_status, [c for c, _ in Child.BIRTH_STATUS_CHOICES])
+            self.assertIn(child.health_condition, intake.HEALTH_CONDITIONS)
+            if child.health_condition == intake.SPECIAL_NEEDS:
+                self.assertTrue(child.special_needs.strip(), child.fullname)
             if child.type_of_adoption:
                 self.assertIn(child.type_of_adoption,
                               [c for c, _ in Child.TYPE_OF_ADOPTION_CHOICES])

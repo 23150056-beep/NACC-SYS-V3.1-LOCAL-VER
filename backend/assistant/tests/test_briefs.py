@@ -56,14 +56,8 @@ class BriefTest(BriefTestBase):
         self.assertEqual(res.status_code, 404)
         self.assertFalse(AssistantJob.objects.exists())
 
-    def test_administrator_may_brief_any_child(self):
-        self.client.force_authenticate(self.admin)
-        with patch.object(services.OllamaClient, "generate", return_value="Brief."):
-            res = self.client.post(self._url(self.theirs))
-        self.assertEqual(res.status_code, 200)
-
     def test_missing_child_is_404(self):
-        self.client.force_authenticate(self.admin)
+        self.client.force_authenticate(self.psy)
         self.assertEqual(self.client.post("/api/assistant/brief/child/99999/").status_code, 404)
 
     def test_503_when_the_assistant_is_off(self):

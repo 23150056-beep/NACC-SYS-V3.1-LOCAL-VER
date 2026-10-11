@@ -210,8 +210,10 @@ def _read_semaphore_reply(body, number, description, otp_code=None):
 
 def _gateway_words(parsed):
     """A refusal as a sentence. Semaphore reports validation failures as
-    {"field": ["reason", ...]} and some refusals as a bare list of strings;
-    printed raw, both read as noise on the settings page."""
+    {"field": ["reason", ...]}, some refusals as a bare list of strings, and
+    some as a list of those objects - [{"senderName": "No active sender name
+    found..."}], seen on 1 Oct 2026 under HTTP 500. Printed raw, every one of
+    them reads as noise on the settings page."""
     if isinstance(parsed, dict):
         parts = []
         for field, reasons in parsed.items():
@@ -220,15 +222,38 @@ def _gateway_words(parsed):
             parts.append(f"{field}: {reasons}")
         return "; ".join(parts)
     if isinstance(parsed, list):
-        return " ".join(str(p) for p in parsed if not isinstance(p, dict))
+        return " ".join(_gateway_words(p) if isinstance(p, (dict, list)) else str(p)
+                        for p in parsed).strip()
     return str(parsed)
+
+
+def _sender_hint():
+    """What to do about a refused sender name, given what was sent.
+
+    Semaphore's "No active sender name found" reads as though the account
+    has no approved name, and an owner whose name IS approved is then told
+    something they know to be false. What it usually means is that the name
+    sent is not one of the account's ACTIVE names - none was sent, it is
+    spelt differently, it is still pending, or the key belongs to another
+    account - so the hint says which name went, and where the list is.
+    """
+    name = settings.SMS_SENDER_NAME
+    # Only Semaphore's check reads the account's sender names.
+    where = ("Settings > Text messages > Check the key lists the sender names "
+             "on the account and their status."
+             if settings.SMS_PROVIDER == "semaphore" else "")
+    if not name:
+        return (" SMS_SENDER_NAME is not set, so no sender name was sent. Set "
+                "it to your approved sender name, spelt exactly as the "
+                "gateway shows it, and restart the API. " + where)
+    return (f" The name sent was '{name}' (SMS_SENDER_NAME). It must match an "
+            f"Active sender name on the same account the API key belongs "
+            f"to, spelt exactly. " + where)
 
 
 def _with_sender_hint(sentence):
     if "sender" in sentence.lower():
-        return (f"{sentence} A sender name has to be registered and approved "
-                f"by the gateway before it can be used; SMS_SENDER_NAME is "
-                f"'{settings.SMS_SENDER_NAME}'.")
+        return sentence + _sender_hint()
     return sentence
 
 
@@ -239,6 +264,9 @@ def _read_semaphore_account(parsed):
     or a zero balance both authenticate perfectly and send nothing, so both
     fail the check rather than printing a balance for someone to misread.
     """
+    # It has been seen as a one-item list as well as a bare object.
+    if isinstance(parsed, list) and len(parsed) == 1:
+        parsed = parsed[0]
     if not isinstance(parsed, dict) or (parsed.get("account_id") is None
                                         and parsed.get("credit_balance") is None):
         return SmsResult(False, "The gateway refused the key: "
@@ -428,6 +456,64 @@ def _endpoint_for(provider):
 SEMAPHORE_OTP_ENDPOINT = "https://api.semaphore.co/api/v4/otp"
 
 
+# Semaphore's list of the account's sender names and their status. Asked by the
+# key check, never by the sender: it is rate-limited to a call or two a minute.
+SEMAPHORE_SENDERNAMES_ENDPOINT = "https://api.semaphore.co/api/v4/account/sendernames"
+
+
+def _check_semaphore_sender_names(api_key):
+    """(verdict, sentence) about the sender names on the key's account.
+
+    The verdict is None when the list could not be had - a rate limit, an
+    answer that cannot be read - because failing the whole check on a second
+    call would hide a perfectly good key.
+    """
+    url = (f"{SEMAPHORE_SENDERNAMES_ENDPOINT}?"
+           f"{urllib.parse.urlencode({'apikey': api_key})}")
+    body, failure = _post(urllib.request.Request(
+        url, headers={"accept": "application/json"}, method="GET"),
+        "sender name check")
+    if failure is not None:
+        return None, f"Sender names could not be checked: {failure.detail}"
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        return None, "Sender names could not be checked: the answer could not be read."
+    names = parsed.get("data") if isinstance(parsed, dict) else parsed
+    if not isinstance(names, list):
+        return None, ("Sender names could not be checked: "
+                      f"{_gateway_words(parsed) or body}")
+
+    entries = [(str(n.get("name") or ""), str(n.get("status") or ""))
+               for n in names if isinstance(n, dict) and n.get("name")]
+    active = [name for name, status in entries if status.lower() == "active"]
+    listing = ", ".join(f"{name} ({status or 'no status'})"
+                        for name, status in entries) or "none"
+    wanted = settings.SMS_SENDER_NAME
+
+    if not active:
+        return False, (f"No sender name on this account is active (sender "
+                       f"names: {listing}), so every message will be refused "
+                       f"until one is approved.")
+    if not wanted:
+        return False, (f"SMS_SENDER_NAME is not set. Set it to an active "
+                       f"sender name - {', '.join(active)} - and restart the "
+                       f"API; without one, messages are refused.")
+    if wanted in active:
+        return True, f"Sender name '{wanted}' is active."
+    for name, status in entries:
+        if name == wanted:
+            return False, (f"Sender name '{wanted}' is on the account but its "
+                           f"status is {status or 'unknown'}, not Active.")
+    for name in active:
+        if name.lower() == wanted.lower():
+            return False, (f"SMS_SENDER_NAME is '{wanted}' but the account has "
+                           f"'{name}'. It must match exactly, capitals included.")
+    return False, (f"SMS_SENDER_NAME is '{wanted}', which is not a sender name "
+                   f"on this account. Active: {', '.join(active)}. Is the API "
+                   f"key from the account that holds the name?")
+
+
 # Where each gateway will confirm the key and the balance for free. Not
 # derived from SMS_ENDPOINT: that setting exists to point the SENDER somewhere
 # else, and quietly rewriting a URL to guess a second one is how you end up
@@ -487,7 +573,13 @@ def check_gateway():
         return SmsResult(False, "The gateway refused the key: "
                                 f"{parsed.get('message') or body}")
     if provider == "semaphore":
-        return _read_semaphore_account(parsed)
+        account = _read_semaphore_account(parsed)
+        if not account.ok:
+            return account
+        senders_ok, senders = _check_semaphore_sender_names(api_key)
+        # None means the list could not be fetched: say so, and let the
+        # account's own verdict stand rather than failing on a second call.
+        return SmsResult(senders_ok is not False, f"{account.detail} {senders}")
 
     data = parsed.get("data") if isinstance(parsed, dict) else parsed
     if provider == "textbee":
@@ -521,11 +613,11 @@ def _explain(code, detail):
     if code in (401, 403):
         return (f"The gateway rejected the credentials (HTTP {code}). Check "
                 f"SMS_API_KEY. It said: {detail}")
-    # Semaphore answers a failed validation with 422, PhilSMS with 400.
-    if code in (400, 422) and "sender" in detail.lower():
-        return (f"The gateway rejected the sender name "
-                f"'{settings.SMS_SENDER_NAME}'. It has to be registered with "
-                f"them before it can be used. It said: {detail}")
+    # Any status, not only a validation one: Semaphore answered "No active
+    # sender name found" with a 500.
+    if "sender" in detail.lower():
+        return (f"The gateway refused the sender name (HTTP {code}). It said: "
+                f"{detail}." + _sender_hint())
     if code == 402:
         return f"The account is out of credit. It said: {detail}"
     if code == 429:

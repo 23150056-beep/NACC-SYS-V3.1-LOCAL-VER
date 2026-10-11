@@ -18,9 +18,10 @@ from rest_framework.test import APIRequestFactory
 from accounts.models import Role
 from assistant import tools
 from children.models import Child
+from clinical.care_gaps import compute_alerts
 from clinical.models import (
-    AgencyFormTemplate, OpinionnaireInvite, ProblemEntry, RemarkNote,
-    SelfReportFlag,
+    AgencyFormTemplate, CaseReferral, ConsentRecord, OpinionnaireInvite,
+    ProblemEntry, RemarkNote, SelfReportFlag,
 )
 from scheduling.models import Appointment
 
@@ -45,6 +46,11 @@ class ResolverTestBase(TestCase):
         self.theirs = Child.objects.create(
             fullname="Juan Dela Cruz", assigned_psychologist=self.other)
         self.factory = APIRequestFactory()
+
+    def _social_worker(self):
+        role, _ = Role.objects.get_or_create(role_name=Role.STAFF)
+        return User.objects.create_user(
+            email="s@racco1.gov.ph", username="s", password="pass1234", role=role)
 
     def _request(self, user):
         req = self.factory.get("/api/assistant/ask/")
@@ -328,6 +334,52 @@ class CareGapResolverTest(ResolverTestBase):
         out = self._resolve(self.psy, "list_care_gaps", {})
         self.assertNotIn("Juan Dela Cruz", [i["child"] for i in out["items"]])
 
+    def test_items_carry_the_child_id(self):
+        # The panel links the row to the child's page by it.
+        out = self._resolve(self.psy, "list_care_gaps", {})
+        self.assertEqual(self.mine.id, out["items"][0]["child_id"])
+
+    def test_a_psychologists_gaps_are_unchanged(self):
+        out = self._resolve(self.psy, "list_care_gaps", {})
+        expected = compute_alerts(Child.objects.filter(assigned_psychologist=self.psy))
+        self.assertEqual([a["type"] for a in expected], [i["type"] for i in out["items"]])
+        self.assertNotIn("empty", out)
+
+    def test_the_isa_keeps_the_agency_rules(self):
+        out = self._resolve(self.admin, "list_care_gaps", {})
+        unbooked = {i["child"] for i in out["items"] if i["type"] == "no_upcoming_appointment"}
+        self.assertEqual({"Maria Santos", "Juan Dela Cruz"}, unbooked)
+
+    def test_a_social_worker_gets_their_own_gaps(self):
+        sw = self._social_worker()
+        Child.objects.filter(pk=self.mine.pk).update(
+            social_worker=sw, created_at=timezone.now() - timedelta(days=30))
+        Child.objects.filter(pk=self.theirs.pk).update(
+            social_worker=User.objects.create_user(
+                email="t@racco1.gov.ph", username="t", password="pass1234",
+                role=sw.role))
+        out = self._resolve(sw, "list_care_gaps", {})
+        types = {i["type"] for i in out["items"]}
+        self.assertEqual({"Maria Santos"}, {i["child"] for i in out["items"]})
+        self.assertIn("no_case_referral", types)
+        # Booking stays theirs; the psychologist's clinical rules do not.
+        self.assertIn("no_upcoming_appointment", types)
+        self.assertNotIn("pre_assessment_overdue", types)
+        self.assertNotIn("report_missing", types)
+
+    def test_a_social_workers_empty_answer_says_what_was_checked(self):
+        sw = self._social_worker()
+        Child.objects.filter(pk=self.mine.pk).update(social_worker=sw)
+        CaseReferral.objects.create(
+            child=self.mine, uploaded_by=sw, file="case-referrals/x.pdf")
+        ConsentRecord.objects.create(child=self.mine, status=ConsentRecord.SIGNED)
+        Appointment.objects.create(
+            child=self.mine, psychologist=self.psy,
+            start=timezone.now() + timedelta(days=3))
+        out = self._resolve(sw, "list_care_gaps", {})
+        self.assertEqual([], out["items"])
+        self.assertEqual("Nothing outstanding in your records.", out["empty"])
+
 
 class SummaryResolverTest(ResolverTestBase):
     def test_finds_a_child_by_partial_name(self):
@@ -363,6 +415,17 @@ class SummaryResolverTest(ResolverTestBase):
         RemarkNote.objects.create(child=self.mine, author=self.other, text="Earlier note")
         out = self._resolve(self.psy, "get_child_summary", {"name": "maria"})
         self.assertIn("Earlier note", [r["text"] for r in out["remarks"]])
+
+    def test_a_social_workers_summary_lists_their_gaps(self):
+        # The same gap types list_care_gaps gives them, not the psychologist's.
+        sw = self._social_worker()
+        Child.objects.filter(pk=self.mine.pk).update(
+            social_worker=sw, created_at=timezone.now() - timedelta(days=30))
+        gaps = self._resolve(sw, "get_child_summary", {"name": "Maria Santos"})["gaps"]
+        self.assertIn("no_case_referral", gaps)
+        self.assertNotIn("pre_assessment_overdue", gaps)
+        self.assertEqual(
+            gaps, [i["type"] for i in self._resolve(sw, "list_care_gaps", {})["items"]])
 
 
 class DirectResolverTest(ResolverTestBase):
@@ -857,13 +920,23 @@ class AvailabilityResolverTest(ResolverTestBase):
     endpoint would then refuse, which is why the arithmetic is shared."""
 
     def setUp(self):
+        # The clock is pinned to a Wednesday morning (Manila), so the class
+        # means the same at any hour of any day. free_windows skips a window
+        # that has already begun today and the chatbot's week runs Sunday to
+        # Saturday: on the real clock a window starting at 23:00 had begun by
+        # the last hour of the day, and late on a Saturday there was nothing
+        # left of the week to offer.
+        self.now = timezone.make_aware(datetime(2026, 10, 7, 10, 0))
+        clock = patch("django.utils.timezone.now", return_value=self.now)
+        clock.start()
+        self.addCleanup(clock.stop)
         super().setUp()
         from scheduling.models import AvailabilityBlock
-        # Every weekday, so the window exists whichever day the suite runs.
+        # Every weekday, so the window exists whichever day it is asked about.
         for weekday in range(7):
             AvailabilityBlock.objects.create(
                 psychologist=self.psy, weekday=weekday,
-                start_time=time(23, 0), end_time=time(23, 59), capacity=2)
+                start_time=time(13, 0), end_time=time(17, 0), capacity=2)
 
     def test_lists_who_is_free(self):
         out = self._resolve(self.admin, "find_availability", {"when": "this_week"})
@@ -876,7 +949,7 @@ class AvailabilityResolverTest(ResolverTestBase):
         for weekday in range(7):
             AvailabilityBlock.objects.create(
                 psychologist=self.other, weekday=weekday,
-                start_time=time(23, 0), end_time=time(23, 59), capacity=1)
+                start_time=time(13, 0), end_time=time(17, 0), capacity=1)
         out = self._resolve(self.psy, "find_availability", {"when": "this_week"})
         self.assertEqual({i["email"] for i in out["items"]}, {"p@racco1.gov.ph"})
 
@@ -886,7 +959,7 @@ class AvailabilityResolverTest(ResolverTestBase):
         for _ in range(2):                       # capacity is 2
             Appointment.objects.create(
                 child=self.mine, psychologist=self.psy,
-                start=timezone.make_aware(datetime.combine(day, time(23, 30))),
+                start=timezone.make_aware(datetime.combine(day, time(14, 30))),
                 status=Appointment.SCHEDULED)
         out = self._resolve(self.admin, "find_availability", {"when": "tomorrow"})
         self.assertEqual(out["items"], [])
@@ -897,7 +970,7 @@ class AvailabilityResolverTest(ResolverTestBase):
         for _ in range(2):
             Appointment.objects.create(
                 child=self.mine, psychologist=self.psy,
-                start=timezone.make_aware(datetime.combine(day, time(23, 30))),
+                start=timezone.make_aware(datetime.combine(day, time(14, 30))),
                 status=Appointment.CANCELLED)
         out = self._resolve(self.admin, "find_availability", {"when": "tomorrow"})
         self.assertTrue(out["items"])

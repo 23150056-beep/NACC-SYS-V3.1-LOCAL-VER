@@ -2,9 +2,10 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from accounts.display import display_name
+from accounts.names import refuse_unreadable
 from accounts.models import Role
 from accounts.phone import as_typed as phone_as_typed
-from children import assignment, custodian, intake
+from children import assignment, custodian, duplicates, intake
 from children.models import AssignmentRequest, Child
 
 User = get_user_model()
@@ -36,12 +37,19 @@ class ChildSerializer(serializers.ModelSerializer):
     # future edit before validate_case_category ever got a chance to apply
     # its change-only exemption.
     case_category = serializers.CharField(required=False, allow_blank=True)
-    # The same, for the two lists that retired values on 24 Sep 2026: birth
-    # status "Child", adoption types "SIBRA" and "ICA Relative".
+    # The same, for the two lists that retired values on 24 Sep 2026 (birth
+    # status "Child", adoption types "SIBRA" and "ICA Relative", offered again
+    # since 7 Oct): a value a later change retires must keep its record valid.
     birth_status = serializers.CharField(required=False, allow_blank=True)
     type_of_adoption = serializers.CharField(required=False, allow_blank=True)
     # And for Referral Source, which was free text until it became a list.
     referral_source = serializers.CharField(required=False, allow_blank=True, max_length=150)
+
+    # Which submission of Add Record this is (children/duplicates.py). Sent on
+    # create and never read back; an edit ignores it. Blank means none.
+    intake_token = serializers.CharField(
+        write_only=True, required=False, allow_null=True, allow_blank=True,
+        max_length=64)
 
     termination = serializers.SerializerMethodField()
     terminations = serializers.SerializerMethodField()
@@ -75,15 +83,16 @@ class ChildSerializer(serializers.ModelSerializer):
             "custodian_contact", "custodian_contact_display", "custodian_sms_consent",
             "custodian_sms_consent_at", "custodian_sms_consent_by_name",
             "custodian_contact_verified", "custodian_texts",
-            "place_of_birth_or_found", "birth_status", "legal_status",
+            "place_of_birth_or_found", "birth_status", "legal_status", "legal_status_date",
             "date_of_admission", "date_of_placement_to_custodian", "type_of_adoption",
             "photo", "referral_source", "referral_reason",
-            "education_level", "current_placement", "medical_notes", "recommendation",
+            "education_level", "current_placement", "health_condition", "special_needs", "alias",
+            "medical_notes", "recommendation",
             "psychologist", "psychologist_name", "social_worker", "social_worker_name",
             "termination", "terminations",
             "pre_assessment_status", "instruments_used", "has_case_referral",
             "pending_assignment", "declined_assignment",
-            "updated_at",
+            "intake_token", "updated_at",
         ]
         # The tracker moves only through the advance-status / terminate actions.
         # fullname is derived (Child.save() composes it from the name parts).
@@ -91,6 +100,27 @@ class ChildSerializer(serializers.ModelSerializer):
 
     def get_social_worker_name(self, obj):
         return display_name(obj.social_worker) or None
+
+    # A name that reached us with a replacement character in it was damaged on
+    # the way (accounts/names.py). The name cannot be changed after the record
+    # is created, so one that is already damaged simply passes unchanged.
+    def _name(self, field, value):
+        return refuse_unreadable(value, getattr(self.instance, field, None))
+
+    def validate_first_name(self, value):
+        return self._name("first_name", value)
+
+    def validate_middle_name(self, value):
+        return self._name("middle_name", value)
+
+    def validate_last_name(self, value):
+        return self._name("last_name", value)
+
+    def validate_intake_token(self, value):
+        try:
+            return duplicates.clean_token(value)
+        except ValueError as exc:
+            raise serializers.ValidationError(str(exc))
 
     def validate_social_worker(self, value):
         request = self.context.get("request")
@@ -251,29 +281,6 @@ class ChildSerializer(serializers.ModelSerializer):
         legacy_fullname = (self.initial_data or {}).get("fullname")
         return str(legacy_fullname).split() if legacy_fullname else []
 
-    def validate_birth_date(self, value):
-        # The agency only serves children aged 5-17 (inclusive); this uses
-        # an exact-birthday-aware age calculation, not a floor(days/365).
-        # Re-validation is CHANGE-only (Task 13 lock: "edits stay
-        # partial-friendly"): the frontend's edit form always resends the
-        # existing birth_date on PUT (full-object update pattern), so
-        # re-checking an UNCHANGED birth_date on every update would
-        # permanently lock out ANY field edit on a child whose age has
-        # since drifted outside 5-17 (e.g. a long-running case where the
-        # child turned 18, or a legacy record with an unusual birth_date).
-        # But a deliberate edit that actually changes birth_date must still
-        # be range-checked - only pass unchanged values through untouched.
-        if value is None:
-            return value
-        if self.instance is not None and value == self.instance.birth_date:
-            return value
-        today = timezone.localdate()
-        age = today.year - value.year - ((today.month, today.day) < (value.month, value.day))
-        if not (5 <= age <= 17):
-            raise serializers.ValidationError(
-                "The child must be between 5 and 17 years old.")
-        return value
-
     def _current_or_unchanged(self, field, value, choices):
         """A value from the current list, or the one the record already holds.
         A record keeps a retired value until somebody changes it; nobody can
@@ -327,6 +334,9 @@ class ChildSerializer(serializers.ModelSerializer):
         role = getattr(getattr(getattr(request, "user", None), "role", None),
                        "role_name", None) if request else None
         if self.instance:
+            # The token belongs to the submission that made the record; no
+            # edit moves or sets it.
+            attrs.pop("intake_token", None)
             # fullname is read-only (DRF drops it from `attrs`), so an attempt to
             # PATCH it has to be caught from the raw request payload instead.
             raw = self.initial_data if hasattr(self, "initial_data") else {}
@@ -376,8 +386,11 @@ class ChildSerializer(serializers.ModelSerializer):
         if self.instance is not None and not self._is_legacy_record():
             self._require(attrs, creating=False, role=role)
         self._check_case(attrs)
+        self._check_age(attrs)
         self._check_dates(attrs)
+        self._check_legal_status_date(attrs)
         self._check_address(attrs)
+        self._check_health(attrs)
         refused = custodian.apply(attrs, self.instance, getattr(request, "user", None), role)
         if refused:
             raise serializers.ValidationError(refused)
@@ -410,20 +423,35 @@ class ChildSerializer(serializers.ModelSerializer):
         blank = lambda v: not str(v or "").strip()  # noqa: E731
         case_type = self._after(attrs, "case_type")
         adoption = self._after(attrs, "type_of_adoption")
+        health = self._after(attrs, "health_condition")
         reasked = not creating and any(
             f in attrs and attrs[f] != getattr(self.instance, f)
             for f in ("case_type", "type_of_adoption"))
         missing = {}
-        for f in intake.required_fields(case_type, adoption):
+        for f in intake.required_fields(case_type, adoption, health):
             if f == "custodian_name" and role == Role.PSYCHOLOGIST:
                 continue
             if not blank(self._after(attrs, f)):
                 continue
+            # What the special needs are is never an older blank: no record
+            # held a health condition before this one was asked.
             if (creating or not blank(getattr(self.instance, f))
-                    or (reasked and f in intake.DYNAMIC)):
+                    or (reasked and f in intake.DYNAMIC) or f == "special_needs"):
                 missing[f] = "This field is required."
         if missing:
             raise serializers.ValidationError(missing)
+
+    def _check_health(self, attrs):
+        """"With special needs" says what they are; any other answer has none,
+        so whatever was typed beside it is dropped rather than kept against a
+        child who is healthy. Only when the request touches either answer."""
+        if "health_condition" not in attrs and "special_needs" not in attrs:
+            return
+        if self._after(attrs, "health_condition") == intake.SPECIAL_NEEDS:
+            if not str(self._after(attrs, "special_needs") or "").strip():
+                raise serializers.ValidationError({"special_needs": "This field is required."})
+        else:
+            attrs["special_needs"] = ""
 
     def _check_case(self, attrs):
         """The category has to be one this track offers - checked when either
@@ -481,6 +509,52 @@ class ChildSerializer(serializers.ModelSerializer):
                              ("barangay", barangay)):
             if place is not None:
                 attrs[field] = place.name
+
+    def _check_age(self, attrs):
+        """The age rule (children/intake.py age_range): 5-17, or 18 and over
+        for an Adult adoption. Judged where the birth date is being set, and
+        again where the case type or type of adoption changes, since that
+        changes the rule - the edit form resends an unchanged birth date, and
+        a record whose child has since turned 18 must stay editable."""
+        born = self._after(attrs, "birth_date")
+        if born is None:
+            return
+        case_type = self._after(attrs, "case_type")
+        adoption = self._after(attrs, "type_of_adoption")
+        if self.instance is not None:
+            moved = any(f in attrs and attrs[f] != getattr(self.instance, f)
+                        for f in ("birth_date", "case_type", "type_of_adoption"))
+            if not moved:
+                return
+        today = timezone.localdate()
+        age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+        low, high = intake.age_range(case_type, adoption)
+        if age < low or (high is not None and age > high):
+            raise serializers.ValidationError(
+                {"birth_date": intake.age_refusal(case_type, adoption)})
+
+    def _check_legal_status_date(self, attrs):
+        """The date the legal status was issued: optional, never in the future
+        or before the birth, and gone when there is no legal status."""
+        if not self._after(attrs, "legal_status"):
+            if self._after(attrs, "legal_status_date") is not None:
+                attrs["legal_status_date"] = None
+            return
+        value = self._after(attrs, "legal_status_date")
+        if value is None:
+            return
+        born = self._after(attrs, "birth_date")
+        born_moved = (self.instance is not None and "birth_date" in attrs
+                      and attrs["birth_date"] != self.instance.birth_date)
+        unchanged = self.instance is not None and value == self.instance.legal_status_date
+        if unchanged and not born_moved:
+            return
+        if not unchanged and value > timezone.localdate():
+            raise serializers.ValidationError(
+                {"legal_status_date": "The date issued cannot be in the future."})
+        if born and value < born:
+            raise serializers.ValidationError(
+                {"legal_status_date": "The date issued cannot be before the date of birth."})
 
     def _check_dates(self, attrs):
         """None of the case dates is in the future or before the child was

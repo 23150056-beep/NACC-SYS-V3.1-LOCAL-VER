@@ -298,17 +298,23 @@ class AppointmentTextsTest(CustodianBase):
         self.assertEqual([], self._queued(self._book))
 
     def test_a_no_show_the_same_day_is_texted_and_a_late_one_is_not(self):
-        self._texts_on()
-        today = Appointment.objects.create(
-            child=self.child, psychologist=self.psy,
-            start=timezone.now() - timedelta(minutes=5), purpose="session")
-        sent = self._queued(lambda: self._as(self.psy).post(f"/api/appointments/{today.id}/no_show/"))
-        self.assertIn("We missed you", sent[0][1])
-        old = Appointment.objects.create(
-            child=self.child, psychologist=self.psy,
-            start=timezone.now() - timedelta(days=3), purpose="session")
-        self.assertEqual([], self._queued(
-            lambda: self._as(self.psy).post(f"/api/appointments/{old.id}/no_show/")))
+        # The clock is pinned to midday. "Five minutes ago" is YESTERDAY for
+        # the first five minutes after midnight, which is the one thing this
+        # test must not depend on: whether a no-show is the same day is the
+        # rule under test, so the day has to be the same by construction.
+        noon = timezone.make_aware(datetime(2026, 10, 7, 12, 0))
+        with patch("django.utils.timezone.now", return_value=noon):
+            self._texts_on()
+            today = Appointment.objects.create(
+                child=self.child, psychologist=self.psy,
+                start=timezone.now() - timedelta(minutes=5), purpose="session")
+            sent = self._queued(lambda: self._as(self.psy).post(f"/api/appointments/{today.id}/no_show/"))
+            self.assertIn("We missed you", sent[0][1])
+            old = Appointment.objects.create(
+                child=self.child, psychologist=self.psy,
+                start=timezone.now() - timedelta(days=3), purpose="session")
+            self.assertEqual([], self._queued(
+                lambda: self._as(self.psy).post(f"/api/appointments/{old.id}/no_show/")))
 
     def test_the_day_before_reminder_is_sent_once(self):
         self._texts_on()

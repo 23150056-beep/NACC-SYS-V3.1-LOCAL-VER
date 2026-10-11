@@ -14,8 +14,11 @@ Problems and consents are exempt, as they always were on the child's page: a
 problem list and a guardian's signature are the case's facts, not a
 colleague's opinion, and the next psychologist needs both.
 """
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from accounts.models import Role
@@ -135,6 +138,24 @@ class ScreensAgreeTest(CarryHistoryBase):
                           ("pre_assessments", "pre-assessments"), ("reports", "report-files")):
             with self.subTest(key=key):
                 self.assertEqual({row["id"] for row in chart[key]}, self._ids(self.psy, path))
+
+    def test_the_brief_facts_follow_the_page(self):
+        # Theirs is made the newer plan, so a reader ignoring the control
+        # would put it first.
+        TreatmentPlan.objects.filter(objectives="THEIRS").update(
+            created_at=timezone.now() + timedelta(minutes=1))
+
+        def page_and_facts(user):
+            self.client.force_authenticate(user)
+            chart = self.client.get(f"/api/reports/child/{self.child.id}/").data
+            on_page = next(p["objectives"] for p in chart["treatment_plans"]
+                           if p["status"] == "active")
+            facts = self.client.get(
+                f"/api/assistant/brief/child/{self.child.id}/facts/").data
+            return on_page, facts["treatment_plan"]["objectives"]
+
+        self.assertEqual(page_and_facts(self.psy), ("MINE", "MINE"))
+        self.assertEqual(page_and_facts(self.admin), ("THEIRS", "THEIRS"))
 
     def test_monitoring_does_not_quote_the_previous_psychologist(self):
         # Theirs is the most recent of each, so a reader ignoring the

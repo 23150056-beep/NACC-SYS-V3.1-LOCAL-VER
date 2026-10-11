@@ -162,6 +162,13 @@ class UserProfile(models.Model):
     facebook = models.CharField(max_length=200, blank=True, default="")
     twitter = models.CharField(max_length=200, blank=True, default="")
     instagram = models.CharField(max_length=200, blank=True, default="")
+    # The PRC license a social worker or psychologist practises under. The
+    # Social Case Study Report's signature block prints both. Only the person
+    # themselves writes them, and only a Staff or Psychologist account has one -
+    # an administrator is IT support. A date in the past is allowed on purpose:
+    # a lapsed license is a fact about the person, not an input error.
+    license_number = models.CharField(max_length=50, blank=True, default="")
+    license_valid_until = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -170,6 +177,43 @@ class UserProfile(models.Model):
 
     def __str__(self):
         return f"Profile for {self.user.email}"
+
+
+class AgencyProfile(models.Model):
+    """Who the agency is, as printed on its reports: one row, pk=1.
+
+    Agency-wide and set by an administrator in Settings. It exists because the
+    Social Case Study Report's signature block needs the Head of Office's name
+    and the printed headings need the office's name and address, and until now
+    those were typed into each report by hand or not at all. The ISA is the
+    agency's IT support and not the head of office, so the Head of Office is a
+    name and a title held here, never an account.
+
+    Blank is a valid state - an agency that has not filled it in prints lines
+    to complete by hand, as the other printed forms do.
+    """
+
+    agency_name = models.CharField(max_length=200, blank=True, default="")
+    office_address = models.TextField(max_length=500, blank=True, default="")
+    contact_details = models.TextField(max_length=300, blank=True, default="")
+    head_of_office_name = models.CharField(max_length=150, blank=True, default="")
+    head_of_office_title = models.CharField(max_length=150, blank=True, default="")
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "tbl_agency_profile"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj
+
+    def __str__(self):
+        return self.agency_name or "Agency profile"
 
 
 class PhoneVerification(models.Model):
@@ -200,3 +244,43 @@ class PhoneVerification(models.Model):
 
     def __str__(self):
         return f"Phone verification for {self.user.email}"
+
+
+class EmailVerification(models.Model):
+    """The code mailed to a typed sign-up address and waiting to be typed
+    back, and how often this request has asked for one. One row per access
+    request (accounts/email_verification.py).
+
+    In the database for the reason PhoneVerification is: the default cache
+    lives in one process's memory, so under gunicorn a code stored by the
+    worker that sent it was "expired" to the worker that took the reply, and
+    each worker kept its own count of guesses.
+
+    Tied to the request's User row rather than keyed by address alone, so it
+    goes when the account does and no address outlives the request it was
+    collected for. `email` is the address the code was mailed to: a code
+    counts only while that is still the request's address, so a code mailed
+    to a typo that an administrator has since corrected cannot vouch for the
+    corrected one.
+    """
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="email_verification")
+    # Lower-cased, as accounts.email_verification.normalise writes it.
+    email = models.EmailField(db_index=True)
+    # Blank means no code is outstanding.
+    code = models.CharField(max_length=12, blank=True, default="")
+    tries = models.PositiveSmallIntegerField(default=0)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    # The resend limits, counted here for the reason PhoneVerification counts
+    # its own: a cache counter is per worker and multiplies the allowance.
+    last_sent_at = models.DateTimeField(null=True, blank=True)
+    window_started_at = models.DateTimeField(null=True, blank=True)
+    sent_in_window = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        db_table = "tbl_email_verification"
+
+    def __str__(self):
+        return f"Email verification for {self.user.email}"
