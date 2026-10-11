@@ -367,7 +367,7 @@ export default function GlobalSearch({ open, onOpenChange }) {
       >
         <Icon name="search" size={17} style={{ color: 'var(--chrome-ink-soft)' }} />
         <span style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 13, color: 'var(--chrome-ink-soft)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-          Find a child or action…
+          Find a child or task
         </span>
         {layout.searchHintOn && (
           <span className="racco-mono" style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--chrome-ink-dim)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 'var(--radius-xs)', padding: '1px 5px', whiteSpace: 'nowrap', flex: 'none' }}>
