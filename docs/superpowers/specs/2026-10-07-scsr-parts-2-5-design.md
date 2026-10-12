@@ -262,10 +262,10 @@ Demo data ships with each phase and satisfies the same rules
 - **P2:** block B and block C's editors, the Domestic Relative question,
   Final and Reopen with snapshots, activity events, the full print, and demo
   finals.
-- **P3:** the SW brief's written part. It is built and tested here with the
-  model faked, and switched on only after `ai_eval --feature case_brief` on
-  the owner's PC and his reading of samples. It reads no remarks, no
-  self-report words, no case study text and no unconfirmed summary.
+- **P3 (built 10 Oct, withdrawn 12 Oct):** the SW brief's written part. The owner's
+  `ai_eval` run found invented dates (2/30) and invented relationships in drafts the
+  checker passed, so it was taken away and replaced by a rule-based "What to do next"
+  list (see CLAUDE.md "The assistant app").
 
 ## Block A for every case type (built 10 Oct 2026)
 

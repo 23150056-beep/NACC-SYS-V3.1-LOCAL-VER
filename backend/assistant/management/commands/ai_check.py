@@ -3,12 +3,10 @@
 Prints what is configured, whether it answers, and how long it took. Exits 1
 when a draft could not be produced, so it is usable from a script.
 """
-import time
-
 from django.core.management.base import BaseCommand
 
 from assistant.models import AssistantSetting
-from assistant.services import AIUnavailable, OllamaClient, get_ai_client
+from assistant.services import AIUnavailable, OllamaClient, get_ai_client, probe_runtime
 
 
 class Command(BaseCommand):
@@ -38,12 +36,10 @@ class Command(BaseCommand):
             self.stdout.write("Drafting: off - briefs, summaries, polish and the "
                               "self-report check never use a hosted model.")
 
-        started = time.monotonic()
         try:
-            client.generate("Reply with the single word: OK.")
+            elapsed = probe_runtime(client)
         except AIUnavailable as exc:
             self.stdout.write(f"Result: {exc}")
             raise SystemExit(1)
 
-        elapsed = int((time.monotonic() - started) * 1000)
         self.stdout.write(f"Result: reachable, answered in {elapsed} ms.")

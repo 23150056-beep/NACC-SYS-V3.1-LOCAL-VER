@@ -266,6 +266,16 @@ def invented_dates(facts, output):
 
 # A numbered part of the draft: "1.", "2)", "**3.**" at the start of a line.
 _LIST_MARKER = re.compile(r"(?m)^[ \t]*(?:[*_#>-]+[ \t]*)*\(?\d{1,2}[.)](?=[\s*])")
+# A heading the model numbered in words: "### Part 2: What is booked", "Part 3:
+# What to bring", "**Step 1**", "Section 2". The owner's run of 12 Oct 2026
+# counted the 2 of five "### Part 2" headings as an invented number. The word
+# must come first and begin the line (after any markdown), and the digit must
+# end the label: a colon, full stop, bracket, dash or the end of the line may
+# follow it - never more of a sentence, so "Part 2 sessions" or "Step 1 hour"
+# is a quantity and still counts.
+_HEADING_LABEL = re.compile(
+    r"(?im)^[ \t]*(?:[*_#>-]+[ \t]*)*(?:part|step|section)[ \t]+\d{1,2}"
+    r"(?=[ \t]*(?:[:.)\-\u2013\u2014*_]|$))")
 _DIGITS = re.compile(r"\d+")
 
 
@@ -273,12 +283,14 @@ def invented_numbers(facts, output):
     """Digit groups in the draft that are not in the facts.
 
     Compared as numbers, so "09" is the "9" of "9:30 AM". A list marker at the
-    start of a line is not a number the draft states, and the digits of a date
-    are judged by invented_dates() rather than twice. Returns the offending
-    strings, in the order they appear.
+    start of a line, or the number in a heading such as "### Part 2: ...", is
+    not a number the draft states, and the digits of a date are judged by
+    invented_dates() rather than twice. Returns the offending strings, in the
+    order they appear.
     """
     known = {int(n) for n in _DIGITS.findall(facts)}
     text = _LIST_MARKER.sub(lambda m: " " * len(m.group(0)), output)
+    text = _HEADING_LABEL.sub(lambda m: " " * len(m.group(0)), text)
     for pattern in (_ISO_DATE, _NUMERIC_DATE):
         text = pattern.sub(lambda m: " " * len(m.group(0)), text)
     found = []

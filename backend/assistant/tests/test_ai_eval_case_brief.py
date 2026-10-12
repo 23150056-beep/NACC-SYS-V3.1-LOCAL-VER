@@ -9,10 +9,11 @@ scored, when rates are withheld, and what the last line says.
 import re
 from datetime import datetime
 from io import StringIO
+from unittest import mock
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 from django.test import TestCase
 from django.utils import timezone
 
@@ -21,7 +22,8 @@ from assistant import prompts, services
 from assistant.brief_facts import brief_facts
 from assistant.management.commands import ai_eval
 from assistant.management.commands.ai_eval import (
-    _EvalRequest, case_brief_sample, case_brief_verdict, score_case_brief)
+    _EvalRequest, case_brief_sample, case_brief_verdict, model_did_not_answer,
+    score_case_brief)
 from assistant.models import AssistantJob, AssistantSetting
 from children.models import Child
 from clinical.models import CaseReferral
@@ -40,6 +42,13 @@ def model_that_writes_a_clean_brief(prompt, system=None):
     return (f"1. {name} was referred to the agency.\n"
             "2. Check the booking and who is waiting.\n"
             "3. Ask about the consent.")
+
+
+def answers_the_check_and_writes_briefs(prompt, system=None):
+    """A model that is up: one word to the runtime check, a brief to anything else."""
+    if prompt == services.RUNTIME_PROBE_PROMPT:
+        return "OK"
+    return model_that_writes_a_clean_brief(prompt)
 
 
 class EvalFixture(TestCase):
@@ -81,10 +90,18 @@ class EvalFixture(TestCase):
     def _children(self, count, **fields):
         return [self._child(**fields) for _ in range(count)]
 
-    def _run(self, *args, model=model_that_writes_a_clean_brief, **options):
+    def _run(self, *args, model=model_that_writes_a_clean_brief, feature="case_brief",
+             real_probe=False, **options):
+        """Run the command with the model faked. The up-front check of the runtime
+        is faked too unless `real_probe`, or it would be one more call to `model`
+        (which answers case briefs) and one more in every count; it has its own
+        tests below."""
         out = StringIO()
-        with patch.object(services.OllamaClient, "generate", side_effect=model) as generate:
-            call_command("ai_eval", "--feature", "case_brief", *args, stdout=out, **options)
+        with patch.object(services.OllamaClient, "generate", side_effect=model) as generate, \
+                patch("assistant.management.commands.ai_eval.probe_runtime",
+                      **({"wraps": services.probe_runtime} if real_probe
+                         else {"return_value": 0})):
+            call_command("ai_eval", "--feature", feature, *args, stdout=out, **options)
         self.generate = generate
         return out.getvalue()
 
@@ -329,12 +346,15 @@ class TheVerdictTest(EvalFixture):
         self.assertRegex(
             out, r"language drift\s+30/30  \(100%\)  \(reported, not failed\)")
 
-    def test_a_model_that_is_down_measures_nothing(self):
+    def test_a_model_that_is_down_measures_nothing_and_says_it_was_down(self):
         self._children(2)
         out = self._run(model=services.AIUnavailable("down"))
         self.assertIn("UNAVAILABLE - down", out)
-        self.assertEqual("NOT YET: no draft was produced, so nothing was measured.",
+        # 2 children x the default 3 drafts, every one refused: not "no draft was
+        # produced", which reads as no data rather than as a model that was down.
+        self.assertEqual("NOT YET: the model did not answer (6 attempts): down.",
                          self._last(out))
+        self.assertNotIn("no draft was produced", out)
         self.assertFalse(AssistantJob.objects.exists())
 
     def test_no_child_to_evaluate_as_is_not_yet(self):
@@ -407,6 +427,21 @@ class ScoringTest(EvalFixture):
                  "2. Nothing is booked.\n3. Ask.")
         self.assertEqual({}, score_case_brief(prompt, draft))
 
+    def test_numbered_part_headings_are_not_invented_numbers(self):
+        # The owner's run of 12 Oct 2026: five drafts were flagged for nothing
+        # but the 2 of a "### Part 2" heading the model chose to write.
+        prompt, child = self._prompt()
+        stated = {int(n) for n in re.findall(r"\d+", prompt[len(prompts.CASE_BRIEF_INSTRUCTIONS):])}
+        self.assertFalse({2, 3} & stated, "the control needs facts without a 2 or a 3")
+        name = prompts.first_name(child)
+        draft = (f"### Part 1: Why {name} was referred\nNo referral summary yet.\n"
+                 "### Part 2: What is booked\nNo session is booked.\n"
+                 "### Part 3: What to bring\nAsk about the consent.")
+        self.assertEqual({}, score_case_brief(prompt, draft))
+        # And a real invented number beside them is still named.
+        flags = score_case_brief(prompt, draft.replace("No session is booked.", "Booked 41 days ago."))
+        self.assertEqual({"invented numbers": ["41"]}, flags)
+
     def test_the_instructions_digits_are_not_facts(self):
         prompt, child = self._prompt()
         self.assertEqual({"invented numbers": ["150"]},
@@ -434,3 +469,185 @@ class VerdictLineTest(EvalFixture):
     def test_no_drafts(self):
         self.assertEqual("NOT YET: no draft was produced, so nothing was measured.",
                          case_brief_verdict(0, 0, 0, 0))
+
+    def test_no_drafts_after_asking_says_the_model_did_not_answer(self):
+        self.assertEqual(
+            "NOT YET: the model did not answer (30 attempts): Local AI runtime "
+            "unreachable: connection refused.",
+            case_brief_verdict(0, 0, 0, 0, attempts=30,
+                               first_error="Local AI runtime unreachable: connection refused"))
+
+    def test_one_attempt_is_singular_and_a_full_stop_is_not_doubled(self):
+        self.assertEqual("the model did not answer (1 attempt): down.",
+                         model_did_not_answer(1, "down."))
+
+    def test_an_error_with_no_text_still_says_something(self):
+        self.assertEqual("the model did not answer (2 attempts): no reason given.",
+                         model_did_not_answer(2, ""))
+
+    def test_drafts_that_arrived_are_judged_as_before_whatever_else_was_refused(self):
+        self.assertEqual("PASS: 0 invented names, 0 invented dates over 30 drafts",
+                         case_brief_verdict(30, 10, 0, 0, attempts=40, first_error="down"))
+
+
+class TheRuntimeIsCheckedFirstTest(EvalFixture):
+    """The model server was not running, so every draft failed one at a time and
+    the run ended on a table of zeros that read as missing data."""
+
+    DOWN = services.AIUnavailable(
+        "Local AI runtime unreachable: <urlopen error [Errno 111] Connection refused>")
+
+    def _refused(self, *args, **options):
+        out = StringIO()
+        with patch.object(services.OllamaClient, "generate", side_effect=self.DOWN) as generate:
+            with self.assertRaises(CommandError) as ctx:
+                call_command("ai_eval", *args, stdout=out, **options)
+        return ctx.exception, out.getvalue(), generate
+
+    def test_an_unreachable_runtime_stops_the_run_before_any_feature(self):
+        self._children(3, summary=True)
+        error, out, generate = self._refused("--feature", "all")
+        # The check was the only thing asked of the model: no feature started.
+        self.assertEqual(1, generate.call_count)
+        for header in ("BRIEFS", "CASE BRIEF", "REMARK POLISH", "CHAT", "SELF-REPORT",
+                       "SUMMARIES", "SUMMARY", "UNAVAILABLE", "NOT YET", "PASS"):
+            self.assertNotIn(header, out)
+        self.assertFalse(AssistantJob.objects.exists())
+
+    def test_it_exits_non_zero(self):
+        # BaseCommand turns a CommandError into this exit status.
+        error, _, _ = self._refused("--feature", "case_brief")
+        self.assertEqual(1, error.returncode)
+
+    def test_the_block_names_what_it_tried_what_went_wrong_and_what_to_do(self):
+        cfg = AssistantSetting.load()
+        cfg.ollama_url = "http://localhost:11434"
+        cfg.model_name = "qwen2.5:3b-instruct"
+        cfg.save()
+        error, _, _ = self._refused("--feature", "case_brief")
+        text = str(error)
+        self.assertIn("did not answer", text)
+        self.assertIn("http://localhost:11434", text)
+        self.assertIn("qwen2.5:3b-instruct", text)
+        self.assertIn("Connection refused", text)
+        self.assertIn("start-ollama.bat", text)
+        self.assertIn("run-local.bat", text)
+        self.assertIn("manage.py ai_check", text)
+
+    def test_every_feature_is_stopped_the_same_way(self):
+        for feature in ("brief", "case_brief", "polish", "chat", "self_report", "summary"):
+            with self.subTest(feature=feature):
+                error, _, generate = self._refused("--feature", feature)
+                self.assertEqual(1, generate.call_count)
+                self.assertIn("start-ollama.bat", str(error))
+
+    def test_the_check_is_the_one_ai_check_makes(self):
+        # The same prompt, sent with nothing else, through the client in use.
+        self._child()
+        asked = {}
+        for command, extra in (("ai_check", ()), ("ai_eval", ("--feature", "case_brief"))):
+            with patch.object(services.OllamaClient, "generate",
+                              side_effect=answers_the_check_and_writes_briefs) as generate:
+                call_command(command, *extra, stdout=StringIO())
+            asked[command] = generate.call_args_list[0]
+        self.assertEqual(asked["ai_check"], asked["ai_eval"])
+        self.assertEqual(mock.call(services.RUNTIME_PROBE_PROMPT), asked["ai_eval"])
+
+    def test_a_reachable_runtime_is_asked_once_and_the_run_goes_on(self):
+        self._children(2)
+        out = self._run("--reps", "1", real_probe=True,
+                        model=answers_the_check_and_writes_briefs)
+        self.assertEqual(3, self.generate.call_count)     # the check + 2 drafts
+        self.assertIn("CASE BRIEF - 2 children x 1 reps", out)
+        self.assertIn("SAMPLE DRAFTS - 2 of 2", out)
+
+    def test_the_check_is_not_counted_as_an_attempt_at_a_draft(self):
+        # It answered and then went away: 2 children x 1 rep, both refused.
+        self._children(2)
+
+        def dies_after_the_check(prompt, system=None):
+            if prompt == services.RUNTIME_PROBE_PROMPT:
+                return "OK"
+            raise services.AIUnavailable("went away")
+        out = self._run("--reps", "1", real_probe=True, model=dies_after_the_check)
+        self.assertEqual("NOT YET: the model did not answer (2 attempts): went away.",
+                         [line for line in out.splitlines() if line.strip()][-1])
+
+    def test_a_hosted_runtime_that_answers_runs_as_before(self):
+        self._child()
+        hosted = services.OpenAICompatibleClient(
+            "https://api.example.test/v1", "hosted-model", "token")
+        out = StringIO()
+        with patch("assistant.management.commands.ai_eval.get_ai_client",
+                   return_value=hosted) as get_client, \
+                patch.object(services.OpenAICompatibleClient, "generate",
+                             side_effect=answers_the_check_and_writes_briefs):
+            call_command("ai_eval", "--feature", "case_brief", "--reps", "1", stdout=out)
+        get_client.assert_called_once_with(allow_hosted=True)
+        self.assertIn("CASE BRIEF - 1 children x 1 reps", out.getvalue())
+
+    def test_a_hosted_runtime_that_does_not_answer_is_not_told_to_start_ollama(self):
+        hosted = services.OpenAICompatibleClient(
+            "https://api.example.test/v1", "hosted-model", "token")
+        with patch("assistant.management.commands.ai_eval.get_ai_client",
+                   return_value=hosted), \
+                patch.object(services.OpenAICompatibleClient, "generate",
+                             side_effect=services.AIUnavailable("Hosted model error: 401")):
+            with self.assertRaises(CommandError) as ctx:
+                call_command("ai_eval", "--feature", "case_brief", stdout=StringIO())
+        text = str(ctx.exception)
+        self.assertIn("https://api.example.test/v1", text)
+        self.assertIn("hosted-model", text)
+        self.assertIn("Hosted model error: 401", text)
+        self.assertNotIn("start-ollama.bat", text)
+        self.assertIn("manage.py ai_check", text)
+
+    def test_switched_off_is_still_said_first(self):
+        cfg = AssistantSetting.load()
+        cfg.enabled = False
+        cfg.save()
+        out = StringIO()
+        with patch.object(services.OllamaClient, "generate") as generate:
+            with self.assertRaises(SystemExit):
+                call_command("ai_eval", "--feature", "case_brief", stdout=out)
+        generate.assert_not_called()
+        self.assertIn("switched off", out.getvalue())
+
+
+class AFeatureThatWasNeverAnsweredSaysSoTest(EvalFixture):
+    """Not only the case brief: the others print a row only when something ran."""
+
+    def test_polish_with_every_ask_refused(self):
+        out = self._run(feature="polish", model=services.AIUnavailable("down"))
+        # 3 fixed cases x the default 2 reps.
+        self.assertNotIn("\nSUMMARY", out)
+        self.assertIn("REMARK POLISH - NOT YET: the model did not answer "
+                      "(6 attempts): down.", out)
+
+    def test_a_feature_that_was_answered_even_once_prints_no_such_line(self):
+        calls = []
+
+        def once(prompt, system=None):
+            calls.append(prompt)
+            if len(calls) > 1:
+                raise services.AIUnavailable("down")
+            return "Settling in well."
+        out = self._run(feature="polish", model=once)
+        self.assertNotIn("did not answer", out)
+        self.assertIn("REMARK POLISH  (1 runs", out)
+
+    def test_each_feature_is_counted_on_its_own(self):
+        # No child has remarks and no report is on file, so brief and summary
+        # ask nothing and say nothing; polish and the self-report check ask and
+        # are refused. Each line carries its own count, none running on.
+        out = self._run(feature="all", model=services.AIUnavailable("down"))
+        self.assertIn("REMARK POLISH - NOT YET: the model did not answer (6 attempts): down.",
+                      out)
+        self.assertIn("SELF-REPORT - NOT YET: the model did not answer (24 attempts): down.",
+                      out)
+        self.assertIn("CHAT - NOT YET: the model did not answer (", out)
+        self.assertNotIn("BRIEFS - NOT YET", out)
+        self.assertNotIn("SUMMARIES - NOT YET", out)
+        # The case brief keeps its own verdict, and it is still the last line.
+        self.assertEqual("NOT YET: no draft was produced, so nothing was measured.",
+                         [line for line in out.splitlines() if line.strip()][-1])

@@ -1,4 +1,4 @@
-import { Badge, Icon, Note, Skeleton } from '../ui';
+import { Badge, Button, Icon, Note, Skeleton } from '../ui';
 import { exactDate, shortDate } from '../utils/time';
 
 // The facts above a pre-session brief (GET /assistant/brief/child/:id/facts/).
@@ -12,6 +12,13 @@ import { exactDate, shortDate } from '../utils/time';
 // consent, custodian texts, survey). Each is a sentence, not a status code,
 // and none carries the custodian's name or number or a word of a summary
 // nobody has confirmed - the API does not send them, and this does not ask.
+//
+// The record's own social worker also gets "What to do next" under the facts:
+// an ordered list the SERVER works out by fixed rules from the same facts
+// (assistant/brief_facts.py next_steps), each a plain sentence and, where the
+// thing is done on a screen, a button that goes there. The ISA and a
+// psychologist are sent no list, so none is drawn for them. Nothing in it is
+// written by the assistant.
 
 const SEVERITY_COLOUR = {
   danger: 'var(--red-600)',
@@ -137,24 +144,64 @@ function FactRows({ f }) {
   );
 }
 
-export default function BriefFacts({ facts, failed }) {
+// One line per step: the sentence, and "Open" where it can be done on a screen.
+// `onGo` is the page's: it closes the modal first, or it would stay over the
+// screen the button just opened.
+function NextSteps({ steps, onGo }) {
   return (
-    <section aria-label="Facts from the record">
-      <div className="racco-eyebrow">From the record</div>
+    <section aria-label="What to do next" style={{ marginTop: 18 }}>
+      <div className="racco-eyebrow">What to do next</div>
       <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 8px' }}>
-        Counted from the case file just now - not drafted by the assistant.
+        Worked out from the record by fixed rules - not drafted by the assistant.
       </p>
-      {failed ? (
-        <Note tone="warning" icon="alert-triangle">
-          The facts could not be loaded. Close this and try again.
-        </Note>
-      ) : !facts ? (
-        <div role="status" aria-label="Loading the facts">
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <div key={i} style={{ padding: '7px 0' }}><Skeleton height={12} /></div>
+      {steps.length === 0 ? (
+        <p style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--text-strong)' }}>
+          Nothing waiting on you for this child.
+        </p>
+      ) : (
+        <ol style={{ margin: 0, paddingLeft: 22, listStyle: 'decimal' }}>
+          {steps.map((step) => (
+            <li key={step.key} style={{ padding: '6px 0', borderBottom: '1px solid var(--ink-50)' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '6px 12px' }}>
+                <span style={{ flex: '1 1 240px', minWidth: 0, fontSize: 13, fontWeight: 600, color: 'var(--text-strong)' }}>
+                  {step.text}
+                </span>
+                {step.link && (
+                  <Button size="sm" variant="secondary" aria-label={`Open: ${step.text}`}
+                          onClick={() => onGo(step.link)}>
+                    Open
+                  </Button>
+                )}
+              </div>
+            </li>
           ))}
-        </div>
-      ) : <FactRows f={facts} />}
+        </ol>
+      )}
     </section>
+  );
+}
+
+export default function BriefFacts({ facts, failed, onGo }) {
+  return (
+    <>
+      <section aria-label="Facts from the record">
+        <div className="racco-eyebrow">From the record</div>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 8px' }}>
+          Counted from the case file just now - not drafted by the assistant.
+        </p>
+        {failed ? (
+          <Note tone="warning" icon="alert-triangle">
+            The facts could not be loaded. Close this and try again.
+          </Note>
+        ) : !facts ? (
+          <div role="status" aria-label="Loading the facts">
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <div key={i} style={{ padding: '7px 0' }}><Skeleton height={12} /></div>
+            ))}
+          </div>
+        ) : <FactRows f={facts} />}
+      </section>
+      {Array.isArray(facts?.next_steps) && <NextSteps steps={facts.next_steps} onGo={onGo} />}
+    </>
   );
 }

@@ -61,6 +61,8 @@ export default function AgencySummary() {
   const [data, setData] = useState(null);
   const [narrative, setNarrative] = useState(null); // { text, jobId }
   const [narrativeBusy, setNarrativeBusy] = useState(false);
+  // The server's sentence when it refused a draft (422); it stays until the next try.
+  const [narrativeRefusal, setNarrativeRefusal] = useState('');
 
   useEffect(() => {
     api.get(`/reports/summary/?range=${range}`).then((r) => setData(r.data)).catch(() => setData(EMPTY));
@@ -102,6 +104,7 @@ export default function AgencySummary() {
 
   const writeNarrative = async () => {
     setNarrativeBusy(true);
+    setNarrativeRefusal('');
     try {
       // Only finished figures — the model restates these and computes nothing.
       const { draft, job_id } = await censusNarrative({
@@ -114,9 +117,16 @@ export default function AgencySummary() {
       });
       setNarrative({ text: draft, jobId: job_id });
     } catch (err) {
-      toast.error(err.response?.status === 503
-        ? 'The assistant is unavailable right now.'
-        : 'Could not write the narrative.');
+      // 422 is a draft that stated something the figures do not hold: it is not
+      // shown, and the server's one sentence says so and what to do. Kept on the
+      // card rather than in a toast, which is gone before it can be read twice.
+      if (err.response?.status === 422 && err.response?.data?.detail) {
+        setNarrativeRefusal(err.response.data.detail);
+      } else {
+        toast.error(err.response?.status === 503
+          ? 'The assistant is unavailable right now.'
+          : 'Could not write the narrative.');
+      }
     } finally {
       setNarrativeBusy(false);
     }
@@ -201,6 +211,11 @@ export default function AgencySummary() {
                 prose around them. Review before it goes in any report.
               </p>
             </div>
+            {narrativeRefusal && (
+              <Note tone="warning" icon="alert-triangle" style={{ borderRadius: 8 }}>
+                <span role="alert">{narrativeRefusal}</span>
+              </Note>
+            )}
             {narrative ? (
               <>
                 <p style={{ whiteSpace: 'pre-wrap', fontSize: 13.5, lineHeight: 1.7, color: 'var(--text-body)' }}>{narrative.text}</p>

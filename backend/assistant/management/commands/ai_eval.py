@@ -10,15 +10,21 @@ name reached a clinical draft unnoticed.
     manage.py ai_eval --feature summary    # long reports, fitted vs whole
     manage.py ai_eval --reps 5 --limit 6   # more evidence, more children
     manage.py ai_eval --feature case_brief # the social worker's written brief
+
+Before any feature runs the model is asked one word, the way `ai_check` does it.
+If it does not answer the command stops there with the URL and model it tried:
+every draft failing one by one, with a table of zeros after them, reads as "no
+data" when the truth is "the model server was not running".
 """
 import time
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 from assistant import evaluation, prompts, tools
 from assistant.brief_facts import brief_facts
 from assistant.models import AssistantSetting
-from assistant.services import AIUnavailable, get_ai_client
+from assistant.services import (
+    AIUnavailable, OpenAICompatibleClient, get_ai_client, probe_runtime)
 from children.models import Child
 
 # Fixed polish inputs: Taglish as the notes are actually written, heavy Tagalog,
@@ -279,14 +285,29 @@ def score_case_brief(prompt, text):
     return flags
 
 
-def case_brief_verdict(drafts, children, with_names, with_dates):
+def model_did_not_answer(attempts, first_error):
+    """'the model did not answer (6 attempts): <first error>.' - what a run says
+    when it asked and every ask was refused, so "nothing measured" is not left
+    to read as "nothing there to measure"."""
+    error = " ".join(str(first_error or "").split()).rstrip(".") or "no reason given"
+    return (f"the model did not answer ({attempts} attempt{'s' if attempts != 1 else ''}): "
+            f"{error}.")
+
+
+def case_brief_verdict(drafts, children, with_names, with_dates,
+                       attempts=0, first_error=""):
     """The one line the run ends with.
 
     PASS needs no draft with an invented name or date, over at least 30 drafts
     from at least 10 children. Anything else is NOT YET, and says which part.
     `with_names` and `with_dates` count DRAFTS that had one, not the items.
+    `attempts` is how many drafts were asked for: with none produced, a run that
+    asked and was refused every time says the model did not answer, and only a
+    run that never asked (no child to evaluate as) says nothing was produced.
     """
     if not drafts:
+        if attempts:
+            return "NOT YET: " + model_did_not_answer(attempts, first_error)
         return "NOT YET: no draft was produced, so nothing was measured."
     found = []
     if with_names:
@@ -336,6 +357,36 @@ def case_brief_sample(limit):
            [(child, False) for child in without[:max(0, limit - len(with_summary))]]
 
 
+class _CountedClient:
+    """The client the features call, counting what it was asked and what it
+    refused, so a feature that ended with nothing can say whether the model was
+    never asked or never answered. Everything else passes straight through."""
+
+    def __init__(self, client):
+        self._client = client
+        self.reset()
+
+    def reset(self):
+        self.attempts = 0
+        self.refused = 0
+        self.first_error = ""
+
+    def _counted(self, call, *args, **kwargs):
+        self.attempts += 1
+        try:
+            return call(*args, **kwargs)
+        except AIUnavailable as exc:
+            self.refused += 1
+            self.first_error = self.first_error or str(exc)
+            raise
+
+    def generate(self, *args, **kwargs):
+        return self._counted(self._client.generate, *args, **kwargs)
+
+    def choose_tool(self, *args, **kwargs):
+        return self._counted(self._client.choose_tool, *args, **kwargs)
+
+
 class Command(BaseCommand):
     help = "Evaluate the assistant's drafting output against real records."
 
@@ -359,26 +410,31 @@ class Command(BaseCommand):
 
         # A measurement, run by hand, and the step the docs require before a
         # drafting feature runs on any other model - so it may reach one.
-        self.client = get_ai_client(allow_hosted=True)
+        client = get_ai_client(allow_hosted=True)
+        self._require_runtime(client)
+        self.client = _CountedClient(client)
         reps = options["reps"] or 2
         limit = options["limit"] or 3
         self.stdout.write(f"Model: {cfg.model_name}   reps: {options['reps'] or 'default'}\n")
 
         self._case_verdict = None
+        self._unanswered = []
         totals = []
         if options["feature"] in ("brief", "all"):
-            totals.append(self._briefs(reps, limit))
+            totals.append(self._tallied("BRIEFS", self._briefs, reps, limit))
         if options["feature"] in ("case_brief", "all"):
+            # Says for itself, in its verdict, whether the model answered.
+            self.client.reset()
             totals.append(self._case_briefs(options["reps"] or CASE_BRIEF_REPS,
                                             options["limit"] or CASE_BRIEF_CHILDREN))
         if options["feature"] in ("polish", "all"):
-            totals.append(self._polish(reps))
+            totals.append(self._tallied("REMARK POLISH", self._polish, reps))
         if options["feature"] in ("chat", "all"):
-            totals.append(self._chat(reps))
+            totals.append(self._tallied("CHAT", self._chat, reps))
         if options["feature"] in ("self_report", "all"):
-            totals.append(self._self_report(reps))
+            totals.append(self._tallied("SELF-REPORT", self._self_report, reps))
         if options["feature"] in ("summary", "all"):
-            totals.extend(self._summaries(reps, limit))
+            totals.extend(self._tallied("SUMMARIES", self._summaries, reps, limit))
 
         # The case brief prints its own block (it decides when rates are shown),
         # so a run of it alone has nothing for the general table.
@@ -393,9 +449,50 @@ class Command(BaseCommand):
                     pct = 100 * n / runs
                     self.stdout.write(f"  {label:22} {n}/{runs}  ({pct:.0f}%)")
 
+        # A feature that was asked and never answered has no row above, which
+        # reads as an empty sample. Say what happened.
+        for label, attempts, first_error in self._unanswered:
+            self.stdout.write(f"\n{label} - NOT YET: "
+                              + model_did_not_answer(attempts, first_error))
+
         # Last, so it is the line the run ends on.
         if self._case_verdict:
             self.stdout.write("\n" + self._case_verdict)
+
+    # -- the runtime ------------------------------------------------------
+
+    @staticmethod
+    def _require_runtime(client):
+        """Stop before any feature when the model does not answer.
+
+        The same probe `ai_check` runs, through the same client. Without it a
+        model server that was not running failed every draft one at a time and
+        the run ended on a table of zeros, which looks like missing data.
+        """
+        try:
+            probe_runtime(client)
+        except AIUnavailable as exc:
+            if isinstance(client, OpenAICompatibleClient):
+                fix = ("The hosted model is not answering. Check its settings and "
+                       "credentials, then check with: manage.py ai_check")
+            else:
+                fix = ("Start the model server (start-ollama.bat in the project folder, "
+                       "or run-local.bat) and check with: manage.py ai_check")
+            raise CommandError(
+                "The model did not answer, so nothing was evaluated.\n"
+                f"  URL:   {getattr(client, 'base_url', '(not set)')}\n"
+                f"  Model: {getattr(client, 'model', '') or '(not set)'}\n"
+                f"  Error: {exc}\n"
+                f"{fix}") from exc
+
+    def _tallied(self, label, run, *args):
+        """Run one feature and remember it if every ask it made was refused."""
+        self.client.reset()
+        result = run(*args)
+        if self.client.attempts and self.client.refused == self.client.attempts:
+            self._unanswered.append(
+                (label, self.client.attempts, self.client.first_error))
+        return result
 
     # -- features ---------------------------------------------------------
 
@@ -500,7 +597,8 @@ class Command(BaseCommand):
         self._print_case_brief_summary(drafts, counts, latencies, len(children),
                                        sum(1 for _, has in sample if has))
         self._case_verdict = case_brief_verdict(
-            len(drafts), len(children), counts["invented names"], counts["invented dates"])
+            len(drafts), len(children), counts["invented names"], counts["invented dates"],
+            attempts=self.client.attempts, first_error=self.client.first_error)
         return ("CASE BRIEF", 0, {}, self._median(latencies))
 
     def _print_case_brief_summary(self, drafts, counts, latencies, children, with_summary):

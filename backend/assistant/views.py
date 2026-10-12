@@ -15,11 +15,11 @@ from accounts.scoping import (role_of as _role, role_of_user as _role_of,
                               visible_children)
 from accounts.permissions import (IsAdministrator, IsAdminOrStaff, is_admin_or_assignee,
                                   writes_case_referrals)
-from assistant import evaluation, prompts, tools
+from assistant import evaluation, guards, prompts, tools
 from assistant.brief_facts import brief_facts, brief_kind
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.serializers import AssistantSettingSerializer
-from assistant.services import (AIUnavailable, CASE_BRIEF_DISCLAIMER, DISCLAIMER,
+from assistant.services import (AIUnavailable, DISCLAIMER,
                                 HOSTED_DRAFTING_REFUSED, OpenAICompatibleClient,
                                 drafting_available, gate, get_ai_client, run_job,
                                 services_lock)
@@ -62,6 +62,18 @@ def _written_brief_refused(request):
     return Response({"detail": WRITTEN_BRIEF_REFUSED}, status=status.HTTP_403_FORBIDDEN)
 
 
+def _refuse_the_draft(job, refusal):
+    """The answer when guards.checked_draft() refuses a draft: the job is
+    recorded as not ok with what was found, nothing is shown or stored, and the
+    person is told in one plain sentence. The text stays on the audit row, which
+    only an administrator reads, so the refusal can be looked into."""
+    job.ok = False
+    job.error = f"refused: {refusal.reason}"[:255]
+    job.save(update_fields=["ok", "error"])
+    return Response({"detail": guards.REFUSAL_SENTENCE},
+                    status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+
 class AssistantBaseView(generics.GenericAPIView):
     """Turns AIUnavailable into a 503 for every assistant endpoint.
 
@@ -94,12 +106,26 @@ class AssistantSettingView(AssistantBaseView):
         return Response(serializer.data)
 
 
+# Who may have a remark polished: the people who can write one (a remark is the
+# assigned psychologist's or an administrator's - _ChildScopedClinicalViewSet).
+# This view asked only that the caller be signed in, so a social worker's
+# account could have the model rewrite any text they sent and be handed
+# whatever it produced; the screen simply never showed them the button. Found
+# when assistant/guards.py STAFF_DRAFTING was checked against the code.
+POLISH_ROLES = (Role.PSYCHOLOGIST, Role.ADMINISTRATOR)
+POLISH_REFUSED = "Polishing is for the people who write case notes."
+
+
 class RemarkPolishView(AssistantBaseView):
     """Polish a remark the psychologist is writing. Returns a draft only —
     nothing is saved to the remark until the human saves it themselves."""
     throttle_scope = "assistant_draft"
 
     def post(self, request):
+        # Before the gate, like the briefs: nothing reaches the model and no job
+        # is written for a request that was refused for who is asking.
+        if _role(request) not in POLISH_ROLES:
+            return Response({"detail": POLISH_REFUSED}, status=status.HTTP_403_FORBIDDEN)
         gate()
         raw = request.data.get("text")
         if not isinstance(raw, str) or not raw.strip():
@@ -267,118 +293,6 @@ class BriefFactsView(AssistantBaseView):
         return Response(brief_facts(request, child))
 
 
-# --- the social worker's written case brief --------------------------------
-#
-# Owner's decision, 8 Oct 2026: a social worker gets the case facts AND a short
-# written part drafted from them; the ISA (IT support) gets the facts and never
-# the written part, and the psychologist keeps their own brief above. Drafted
-# only where drafting is (the local copy with the model runtime), measured by
-# `manage.py ai_eval --feature case_brief`, and behind the one assistant switch
-# like everything else - no switch of its own.
-
-# What anyone but a social worker is told at either door. One sentence: the
-# facts are on the brief panel for the ISA and the psychologist has their own
-# brief, so there is nothing else to point them at.
-CASE_BRIEF_REFUSED = "The written case brief is for the child's social worker."
-
-
-def _case_brief_refused(request):
-    """The 403 for anyone but a social worker, or None.
-
-    Asked FIRST at both doors, before the child is looked up and before gate():
-    nothing is sent to the model and no AssistantJob is written for a read that
-    was refused.
-    """
-    if _role(request) == Role.STAFF:
-        return None
-    return Response({"detail": CASE_BRIEF_REFUSED}, status=status.HTTP_403_FORBIDDEN)
-
-
-def _case_brief_prompt(request, child):
-    """(prompt, its SHA-256) as the facts stand now.
-
-    The facts are the very dict the panel above the draft is made from, so what
-    the model was given and what the worker can check it against cannot differ.
-    """
-    prompt = prompts.build_case_brief_prompt(brief_facts(request, child), child)
-    return prompt, prompts.prompt_sha(prompts.CASE_BRIEF_SYSTEM, prompt)
-
-
-class CaseBriefView(AssistantBaseView):
-    """Draft today's written case brief for a social worker's own child.
-
-    The ~20-60s path on the agency machine: the screen asks LatestCaseBriefView
-    first and only comes here when there is no current draft.
-    """
-    throttle_scope = "assistant_draft"
-
-    def post(self, request, child_id):
-        refused = _case_brief_refused(request)
-        if refused:
-            return refused
-        # Staff are narrowed to their own records by visible_children: another
-        # social worker's child is a 404, as everywhere else.
-        child = visible_children(request).filter(pk=child_id).first()
-        if child is None:
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
-        gate()
-        if not drafting_available():
-            # Refused before the prompt is built or a job is written, as the
-            # prefetch is: run_job would audit a read that never happened.
-            raise AIUnavailable(HOSTED_DRAFTING_REFUSED)
-        prompt, sha = _case_brief_prompt(request, child)
-        draft, job = run_job(
-            "case_brief", prompt, system=prompts.CASE_BRIEF_SYSTEM,
-            input_ref=f"child:{child.id}", user=request.user, child=child,
-            prompt_sha=sha)
-        if not draft.strip():
-            # An empty "written brief" under a disclaimer reads as broken, and
-            # must not be served again as today's.
-            job.ok = False
-            job.error = "the model returned nothing"
-            job.save(update_fields=["ok", "error"])
-            return Response({"detail": "The assistant did not write a brief. "
-                                       "Try again."},
-                            status=status.HTTP_422_UNPROCESSABLE_ENTITY)
-        return Response({"draft": draft, "job_id": job.id,
-                         "generated_at": job.created_at,
-                         "disclaimer": CASE_BRIEF_DISCLAIMER})
-
-
-class LatestCaseBriefView(AssistantBaseView):
-    """Today's case brief by THIS user for THIS child, if it is still true.
-
-    Served only while the prompt built from the facts NOW hashes the same as
-    the one it was drafted from (`AssistantJob.prompt_sha`). A session booked,
-    a consent recorded or a referral summary confirmed since changes the facts,
-    so the draft answers 404 "No current brief" and the worker drafts it again,
-    rather than reading yesterday's account of a case that has moved on.
-
-    Reads history only, so, like LatestBriefView, it does NOT gate: a brief
-    drafted this morning stays readable after the assistant is switched off.
-    """
-
-    def get(self, request, child_id):
-        refused = _case_brief_refused(request)
-        if refused:
-            return refused
-        child = visible_children(request).filter(pk=child_id).first()
-        if child is None:
-            return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
-        _, sha = _case_brief_prompt(request, child)
-        job = (AssistantJob.objects
-               .filter(job_type="case_brief", ok=True, created_by=request.user,
-                       child=child, prompt_sha=sha,
-                       created_at__date=timezone.localdate())
-               .order_by("-created_at", "-id").first())
-        if job is None:
-            return Response({"detail": "No current brief."},
-                            status=status.HTTP_404_NOT_FOUND)
-        return Response({"draft": job.output_text, "job_id": job.id,
-                         "generated_at": job.created_at,
-                         "disclaimer": CASE_BRIEF_DISCLAIMER})
-
-
 # (user id, child id) pairs currently being briefed, so two page loads cannot
 # queue the same brief twice. Per user, like the briefs themselves. Guarded by
 # its own lock; the generation lock lives in services.
@@ -528,11 +442,20 @@ def _document_to_summarise(request, kind, doc_id):
     return doc, None
 
 
+# The summaries a social worker can ask for (_writes_referrals), and so the
+# ones whose drafts are checked before they are stored or shown: no draft that
+# names someone the document never mentions. The psychologist's report summary
+# is reached by the psychologist and the ISA alone and is left as it was.
+_CHECKED_DOC_KINDS = ("case-referral",)
+
+
 class DocumentSummaryView(AssistantBaseView):
     """Draft a summary of an uploaded document into its `ai_summary` column.
 
     The draft is saved unconfirmed. It only becomes clinical text when a human
-    confirms it, at which point it is their words, not a draft.
+    confirms it, at which point it is their words, not a draft. A case
+    referral's draft is first checked for names the document does not hold
+    (assistant/guards.py); one that fails is not stored and not shown.
     """
     throttle_scope = "assistant_draft"
     kind = None
@@ -550,13 +473,21 @@ class DocumentSummaryView(AssistantBaseView):
 
         # A long report is read in part; the draft says which part, so the
         # psychologist confirming it knows what it could not have seen.
-        coverage = prompts.fit_document(doc.extracted_text)[1]
+        fitted, coverage = prompts.fit_document(doc.extracted_text)
         draft, job = run_job(
             "doc_intelligence",
             prompts.build_summary_prompt(doc.extracted_text, label),
             system=prompts.SUMMARY_SYSTEM,
             input_ref=f"{prefix}:{doc.id}",
             user=request.user, child=doc.child)
+        if self.kind in _CHECKED_DOC_KINDS:
+            # Checked against the text the model was given, not the whole file:
+            # a name it could only have got from the part it was not shown is
+            # still an invention.
+            try:
+                guards.checked_draft("doc_intelligence", draft, fitted)
+            except guards.DraftRefused as refusal:
+                return _refuse_the_draft(job, refusal)
         doc.ai_summary = draft
         doc.ai_summary_confirmed = False
         doc.save(update_fields=["ai_summary", "ai_summary_confirmed"])
@@ -606,7 +537,9 @@ class CensusNarrativeView(AssistantBaseView):
 
     The model receives finished numbers and is told to restate them. It never
     counts anything: a wrong caseload figure in an agency report is far worse
-    than no narrative at all.
+    than no narrative at all. Staff may ask for one, so the draft is checked
+    against the figures before it is shown (assistant/guards.py): 422 when it
+    names, dates or counts something they do not hold.
     """
     throttle_scope = "assistant_draft"
     permission_classes = [IsAdminOrStaff]
@@ -623,6 +556,14 @@ class CensusNarrativeView(AssistantBaseView):
             system=prompts.CENSUS_SYSTEM,
             input_ref="agency:summary",
             user=request.user)
+        # The model restates finished figures and computes nothing: a name, a
+        # date or a number that is not among them is an invention, and a wrong
+        # figure in an agency report is worse than no narrative.
+        try:
+            guards.checked_draft("census_narrative", draft,
+                                 prompts.census_figures_text(figures))
+        except guards.DraftRefused as refusal:
+            return _refuse_the_draft(job, refusal)
         return Response({"draft": draft, "job_id": job.id,
                          "disclaimer": DISCLAIMER})
 
@@ -765,7 +706,8 @@ class AssistantUnansweredView(AssistantBaseView):
 _ACCESS_KINDS = {"child": "brief", "report": "report_summary",
                  "casereferral": "referral_summary", "invite": "survey_check"}
 # A case brief is "child:<id>" like the psychologist's brief and is told apart
-# by its job type; the log names it for what it is.
+# by its job type; the log names it for what it is. No endpoint writes one any
+# more (taken away 12 Oct 2026), but rows from before are still the ISA's to see.
 _ACCESS_KINDS_BY_JOB_TYPE = {"case_brief": "case_brief"}
 
 # Every job type the log lists: drafts, one row each, and the self-report check,
@@ -787,9 +729,10 @@ class ChildAccessLogView(AssistantBaseView):
     """Who had the model read this child's record: the ISA's question, answered
     for one child.
 
-    Lists every pre-session brief, every social worker's case brief, every report
-    and referral summary and the automatic self-report check, with when, who,
-    what kind and how it ended.
+    Lists every pre-session brief, every social worker's case brief (written
+    before 12 Oct 2026, when that feature was taken away), every report and
+    referral summary and the automatic self-report check, with when, who, what
+    kind and how it ended.
     Metadata only - never `output_text` - so it shows who and when, not what
     was drafted.
 
@@ -895,12 +838,8 @@ class AssistantCapabilitiesView(AssistantBaseView):
 
     `brief` says which brief the signed-in role gets: "clinical" (the
     psychologist's, facts and a written brief) or "case" (everyone else's,
-    facts alone). It follows the role, not the deployment, so the screen can
+    facts alone, and for the social worker what to do next). It follows the role, not the deployment, so the screen can
     choose the button before anything else has answered.
-
-    `case_brief_writing` says whether this user is offered a written case
-    brief: a social worker, on a deployment that drafts. The ISA and the
-    psychologist never are, whatever the deployment.
 
     `drafting` is False where the model is hosted, because get_ai_client()
     refuses every caller without allow_hosted. A brief's prose, polish, summary
@@ -915,8 +854,7 @@ class AssistantCapabilitiesView(AssistantBaseView):
         return Response({"can_ask": tools.capability_text(role),
                          "examples": tools.capability_examples(role),
                          "drafting": drafting_available(),
-                         "brief": brief_kind(role),
-                         "case_brief_writing": role == Role.STAFF and drafting_available()})
+                         "brief": brief_kind(role)})
 
 
 # answer_directly's `reason` defaults to "unsupported" in its resolver, so it
