@@ -631,6 +631,29 @@ export function Skeleton({ width = '100%', height = 12, radius = 'var(--radius-x
   return <span className="racco-skeleton" aria-hidden="true" style={{ display: 'block', width, height, borderRadius: radius, ...style }} />;
 }
 
+/* ----------------------------- LiveStatus ----------------------------- *
+ * One polite live region that STAYS mounted while its text changes ("Loading
+ * the facts…" -> "Facts loaded"). A status that appears together with its
+ * words, or that is unmounted when the result lands, is often not announced at
+ * all - so the region renders empty first and takes its text a moment later,
+ * and callers keep it in the tree for the whole wait.
+ *
+ * Hidden from the eye by default (`visible` shows it): the words are for a
+ * screen reader, and the screen has its own, visible way of saying the same.
+ * Pass '' to say nothing; setting the same words again after they were cleared
+ * says them again. */
+export function LiveStatus({ text = '', visible = false, role = 'status', style, ...rest }) {
+  const [shown, setShown] = useState('');
+  useEffect(() => {
+    if (!text) { setShown(''); return undefined; }
+    const timer = setTimeout(() => setShown(text), 60);
+    return () => clearTimeout(timer);
+  }, [text]);
+  return (
+    <div role={role} className={visible ? undefined : 'racco-sr-only'} style={style} {...rest}>{shown}</div>
+  );
+}
+
 /* ------------------------ Dialog behaviour (a11y) ------------------------ *
  * Everything a modal/drawer owes the keyboard: focus moves in on open, Tab is
  * trapped inside, Escape closes (when the dialog allows it), and focus returns

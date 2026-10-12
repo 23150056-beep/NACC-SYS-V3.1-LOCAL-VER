@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import api from '../api/client';
 import { useToast } from '../context/ToastContext';
 import { useAssistant } from '../context/AssistantContext';
 import {
-  Badge, Button, Card, Icon, MiniBar, Note, PAGE, PageHeader, Segmented, StatCard,
+  Badge, Button, Card, Icon, LiveStatus, MiniBar, Note, PAGE, PageHeader, Segmented, StatCard,
   TD, TH, THEAD_ROW, TR,
 } from '../ui';
 import { sendFeedback, censusNarrative } from '../api/assistant';
@@ -59,14 +59,47 @@ export default function AgencySummary() {
   const { drafting } = useAssistant();
   const [range, setRange] = useState('monthly');
   const [data, setData] = useState(null);
+  // Which range `data` was fetched for: a draft is written from the figures on
+  // screen, so it waits until they are the chosen period's.
+  const [dataRange, setDataRange] = useState(null);
   const [narrative, setNarrative] = useState(null); // { text, jobId }
   const [narrativeBusy, setNarrativeBusy] = useState(false);
   // The server's sentence when it refused a draft (422); it stays until the next try.
   const [narrativeRefusal, setNarrativeRefusal] = useState('');
+  // The server's sentence when it answered 503 (switched off, runtime down): kept
+  // on the card, with the button grey and this as its reason, for the visit.
+  const [narrativeOff, setNarrativeOff] = useState('');
+  // The answer to "was it useful": null, 'useful' or 'not_useful'. One answer per
+  // draft - the usage metrics count each draft once.
+  const [verdict, setVerdict] = useState(null);
+  // The draft request that is out. A new period ends its wait and its answer is
+  // dropped (the server still finishes it and logs the job).
+  const narrativeFlight = useRef(null);
+  const [note, setNote] = useState(''); // the page's polite announcement
 
   useEffect(() => {
-    api.get(`/reports/summary/?range=${range}`).then((r) => setData(r.data)).catch(() => setData(EMPTY));
+    let live = true;
+    api.get(`/reports/summary/?range=${range}`)
+      .then((r) => { if (live) { setData(r.data); setDataRange(range); } })
+      .catch(() => { if (live) { setData(EMPTY); setDataRange(range); } });
+    return () => { live = false; };
   }, [range]);
+
+  // A narrative describes one period. Choosing another clears it - the old words
+  // under a new heading would be read as that period's - and ends any request
+  // still out for the old one.
+  const chooseRange = (next) => {
+    if (next === range) return;
+    narrativeFlight.current?.abort();
+    narrativeFlight.current = null;
+    setNarrative(null);
+    setNarrativeRefusal('');
+    setNarrativeBusy(false);
+    setVerdict(null);
+    setNote('');
+    setRange(next);
+  };
+  useEffect(() => () => narrativeFlight.current?.abort(), []);
 
   const downloadCsv = async () => {
     try {
@@ -103,8 +136,13 @@ export default function AgencySummary() {
   ];
 
   const writeNarrative = async () => {
+    if (narrativeFlight.current) return;
+    const controller = new AbortController();
+    narrativeFlight.current = controller;
     setNarrativeBusy(true);
     setNarrativeRefusal('');
+    setVerdict(null);
+    setNote('Writing the narrative… this can take up to a minute.');
     try {
       // Only finished figures — the model restates these and computes nothing.
       const { draft, job_id } = await censusNarrative({
@@ -114,21 +152,53 @@ export default function AgencySummary() {
         pending_pre_assessments: d.pending_pre_assessments,
         ...Object.fromEntries(
           Object.entries(d.by_case_type || {}).map(([k, v]) => [`case_type_${k}`, v])),
-      });
+      }, { signal: controller.signal });
       setNarrative({ text: draft, jobId: job_id });
+      setNote('Narrative drafted. Review it before it goes in any report.');
     } catch (err) {
-      // 422 is a draft that stated something the figures do not hold: it is not
-      // shown, and the server's one sentence says so and what to do. Kept on the
-      // card rather than in a toast, which is gone before it can be read twice.
-      if (err.response?.status === 422 && err.response?.data?.detail) {
-        setNarrativeRefusal(err.response.data.detail);
+      // Ended by choosing another period (or leaving): nothing to report.
+      if (controller.signal.aborted) return;
+      const detail = err.response?.data?.detail;
+      if (err.response?.status === 422 && detail) {
+        // 422 is a draft that stated something the figures do not hold: it is not
+        // shown, and the server's one sentence says so and what to do. Kept on the
+        // card rather than in a toast, which is gone before it can be read twice.
+        setNarrativeRefusal(detail);
+        setNote('');
+      } else if (err.response?.status === 503) {
+        // A normal state, not a fault: the sentence stays on the card, the button
+        // stays grey, and no alert is raised.
+        const sentence = typeof detail === 'string' && detail ? detail : 'The assistant is unavailable right now.';
+        setNarrativeOff(sentence);
+        setNote(sentence);
       } else {
-        toast.error(err.response?.status === 503
-          ? 'The assistant is unavailable right now.'
-          : 'Could not write the narrative.');
+        const sentence = typeof detail === 'string' && detail ? detail : 'Could not write the narrative.';
+        setNarrativeRefusal(sentence);
+        setNote('');
+        toast.error(sentence);
       }
     } finally {
-      setNarrativeBusy(false);
+      if (narrativeFlight.current === controller) {
+        narrativeFlight.current = null;
+        setNarrativeBusy(false);
+      }
+    }
+  };
+
+  // "Useful" and "Not useful" are said back, in words, and recorded once. "Not
+  // useful" also discards the draft, so the buttons it was pressed on go; the
+  // keyboard goes to the button that drafts another.
+  const answer = (outcome) => {
+    if (!narrative || verdict) return;
+    sendFeedback(narrative.jobId, outcome === 'useful' ? 'accepted' : 'discarded').catch(() => {});
+    setVerdict(outcome);
+    // "Useful" is said by the status beside the buttons, which is on screen and
+    // announced at once; "Not useful" removes that status with the draft, so the
+    // page says it.
+    if (outcome === 'not_useful') {
+      setNarrative(null);
+      setNote('Narrative discarded - marked not useful.');
+      requestAnimationFrame(() => document.getElementById('narrative-draft-btn')?.focus());
     }
   };
 
@@ -139,12 +209,13 @@ export default function AgencySummary() {
 
   return (
     <div style={PAGE} className="racco-print-area">
+      <LiveStatus text={note} />
       <PageHeader
         title="Agency Summary"
         subtitle={`${RANGES.find((r) => r.value === range)?.label || range} · RACCO I`}
       >
         <span className="racco-no-print" style={{ display: 'inline-flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          <Segmented options={RANGES} value={range} onChange={setRange} label="Summary range" />
+          <Segmented options={RANGES} value={range} onChange={chooseRange} label="Summary range" />
           <Button variant="secondary" onClick={downloadCsv} iconLeft={<Icon name="download" size={17} />}>Export CSV</Button>
           <Button variant="secondary" onClick={() => window.print()} iconLeft={<Icon name="printer" size={17} />}>Print</Button>
         </span>
@@ -197,7 +268,9 @@ export default function AgencySummary() {
         <Card
           title="Narrative summary"
           actions={(
-            <Button variant="secondary" size="sm" onClick={writeNarrative} disabled={narrativeBusy} className="racco-no-print">
+            <Button id="narrative-draft-btn" variant="secondary" size="sm" onClick={writeNarrative}
+                    disabled={narrativeBusy || dataRange !== range || !!narrativeOff} className="racco-no-print"
+                    aria-describedby={narrativeOff ? 'narrative-off' : undefined}>
               {narrativeBusy ? 'Writing…' : narrative ? 'Re-draft' : 'Draft narrative'}
             </Button>
           )}
@@ -211,6 +284,12 @@ export default function AgencySummary() {
                 prose around them. Review before it goes in any report.
               </p>
             </div>
+            {narrativeOff && (
+              // Why the button is grey, in the server's words.
+              <Note tone="warning" icon="alert-triangle" style={{ borderRadius: 8 }}>
+                <span id="narrative-off">Narrative unavailable: {narrativeOff}</span>
+              </Note>
+            )}
             {narrativeRefusal && (
               <Note tone="warning" icon="alert-triangle" style={{ borderRadius: 8 }}>
                 <span role="alert">{narrativeRefusal}</span>
@@ -221,20 +300,29 @@ export default function AgencySummary() {
                 <p style={{ whiteSpace: 'pre-wrap', fontSize: 13.5, lineHeight: 1.7, color: 'var(--text-body)' }}>{narrative.text}</p>
                 <div className="racco-no-print" style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'flex-end' }}>
                   <span style={{ flex: 1, fontWeight: 600, fontSize: 11.5, color: 'var(--text-faint)' }}>
-                    Your answer trains nothing — it is counted so the feature can be judged.
+                    {verdict ? null : 'Your answer trains nothing — it is counted so the feature can be judged.'}
+                    {/* Always in the tree, empty until an answer is given, so that
+                        what it then says is both seen and announced. */}
+                    <span role="status" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--success-700)' }}>
+                      {verdict === 'useful' && (
+                        <><Icon name="check-circle-2" size={15} aria-hidden="true" />Thank you - marked useful.</>
+                      )}
+                    </span>
                   </span>
+                  {/* aria-disabled, not disabled, once answered: the key stays where it is. */}
                   <Button
-                    variant="secondary" size="sm"
-                    onClick={() => { sendFeedback(narrative.jobId, 'discarded').catch(() => {}); setNarrative(null); }}
+                    variant="secondary" size="sm" aria-disabled={verdict ? true : undefined}
+                    onClick={() => answer('not_useful')}
                   >
                     Not useful
                   </Button>
                   <Button
-                    variant="secondary" size="sm"
-                    style={{ background: 'var(--success-50)', borderColor: 'var(--success-100)', color: 'var(--success-700)' }}
-                    onClick={() => sendFeedback(narrative.jobId, 'accepted').catch(() => {})}
+                    variant="secondary" size="sm" aria-disabled={verdict ? true : undefined}
+                    aria-pressed={verdict === 'useful'}
+                    style={{ background: 'var(--success-50)', borderColor: 'var(--success-100)', color: 'var(--success-700)', ...(verdict ? { opacity: 0.7 } : {}) }}
+                    onClick={() => answer('useful')}
                   >
-                    Useful
+                    {verdict === 'useful' ? 'Marked useful' : 'Useful'}
                   </Button>
                 </div>
               </>
