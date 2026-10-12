@@ -159,7 +159,7 @@ function NextSteps({ steps, onGo }) {
           Nothing waiting on you for this child.
         </p>
       ) : (
-        <ol style={{ margin: 0, paddingLeft: 20 }}>
+        <ol style={{ margin: 0, paddingLeft: 22, listStyle: 'decimal' }}>
           {steps.map((step) => (
             <li key={step.key} style={{ padding: '6px 0', borderBottom: '1px solid var(--ink-50)' }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '6px 12px' }}>
