@@ -1344,6 +1344,68 @@ switched to the record.)
 - The record form also asks before closing with unsaved input; a new record's
   draft is flushed and kept, an edit's changes are discarded only on "Discard".
 
+## The header search (Ctrl K)
+
+Owner's request, 11 Oct 2026: the box in the header finds AND does
+(`components/GlobalSearch.jsx`, matching in `utils/search.js`).
+
+- **A child is found by what intake remembers**: name in any word order,
+  case number, custodian, barangay/municipality/province, birth year or date
+  (2015, 2015-03-02, 03/02/2015), case type, psychologist, social worker.
+  Accents and ñ do not count, "Ma." is also Maria. A match outside the name
+  says where it was found. Never add medical notes, the referral reason or
+  contact numbers to what is matched: the box finds a child, it does not read
+  the file.
+- **Only from `/children/`**, which the server already scopes - nothing here
+  may widen what an account sees. Fetched each time the box opens, so a child
+  added since is found.
+- **Quick actions on a child** (right arrow, or the row's arrow): Open record,
+  Book a session (only with a case referral), Upload (a referral for
+  SW/ISA, a report for the child's psychologist), Edit record - through the
+  links the screens already read (`?book=1&child=`, `?upload=1&child=`), plus
+  Records' `?edit=<id>`, which opens the form only where `canEditRecord`
+  allows. Same rules as the screens; the server checks again.
+- **Before typing**: Recent (ids only in sessionStorage, names from the
+  current list, cleared by logout - office computers are shared), Needs you
+  (from the list already fetched, and `useCensus`'s pending counts), and the
+  role's actions.
+- **The header pill IS the input** (owner, 11 Oct 2026): no second box opens,
+  and the results drop down under it. It was a button that opened a panel with
+  its own field, so the first one looked like a box and acted like a link.
+  The pill carries the focus ring (`.racco-chrome-search` in index.css),
+  because index.css gives every focused input a small-radius ring that would
+  square off the pill - white at 40%, since `--shadow-focus` is a pale blue
+  that vanishes on the navy. Clicks inside the panel keep focus in the input
+  (`mousedown` preventDefault), so the arrow keys keep working after a click.
+  Closing for any reason - Esc, a choice, a click or Tab away, another header
+  popover opening - clears the text.
+- **A press anywhere on the pill opens it**, the Ctrl K chip and the icon
+  included, also when the field kept focus with the panel shut (the browser's
+  back button leaves it so). The click-outside listener reads `composedPath()`:
+  the chip unmounts during its own mousedown, and `contains(e.target)` then
+  called the press "outside" and shut the panel the same instant. Tabbing onto
+  the bar does not open the panel - typing, the down arrow or Ctrl K do - so a
+  keyboard pass through the header neither flashes the panel nor refetches the
+  roster.
+- **Tab and Shift+Tab are read on the input's keydown**, not as a blur: with
+  nothing focusable before the bar, Shift+Tab leaves the page with a null
+  `relatedTarget`, which a blur handler cannot tell from a click. Nothing in
+  the panel is a tab stop - a row focused there answered neither Esc nor the
+  arrows. The rows are `role="option"` divs under a `listbox`, the highlight
+  is announced through `aria-activedescendant`, and axe-core is clean on the
+  open panel; buttons inside the options fail `nested-interactive`.
+- **The highlight follows the pointer only when it MOVES** (`pointerAt`). A
+  list scrolling or refilling under a resting pointer fires `mouseenter` on
+  whatever slid beneath it and used to pull the highlight off the row the keys
+  had reached. The cursor clamp is a functional update for the same family of
+  reason: from the foot of a long list, the next letter left the highlight on
+  the new list's last row instead of its first.
+- **Ctrl/Cmd+K is the plain chord only**, and does nothing while a modal
+  drawer or dialog is up (`aria-modal`): the panel would open under the scrim
+  and take the focus out of it. The header tabs give up width (36px at the
+  least) below 1180 instead of running under the pill and the bell, where the
+  first tab sat over the clear button.
+
 ## Text messages (Semaphore)
 
 Audited 26 Sep 2026 when the owner chose Semaphore. `SMS_PROVIDER` picks the

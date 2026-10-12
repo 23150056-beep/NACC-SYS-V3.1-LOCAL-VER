@@ -438,6 +438,24 @@ textarea:focus-visible {
   position: relative;
   z-index: 1;
 }
+/* The header search is a pill with a bare input inside it. The ring above is
+   a small-radius box, which on that input would square off the pill's ends
+   and sit inside it; the pill carries the ring instead. The placeholder is
+   the dark header's own soft ink - the grey above is unreadable on navy. */
+.racco-chrome-search:focus-within {
+  /* Not --shadow-focus: that ring is a pale blue, near-invisible on navy. */
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--chrome-ink) 40%, transparent);
+}
+.racco-chrome-search input:focus-visible {
+  box-shadow: none;
+  border-radius: 0;
+  position: static;
+  z-index: auto;
+}
+.racco-chrome-search input::placeholder {
+  color: var(--chrome-ink-soft);
+  opacity: 1;
+}
 tr:focus-visible {
   box-shadow: inset 0 0 0 2px var(--ring);
   border-radius: 0;
