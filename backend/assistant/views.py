@@ -19,6 +19,7 @@ from assistant import evaluation, guards, prompts, tools
 from assistant.brief_facts import brief_facts, brief_kind
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.redact import Masker
+from assistant.runtime import record_runtime_change
 from assistant.serializers import AssistantSettingSerializer
 from assistant.services import (AIUnavailable, DISCLAIMER,
                                 HOSTED_DRAFTING_REFUSED, OpenAICompatibleClient,
@@ -100,10 +101,14 @@ class AssistantSettingView(AssistantBaseView):
         return Response(AssistantSettingSerializer(AssistantSetting.load()).data)
 
     def put(self, request):
-        serializer = AssistantSettingSerializer(
-            AssistantSetting.load(), data=request.data, partial=True)
+        current = AssistantSetting.load()
+        before = (current.ollama_url, current.model_name)
+        serializer = AssistantSettingSerializer(current, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        saved = serializer.save()
+        # Where case text goes, and which model reads it: moving either is a
+        # security event, kept with the ISA's name (see assistant/runtime.py).
+        record_runtime_change(request.user, *before, saved.ollama_url, saved.model_name)
         return Response(serializer.data)
 
 

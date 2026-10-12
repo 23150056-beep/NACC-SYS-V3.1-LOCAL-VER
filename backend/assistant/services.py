@@ -18,6 +18,7 @@ import urllib.error
 import urllib.request
 
 from assistant.models import AssistantJob, AssistantSetting
+from assistant.runtime import runtime_url_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +188,13 @@ def get_ai_client(*, allow_hosted=False):
                                       settings.ASSISTANT_MODEL_NAME,
                                       settings.ASSISTANT_MODEL_TOKEN)
 
+    # The runtime is wherever the administrator saved it, which is checked when
+    # it is saved - but a value can arrive another way (the Django admin, a
+    # shell, a row saved before the rule), and this is the one place that sends
+    # anything. A remote address is not used unless the deployment allows one.
+    refusal = runtime_url_refusal(cfg.ollama_url)
+    if refusal:
+        return NullClient(refusal)
     return OllamaClient(cfg.ollama_url, cfg.model_name)
 
 
