@@ -1415,6 +1415,25 @@ Owner's request, 11 Oct 2026: the box in the header finds AND does
   and take the focus out of it. The header tabs give up width (36px at the
   least) below 1180 instead of running under the pill and the bell, where the
   first tab sat over the clear button.
+- **The bar is an inch (96px) longer than it was** (owner, 12 Oct 2026;
+  `searchBarWidth` in `LayoutContext.jsx`): 306 under 1180, 364 to 1399, 416
+  from 1400, against 210 / 268 / 320. The header tabs shrink to make the room,
+  down to their 36px minimum, and the results panel (340 / 430) stays wider than
+  the bar. Only under 842 (the "More" button) is there not room for all of it:
+  there the bar takes what is spare and never less than before, and the full
+  inch is in from 842. It never gets shorter as the window grows.
+  **The account's name and role wait for 1280 in the header** (`identityOn`, it
+  was 1080): they cost 151px, and at 1080 they left no room for the inch, so the
+  bar snapped 96px shorter as the window grew past 1079 and was barely longer
+  than before until 1244. The rail's own account card names the user from 1080,
+  so nothing goes unsaid, and 1280 also leaves the tabs their room for a
+  26-character first name. Sized against the ISA, whose role label is the
+  widest, with 30px in hand; a control added to the header means measuring again.
+- **The pending count on a tab hangs off the icon's corner from the tab's OWN
+  width** (`right: max(2px, calc(50% - 23px))`, `AppHeader.jsx`). It was worked
+  out from `layout.tabWidth`, but the strip shrinks the tabs below that, and a
+  badge placed for the wider tab lay over most of the icon. A percentage follows
+  the real width; the 2px floor keeps even three digits inside a 36px tab.
 
 ## Text messages (Semaphore)
 
