@@ -37,6 +37,36 @@ class AssistantSettingAdmin(admin.ModelAdmin):
 
 @admin.register(AssistantJob)
 class AssistantJobAdmin(admin.ModelAdmin):
-    list_display = ("created_at", "job_type", "input_ref", "ok", "outcome", "latency_ms")
+    """The audit trail, to look at and never to change or take apart.
+
+    Not the text. A row carries what the model wrote (`output_text`: a drafted
+    brief, a report summary, a tool call) and, on a chat, the question a person
+    typed (`input_ref`), and the Django admin is a second, wider door onto them:
+    every superuser holds it, and the seeded ISA is one. What the ISA may know
+    about the assistant's use is who, when, which child, what kind and how it
+    ended - the access log on the child's page, which never shows text either.
+    The reference ("child:12", "report:3") is shown for every job but a chat,
+    where it is a question.
+
+    Read-only, in all three verbs: a row edited or deleted here would rewrite
+    the access log without leaving a trace.
+    """
+
+    list_display = ("created_at", "job_type", "reference", "ok", "outcome", "latency_ms")
     list_filter = ("job_type", "ok", "outcome")
-    readonly_fields = ("created_at",)
+    fields = ("created_at", "job_type", "reference", "created_by", "child", "ok",
+              "outcome", "answer", "result_count", "model_used", "latency_ms", "error")
+    readonly_fields = fields
+
+    @admin.display(description="Reference")
+    def reference(self, obj):
+        return "(a typed question - not shown)" if obj.job_type == "chat" else obj.input_ref
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
