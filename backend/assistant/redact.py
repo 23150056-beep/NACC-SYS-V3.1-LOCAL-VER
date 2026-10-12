@@ -142,6 +142,16 @@ class Masker:
                 self._between.setdefault(first, {}).setdefault(last, set()).add(pk)
                 self._longest = max(self._longest, len(first) + 1 + len(last))
 
+    def fork(self):
+        """A masker that knows the same children but has handed out no tokens
+        yet, without reading them again: for masking a list of separate texts,
+        each of which starts again at CHILD."""
+        other = object.__new__(Masker)
+        other.__dict__.update(self.__dict__)
+        other._tokens = {}
+        other.mapping = {}
+        return other
+
     # --- finding ----------------------------------------------------------
 
     def _spans(self, text):

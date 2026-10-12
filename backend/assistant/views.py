@@ -10,7 +10,7 @@ from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from accounts.models import Role
+from accounts.models import Role, User
 from accounts.scoping import (role_of as _role, role_of_user as _role_of,
                               visible_children)
 from accounts.permissions import (IsAdministrator, IsAdminOrStaff, is_admin_or_assignee,
@@ -644,19 +644,32 @@ class AssistantUnansweredView(AssistantBaseView):
     to change something and runtime failures are counted but not listed —
     none of them is a question the assistant should learn to answer.
 
-    Administrators only, like the usage table it sits beside. The questions are
-    already readable in the Django admin's job list, so this is a view of rows
-    that exist, not new exposure. It names the asker's ROLE and never the
-    person: the point is what the agency needs, not who asked.
+    Administrators only, like the usage table it sits beside. It shows what was
+    asked, and the words are other people's, so it is held to three rules:
+
+    - The question is the one the log kept, with every child's name, phone
+      number and email address already taken out (assistant/redact.py). Rows
+      written before that was done are masked again as they are read - the ISA
+      sees every child, so every name is known - and a question is shown with
+      "CHILD" in it, never a name.
+    - The asker is never named, and a role is named only when at least
+      MIN_ROLE_SIZE active accounts hold it. "A psychologist asked this" says
+      who it was when the agency has one psychologist.
+    - The date is the day, not the time.
 
     Not gated, for the metrics' reason: reading history has to keep working
     while the assistant is switched off.
     """
     permission_classes = [IsAdministrator]
     LIST_LIMIT = 25
+    MIN_ROLE_SIZE = 3
+    SOMEONE = "a colleague"
 
     def get(self, request):
         since = timezone.now() - timedelta(days=WINDOW_DAYS)
+        seats = dict(User.objects.filter(status=User.ACTIVE)
+                     .values_list("role__role_name").annotate(n=Count("id")))
+        masker = Masker(request)
         # Typed questions only: see FOLLOWUP_MODEL.
         chats = (AssistantJob.objects
                  .filter(job_type="chat", created_at__gte=since)
@@ -688,18 +701,21 @@ class AssistantUnansweredView(AssistantBaseView):
         groups = {}
         for job in misses:
             why = _why_unanswered(job)
+            question = masker.fork().mask_text(job.input_ref)
             # The same question asked twice is one row with a count. Case,
             # spacing and a trailing "?" are not a different question.
-            key = (" ".join(job.input_ref.lower().split()).rstrip("?!. "), why)
+            key = (" ".join(question.lower().split()).rstrip("?!. "), why)
             group = groups.get(key)
             if group is None:
                 # Newest first, so the wording kept is the most recent.
                 group = groups[key] = {
-                    "question": job.input_ref, "why": why, "times": 0,
+                    "question": question, "why": why, "times": 0,
                     "last_asked": timezone.localtime(job.created_at).date().isoformat(),
                     "roles": set()}
             group["times"] += 1
-            group["roles"].add(_role_of(job.created_by) or "Unknown")
+            role = _role_of(job.created_by)
+            group["roles"].add(role if seats.get(role, 0) >= self.MIN_ROLE_SIZE
+                               else self.SOMEONE)
 
         # Most-asked first; among equals, the most recent.
         ordered = sorted(groups.values(), key=lambda g: g["last_asked"], reverse=True)
