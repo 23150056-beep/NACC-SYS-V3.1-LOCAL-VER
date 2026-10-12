@@ -101,7 +101,10 @@ class ScopeTest(FactsFixture):
         # The case brief's extra rows (CaseBriefTest holds what is in them).
         case_rows = {"case_referral", "psychologist", "consent", "custodian_texts",
                      "survey"}
-        for user, keys in ((self.psy, shared), (self.sw, shared | case_rows),
+        # And the record's own social worker's: where the case study stands, and
+        # what to do next (test_next_steps). The ISA and a psychologist get neither.
+        own_sw = {"case_study", "next_steps"}
+        for user, keys in ((self.psy, shared), (self.sw, shared | case_rows | own_sw),
                            (self.admin, shared | case_rows)):
             with self.subTest(user=user.email):
                 res = self._facts(user)
@@ -291,11 +294,15 @@ class RecordFactsTest(FactsFixture):
         Child.objects.filter(pk=self.child.pk).update(
             created_at=timezone.now() - timedelta(days=30))
         self._flag()
+        # A session held 40 days ago and none to come: the overdue follow-up is
+        # the one gap neither a row nor a next step says.
+        self._appt(-40, status=Appointment.COMPLETED)
         mine = self._facts(self.sw).data
         theirs = self._facts(self.psy).data
-        # The referral and consent gaps are the case brief's own rows now, so
-        # only the booking gap is left to list.
-        self.assertEqual({"no_upcoming_appointment"},
+        # The referral and consent gaps are the case brief's own rows, and the
+        # booking gap is its "Book the next session" step, so only the overdue
+        # follow-up is left to list.
+        self.assertEqual({"follow_up_overdue"},
                          {g["type"] for g in mine["care_gaps"]})
         self.assertIn("pre_assessment_overdue", {g["type"] for g in theirs["care_gaps"]})
         self.assertNotIn("no_case_referral", {g["type"] for g in theirs["care_gaps"]})
@@ -307,7 +314,7 @@ class RecordFactsTest(FactsFixture):
         self.assertTrue({"self_report_concern", "no_case_referral", "no_signed_consent"}
                         <= {a["type"] for a in dashboard})
         said = {"self_report_concern", "no_case_referral", "no_psychologist",
-                "no_signed_consent"}
+                "no_signed_consent", "no_upcoming_appointment"}
         self.assertEqual(
             [(g["type"], g["message"]) for g in mine["care_gaps"]],
             [(a["type"], a["message"]) for a in dashboard if a["type"] not in said])

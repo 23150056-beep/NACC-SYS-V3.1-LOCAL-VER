@@ -287,11 +287,14 @@ class PromptArithmeticTest(CaseBriefFixture):
         ProblemEntry.objects.create(child=self.child, description="Two.")
         ProblemEntry.objects.create(child=self.child, description="Done.", resolved=True)
         self._flag()
+        # A session held 40 days ago, none to come: the overdue follow-up is a
+        # gap no row and no next step says, so the prompt still lists it.
+        self._appointment(NOW - timedelta(days=40), status=Appointment.COMPLETED)
         text = self._facts_text()
         self.assertIn("Self-report answers waiting to be read: 1\n", text)
         self.assertIn("Open problems on file: 2\n", text)
-        self.assertIn("Care gaps still open:\n- Active case with no upcoming "
-                      "appointment.", text)
+        self.assertIn("Care gaps still open:\n- Last completed session over 30 days "
+                      "ago.", text)
 
     def test_no_gaps_is_said_plainly(self):
         self._appointment(NOW + timedelta(days=2), status=Appointment.SCHEDULED)

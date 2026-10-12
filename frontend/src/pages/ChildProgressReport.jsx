@@ -74,6 +74,9 @@ export default function ChildProgressReport() {
   // a social worker cannot start a survey.) Above the early returns, with the
   // other hooks.
   useOpenFromLink('tab', 'voice', () => setTab('voice'));
+  // The case brief's "read the survey answers" step: the flagged words and
+  // "Mark as read" are on Overview, which this page may have been left off.
+  useOpenFromLink('tab', 'overview', () => setTab('overview'));
   // The case study's activity events link here (utils/activity.js).
   useOpenFromLink('tab', 'casestudy', () => setTab('casestudy'));
   const [ackBusy, setAckBusy] = useState(null);
@@ -1181,7 +1184,8 @@ export default function ChildProgressReport() {
         <Modal open onClose={() => setBrief(null)} title={caseBrief ? 'Case brief' : 'Pre-session brief'}
                subtitle={brief.prose === 'ready' ? `Drafted ${clock(brief.generatedAt)}` : null}
                width={560}>
-          <BriefFacts facts={brief.facts} failed={brief.factsFailed} />
+          <BriefFacts facts={brief.facts} failed={brief.factsFailed}
+                      onGo={(to) => { setBrief(null); navigate(to); }} />
           <>
             {brief.prose !== 'none' && (
               <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0 12px' }} />

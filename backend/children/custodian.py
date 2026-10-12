@@ -54,15 +54,22 @@ def texts_allowed(child):
                 and child.status == child.ACTIVE)
 
 
+# What status_of() says when texts are on, and the ending of every sentence for
+# when they are off. Named so a screen that needs to tell the two apart (the
+# case brief's next steps) compares against these and not against typed copies.
+TEXTS_ON = "Texts on"
+TEXTS_OFF_ENDING = " - texts off"
+
+
 def status_of(child):
     """A short line for screens: why texts are on or off."""
     if not child.custodian_contact:
-        return "No contact number - texts off"
+        return "No contact number" + TEXTS_OFF_ENDING
     if not child.custodian_sms_consent:
-        return "No consent recorded - texts off"
+        return "No consent recorded" + TEXTS_OFF_ENDING
     if not child.custodian_contact_verified_at:
-        return "Number not confirmed - texts off"
-    return "Texts on"
+        return "Number not confirmed" + TEXTS_OFF_ENDING
+    return TEXTS_ON
 
 
 # --- Recording it on the child ---------------------------------------------

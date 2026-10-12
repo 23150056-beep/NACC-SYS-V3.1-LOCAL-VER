@@ -28,6 +28,7 @@ from children.models import AssignmentRequest, Child
 from clinical import care_gaps
 from clinical.models import (AgencyFormTemplate, CaseReferral, ConsentRecord,
                              OpinionnaireInvite, PreAssessment)
+from scheduling.models import Appointment
 
 BRIEF = "/api/assistant/brief/child/{}/"
 LATEST = "/api/assistant/brief/child/{}/latest/"
@@ -231,7 +232,8 @@ class CaseBriefFactsTest(FactsFixture):
                 child=self.child, psychologist=self.previous, requested_by=self.sw)
         with patch("django.utils.timezone.now", return_value=NOW):
             row = self._case()["psychologist"]
-        self.assertEqual(row, {"state": "asked", "name": "Mila Bulan", "days_ago": 3})
+        self.assertEqual(row, {"state": "asked", "name": "Mila Bulan", "days_ago": 3,
+                               "elapsed_days": 3})
 
     def test_a_declined_request_gives_the_reason(self):
         self._unassign()
@@ -334,10 +336,11 @@ class CaseBriefFactsTest(FactsFixture):
         OpinionnaireInvite.objects.filter(pk=invite.pk).update(
             created_at=NOW - timedelta(days=5))
         with patch("django.utils.timezone.now", return_value=NOW):
-            self.assertEqual(self._case()["survey"], {"state": "sent", "date": "2026-10-03"})
+            self.assertEqual(self._case()["survey"],
+                             {"state": "sent", "date": "2026-10-03", "elapsed_days": 5})
         with patch("django.utils.timezone.now", return_value=NOW + timedelta(days=3)):
             self.assertEqual(self._case()["survey"],
-                             {"state": "expired", "date": "2026-10-03"})
+                             {"state": "expired", "date": "2026-10-03", "elapsed_days": 8})
         OpinionnaireInvite.objects.filter(pk=invite.pk).update(
             status=OpinionnaireInvite.EXPIRED)
         with patch("django.utils.timezone.now", return_value=NOW):
@@ -397,22 +400,26 @@ class CaseBriefFactsTest(FactsFixture):
                 self.client.get("/api/reports/dashboard/").data["care_gaps"]
                 if a["child_id"] == self.child.id]
 
-    def test_a_social_workers_list_drops_every_gap_a_row_says(self):
+    def test_a_social_workers_list_drops_every_gap_a_row_or_a_step_says(self):
         # Four rows, four gaps: referral, psychologist, consent and the survey
         # (sent 8 days ago and not answered, which its row says as "no answer
-        # yet"). What the rows do not say - the two booking gaps - stays.
+        # yet"); and the booking gap is the "Book the next session" step. What
+        # neither says - a follow-up gone overdue - stays.
         self._unassign()
         invite = self._invite(status=OpinionnaireInvite.PENDING,
                               expires_at=NOW + timedelta(days=2))
         OpinionnaireInvite.objects.filter(pk=invite.pk).update(
             created_at=NOW - timedelta(days=8))
+        Appointment.objects.create(
+            child=self.child, psychologist=self.psy, status=Appointment.COMPLETED,
+            start=NOW - timedelta(days=40))
         with patch("django.utils.timezone.now", return_value=NOW):
             data = self._case(self.sw)
             on_dashboard = self._gaps_on_the_dashboard(self.sw)
         said = {"no_case_referral", "no_psychologist", "no_signed_consent",
-                "survey_unanswered"}
-        # The control: the Dashboard carries all four, so the brief's silence
-        # is the rows' doing and not a child with no gaps.
+                "survey_unanswered", "no_upcoming_appointment"}
+        # The control: the Dashboard carries all five, so the brief's silence
+        # is the rows' and the steps' doing and not a child with no gaps.
         self.assertTrue(said <= set(on_dashboard), on_dashboard)
         self.assertIsNone(data["case_referral"])
         self.assertEqual(data["psychologist"], {"state": "none"})
@@ -423,7 +430,18 @@ class CaseBriefFactsTest(FactsFixture):
         self.assertEqual(sorted(types),
                          sorted(t for t in on_dashboard
                                 if t not in said | {"self_report_concern"}))
-        self.assertIn("no_upcoming_appointment", types)
+        self.assertEqual(["follow_up_overdue"], types)
+
+    def test_the_isa_keeps_the_booking_gap_a_social_worker_is_told_as_a_step(self):
+        # The ISA has no next steps, so the gap their list shares with the
+        # social worker's step is not dropped from theirs - nor from a
+        # psychologist's.
+        self.assertIn("no_upcoming_appointment",
+                      {g["type"] for g in self._case(self.admin)["care_gaps"]})
+        self.assertIn("no_upcoming_appointment",
+                      {g["type"] for g in self._case(self.psy)["care_gaps"]})
+        self.assertNotIn("no_upcoming_appointment",
+                         {g["type"] for g in self._case(self.sw)["care_gaps"]})
 
     def test_the_isa_is_not_told_the_consent_gap_under_the_consent_row(self):
         # The ISA's gaps are the clinical set, whose consent gap is
@@ -458,16 +476,16 @@ class CaseBriefFactsTest(FactsFixture):
         self.assertNotIn("consent_missing", {g["type"] for g in data["care_gaps"]})
         self.assertNotIn("consent_missing", self._gaps_on_the_dashboard(self.admin))
 
-    def test_every_gap_type_is_either_a_row_or_decided_to_stay(self):
-        # A new gap type is a decision: does a case row already say it? The
-        # consent gap went unmapped because the ISA's rule set spells it
-        # differently from the social worker's, and nothing noticed.
+    def test_every_gap_type_is_either_a_row_a_step_or_decided_to_stay(self):
+        # A new gap type is a decision: does a case row or a next step already
+        # say it? The consent gap went unmapped because the ISA's rule set
+        # spells it differently from the social worker's, and nothing noticed.
         source = Path(care_gaps.__file__).read_text(encoding="utf-8")
         issued = set(re.findall(r'(?:_alert|add)\(\s*\w+,\s*"([a-z_]+)"', source))
         kept_in_the_list = {"pre_assessment_overdue", "report_missing",
-                            "follow_up_overdue", "no_upcoming_appointment"}
+                            "follow_up_overdue"}
         decided = (brief_facts._SAID_IN_CASE_ROWS | brief_facts._SAID_ELSEWHERE
-                   | kept_in_the_list)
+                   | brief_facts._SAID_IN_NEXT_STEPS | kept_in_the_list)
         self.assertEqual(issued, decided)
 
     def test_the_psychologists_care_gaps_are_still_their_dashboards(self):
