@@ -17,6 +17,7 @@ import time
 import urllib.error
 import urllib.request
 
+from assistant import retention
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.runtime import runtime_url_refusal
 
@@ -253,6 +254,7 @@ def run_job(job_type, prompt, *, system=None, input_ref="", user=None, child=Non
     Pass `child` whenever the prompt is built from a child's record, or the
     ISA's access log on that child's page will not show the read.
     """
+    retention.prune_if_due()
     client = get_ai_client()
     creator = user if getattr(user, "is_authenticated", False) else None
     started = time.monotonic()

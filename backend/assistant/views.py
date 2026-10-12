@@ -15,7 +15,7 @@ from accounts.scoping import (role_of as _role, role_of_user as _role_of,
                               visible_children)
 from accounts.permissions import (IsAdministrator, IsAdminOrStaff, is_admin_or_assignee,
                                   writes_case_referrals)
-from assistant import evaluation, guards, prompts, tools
+from assistant import evaluation, guards, prompts, retention, tools
 from assistant.brief_facts import brief_facts, brief_kind
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.redact import Masker
@@ -528,7 +528,10 @@ class ConfirmSummaryView(AssistantBaseView):
         job = AssistantJob.objects.filter(
             job_type="doc_intelligence", input_ref=f"{prefix}:{doc.id}",
             ok=True).first()
-        if job:
+        # A draft older than the retention window has had its text blanked
+        # (assistant/retention.py), and "kept verbatim" cannot be told any more:
+        # the outcome stays pending rather than being recorded as an edit.
+        if job and job.output_text:
             job.outcome = (AssistantJob.ACCEPTED
                            if job.output_text.strip() == text
                            else AssistantJob.EDITED)
@@ -897,6 +900,7 @@ def _answer(request, call, question, model_used, started, masker):
     by now its arguments hold the real name the lookup needs, and the row must
     not.
     """
+    retention.prune_if_due()
     creator = request.user if request.user.is_authenticated else None
     job = AssistantJob.objects.create(
         job_type="chat", input_ref=question[:150],

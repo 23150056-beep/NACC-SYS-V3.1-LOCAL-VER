@@ -470,3 +470,9 @@ ASSISTANT_ALLOW_HOSTED_MODEL = env_bool("ASSISTANT_ALLOW_HOSTED_MODEL", False)
 # not a setting in the app, so it takes whoever runs the server rather than
 # whoever holds an administrator account.
 ASSISTANT_ALLOW_REMOTE_RUNTIME = env_bool("ASSISTANT_ALLOW_REMOTE_RUNTIME", False)
+
+# The assistant log keeps text (questions, drafts, summaries) that has no use
+# after a few days; assistant/retention.py blanks it, by itself, at most once an
+# hour, from the first assistant request after that. Off under the test runner,
+# where it would fire at an arbitrary point of an arbitrary test.
+ASSISTANT_PRUNE_ON_REQUEST = not _TESTING
