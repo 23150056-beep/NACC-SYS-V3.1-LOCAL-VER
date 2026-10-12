@@ -715,8 +715,15 @@ function useDialogBehaviour({ active = true, onClose, closeOnEscape = true } = {
 /* ----------------------------- Modal ----------------------------- *
  * `dismissible={false}` for anything the user cannot get back — a one-time
  * secret, an unsaved form: a stray backdrop click must not destroy it. */
-export function Modal({ open = true, onClose, title, subtitle = null, icon = null, tone = 'neutral', width = 460, dismissible = true, children, footer = null, style = {} }) {
-  const ref = useDialogBehaviour({ active: open, onClose, closeOnEscape: dismissible });
+export function Modal({ open = true, onClose, title, subtitle = null, icon = null, tone = 'neutral', width = 460, dismissible = true, onDismissBlocked = null, children, footer = null, style = {} }) {
+  // With `onDismissBlocked` the backdrop, Escape and the close button all still
+  // act - they ask instead of closing ("Discard your edits?"), as a Drawer's do.
+  // Without it a non-dismissible modal ignores all three, as before.
+  const close = useCallback(() => {
+    if (dismissible) onClose?.(); else onDismissBlocked?.();
+  }, [dismissible, onClose, onDismissBlocked]);
+  const closable = dismissible || !!onDismissBlocked;
+  const ref = useDialogBehaviour({ active: open, onClose: close, closeOnEscape: closable });
   const titleId = useId();
   if (!open) return null;
   const tones = {
@@ -729,7 +736,7 @@ export function Modal({ open = true, onClose, title, subtitle = null, icon = nul
   const [chipBg, chipFg] = tones[tone] || tones.neutral;
   return createPortal(
     <div
-      onMouseDown={(e) => { if (dismissible && e.target === e.currentTarget) onClose?.(); }}
+      onMouseDown={(e) => { if (closable && e.target === e.currentTarget) close(); }}
       style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 90, animation: 'racco-fade-in var(--dur-base) var(--ease-out)' }}
     >
       <div
@@ -742,8 +749,8 @@ export function Modal({ open = true, onClose, title, subtitle = null, icon = nul
             <h2 id={titleId} style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)', margin: 0 }}>{title}</h2>
             {subtitle && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>{subtitle}</div>}
           </div>
-          {dismissible && (
-            <button type="button" onClick={onClose} aria-label="Close" {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--text-muted)')}><Icon name="x" size={16} /></button>
+          {closable && (
+            <button type="button" onClick={close} aria-label="Close" {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--text-muted)')}><Icon name="x" size={16} /></button>
           )}
         </div>
         <div style={{ padding: '16px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>{children}</div>
