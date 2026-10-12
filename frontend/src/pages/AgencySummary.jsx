@@ -334,7 +334,10 @@ export default function AgencySummary() {
       )}
 
       <Card eyebrow="NACC-SAMD reporting" title="Service users (current)" padding="0">
-        <div className="racco-scroll" style={{ overflowX: 'auto' }}>
+        {/* A table that can scroll sideways is a region the keyboard can reach and
+            scroll (axe: scrollable-region-focusable); it overflows once the side
+            rails take their share of a 1280px window. */}
+        <div className="racco-scroll" style={{ overflowX: 'auto' }} role="region" aria-label="Service users by age group and sex" tabIndex={0}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr style={THEAD_ROW}>
               {['Age group', 'Male', 'Female', 'Total'].map((h) => <th key={h} scope="col" style={TH}>{h}</th>)}
@@ -442,7 +445,7 @@ export default function AgencySummary() {
         </Card>
 
         <Card eyebrow="Clinical team" title="Activity &amp; caseload" padding="0">
-          <div className="racco-scroll" style={{ overflowX: 'auto' }}>
+          <div className="racco-scroll" style={{ overflowX: 'auto' }} role="region" aria-label="Sessions and active caseload by psychologist" tabIndex={0}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead><tr style={THEAD_ROW}>
                 {['Psychologist', 'Sessions', 'Active caseload'].map((h) => <th key={h} scope="col" style={TH}>{h}</th>)}
