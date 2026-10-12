@@ -589,32 +589,42 @@ Settings, no per-feature flags.
   dropped, for both role lists (the ISA's consent gap is `consent_missing`
   from `compute_alerts`, a SW's `no_signed_consent`; a guard test fails on a
   gap type nobody has decided). `/assistant/capabilities/` says `brief: "clinical" | "case"`.
-- **A SW's Case brief has a written part** (10 Oct 2026, job type
-  `case_brief`, assistant 0007): `POST /api/assistant/case-brief/child/<id>/`,
-  the record's SW only - the ISA and psychologists get 403 before `gate()`, so
-  nothing reaches the model. The prompt (`build_case_brief_prompt`) is built
-  from the SAME dict the facts panel shows, static prefix first, dates in
-  words worked out in Python; it never carries remarks, self-report words,
-  case study text, an unconfirmed summary, the custodian's name or number, or
-  the psychologist's name (only the decline reason, cut to 200 characters,
-  and the CONFIRMED referral summary, ~1,500). `latest/` serves today's draft
-  only while `AssistantJob.prompt_sha` equals the prompt built now, so a new
-  next session, consent or referral makes it stale; a second booking that
-  does not change the next session does not. Hosted: never offered
-  (`case_brief_writing` false). The access log selects job types from
-  `ACCESS_LOGGED_JOB_TYPES`, and a guard test fails on a `TYPE_CHOICES` entry
-  that is neither logged nor in `NOT_A_CHILD_READ` - the "nothing checks
-  this" gap below, closed for job types.
-- **`ai_eval --feature case_brief`** (10 children x 3 reps by default; the
-  older features keep 3 x 2) counts invented names, invented dates and
-  invented numbers (scored against the FACTS part of the prompt - the
-  instructions contain digits), over 150 words, repeats, drift. It prints 5
-  drafts in full and ends with one verdict line: PASS needs zero invented
-  names and dates over at least 30 drafts from at least 10 children; fewer
-  than 10 children prints counts, never rates. **`invented_names` cannot see a
-  name at the start of a sentence or line** (it needs a lowercase word before
-  the capital) - the printed samples are the control for that, so read them.
-  Not yet run on the owner's PC as of 10 Oct 2026.
+- **No AI-written case brief for social workers** (owner, 12 Oct 2026). It was
+  built (job type `case_brief`) and measured on the owner's PC with
+  `ai_eval --feature case_brief`: 2/30 drafts invented dates, and drafts the
+  checker passed invented RELATIONSHIPS a SW could act on ("next home visit by
+  the social worker" for a psychologist session, "pending survey results", a
+  real date pinned to the wrong event). The endpoints and the screen are
+  gone; the prompt builder and the eval feature stay so it can be measured
+  again (e.g. once referral summaries are confirmed). Do not bring it back
+  without a passing eval AND reading the samples.
+- **Instead, "What to do next" by rules** (`brief_facts.next_steps`, Staff on
+  their own record only): file the referral, ask a psychologist / chase one
+  silent 7+ days / ask another after a decline, consent, book, custodian
+  texts, an unanswered survey, survey answers to read, the case study - each
+  with a link to where it is done, firing at the same moment as its Dashboard
+  gap (thresholds imported from `care_gaps`, pinned to the second). The SW's
+  leftover care gaps drop what a step says (`_NEXT_STEP_GAPS`, guard test).
+  No model, so nothing can be invented; works on the demo too.
+- **Every model text a SW can still get is checked first**
+  (`assistant/guards.py checked_draft`, built on `evaluation.py`): the census
+  narrative (names, dates, numbers vs the figures) and a case-referral summary
+  (names vs the text the model saw) answer 422 "The assistant's draft
+  mentioned something that is not in the source…" and store nothing; a
+  self-report flag's model reason that fails becomes "flagged by the local
+  model" (the flag is kept). Known limits: numbers are compared as a set, a
+  name opening a sentence is not seen, and invented relationships are not
+  caught at all - which is why the model text a SW can reach is kept small.
+- **`STAFF_DRAFTING` decides, for every `AssistantJob` type, what a Staff
+  account gets**: refused (brief, case_brief, remark_polish), guarded
+  (doc_intelligence, census_narrative, self_report) or tool_only (chat).
+  `test_staff_drafting.py` fails on a job type nobody has decided, and
+  exercises each as a Staff account against a model that invents a name, a
+  date and a number. Building it found two claims the code did not keep:
+  remark Polish answered ANY signed-in account (now Psychologist and ISA
+  only), and a self-report flag showed the model's own words unchecked.
+- **The checker no longer counts a "Part 2" / "Step 1" heading as an invented
+  number** (`evaluation.py`); "Part 2 sessions" still counts.
 - **The ISA can see who had the model read a child**: the Assistant log tab
   on the child's page, administrators only (`ChildAccessLogView`). Briefs,
   report and referral summaries, the self-report check; who, when, what kind,
@@ -1588,7 +1598,7 @@ react-big-calendar's own `role="rowgroup"` markup rather than ours.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,525 tests, ~1 min
+cd backend && .venv/Scripts/python.exe manage.py test   # 2,603 tests, ~1 min
 cd frontend && npm run lint && npm run build
 ```
 

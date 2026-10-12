@@ -222,3 +222,9 @@ cheapest ideas are the ones that **add no tool and change no prompt**.
   without saving it?** **Decided: no - confirmed only.** Two kinds of summary
   on screen is one too many, and an unchecked draft about a child could pass
   for the psychologist's own words.
+
+**Update 12 Oct 2026:** the written part was built and measured
+(`ai_eval --feature case_brief`) and failed - invented dates and invented
+relationships - so it was withdrawn. SWs get a rule-based "What to do next"
+list instead, and every model text a SW can still reach is checked by
+`assistant/guards.py` (see CLAUDE.md).
