@@ -2,7 +2,10 @@
 
 Rows are made through the real endpoints wherever one exists. The point is
 that each feature attributes its read to the child, and a hand-made row would
-prove only that the view reads rows.
+prove only that the view reads rows. The written case brief is the exception:
+it was taken away on 12 Oct 2026, so no endpoint writes its rows any more and
+the ones here are made by hand - what is held is that the ISA can still see
+the ones that were written.
 """
 from datetime import timedelta
 from importlib import import_module
@@ -74,12 +77,12 @@ class AccessLogBase(APITestCase):
         self.assertEqual(200, res.status_code)
         return res
 
-    def _case_brief(self, user=None, child=None, reply="A written brief."):
-        res = self._drafted(
-            user or self.sw, f"/api/assistant/case-brief/child/{(child or self.child).id}/",
-            reply)
-        self.assertEqual(200, res.status_code)
-        return res
+    def _case_brief(self, user=None, child=None, reply="A written brief.", ok=True):
+        """A row as the removed endpoint wrote it (see the module docstring)."""
+        child = child or self.child
+        return AssistantJob.objects.create(
+            job_type="case_brief", input_ref=f"child:{child.id}", output_text=reply,
+            ok=ok, error="" if ok else "down", created_by=user or self.sw, child=child)
 
     def _log(self, child=None):
         self.client.force_authenticate(self.admin)
@@ -141,32 +144,10 @@ class WhatIsListedTest(AccessLogBase):
         self.assertEqual(["brief", "case_brief"], kinds)
 
     def test_a_case_brief_that_did_not_complete_is_listed_as_failed(self):
-        self.client.force_authenticate(self.sw)
-        with patch.object(services.OllamaClient, "generate",
-                          side_effect=services.AIUnavailable("down")):
-            res = self.client.post(f"/api/assistant/case-brief/child/{self.child.id}/")
-        self.assertEqual(503, res.status_code)
+        self._case_brief(ok=False)
         entries = self._log()["entries"]
         self.assertEqual(["case_brief"], [e["kind"] for e in entries])
         self.assertEqual(["failed"], [e["status"] for e in entries])
-
-    def test_a_case_brief_that_was_refused_is_not_a_read(self):
-        # The ISA and a psychologist are refused before anything is sent; a
-        # hosted deployment and a switched-off assistant likewise.
-        for user in (self.admin, self.psy):
-            self.client.force_authenticate(user)
-            self.assertEqual(403, self.client.post(
-                f"/api/assistant/case-brief/child/{self.child.id}/").status_code)
-        cfg = AssistantSetting.load()
-        cfg.enabled = False
-        cfg.save()
-        self.client.force_authenticate(self.sw)
-        self.assertEqual(503, self.client.post(
-            f"/api/assistant/case-brief/child/{self.child.id}/").status_code)
-        data = self._log()
-        self.assertEqual([], data["entries"])
-        self.assertEqual(0, data["total"])
-        self.assertFalse(AssistantJob.objects.exists())
 
     def test_a_prefetched_brief_is_listed_too(self):
         with patch.object(services.OllamaClient, "generate", return_value="Draft."):

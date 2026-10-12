@@ -5,7 +5,6 @@ never the other way round. The static half is a module constant so it is
 literally the same bytes on every call, which keeps the runtime's prefix cache
 warm — the difference between a 0.37s and a 17s prefill.
 """
-import hashlib
 from datetime import date, datetime
 
 from django.utils import timezone
@@ -25,6 +24,15 @@ BRIEF_SYSTEM = (
     "session with a child. You use only the facts you are given."
 )
 
+# NOT OFFERED TO ANYONE. The social worker's written case brief was taken away on
+# 12 Oct 2026: `ai_eval --feature case_brief` on the owner's PC (10 children x 3
+# reps, local model) found 2 of 30 drafts inventing dates, and drafts the
+# checker passed still invented relationships a social worker could act on
+# ("next home visit by the social worker" for a psychologist's session, "pending
+# survey results", a case conference nobody scheduled, a real date attached to
+# the wrong event). The social worker gets plain-rule "What to do next" steps
+# instead (brief_facts.next_steps). This prompt is kept only so the feature can
+# be measured again; no endpoint sends it to a model.
 CASE_BRIEF_SYSTEM = (
     "You prepare short factual case briefs for a social worker at a child "
     "protection agency. You use only the facts you are given."
@@ -61,6 +69,7 @@ BRIEF_INSTRUCTIONS = (
     "FACTS:\n"
 )
 
+# See the note above CASE_BRIEF_SYSTEM: not offered to anyone, kept to be measured.
 CASE_BRIEF_INSTRUCTIONS = (
     "Write a short case brief for the social worker from the facts below. "
     "They will read it before a home visit, a case conference or the next "
@@ -259,6 +268,10 @@ def build_census_prompt(figures):
 
 # --- the case brief --------------------------------------------------------
 #
+# NOT OFFERED TO ANYONE since 12 Oct 2026 (see the note above CASE_BRIEF_SYSTEM):
+# this builder and `ai_eval --feature case_brief` remain only so the written
+# brief can be measured again.
+#
 # A social worker's written brief (owner, 8 Oct 2026; the ISA gets the facts
 # and never this). It is drafted from the SAME dict the facts panel shows,
 # brief_facts(request, child) for kind "case", in a fixed order, one labelled
@@ -408,12 +421,6 @@ def build_case_brief_prompt(facts, child):
         lines.append("Referral summary:\n"
                      + _cut(referral["summary"].strip(), REFERRAL_SUMMARY_CHARS))
     return CASE_BRIEF_INSTRUCTIONS + "\n".join(lines)
-
-
-def prompt_sha(system, prompt):
-    """What a draft is stamped with: the SHA-256 of everything the model was
-    given. The system text is a constant, so only the prompt varies."""
-    return hashlib.sha256((system + prompt).encode("utf-8")).hexdigest()
 
 
 # --- chatbot --------------------------------------------------------------

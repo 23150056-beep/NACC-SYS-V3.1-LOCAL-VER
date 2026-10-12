@@ -47,6 +47,8 @@ class AssistantJob(models.Model):
         ("census_narrative", "Census Narrative"),
         ("chat", "Chatbot Question"),
         ("self_report", "Self-Report Check"),
+        # No endpoint writes one since 12 Oct 2026, but the rows exist and the
+        # ISA's access log must still list them.
         ("case_brief", "Case Brief"),
     ]
 
@@ -87,11 +89,11 @@ class AssistantJob(models.Model):
     # other kind of turn, and for rows written before sizes were recorded —
     # those are unknown, not empty.
     result_count = models.PositiveIntegerField(null=True, blank=True)
-    # The SHA-256 of the system text and prompt the model was given, where the
-    # draft is only good for the facts it was written from (the case brief). A
-    # draft is served again only while the prompt built NOW hashes the same, so
-    # a session booked or a consent recorded since makes it stale without
-    # anything having to remember to invalidate it. Blank for every other job.
+    # The SHA-256 of the system text and prompt the model was given. Only the
+    # written case brief set it, to serve a draft again while its facts were
+    # unchanged. That feature was taken away on 12 Oct 2026 and nothing writes
+    # this now; the column stays because rows hold it and migration 0007 made it.
+    # Blank for every other job.
     prompt_sha = models.CharField(max_length=64, blank=True, default="")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
