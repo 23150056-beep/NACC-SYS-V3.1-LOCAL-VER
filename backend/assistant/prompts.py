@@ -261,9 +261,15 @@ def fit_document(text, budget=SUMMARY_BUDGET_CHARS):
             "by. Only its beginning and its end were read.")
 
 
+def census_figures_text(figures):
+    """The figures as the model is given them, one `key: value` line each. Also
+    what a narrative is checked against (assistant/guards.py): the source is
+    exactly what the model saw, never the instructions around it."""
+    return "\n".join(f"{key}: {value}" for key, value in sorted(figures.items()))
+
+
 def build_census_prompt(figures):
-    lines = [f"{key}: {value}" for key, value in sorted(figures.items())]
-    return CENSUS_INSTRUCTIONS + "\n".join(lines)
+    return CENSUS_INSTRUCTIONS + census_figures_text(figures)
 
 
 # --- the case brief --------------------------------------------------------

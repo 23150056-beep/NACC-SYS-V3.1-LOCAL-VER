@@ -15,7 +15,7 @@ from accounts.scoping import (role_of as _role, role_of_user as _role_of,
                               visible_children)
 from accounts.permissions import (IsAdministrator, IsAdminOrStaff, is_admin_or_assignee,
                                   writes_case_referrals)
-from assistant import evaluation, prompts, tools
+from assistant import evaluation, guards, prompts, tools
 from assistant.brief_facts import brief_facts, brief_kind
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.serializers import AssistantSettingSerializer
@@ -60,6 +60,18 @@ def _written_brief_refused(request):
     if _role(request) == Role.PSYCHOLOGIST:
         return None
     return Response({"detail": WRITTEN_BRIEF_REFUSED}, status=status.HTTP_403_FORBIDDEN)
+
+
+def _refuse_the_draft(job, refusal):
+    """The answer when guards.checked_draft() refuses a draft: the job is
+    recorded as not ok with what was found, nothing is shown or stored, and the
+    person is told in one plain sentence. The text stays on the audit row, which
+    only an administrator reads, so the refusal can be looked into."""
+    job.ok = False
+    job.error = f"refused: {refusal.reason}"[:255]
+    job.save(update_fields=["ok", "error"])
+    return Response({"detail": guards.REFUSAL_SENTENCE},
+                    status=status.HTTP_422_UNPROCESSABLE_ENTITY)
 
 
 class AssistantBaseView(generics.GenericAPIView):
@@ -416,11 +428,20 @@ def _document_to_summarise(request, kind, doc_id):
     return doc, None
 
 
+# The summaries a social worker can ask for (_writes_referrals), and so the
+# ones whose drafts are checked before they are stored or shown: no draft that
+# names someone the document never mentions. The psychologist's report summary
+# is reached by the psychologist and the ISA alone and is left as it was.
+_CHECKED_DOC_KINDS = ("case-referral",)
+
+
 class DocumentSummaryView(AssistantBaseView):
     """Draft a summary of an uploaded document into its `ai_summary` column.
 
     The draft is saved unconfirmed. It only becomes clinical text when a human
-    confirms it, at which point it is their words, not a draft.
+    confirms it, at which point it is their words, not a draft. A case
+    referral's draft is first checked for names the document does not hold
+    (assistant/guards.py); one that fails is not stored and not shown.
     """
     throttle_scope = "assistant_draft"
     kind = None
@@ -438,13 +459,21 @@ class DocumentSummaryView(AssistantBaseView):
 
         # A long report is read in part; the draft says which part, so the
         # psychologist confirming it knows what it could not have seen.
-        coverage = prompts.fit_document(doc.extracted_text)[1]
+        fitted, coverage = prompts.fit_document(doc.extracted_text)
         draft, job = run_job(
             "doc_intelligence",
             prompts.build_summary_prompt(doc.extracted_text, label),
             system=prompts.SUMMARY_SYSTEM,
             input_ref=f"{prefix}:{doc.id}",
             user=request.user, child=doc.child)
+        if self.kind in _CHECKED_DOC_KINDS:
+            # Checked against the text the model was given, not the whole file:
+            # a name it could only have got from the part it was not shown is
+            # still an invention.
+            try:
+                guards.checked_draft("doc_intelligence", draft, fitted)
+            except guards.DraftRefused as refusal:
+                return _refuse_the_draft(job, refusal)
         doc.ai_summary = draft
         doc.ai_summary_confirmed = False
         doc.save(update_fields=["ai_summary", "ai_summary_confirmed"])
@@ -494,7 +523,9 @@ class CensusNarrativeView(AssistantBaseView):
 
     The model receives finished numbers and is told to restate them. It never
     counts anything: a wrong caseload figure in an agency report is far worse
-    than no narrative at all.
+    than no narrative at all. Staff may ask for one, so the draft is checked
+    against the figures before it is shown (assistant/guards.py): 422 when it
+    names, dates or counts something they do not hold.
     """
     throttle_scope = "assistant_draft"
     permission_classes = [IsAdminOrStaff]
@@ -511,6 +542,14 @@ class CensusNarrativeView(AssistantBaseView):
             system=prompts.CENSUS_SYSTEM,
             input_ref="agency:summary",
             user=request.user)
+        # The model restates finished figures and computes nothing: a name, a
+        # date or a number that is not among them is an invention, and a wrong
+        # figure in an agency report is worse than no narrative.
+        try:
+            guards.checked_draft("census_narrative", draft,
+                                 prompts.census_figures_text(figures))
+        except guards.DraftRefused as refusal:
+            return _refuse_the_draft(job, refusal)
         return Response({"draft": draft, "job_id": job.id,
                          "disclaimer": DISCLAIMER})
 
