@@ -197,6 +197,23 @@ def get_ai_client(*, allow_hosted=False):
     return OllamaClient(cfg.ollama_url, cfg.model_name)
 
 
+RUNTIME_PROBE_PROMPT = "Reply with the single word: OK."
+
+
+def probe_runtime(client):
+    """Ask `client` for one word; return how long it took, in milliseconds.
+
+    Raises AIUnavailable when it cannot answer. This is the one definition of
+    "is the model reachable": `manage.py ai_check` reports it and
+    `manage.py ai_eval` stops on it before it runs a feature, so the two cannot
+    disagree about what a working runtime is. It goes through the client it is
+    given, which already knows its own URL and model.
+    """
+    started = time.monotonic()
+    client.generate(RUNTIME_PROBE_PROMPT)
+    return int((time.monotonic() - started) * 1000)
+
+
 def gate():
     """Return the config when the assistant may run, else raise AIUnavailable.
 
