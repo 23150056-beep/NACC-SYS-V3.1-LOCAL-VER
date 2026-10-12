@@ -18,6 +18,7 @@ from accounts.permissions import (IsAdministrator, IsAdminOrStaff, is_admin_or_a
 from assistant import evaluation, guards, prompts, tools
 from assistant.brief_facts import brief_facts, brief_kind
 from assistant.models import AssistantJob, AssistantSetting
+from assistant.redact import Masker
 from assistant.serializers import AssistantSettingSerializer
 from assistant.services import (AIUnavailable, DISCLAIMER,
                                 HOSTED_DRAFTING_REFUSED, OpenAICompatibleClient,
@@ -879,18 +880,23 @@ def _answer_kind(call):
 FOLLOWUP_MODEL = "follow-up (no model)"
 
 
-def _answer(request, call, question, model_used, started):
+def _answer(request, call, question, model_used, started, masker):
     """Log the turn, run the lookup, record how it ended, and respond.
 
     One path for both ways a turn arrives — a typed question the model routed,
     and a follow-up chip that skipped the model — so the log, the failure
     handling and the response cannot differ between them.
+
+    `question` is what the log keeps, so it arrives already masked (see
+    assistant/redact.py). The tool call is masked here, with the same `masker`:
+    by now its arguments hold the real name the lookup needs, and the row must
+    not.
     """
     creator = request.user if request.user.is_authenticated else None
     job = AssistantJob.objects.create(
         job_type="chat", input_ref=question[:150],
-        output_text=f"{call.tool}({call.args})"[:2000],
-        model_used=model_used, ok=call.ok, error=call.error[:255],
+        output_text=masker.mask_text(f"{call.tool}({call.args})")[:2000],
+        model_used=model_used, ok=call.ok, error=masker.mask_text(call.error)[:255],
         answer="" if call.ok else AssistantJob.NOT_UNDERSTOOD,
         latency_ms=int((time.monotonic() - started) * 1000),
         created_by=creator)
@@ -963,17 +969,22 @@ class AssistantAskView(AssistantBaseView):
                 status=status.HTTP_400_BAD_REQUEST)
 
         # The one feature whose prompt may leave the machine: it is the typed
-        # question, and records only ever come back from the database.
+        # question, and records only ever come back from the database. Even so,
+        # a name of a child the asker can see, a phone number and an email
+        # address are taken out first - always, local or hosted, so the prompt
+        # stays one constant - and the model's arguments get them back here.
+        masker = Masker(request)
+        masked = masker.mask_text(question)
         client = get_ai_client(allow_hosted=True)
         creator = request.user if request.user.is_authenticated else None
         started = time.monotonic()
         try:
             with services_lock():
                 name, raw_args = client.choose_tool(
-                    question, tools.ollama_payload(), system=prompts.CHAT_SYSTEM)
+                    masked, tools.ollama_payload(), system=prompts.CHAT_SYSTEM)
         except AIUnavailable as exc:
             AssistantJob.objects.create(
-                job_type="chat", input_ref=question[:150], ok=False,
+                job_type="chat", input_ref=masked[:150], ok=False,
                 answer=AssistantJob.FAILED,
                 error=str(exc)[:255], model_used=getattr(client, "model", ""),
                 latency_ms=int((time.monotonic() - started) * 1000),
@@ -985,7 +996,10 @@ class AssistantAskView(AssistantBaseView):
         if not name:
             name, raw_args = "answer_directly", {"reason": "unsupported"}
 
-        call = tools.validate(name, raw_args)
+        call = tools.validate(name, masker.restore(raw_args))
+        # The three guards below read the question as typed: they run on this
+        # machine, and a masked "CHILD" would read as the word "child" to the
+        # first of them. Only the model and the log get the masked text.
         # Deterministic backstop for the one misroute seen in the wild: "how
         # many psychologists are in the system?" answered "40 active children".
         # It can only make the assistant decline, never assert.
@@ -996,7 +1010,7 @@ class AssistantAskView(AssistantBaseView):
         # And a greeting is a greeting even when the model forgets to say
         # so, which it does two times in three.
         call = tools.correct_greeting(question, call)
-        return _answer(request, call, question, client.model, started)
+        return _answer(request, call, masked, client.model, started, masker)
 
 
 class AssistantFollowupView(AssistantBaseView):
@@ -1030,7 +1044,9 @@ class AssistantFollowupView(AssistantBaseView):
         call = tools.validate(tool, args)
         if not call.ok:
             return Response({"detail": call.error}, status=status.HTTP_400_BAD_REQUEST)
-        return _answer(request, call, label.strip(), FOLLOWUP_MODEL, started)
+        masker = Masker(request)
+        return _answer(request, call, masker.mask_text(label.strip()),
+                       FOLLOWUP_MODEL, started, masker)
 
 
 class ModelHealthView(AssistantBaseView):

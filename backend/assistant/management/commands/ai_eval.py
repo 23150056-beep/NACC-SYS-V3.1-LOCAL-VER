@@ -126,6 +126,13 @@ CHAT_CASES = [
     ("greeting tl", "Salamat po!", "answer_directly", False,
      {"reason": "greeting_or_closing"}),
     ("name partial", "Tell me about Maria", "get_child_summary", False, None),
+    # What the model is actually shown when a question names a child: the
+    # server swaps the name for a token first (assistant/redact.py), and
+    # CHAT_SYSTEM teaches passing it back exactly as written.
+    ("name token en", "Tell me about CHILD", "get_child_summary", False,
+     {"name": "CHILD"}),
+    ("name token tl", "Sino si CHILD?", "get_child_summary", False,
+     {"name": "CHILD"}),
     ("action en", "Book Ana for Friday", "answer_directly", False, None),
     # get_statistics. The two panel suggestions first: a suggested question
     # that routes wrong is worse than none. "Caseload per psychologist?" is
