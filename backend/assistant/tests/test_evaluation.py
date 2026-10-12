@@ -295,6 +295,59 @@ class InventedNumbersTest(SimpleTestCase):
         self.assertEqual(["8"], self.flagged("Seen 8. times"))
         self.assertEqual(["4", "7"], self.flagged("4.7 hours are needed."))
 
+    # -- headings the model numbered in words (the owner's run, 12 Oct 2026) ----
+
+    SPARSE = "First name: Maria\nAge: 9\nNext session: none booked.\n"
+
+    def sparse(self, draft):
+        # Facts without a 1, 2 or 3 in them, as the owner's children had.
+        return evaluation.invented_numbers(self.SPARSE, draft)
+
+    def test_a_part_heading_is_not_an_invented_number(self):
+        # Quoted from the drafts the checker called invented: five of them
+        # were this heading and nothing else.
+        for draft in ("### Part 2: What is booked\nNothing is booked.",
+                      "Part 3: What to bring\nAsk about the consent.",
+                      "### Part 1: Why Maria was referred",
+                      "**Part 2: What is booked**\nNothing.",
+                      "Part 2\nNothing is booked.", "### Part 3",
+                      "Part 2 - What is booked", "Part 2. What is booked"):
+            with self.subTest(draft):
+                self.assertEqual([], self.sparse(draft))
+
+    def test_step_and_section_headings_are_the_same(self):
+        for draft in ("Step 1: Check the consent", "## Step 2\nAsk.",
+                      "Section 2: Consent", "**Section 3**\nAsk.", "step 1: lower case"):
+            with self.subTest(draft):
+                self.assertEqual([], self.sparse(draft))
+
+    def test_the_whole_owners_shape_is_clean_and_a_real_invention_in_it_is_not(self):
+        clean = ("### Part 1: Why Maria was referred\nNo referral summary yet.\n"
+                 "### Part 2: What is booked\nNothing is booked.\n"
+                 "### Part 3: What to bring\nAsk about the consent.")
+        self.assertEqual([], self.sparse(clean))
+        # The headings are let through; a number in the body is still judged.
+        self.assertEqual(["40"], self.sparse(
+            clean.replace("Nothing is booked.", "Booked 40 days ago.")))
+
+    def test_a_label_only_covers_its_own_digit(self):
+        self.assertEqual(["5"], self.sparse("Part 2: 5 visits are booked."))
+
+    def test_a_quantity_that_begins_with_such_a_word_still_counts(self):
+        # "Part 2 sessions" and "Step 1 hour" carry on past the digit.
+        self.assertEqual(["2"], self.sparse("Part 2 sessions are booked."))
+        self.assertEqual(["1"], self.sparse("Step 1 hour before the visit."))
+
+    def test_a_label_in_the_middle_of_a_sentence_still_counts(self):
+        # Only a heading is let through. The sentence "see Part 2" names a part
+        # the facts never gave, and refusing it is the safe direction.
+        self.assertEqual(["2"], self.sparse("Please see Part 2 for the plan."))
+        self.assertEqual(["2"], self.sparse("Maria is 9. See Part 2."))
+
+    def test_some_other_word_before_a_digit_is_not_a_label(self):
+        self.assertEqual(["2"], self.sparse("Visit 2: bring the form."))
+        self.assertEqual(["2"], self.sparse("Parts 2: bring the form."))
+
     def test_the_instructions_do_not_count_as_facts(self):
         # "3 parts", "150 words": digits of the instructions, not of the case.
         self.assertEqual(["150"], self.flagged("Within 150 words."))

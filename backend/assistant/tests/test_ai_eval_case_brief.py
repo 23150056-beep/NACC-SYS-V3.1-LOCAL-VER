@@ -427,6 +427,21 @@ class ScoringTest(EvalFixture):
                  "2. Nothing is booked.\n3. Ask.")
         self.assertEqual({}, score_case_brief(prompt, draft))
 
+    def test_numbered_part_headings_are_not_invented_numbers(self):
+        # The owner's run of 12 Oct 2026: five drafts were flagged for nothing
+        # but the 2 of a "### Part 2" heading the model chose to write.
+        prompt, child = self._prompt()
+        stated = {int(n) for n in re.findall(r"\d+", prompt[len(prompts.CASE_BRIEF_INSTRUCTIONS):])}
+        self.assertFalse({2, 3} & stated, "the control needs facts without a 2 or a 3")
+        name = prompts.first_name(child)
+        draft = (f"### Part 1: Why {name} was referred\nNo referral summary yet.\n"
+                 "### Part 2: What is booked\nNo session is booked.\n"
+                 "### Part 3: What to bring\nAsk about the consent.")
+        self.assertEqual({}, score_case_brief(prompt, draft))
+        # And a real invented number beside them is still named.
+        flags = score_case_brief(prompt, draft.replace("No session is booked.", "Booked 41 days ago."))
+        self.assertEqual({"invented numbers": ["41"]}, flags)
+
     def test_the_instructions_digits_are_not_facts(self):
         prompt, child = self._prompt()
         self.assertEqual({"invented numbers": ["150"]},
