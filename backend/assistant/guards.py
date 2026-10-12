@@ -118,3 +118,57 @@ def checked_draft(job_type, text, source_text):
         raise DraftRefused("; ".join(
             f"{label} not in the source: {', '.join(items[:6])}" for label, items in found))
     return text
+
+
+# --- the rule that keeps this true for every kind of draft ----------------------
+#
+# How a Staff account (a social worker) is treated, for EVERY kind of model job
+# there is: `AssistantJob.TYPE_CHOICES`. A new job type is a new way for model
+# text to reach somebody, and the last one (the written case brief) shipped to
+# social workers without anything asking whether it should. So a type missing
+# from here fails `assistant/tests/test_staff_drafting.py`, which also runs
+# every entry as a Staff account against a model that writes an invented name,
+# date and number, and fails when the behaviour is not the one claimed.
+#
+#   REFUSED    the endpoint refuses a Staff account (403 or 404), or no endpoint
+#              offers the type at all. Staff never receive the text.
+#   GUARDED    a Staff account can obtain the text, and checked_draft() runs on
+#              it first (CHECKS above says which checks). What fails is not
+#              shown or stored.
+#   TOOL_ONLY  the model's whole output is a tool name and its arguments, and
+#              the words the person reads are fixed copy and rows from the
+#              database. Only the validated arguments come back, in the
+#              "Looking up: ..." line, so that the person can see what was
+#              understood.
+REFUSED, GUARDED, TOOL_ONLY = "refused", "guarded", "tool_only"
+
+STAFF_DRAFTING = {
+    # The psychologist's written pre-session brief, drafted from case notes a
+    # social worker cannot write and has no case reason to have a model read.
+    # PreSessionBriefView, LatestBriefView and PrefetchBriefsView answer 403
+    # before anything reaches the model (views._written_brief_refused).
+    "brief": REFUSED,
+    # The social worker's written case brief, taken away on 12 Oct 2026: it
+    # invented dates and relationships. No route serves it. The prompt and
+    # `ai_eval --feature case_brief` remain only to measure it again.
+    "case_brief": REFUSED,
+    # A psychologist's case note, polished while they write it. A social worker
+    # cannot write one, so RemarkPolishView answers 403 to any role that cannot.
+    "remark_polish": REFUSED,
+    # Summaries of uploaded documents. A social worker can ask for one on a
+    # case referral (a psychologist's report is refused them), so the referral
+    # draft is checked for names before it is stored or shown.
+    "doc_intelligence": GUARDED,
+    # The Agency Summary's narrative, which Staff may ask for: checked against
+    # the figures it was sent.
+    "census_narrative": GUARDED,
+    # The chatbot. The model answers with a tool name and arguments and never
+    # sees a result: the answer is the database's.
+    "chat": TOOL_ONLY,
+    # The model's second look at a child's own answers. It only adds a flag, but
+    # its few words of reason are stored on that flag and read by whoever can
+    # read the child's flags, a social worker included, so the reason is checked
+    # against the question and answer it was drawn from and, when it fails,
+    # replaced by a fixed one. The flag itself is never lost.
+    "self_report": GUARDED,
+}

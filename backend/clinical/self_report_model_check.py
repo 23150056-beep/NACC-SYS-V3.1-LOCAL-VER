@@ -19,6 +19,10 @@ from django.db import connection
 
 logger = logging.getLogger(__name__)
 
+# What a flag says when the model flagged it but gave no reason - or gave one
+# that was not shown (see run_model_check).
+GENERIC_REASON = "flagged by the local model"
+
 _YES = re.compile(r"^\s*(yes|oo)\b", re.IGNORECASE)
 _LEAD = re.compile(r"^\s*(yes|oo)\b[\s\-–—:,.]*", re.IGNORECASE)
 
@@ -33,12 +37,12 @@ def _parse(reply):
     if not _YES.match(text):
         return None
     reason = _LEAD.sub("", text)
-    return (reason or "flagged by the local model")[:255]
+    return (reason or GENERIC_REASON)[:255]
 
 
 def run_model_check(invite_id):
     """Synchronous. Safe to call from a thread, a command, or a test."""
-    from assistant import prompts
+    from assistant import guards, prompts
     from assistant.models import AssistantJob, AssistantSetting
     from assistant.services import AIUnavailable, get_ai_client, services_lock
     from clinical.models import OpinionnaireInvite, SelfReportFlag
@@ -82,10 +86,23 @@ def run_model_check(invite_id):
             return
 
         reason = _parse(reply)
+        note = ""
+        if reason and reason != GENERIC_REASON:
+            # The model's few words are stored on the flag and read by whoever
+            # can read the flag - a social worker for their own children - so
+            # they are held to the question and answer they were drawn from: no
+            # name, date or number that is not in them. A reason that fails is
+            # replaced, never the flag: the model can only ADD a flag, and one
+            # worth raising is not lost because of how it was explained.
+            try:
+                guards.checked_draft("self_report", reason, f"{question}\n{answer}")
+            except guards.DraftRefused as refusal:
+                reason = GENERIC_REASON
+                note = f"reason not shown: {refusal.reason}"[:255]
         AssistantJob.objects.create(
             job_type="self_report", input_ref=f"invite:{invite.pk}",
             output_text=str(reply)[:2000], model_used=client.model, ok=True,
-            latency_ms=int((time.monotonic() - started) * 1000),
+            error=note, latency_ms=int((time.monotonic() - started) * 1000),
             child=invite.child)
 
         if reason:

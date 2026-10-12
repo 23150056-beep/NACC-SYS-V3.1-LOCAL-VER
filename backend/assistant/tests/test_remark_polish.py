@@ -115,3 +115,61 @@ class RemarkPolishDriftGuardTest(APITestCase):
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.data["draft"], clean)
         self.assertTrue(AssistantJob.objects.get().ok)
+
+
+class RemarkPolishRolesTest(APITestCase):
+    """Polishing is for the people who write case notes: the assigned
+    psychologist and an administrator. It used to ask only that the caller be
+    signed in, so a social worker's account could send any text and be handed
+    what the model made of it, unchecked; the screen just never showed them the
+    button. Refused for who is asking, before the switch and before the model.
+    """
+
+    def setUp(self):
+        roles = {n: Role.objects.create(role_name=n)
+                 for n in (Role.ADMINISTRATOR, Role.PSYCHOLOGIST, Role.STAFF)}
+        self.users = {
+            n: User.objects.create_user(
+                email=f"{n[:1].lower()}@racco1.gov.ph", username=n.lower(),
+                password="pass1234", role=r) for n, r in roles.items()}
+        self.norole = User.objects.create_user(
+            email="n@racco1.gov.ph", username="n", password="pass1234")
+        cfg = AssistantSetting.load()
+        cfg.enabled = True
+        cfg.save()
+
+    def _post(self, user):
+        self.client.force_authenticate(user)
+        with patch.object(services.OllamaClient, "generate",
+                          return_value="The child arrived late.") as generate:
+            res = self.client.post(URL, {"text": "kid late again"}, format="json")
+        return res, generate
+
+    def test_a_social_worker_is_refused_and_nothing_reaches_the_model(self):
+        res, generate = self._post(self.users[Role.STAFF])
+        self.assertEqual(403, res.status_code)
+        self.assertEqual("Polishing is for the people who write case notes.",
+                         res.data["detail"])
+        self.assertNotIn("draft", res.data)
+        generate.assert_not_called()
+        self.assertFalse(AssistantJob.objects.exists())
+
+    def test_an_account_with_no_role_is_refused_too(self):
+        res, generate = self._post(self.norole)
+        self.assertEqual(403, res.status_code)
+        generate.assert_not_called()
+
+    def test_the_psychologist_and_the_administrator_are_not_affected(self):
+        for role in (Role.PSYCHOLOGIST, Role.ADMINISTRATOR):
+            with self.subTest(role=role):
+                res, _ = self._post(self.users[role])
+                self.assertEqual(200, res.status_code)
+                self.assertEqual("The child arrived late.", res.data["draft"])
+
+    def test_the_refusal_is_for_who_is_asking_so_the_switch_does_not_change_it(self):
+        cfg = AssistantSetting.load()
+        cfg.enabled = False
+        cfg.save()
+        self.assertEqual(403, self._post(self.users[Role.STAFF])[0].status_code)
+        # The psychologist is told it is unavailable, as before.
+        self.assertEqual(503, self._post(self.users[Role.PSYCHOLOGIST])[0].status_code)

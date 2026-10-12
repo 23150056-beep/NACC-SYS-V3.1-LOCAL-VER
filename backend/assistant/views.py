@@ -106,12 +106,26 @@ class AssistantSettingView(AssistantBaseView):
         return Response(serializer.data)
 
 
+# Who may have a remark polished: the people who can write one (a remark is the
+# assigned psychologist's or an administrator's - _ChildScopedClinicalViewSet).
+# This view asked only that the caller be signed in, so a social worker's
+# account could have the model rewrite any text they sent and be handed
+# whatever it produced; the screen simply never showed them the button. Found
+# when assistant/guards.py STAFF_DRAFTING was checked against the code.
+POLISH_ROLES = (Role.PSYCHOLOGIST, Role.ADMINISTRATOR)
+POLISH_REFUSED = "Polishing is for the people who write case notes."
+
+
 class RemarkPolishView(AssistantBaseView):
     """Polish a remark the psychologist is writing. Returns a draft only —
     nothing is saved to the remark until the human saves it themselves."""
     throttle_scope = "assistant_draft"
 
     def post(self, request):
+        # Before the gate, like the briefs: nothing reaches the model and no job
+        # is written for a request that was refused for who is asking.
+        if _role(request) not in POLISH_ROLES:
+            return Response({"detail": POLISH_REFUSED}, status=status.HTTP_403_FORBIDDEN)
         gate()
         raw = request.data.get("text")
         if not isinstance(raw, str) or not raw.strip():
