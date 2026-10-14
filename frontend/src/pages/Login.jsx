@@ -156,7 +156,6 @@ export default function Login() {
   }[view] || 'Log in to your account';
 
   const subheading = {
-    login: 'Continue with Google, or use your agency credentials.',
     help: 'Password resets are handled by your administrator.',
     pending: 'An administrator has to approve your access.',
   }[view] || '';
