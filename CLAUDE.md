@@ -1578,6 +1578,41 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   every boot). A refresh in that minute used to show a bare "Loading…" that
   read as broken; `ProtectedRoute`'s `WaitingForServer` now says the server is
   waking after 3 s and offers "Try again" after 75 s. Not a fault to debug.
+  Signing in was the same wait with less said (owner, 14 Oct 2026: "20 to 30
+  seconds or more"), so three things changed, none of them touching
+  `entrypoint.sh`:
+  - **`seed_psgc` writes only what changed.** It asked `update_or_create`
+    about all 3,394 places on every wake-up: a lookup, an update and a
+    savepoint pair apiece, 13,578 statements to Neon to learn that nothing
+    had changed. It now reads each table once, compares in Python and bulk
+    writes only the rows that are missing or differ, so a run with nothing to
+    do is 3 reads (5 statements with BEGIN and COMMIT). Measured locally on
+    SQLite: 13,578 -> 5 queries, 1.9 s -> 0.04 s; not measured against Neon,
+    where the saving is the round trips. Rows still update in place on the
+    PSGC code, so no primary key moves. `test_locations.py` pins the count and
+    checks it does not grow with the number of rows.
+  - **The sign-in and sign-up pages wake the server on open** (`wakeServer()`
+    in `api/client.js`): one GET to `/healthz/`, which also touches Neon, once
+    per page load, so the server is waking while the person types and their
+    request finds it up. Fire and forget, never a toast. It overlaps the boot
+    with the typing; it does not shorten the boot, which still runs migrate
+    and both PSGC steps.
+  - **The sign-in says what is happening after 3 s** (`SlowSignIn` in
+    `Login.jsx`, tied to `busy`): "Waking the server (up to a minute)" and
+    "Keep this page open" with the seconds so far, a small spinner beside the
+    first line. It takes the place of the "Request access" links under the
+    divider and their size - two centred lines of the same type, no box - not a
+    spot under the button: the card is centred, so anything that changes its
+    height moves the fields, and the button slid out from under the pointer of
+    someone waiting on it. The links stay in the flow, hidden while signing
+    in, and give the footer its height; the note lies over them in the same
+    grid cell, so the card is exactly its idle size at the click and at 3 s
+    (measured 0 px on the fields, the button and the card at 1280x800,
+    375x667 and 320x568; the idle card is the size it was before the note
+    existed). Keep it no taller than the links: on a 320-wide phone
+    they are three lines and the note two. Gone the moment the request
+    settles, the links back in the same space; a quick sign-in never sees it.
+    The Google door shares `busy`, so it gets the line too.
 - **A deploy that times out on the health check is usually Render, not the
   code.** It happened on 24 Sep and again on 5 Oct, both times on a deploy
   that carried new migrations; each time a manual redeploy of the same commit
@@ -1617,7 +1652,7 @@ react-big-calendar's own `role="rowgroup"` markup rather than ours.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,603 tests, ~1 min
+cd backend && .venv/Scripts/python.exe manage.py test   # 2,611 tests, ~1 min
 cd frontend && npm run lint && npm run build
 ```
 

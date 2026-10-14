@@ -5,7 +5,7 @@ import AuthLayout, { AuthLink } from '../components/AuthLayout';
 import GoogleSignInButton from '../components/GoogleSignInButton';
 import { useAuth } from '../context/AuthContext';
 import { useConfirm } from '../context/ConfirmContext';
-import api from '../api/client';
+import api, { wakeServer } from '../api/client';
 
 /* Requesting access, which is not the same as getting it.
  *
@@ -91,6 +91,10 @@ export default function Signup() {
   // The confirm step above is otherwise reached only from this tab's own
   // memory of having just applied. /login links here with ?confirm=1.
   const [recovering, setRecovering] = useState(searchParams.get('confirm') === '1');
+
+  // Wake the server while the form is being filled in; sending the request is
+  // then not what wakes it.
+  useEffect(() => { wakeServer(); }, []);
 
   // Counts the "Send a new code" lock down once a second. Above every early
   // return below, as a hook has to be.
