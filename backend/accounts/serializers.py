@@ -214,7 +214,7 @@ class UserWriteSerializer(serializers.ModelSerializer):
                 entity_label=(f"{instance.fullname or instance.email} — role changed "
                               f"from {previous_role.role_name if previous_role else 'none'} "
                               f"to {new_role.role_name if new_role else 'none'}"),
-                entity_id=instance.id)
+                entity_id=instance.id, kind=ActivityLog.KIND_ROLE)
         return instance
 
 
@@ -271,7 +271,23 @@ def _complete_admin_takeover(new_admin):
     new_admin.save(update_fields=["admin_takeover_pending", "updated_at"])
 
 
+class _SignInName(serializers.CharField):
+    """The box takes text. DRF's CharField would turn a number into its digits
+    and go on to look for an account of that name; a list or an object is
+    refused outright, and the number is refused with them so every value that
+    is not text ends the same way a blank one does, a 400."""
+
+    def to_internal_value(self, data):
+        if not isinstance(data, str):
+            self.fail("invalid")
+        return super().to_internal_value(data)
+
+
 class LoginSerializer(TokenObtainPairSerializer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields[self.username_field] = _SignInName(write_only=True)
+
     @classmethod
     def get_token(cls, user):
         token = super().get_token(user)

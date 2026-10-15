@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import api from '../api/client';
 import { useActivity } from '../context/ActivityContext';
 import {
@@ -142,12 +143,17 @@ const ACTION_META = {
   reopened: { icon: 'undo-2', tint: 'var(--amber-500)', verb: 'Reopened case study', passive: 'Case study reopened' },
   // A duplicate child record taken out by the ISA (backend children/duplicates.py).
   removed: { icon: 'trash-2', tint: 'var(--red-500)', verb: 'Removed duplicate record', passive: 'Duplicate record removed' },
+  // A list of children saved to a file by the browser (backend children/views.py
+  // `exported`). The label is the whole sentence: "Exported the Records list (CSV, 40 rows)".
+  exported: { icon: 'file-down', tint: 'var(--amber-500)', verb: 'Exported a list', passive: 'Exported a list' },
 };
 
 function ActivityRow({ entry }) {
   const meta = ACTION_META[entry.action] || { icon: 'dot', tint: 'var(--ink-400)', verb: entry.action, passive: entry.action };
-  const label = entry.by_them ? meta.verb : meta.passive;
-  const target = entry.entity_label || entry.entity_type || '';
+  const exported = entry.action === 'exported';
+  // An export's label already says what was taken out and how long it was.
+  const label = exported ? (entry.entity_label || meta.verb) : entry.by_them ? meta.verb : meta.passive;
+  const target = exported ? '' : (entry.entity_label || entry.entity_type || '');
   return (
     <li style={{ display: 'flex', gap: 10, padding: '9px 0', borderBottom: '1px solid var(--divider-row)' }}>
       <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, flex: 'none', borderRadius: '50%', background: 'var(--surface)', border: '1px solid var(--border)', color: meta.tint, marginTop: 1 }}>
@@ -221,6 +227,7 @@ export default function Users() {
   const { refresh: refreshActivity } = useActivity();
   const toast = useToast();
   const ask = useConfirm();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // include_archived: deactivated accounts belong in the directory. Hiding
   // them made "this person is gone" indistinguishable from "this person was
@@ -258,6 +265,38 @@ export default function Users() {
       .then((r) => setActivity(r.data))
       .catch(() => setActivity([]));
   };
+
+  /* Two links from the ISA's console on the Dashboard (see utils/links.js).
+   * /users?new=1 opens the add-user form straight away. /users?edit=<id> opens
+   * that account's drawer, the way /children?edit=<id> opens a record: it waits
+   * for the directory, opens once, clears the parameter, and says so once when
+   * the account is not in the directory. A link that asks for both gets the add
+   * form, and `edit` is dropped with `new` in the one change to the address:
+   * left behind it would open that account's drawer the moment the form was
+   * closed, or on the next reload. A blank `edit=` is cleared, not kept. */
+  useOpenFromLink('new', '1', () => openCreate(), !!form, ['edit']);
+  const editParam = searchParams.get('edit');
+  const handledEdit = useRef(null);
+  useEffect(() => {
+    if (editParam === null) { handledEdit.current = null; return; }
+    // The add form's link clears this parameter along with its own.
+    if (searchParams.get('new') === '1') return;
+    const clear = () => {
+      const next = new URLSearchParams(searchParams);
+      next.delete('edit');
+      setSearchParams(next, { replace: true });
+    };
+    if (editParam === '') { clear(); return; }
+    if (loading || form || handledEdit.current === editParam) return;
+    handledEdit.current = editParam;
+    const target = users.find((u) => String(u.id) === editParam);
+    clear();
+    if (target) openEdit(target);
+    else toast.error('That account could not be found.');
+    // One-shot, like Records' ?edit=: depending on the helpers would reopen
+    // the drawer each time it was closed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editParam, loading, form, users]);
 
   const dirty = !!form && !!pristine && EDITABLE.some((k) => String(form[k] ?? '') !== String(pristine[k] ?? ''));
   const closeForm = () => { setForm(null); setPristine(null); setError(''); setSeekRole(false); };

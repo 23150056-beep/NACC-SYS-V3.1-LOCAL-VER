@@ -1435,6 +1435,218 @@ Owner's request, 11 Oct 2026: the box in the header finds AND does
   badge placed for the wider tab lay over most of the icon. A percentage follows
   the real width; the 2px floor keeps even three digits inside a 36px tab.
 
+## The ISA's admin console
+
+Built 14 Oct 2026, at the top of the ISA's Dashboard (`pages/dashboard/AdminConsole.jsx`,
+mounted for the Administrator alone). The ISA is the agency's IT support, not
+the Head of Office, so it answers three questions in this order: who is waiting
+on me, is anything broken, who has access to what. The figures, team, care gaps
+and census stay underneath, as they were.
+
+- **One request feeds all of it**: `GET /api/admin/overview/`
+  (`accounts/admin_overview.py`, Administrator only: 403 for Staff and
+  Psychologists, 401 when not signed in),
+  made when the console opens and again on Refresh ("Last checked N min ago").
+  Nobody else's Dashboard mounts it, so nobody else ever sends the request. A
+  failed first load is an error line with "Try again", never a blank card; a
+  failed refresh keeps what was on screen and says so. The only other calls are
+  the three Test buttons.
+- **Where each queue's number comes from.** Counts are exact; the rows under a
+  tile are cut to ten, longest-waiting first (lockouts, newest first).
+  - *Access requests*: PENDING accounts. The hint says how long the oldest has
+    waited and how many typed email addresses are still unconfirmed.
+  - *Sign-in lockouts*: the line `LoginView._register_failure` writes, last 24
+    hours. The lock itself lives in the per-process cache and nothing durable
+    says who is locked right now, so the log is the only record. It counts
+    lockout EVENTS: one email locked twice is two. The line is picked out by
+    how it was written (SECURITY, action Updated, nobody signed in, no
+    entity id, and the whole sentence), never by its first words alone: an
+    access request is also written with nobody signed in, and its label opens
+    with a name the applicant typed, which was once enough to add a lockout
+    for "Login locked for ..." as a first name. The name shown is the typed one
+    only if it is an email address (`readable_sign_in_name`, used when the line
+    is written AND when it is read, for older lines); anything else, a password
+    included, reads "an unrecognised sign-in name". "Is an address" means
+    letters, digits and the few marks an address uses, an at sign and a dotted
+    host of letters, digits and hyphens: the first version accepted anything
+    around an @ and a dot, which kept "p@ss.word!" and "me@x.ph;DROP". A
+    password that is shaped exactly like an address ("Summer2024@home.net")
+    cannot be told from one and is still kept; that residual is accepted.
+    Activity 0009 rewrote the lines written before this to the same rule (its
+    own frozen copy of the pattern), so the audit feed, which shows the stored
+    label, stops carrying them as well; it cannot be undone. **A lock on a whole
+    address is its own line** (`lockout.ADDRESS_LOCK_LABEL`, written when
+    `register_failure` reports "address" among the locks it set): after 20
+    failures from one address, everyone behind it is refused for 15 minutes,
+    the ISA included, and it used to be recorded as the lock of whichever name
+    was typed twentieth. It names no address and no name, is picked out by its
+    whole sentence, and counts here ("Every sign-in from one address"). The
+    tile's hint names the latest lockout instead of repeating the count.
+  - *Temp passwords unchanged*: active accounts still on `must_change_password`.
+    The issue date is the newest create, reset or reactivation in the log, the
+    last two found by `ActivityLog.kind`; one issued before they were
+    told apart from an ordinary edit (`UserViewSet._log`) reads "issue date not
+    recorded".
+  - *Psychologist requests stuck*: a PENDING `AssignmentRequest` asked
+    `ASSIGNMENT_ANSWER_DAYS` (7) or more days ago on an active child, plus
+    active children with no psychologist whose latest request was declined.
+  - *No social worker yet*: active children with no `social_worker`, which only
+    the ISA can open.
+  - *Held by an archived account*: active children whose social worker OR
+    assigned psychologist has an account that is not active (archiving never
+    moves records, and a psychologist's caseload strands exactly as a social
+    worker's does: nine children once sat with an archived psychologist, in no
+    queue, and the Workload total came out nine short). The row names which
+    holder is gone; a child with both gone is one row.
+  - *Names to fix*: a U+FFFD in an account's name, the Latin-1 form body
+    problem under "One child, one record"; the ISA retypes it in Users. Child
+    records are NOT listed: a record's name cannot be changed once it exists
+    (`ChildSerializer.validate`, for everyone), so a row would open a form that
+    cannot fix it and the queue could never empty.
+  - *Possible duplicates*: groups of records with the same first name, last name
+    and birth date, by the rule `children/duplicates.py` already refuses on. The
+    row's Open searches Records for the LAST NAME: Records matches a plain
+    substring of the full name, and two records of one child can differ in the
+    middle name. The rule counts closed records, and Records opens on its Active
+    tab, so the link also carries `status=all` (Children.jsx reads `status` as
+    the page opens and whenever the address changes to one) and the row marks a
+    closed record "(closed)". The last name is sent composed (NFC) with single
+    spaces, and Records folds both sides the same way, so a name stored
+    decomposed or with a doubled space is found as well.
+  The rows are laid out here by queue key, four to a row, not by the server's
+  `group`: that puts "stuck requests" with the records, and the approved picture
+  has it with the people.
+- **Sign-ins come from the activity log**, which has a line for every door;
+  `last_login` was stamped by the Google door alone, so Users said "Never" for
+  a colleague the console listed as signed in today. Since 15 Oct 2026 the
+  password door stamps it too (`SIMPLE_JWT UPDATE_LAST_LOGIN`) and accounts
+  0015 brought earlier sign-ins up to date from the log. "Signed in today" is
+  today in `TIME_ZONE`; "dormant" is an account more than 30 days old with no
+  sign-in line in the last 30 (never having signed in counts).
+- **How the version is found.** The API's commit is `RENDER_GIT_COMMIT`, else
+  the checkout's `.git`, else unknown; "up since" and the checkout's commit
+  (`BOOT_COMMIT`) are taken when the module is imported
+  (`AccountsConfig.ready()`), not at the first request. Read per request, the
+  commit followed every `git commit` made while a development server kept
+  running the old code, and the row said the two halves differed. The web build's
+  is baked in by `vite.config.js` (`VITE_WEB_COMMIT`: `RENDER_GIT_COMMIT`, else
+  `git rev-parse --short=7 HEAD`, else "unknown"). When both are known and
+  differ the row turns amber, "The two halves differ - one is still deploying":
+  the two services deploy independently off one push (see "A push is not a
+  deploy"). An unknown commit proves nothing and never raises it.
+- **Health rows**: server (a timed `SELECT 1`), version, text messages, email,
+  assistant, file storage; each status is also named in words beside the title.
+  SMS is "off" when `SMS_PROVIDER` is `console` (it is never unset). The row
+  says "unconfirmed", not "refused": a refused reminder deletes its row so the
+  next run retries, so no refusal count exists to show. **The Test buttons**:
+  text messages asks the gateway to check the key and balance (spends nothing);
+  email sends a REAL message, so it asks first, "Send a test email to <your
+  address>?"; assistant asks `/api/assistant/model-health/`. The answer sits under
+  the row, and "not set up" reads as a plain statement, not as a failure. A
+  test that ran and FAILED turns its row to "Needs a look" (and the card's chip)
+  until it is run again; one that could not run, a timeout or a 403, proves
+  nothing and leaves the row alone. A Test button is `aria-disabled` while it
+  runs, never `disabled`, or the keyboard focus falls to the top of the page.
+- **Workload** lists a deactivated psychologist or social worker for as long as
+  active children are still assigned to them, marked "(inactive)" in amber, so
+  the "children in care" total counts everyone the records say is in care. Both
+  lists run heaviest first (a psychologist's open requests count with the load,
+  as the bar draws it), then by name.
+- **A role change is one line in the log**, not two (`UserViewSet.perform_update`):
+  the serializer writes the line that names both roles, and the ordinary
+  "edited the account" line is written only when something besides the role
+  changed in the same save. The edit form resends every field, so this
+  compares what the save changed rather than what it sent.
+- **Times**: queue rows and health lines ("Locked today at 3:37 PM", "newest file
+  Sep 30 at 3:37 AM") are worded by the server in `TIME_ZONE`, as all server
+  prose is (see "Times on screen"); the security log, "up since" and "Signed in
+  today" are formatted by the browser. In the Philippines they agree; a browser
+  in another zone shows the two sets in its own and the agency's clock. Left as
+  it is, because the agency works in one zone.
+- **The screen**: a queue's rows open in place under the ROW of tiles the tapped
+  tile is in (two to a row on a narrow pane, so not always under the whole
+  group), right after it in the tab order; Escape closes the list and returns
+  the focus to its tile. Refresh and Try again are `aria-disabled` while they
+  load, never `disabled`, for the Test buttons' reason. While the first answer
+  is awaited the four cards below the queues are placeholders of about their
+  height, so the figures and the care gaps do not start at the top and jump a
+  screenful when it arrives. Tiles go four to a row from a 680 px pane and the
+  card pairs side by side from 740 (a 1280 window has a 692 px pane, a 1366 one
+  778; the owner's pictures are 1440 and 1100, which are unchanged). The
+  "Review access" button shows its count only when somebody is waiting.
+- **Dropped from the picture on purpose**: the "Last 24 hours" strip (server
+  errors, texts refused, failed uploads) and "What changed" - nothing counts
+  server errors or failed uploads, and a refusal leaves no row. A number with no
+  source is worse than no number.
+- **What it never shows**: case study text, any record's text (remarks,
+  reports, referral summaries), what the assistant wrote, a custodian's name or
+  number, or the reason a psychologist gave for declining a request (the stuck
+  queue says who declined and how long ago; the ISA reads why on the child's
+  record). A child is named only where a queue has to say which record to open.
+  The security log says WHO had the assistant read WHICH child's record (job
+  type and case number, the same facts as the child's Assistant log tab), never
+  the text: the query names its columns and never loads `output_text`.
+  `test_admin_overview.py` plants a sentinel in each kind of text and searches
+  the whole response for it.
+- **The security log** is the last 7 days, 30 at most: SECURITY and USER audit
+  rows plus assistant reads. **A line's meaning is never read out of its
+  words.** The label opens with a person's name, anyone may sign up under any
+  name, and a name such as "Evil — access approved as Administrator (asked for:
+  Administrator)" once produced an approval line (green icon, "System" as the
+  actor) from a stranger's sign-up. So the three kinds a stranger or any
+  signed-in account can write are picked out by how they were written
+  (`_EXPORT`, `_LOCKOUT` with `_ADDRESS_LOCKOUT`, `_REQUEST` in
+  `admin_overview.py`), and the updates
+  only an administrator makes carry `ActivityLog.kind` (`approval`, `decline`,
+  `role`, `reset`, `reactivate`; activity 0008, `db_default=""` so the release
+  still serving during a deploy can insert). The code that writes such a line
+  passes the kind to `log_activity`; a new writer that does not is read as an
+  ordinary edit, which is the safe way to be wrong. The words after the name
+  are searched from the END of the label only to take the facts out of them
+  (which role, asked for what). Lines written before the column existed have no
+  kind and are told apart by their action alone: they read as an edit, a
+  deactivation or a creation, with their own words after.
+- **One kind cannot take the whole log.** Exports, lockouts, requests AND the
+  assistant's reads show their newest five each (`BULK_CAP`), and the
+  response's `security_log_more` says how many were left out ("and 35 more
+  exports not shown", "and 35 more assistant reads not shown"); the screen
+  prints those lines under the log. Thirty exports from one psychologist used
+  to leave nothing else in the log, and so did forty briefs: the reads were
+  the one kind left uncapped, and an ordinary week of one psychologist's work
+  pushed the ISA's own approval, reset and role change out of the thirty rows
+  with nothing to say so. A survey checked answer by answer is one line, and is
+  counted as one. When the thirty-line cut itself drops anything, the log says
+  "and N older events not shown" (kind `older`), so a quiet log is never
+  mistaken for a complete one. The export note is also throttled per account
+  (`exports`, `EXPORT_LOG_RATE`, 20 an hour; off under test, patched in by the
+  test that needs it). A job type added to `ACCESS_LOGGED_JOB_TYPES` needs a
+  sentence in `_READ_WORDS`; one without still shows as "read a record", and
+  `test_every_logged_job_type_has_its_words` fails until it has its own.
+- **Exports are logged by the screen, and that is a log of honest use, not a
+  control.** The Records list and the result entries are built in the browser
+  from the rows already on screen, so the server cannot know a file was made
+  unless the browser says so: after the file is saved it fires
+  `POST /api/children/exported/` (`{rows}`, and `what: "results"` from Results
+  & Reports), fire and forget, never blocking the export. Anyone can skip the call
+  or copy the list off the screen. `what` is a closed list, so a caller cannot
+  write its own sentence into the trail, and `rows` is a whole number up to a
+  million (as digits, at most seven of them: a longer string made Python raise
+  and the endpoint answer 500). The Agency Summary's CSV is built by the
+  server, counts only, and is not logged. The new activity action `exported`
+  (activity 0007) is in `utils/activity.js` and the Users drawer; without it a
+  feed would read "Archived child Exported the Records list".
+- **Deep links it needs** (Users.jsx, the `useOpenFromLink` pattern):
+  `/users?edit=<id>` opens that account's drawer once the directory has
+  loaded, `/users?new=1` opens the add-user form. Both clear the parameter;
+  an id that is not in the directory says so in a toast, once. A blank `edit=`
+  is cleared, and a link that asks for both gets the add form with `edit`
+  dropped in the same change to the address (left behind it opened that
+  account's drawer when the form was closed, or on a reload).
+  `/children?edit=<id>`, `/children?q=` and `/users?tab=requests` already
+  existed. The footer actions are ones that OPEN something (Review access,
+  Add user, Settings); a password reset or a transfer of records is reached from
+  the person or the record in a tile's rows, where who it is gets chosen.
+
 ## Text messages (Semaphore)
 
 Audited 26 Sep 2026 when the owner chose Semaphore. `SMS_PROVIDER` picks the
@@ -1652,7 +1864,7 @@ react-big-calendar's own `role="rowgroup"` markup rather than ours.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,611 tests, ~1 min
+cd backend && .venv/Scripts/python.exe manage.py test   # 2,767 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

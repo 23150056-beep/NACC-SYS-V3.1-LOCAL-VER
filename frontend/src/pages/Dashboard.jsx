@@ -6,6 +6,7 @@ import { useLayout } from '../context/LayoutContext';
 import { Alert, Icon, IconChip, MiniBar, PAGE, Segmented } from '../ui';
 import { ActivityCard, CensusCard, TodayCard } from '../components/RightRail';
 import AssignmentRequests from '../components/AssignmentRequests';
+import AdminConsole from './dashboard/AdminConsole';
 import { caseRef, initialsOf } from '../utils/child';
 import { gapMeta, gapTarget } from '../config/careGaps';
 
@@ -64,7 +65,7 @@ export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const layout = useLayout();
-  const { stats, range, setRange, pendingAccess, failed } = useCensus();
+  const { stats, range, setRange, failed } = useCensus();
 
   const role = user?.role_name || 'Staff';
   const isPsych = role === 'Psychologist';
@@ -116,12 +117,6 @@ export default function Dashboard() {
     { label: 'Add record', icon: 'user-plus', to: '/children?openCreate=1', primary: true },
     { label: 'Book appointment', icon: 'calendar-plus', to: '/schedule?book=1' },
     { label: 'Upload case referral', icon: 'upload', to: '/reports?upload=1' },
-    // Only when somebody is actually waiting. A permanent "Review access"
-    // leading to an empty queue is a button that cries wolf, and the count is
-    // the only part of it worth reading.
-    ...(role === 'Administrator' && pendingAccess > 0
-      ? [{ label: `Review access (${pendingAccess})`, icon: 'user-check', to: '/users?tab=requests' }]
-      : []),
   ];
 
   const today = new Date().toLocaleDateString(undefined, {
@@ -167,6 +162,12 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+
+      {/* The ISA's console: who is waiting on them, what is broken, who has
+          access. It carries "Review access" and the other account actions, so
+          the quick-action row above does not. It is mounted for the
+          administrator alone, so nobody else ever asks the server for it. */}
+      {role === 'Administrator' && <AdminConsole />}
 
       {/* Children a psychologist has been asked to take. Above the figures:
           it is the one thing on this page waiting on them personally, and

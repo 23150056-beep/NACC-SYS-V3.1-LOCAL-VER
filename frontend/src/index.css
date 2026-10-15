@@ -460,6 +460,14 @@ tr:focus-visible {
   box-shadow: inset 0 0 0 2px var(--ring);
   border-radius: 0;
 }
+/* The ISA console's queue tiles (pages/dashboard/AdminConsole.jsx) sit edge to
+   edge in a grid, inside a card that clips its contents. The ring above is
+   drawn outside the control, so it would be cut at the card's edge and lie
+   under the next tile; this one is drawn inside. */
+.racco-queue-tile:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--blue-500);
+  border-radius: 0;
+}
 
 /* Utility classes consumed by the kit */
 .racco-eyebrow {

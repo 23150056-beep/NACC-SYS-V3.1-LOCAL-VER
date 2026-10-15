@@ -6,11 +6,13 @@ from activity.models import ActivityLog
 logger = logging.getLogger(__name__)
 
 
-def log_activity(actor, action, category, *, entity_type="", entity_label="", entity_id=None, recipient=None):
+def log_activity(actor, action, category, *, entity_type="", entity_label="", entity_id=None,
+                 recipient=None, kind=""):
     """Record an activity event. Never raises — logging must not break the request.
 
     `recipient` directs the event at a specific user (used for psychologist
-    notifications, e.g. a newly assigned child).
+    notifications, e.g. a newly assigned child). `kind` says what a USER line
+    is where its action does not (see ActivityLog.kind).
     """
     try:
         is_user = bool(getattr(actor, "is_authenticated", False))
@@ -24,6 +26,7 @@ def log_activity(actor, action, category, *, entity_type="", entity_label="", en
             entity_type=entity_type,
             entity_label=entity_label or "",
             entity_id=entity_id,
+            kind=kind,
         )
     except Exception:  # pragma: no cover - defensive
         logger.exception("Failed to write activity log")
