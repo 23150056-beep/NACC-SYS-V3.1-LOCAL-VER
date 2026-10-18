@@ -945,7 +945,9 @@ def _answer(request, call, question, model_used, started, masker):
     try:
         result = tools.REGISTRY[call.tool]["resolve"](request, call.args)
     except Exception:                                        # noqa: BLE001
-        logger.exception("Chat resolver failed: %s(%s)", call.tool, call.args)
+        # The tool only: its arguments hold what was asked about, which is
+        # often a child's name, and a log line is read by whoever reads logs.
+        logger.exception("Chat resolver failed: %s", call.tool)
         job.ok = False
         job.error = f"resolver failed: {call.tool}"[:255]
         job.answer = AssistantJob.FAILED

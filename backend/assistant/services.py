@@ -252,7 +252,8 @@ def run_job(job_type, prompt, *, system=None, input_ref="", user=None, child=Non
     working on Tuesday" is answerable from data rather than from memory.
 
     Pass `child` whenever the prompt is built from a child's record, or the
-    ISA's access log on that child's page will not show the read.
+    ISA's access log on that child's page will not show the read. A refusal
+    that sent nothing is not attributed to the child (see below).
     """
     retention.prune_if_due()
     client = get_ai_client()
@@ -263,11 +264,18 @@ def run_job(job_type, prompt, *, system=None, input_ref="", user=None, child=Non
         with _GENERATION_LOCK:
             raw = client.generate(prompt, system=system)
     except AIUnavailable as exc:
+        # The row is kept for the usage figures, but it names the child only
+        # when a read was attempted. A client that is not available (the
+        # assistant switched off, a hosted deployment refusing to draft from
+        # records, a remote runtime address that is not used) never sent
+        # anything, and the child's access log must not list a read that never
+        # happened - the same rule the self-report check follows.
         AssistantJob.objects.create(
             job_type=job_type, input_ref=input_ref, ok=False,
             error=str(exc)[:255], model_used=getattr(client, "model", ""),
             latency_ms=int((time.monotonic() - started) * 1000),
-            created_by=creator, child=child)
+            created_by=creator,
+            child=child if getattr(client, "available", True) else None)
         raise
 
     text = _normalize_output(raw)

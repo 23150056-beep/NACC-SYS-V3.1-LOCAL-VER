@@ -11,6 +11,12 @@ name reached a clinical draft unnoticed.
     manage.py ai_eval --reps 5 --limit 6   # more evidence, more children
     manage.py ai_eval --feature case_brief # the social worker's written brief
 
+On a HOSTED model only the fixed chat questions and the fixed self-report
+examples are run: brief, case_brief, polish and summary send real case records,
+and records do not leave the agency's machine. `--allow-hosted-records`
+overrides that, and only with DEBUG on (a development machine with fictional
+children).
+
 Before any feature runs the model is asked one word, the way `ai_check` does it.
 If it does not answer the command stops there with the URL and model it tried:
 every draft failing one by one, with a table of zeros after them, reads as "no
@@ -18,6 +24,7 @@ data" when the truth is "the model server was not running".
 """
 import time
 
+from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
 from assistant import evaluation, prompts, tools
@@ -394,6 +401,26 @@ class _CountedClient:
         return self._counted(self._client.choose_tool, *args, **kwargs)
 
 
+# The features that put real case records in a prompt, and so may not be sent
+# to a hosted model. Polish is here although its inputs are fixed sentences: a
+# hosted deployment drafts nothing (services.get_ai_client), and the eval does
+# not measure a feature the deployment will never run.
+RECORD_FEATURES = ("brief", "case_brief", "polish", "summary")
+HOSTED_RECORDS_REFUSED = (
+    "The hosted model is kept to the fixed chat questions and self-report "
+    "examples, because brief, case_brief, polish and summary send real case "
+    "records to it; pass --allow-hosted-records on a DEBUG machine whose "
+    "children are fictional to run them anyway.")
+HOSTED_RECORDS_NEED_DEBUG = (
+    "--allow-hosted-records is refused unless DEBUG is on, because a "
+    "deployment's real case records must not be sent to a hosted model.")
+HOSTED_RECORDS_SKIPPED = (
+    "A hosted model is in use, so brief, case_brief, polish and summary are "
+    "skipped (they send real case records) and only the fixed chat questions "
+    "and self-report examples are run; --allow-hosted-records on a DEBUG "
+    "machine overrides that.")
+
+
 class Command(BaseCommand):
     help = "Evaluate the assistant's drafting output against real records."
 
@@ -408,6 +435,10 @@ class Command(BaseCommand):
         parser.add_argument("--limit", type=int, default=None,
                             help="Children to sample for briefs; reports for summaries. "
                                  f"Default 3, and {CASE_BRIEF_CHILDREN} for case_brief.")
+        parser.add_argument("--allow-hosted-records", action="store_true",
+                            help="Let a hosted model be sent real case records "
+                                 "(brief, case_brief, polish, summary). Refused "
+                                 "unless DEBUG is on.")
 
     def handle(self, *args, **options):
         cfg = AssistantSetting.load()
@@ -418,6 +449,7 @@ class Command(BaseCommand):
         # A measurement, run by hand, and the step the docs require before a
         # drafting feature runs on any other model - so it may reach one.
         client = get_ai_client(allow_hosted=True)
+        held_back = self._held_back_from_hosted(client, options)
         self._require_runtime(client)
         self.client = _CountedClient(client)
         reps = options["reps"] or 2
@@ -427,20 +459,26 @@ class Command(BaseCommand):
         self._case_verdict = None
         self._unanswered = []
         totals = []
-        if options["feature"] in ("brief", "all"):
+
+        def wanted(feature):
+            return options["feature"] in (feature, "all") and feature not in held_back
+
+        if held_back and options["feature"] == "all":
+            self.stdout.write(HOSTED_RECORDS_SKIPPED + "\n")
+        if wanted("brief"):
             totals.append(self._tallied("BRIEFS", self._briefs, reps, limit))
-        if options["feature"] in ("case_brief", "all"):
+        if wanted("case_brief"):
             # Says for itself, in its verdict, whether the model answered.
             self.client.reset()
             totals.append(self._case_briefs(options["reps"] or CASE_BRIEF_REPS,
                                             options["limit"] or CASE_BRIEF_CHILDREN))
-        if options["feature"] in ("polish", "all"):
+        if wanted("polish"):
             totals.append(self._tallied("REMARK POLISH", self._polish, reps))
-        if options["feature"] in ("chat", "all"):
+        if wanted("chat"):
             totals.append(self._tallied("CHAT", self._chat, reps))
-        if options["feature"] in ("self_report", "all"):
+        if wanted("self_report"):
             totals.append(self._tallied("SELF-REPORT", self._self_report, reps))
-        if options["feature"] in ("summary", "all"):
+        if wanted("summary"):
             totals.extend(self._tallied("SUMMARIES", self._summaries, reps, limit))
 
         # The case brief prints its own block (it decides when rates are shown),
@@ -467,6 +505,25 @@ class Command(BaseCommand):
             self.stdout.write("\n" + self._case_verdict)
 
     # -- the runtime ------------------------------------------------------
+
+    @staticmethod
+    def _held_back_from_hosted(client, options):
+        """The features this run may not do, because of the model it would
+        send them to: the four that put real records in a prompt, when the
+        model is hosted. Raises when one of them was asked for by name.
+
+        Decided before the runtime is probed or anything is generated, so a
+        refusal costs nothing and sends nothing.
+        """
+        if not isinstance(client, OpenAICompatibleClient):
+            return ()
+        if options.get("allow_hosted_records"):
+            if not settings.DEBUG:
+                raise CommandError(HOSTED_RECORDS_NEED_DEBUG)
+            return ()
+        if options["feature"] in RECORD_FEATURES:
+            raise CommandError(HOSTED_RECORDS_REFUSED)
+        return RECORD_FEATURES
 
     @staticmethod
     def _require_runtime(client):
