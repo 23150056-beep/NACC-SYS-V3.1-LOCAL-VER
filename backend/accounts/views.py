@@ -741,6 +741,11 @@ class UserViewSet(viewsets.ModelViewSet):
         entries = list(
             ActivityLog.objects
             .filter(Q(actor=user) | Q(entity_type="User", entity_id=user.id))
+            # A move of records writes a line for each record and a sentence
+            # for each worker told (children/transfer.py): 25 lines of one
+            # move would be the whole drawer, and its sentence twice. The
+            # drawer keeps the sentence once; the rest is in the table.
+            .exclude(kind__in=[ActivityLog.KIND_MOVE_DETAIL, ActivityLog.KIND_MOVE_COPY])
             .order_by("-created_at")[:25])
         data = ActivityLogSerializer(entries, many=True).data
         for row, entry in zip(data, entries):

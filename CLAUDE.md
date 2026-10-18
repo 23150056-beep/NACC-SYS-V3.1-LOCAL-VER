@@ -1115,8 +1115,9 @@ are unchanged (their assigned children).
   field, or to nobody until one is assigned.
 - **A new record is its creator's** (`ChildViewSet.perform_create`), whatever
   the request says. **Only the ISA moves one** (a closed case taken over at
-  intake aside, below) - the record form's Social
-  Worker field, shown to the ISA only; a SW sending a different one gets 400,
+  intake aside, below) - through the record form's Social
+  Worker field, shown to the ISA only, or many at once through the console's
+  Transfer records (below); a SW sending a different one gets 400,
   sending the same one is fine because the edit form resends everything. It
   must be a Staff account.
 - **Existing records were backfilled** (children 0025): the uploader of the
@@ -1180,6 +1181,59 @@ are unchanged (their assigned children).
   staff account can see.
 - **Archiving a SW does not move their records.** The ISA transfers them; the
   Social Worker field lists an inactive holder as "(inactive)".
+- **The ISA can move many records at once** (15 Oct 2026, `children/transfer.py`,
+  `POST /api/children/transfer/`; the console's "Transfer records"). Body
+  `{from_social_worker, to_social_worker, children: [ids]}`; Administrator
+  only, 403 for anyone else before the body is read, 401 when not signed in.
+  The one they leave is any Staff account, an archived one included (the usual
+  reason); the one they go to must be an ACTIVE Staff account and a different
+  one - the record form's "who may hold a record" rule. **Every id must be an
+  ACTIVE record held by the one they leave.** A closed, missing, already moved
+  or someone else's record refuses the WHOLE request and moves nothing: 409
+  with `problems` (id, case number, why) when the list went stale, 400 when it
+  is malformed (empty, over 1,000, not whole numbers, an id twice). The rows
+  are locked (in id order, so two moves that share records take the locks the
+  same way round), moved by one conditional UPDATE and the count re-checked, so
+  a change in between rolls the move back rather than leaving part of it; the
+  log lines go in inside the same transaction, so a move whose lines could not
+  be written is not made. **A database that gives the transaction up because
+  another got there first is the same 409**, not a 500: SQLite's "database is
+  locked" (only where the connection does not start its transactions with
+  `transaction_mode: IMMEDIATE` - the local copy's own `DATABASES` does, which
+  makes the second move wait and then find the records gone, but a
+  `DATABASE_URL=sqlite:///...` copy does not) and PostgreSQL's deadlock or
+  serialization failure (`_lost_a_race`); any other `OperationalError` is still
+  an error. Two overlapping moves at once: 16 rounds on PostgreSQL 16, 12 on the
+  local copy and 15 on a plain SQLite copy were always one 200 and one 409,
+  never a part-move. **Only `social_worker` changes** (and `updated_at`,
+  bumped by hand because a bulk UPDATE skips `auto_now`: a record form opened
+  before the move is told "updated by someone else"). The psychologist, an
+  open request to one, the case study and the appointments stay; what a SW
+  sees of them follows the field - case study access, names on the calendar,
+  Records, and a psychologist's answer to a request, which goes to the child's
+  current SW. **The trail has two layers** (the action `transferred`, activity
+  0010, choices only): a RECORD line for each record, the audit trail ("Moved
+  C-0042 · Ana Cruz from R. Santos to E. Pascua", the ISA the actor, nobody
+  addressed, `kind` `move_detail`), and ONE sentence ("Moved 9 records from
+  ...", the label the whole sentence as for exports) for the worker receiving
+  the records and one for the worker who gave them up, unless that account
+  cannot sign in. The feeds show the newest 50 lines and a leaver's whole
+  caseload is the commonest move, so **`/api/activity/` leaves the per-record
+  lines out for everyone** and the ISA's feed also drops the second sentence
+  (`move_copy`, the same words again): a move of 60 records is one line in
+  each bell, and the assignment answers are not pushed out. **The Users
+  drawer** (the last 25 of what an account did, the ISA's own among them) keeps
+  one sentence per move for the same reason. The per-record rows stay in the
+  table, in no screen, for whoever asks who moved a child: "View full audit
+  trail" on the rail goes to Users, whose drawer keeps the one sentence, so the
+  ISA cannot read "who moved C-0042?" on screen today. That is a known gap,
+  not an oversight. If the owner wants it answered, it belongs on the child's
+  own page (a read of that child's `move_detail` lines), never in the feeds,
+  which the same 60-record move would fill again. The actor's name is
+  cut to its 150-character column like the labels: SQLite does not enforce a
+  length, PostgreSQL refuses the insert, and a log line must not be what stops
+  a move. `children/tests/test_transfer.py`, also run on PostgreSQL 16 - a
+  length test that only ever ran on SQLite could not fail.
 
 ## Assigning a psychologist is asking
 
@@ -1449,8 +1503,13 @@ and census stay underneath, as they were.
   made when the console opens and again on Refresh ("Last checked N min ago").
   Nobody else's Dashboard mounts it, so nobody else ever sends the request. A
   failed first load is an error line with "Try again", never a blank card; a
-  failed refresh keeps what was on screen and says so. The only other calls are
-  the three Test buttons.
+  failed refresh keeps what was on screen and says so. A re-read after a write
+  (the footer's transfer and assistant switch, `load({ fresh: true })`) never
+  reuses a request sent before it, because that reply may still carry the old
+  picture, and an older answer never overwrites a newer one (each call takes the
+  next sequence number and only the latest may write); a plain Refresh may
+  still join a request that is already out. The only other calls are the three
+  Test buttons and what the footer's actions do (below).
 - **Where each queue's number comes from.** Counts are exact; the rows under a
   tile are cut to ten, longest-waiting first (lockouts, newest first).
   - *Access requests*: PENDING accounts. The hint says how long the oldest has
@@ -1574,6 +1633,98 @@ and census stay underneath, as they were.
   card pairs side by side from 740 (a 1280 window has a 692 px pane, a 1366 one
   778; the owner's pictures are 1440 and 1100, which are unchanged). The
   "Review access" button shows its count only when somebody is waiting.
+- **The footer holds every admin action** (owner, 15 Oct 2026: it carried only
+  three, and he named the rest; `pages/dashboard/ConsoleActions.jsx`). Accounts:
+  Review access (with its count only while somebody waits), Add user, Reset a
+  password, Transfer records. System: Send test text, Assistant: On/Off, Agency
+  details, Settings. Outlined small buttons that wrap in whatever pane there is
+  (checked at 1440, 1280, 1100, 820, 390 and 320; the group labels sit level
+  with the FIRST row of their buttons, not centred on the group, so at 1280,
+  where each group wraps onto a second line, "Accounts" and "System" stay with
+  the line they name), **all eight outlined** as in
+  the approved picture - Review access too, whose count is what says somebody
+  is waiting (it used to turn solid blue with one). Drawn once the overview has
+  answered, and also when it FAILED - a console that failed to load is when Add
+  user and Settings are still wanted - but not while the first answer is
+  awaited: the placeholder tiles are shorter than the real ones (a real tile is
+  96px with one-line text and 129px with the two-line label and hint that an
+  all-clear agency or a phone gives), so a footer drawn at once slid tens of
+  pixels down under the pointer as the tiles arrived, and a press aimed at one
+  button landed on another thing. Five go to another page (Review access, Add
+  user, Agency details, Settings, and Reset a password once it has been told
+  whose); Transfer records, Send test text and Assistant finish here. One that
+  is working is `aria-disabled`, never `disabled`, for the Test buttons' reason.
+  - *Reset a password* opens a picker (the shared `Modal`) of ACTIVE accounts
+    other than the ISA's own - the new password would end their own session -
+    from `GET /users/`; the search box has the focus, the arrow keys move
+    between rows. Under 420px the role drops under the email
+    (`.racco-pick-role`, `!important` because the element's inline style says
+    flex none and right-aligned, which a plain rule cannot beat): beside the
+    name, at 320, it left the name a few letters wide and a row 180px tall.
+    Picking one goes to `/users?reset=<id>`, and that is all the
+    console does: Users asks the same question the drawer's Temporary password
+    button asks and shows the one-time password in its own dialog. **The
+    password is never on the console.**
+  - *Transfer records* is a `Drawer` over `POST /api/children/transfer/` (see
+    "Each social worker's own records"). From lists the social workers holding
+    an active record, a deactivated account first and marked "(inactive)", with
+    their count; To lists ACTIVE social workers other than From; the checklist
+    of From's active records is all ticked until the ISA unticks ("Select all /
+    none"). Both lists are read when the drawer opens (`GET /users/` and
+    `GET /children/`, which the ISA already may), not taken from the overview:
+    the overview's workload is as of the last check, and the checklist needs
+    the rows anyway, so the counts beside the names are counted from the very
+    list that is ticked and cannot disagree with it. Every count the drawer
+    prints has its thousands separator (`num()`: "1,200", not "1200" in one
+    place and "1,200" in the next). The closed From select holds about 26
+    characters at 320px, so a long name still clips its "records"; the count
+    is repeated in the checklist header below it and the open list is whole,
+    which is why the line was shortened ("active" dropped) and not given a
+    second row, which a native select cannot do. "Move N records" asks
+    first, then an end dialog reads back how many moved and to whom; the
+    console is read again (the archived-holder tile and Workload follow) and so
+    is the activity feed. A 409 shows the server's sentence, reads the list again
+    and keeps ticked what is still the holder's to move; nothing moved. A 400
+    reads it again too: the receiver may have been deactivated since the drawer
+    opened, and without it that worker stayed picked and offered, and every
+    retry said the same thing. The refusal is scrolled into view
+    (`scrollIntoView`): it is drawn at the top of the same scrolling box as the
+    checklist, and with the box scrolled it was off screen while the list
+    quietly lost a row. **One move takes at most 1,000 records** (the server's
+    rule): for a holder with more, the first 1,000 are ticked, Select all means
+    those, the rest cannot be ticked, and a line says to open it again for the
+    rest. The fields lock only once the request is out, not while the question
+    is up.
+  - *Send test text* asks first (it costs a credit), then calls the same
+    `POST /sms-test/` as Settings; the answer is the end dialog. With no gateway
+    (`SMS_PROVIDER` console, the local copy) the server logs the text and answers
+    ok, so the dialog says "written to the log", not "sent". An ISA with no
+    verified number is told so and offered "Open my profile" (`/profile`).
+  - *Assistant: On/Off* reads the overview's `assistant` health row (status
+    "off" is off; unknown until the overview answers - which, since the footer
+    is drawn only once there are tiles or an error, means the load FAILED - and
+    the button then says "on/off", is `aria-disabled` and, when pressed, says in
+    a toast that the console has not loaded and to press Try again: a reason in
+    a `title` alone is never seen on a keyboard or a phone). **The label carries the state and there is no
+    `aria-pressed`**: a toggle button's name must not change with its state, so
+    both would have a screen reader say it twice. The confirmation
+    is `assistantSwitchConfirm()` in `utils/assistantSwitch.js`, **the one place
+    Settings and the console take their wording from** - two copies would drift,
+    and the one that drifts is the one that asks for less. It PUTs only
+    `{enabled}` to `/assistant/settings/` (Settings sends the whole form), then
+    reads the console again so the health row and the button agree, and ends
+    with a dialog saying what is now on or off for everyone (a toast was gone
+    before anyone read that the chat panel had stopped); a failure toasts the
+    server's words and leaves the label alone.
+  - *Agency details* goes to `/settings?section=agency`: once the card has
+    loaded, Settings brings it into view and puts the cursor in its first field,
+    then clears the parameter. No second form.
+  - **A screen opens at its top** (`Shell` in `App.jsx`, a layout effect on the
+    PATH): every route renders its own Shell but React reuses the one element
+    across them, so `<main>` kept the previous screen's scroll and a button at the
+    foot of the Dashboard opened Settings 400 to 900px down, with its header
+    scrolled away (the sidebar's links did the same). An address that only gains
+    a parameter (`?tab=`, `?edit=`) is the same screen and keeps its place.
 - **Dropped from the picture on purpose**: the "Last 24 hours" strip (server
   errors, texts refused, failed uploads) and "What changed" - nothing counts
   server errors or failed uploads, and a refusal leaves no row. A number with no
@@ -1643,9 +1794,18 @@ and census stay underneath, as they were.
   dropped in the same change to the address (left behind it opened that
   account's drawer when the form was closed, or on a reload).
   `/children?edit=<id>`, `/children?q=` and `/users?tab=requests` already
-  existed. The footer actions are ones that OPEN something (Review access,
-  Add user, Settings); a password reset or a transfer of records is reached from
-  the person or the record in a tile's rows, where who it is gets chosen.
+  existed. Two more for the footer: **`/users?reset=<id>`** asks the existing
+  reset confirmation (`setConfirm({kind: 'reset'})`, the drawer's own path) once
+  the directory has loaded, clears the parameter, and says so in a toast, once,
+  for an id that is not there or an account that is not active (the server
+  refuses any but an active one; the signed-in ISA's OWN id is accepted, as the
+  Users drawer's Temporary password button and the row menu accept it - the
+  confirmation says the current password stops working, and only the console's
+  picker leaves the ISA out); `new` and `edit` outrank it and drop it from
+  the address with them, because two effects each rewriting the address from
+  what they read would put back what the other removed. **`/settings?section=agency`**
+  scrolls to the agency card and focuses its first field when it has loaded
+  (`useOpenFromLink`, so it is used up and does not fire again on a reload).
 
 ## Text messages (Semaphore)
 
@@ -1859,12 +2019,32 @@ violations either, so the audit records element and text counts beside the
 verdict. One known violation remains on `/schedule`, and it is
 react-big-calendar's own `role="rowgroup"` markup rather than ours.
 
+**A `Button` shows where the keyboard is** (`.racco-btn:focus-visible` in
+index.css). `Button` sets its own `box-shadow` inline (none for the plain and
+outlined ones, a drop shadow for the filled ones), and an inline style beats the
+global `button:focus-visible` ring, so no `Button` in the app - the console's
+eight, the Dashboard's quick actions - had a visible focus until 18 Oct 2026. The
+rule is `!important`, the one thing that outranks an inline style, and is kept
+to the Button's own class so the inset rings of `.racco-queue-tile` and
+`.racco-pick-row`, which are plain buttons, are not overruled. The Dashboard's
+quick-action row is hand-built with the same inline shadow and carries the class
+by hand. Other hand-built `<button>`s that set `boxShadow` inline have the same
+fault and have not been swept: give them `racco-btn`, do not drop the shadow. A computed-style
+check needs a wait after focusing: the shadow transitions in, and a read straight
+away says `none`.
+
+**Toasts are announced** (`ToastContext.jsx`): the stack is a polite live
+region that is always in the page. It was a plain `div`, so the only feedback of
+`/users?reset=` for an account that is not there, or of a button that cannot act
+yet, was silent to a screen reader. A toast is still not a place for anything
+that must be read: the end dialogs (`useNotice`) are.
+
 ## Before committing or bundling anything
 
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,767 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 2,828 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

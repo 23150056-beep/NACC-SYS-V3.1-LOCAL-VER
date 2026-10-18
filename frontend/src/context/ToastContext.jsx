@@ -35,7 +35,11 @@ export function ToastProvider({ children }) {
   return (
     <ToastContext.Provider value={value}>
       {children}
-      <div style={{ position: 'fixed', top: 78, right: 26, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 10, pointerEvents: 'none', maxWidth: 'calc(100vw - 52px)' }}>
+      {/* A live region that is always in the page, so a toast added to it is
+          read out. Without one the only feedback of a link to a missing
+          account, or of a button that cannot act yet, was silent to a screen
+          reader. Polite: a toast never needs to cut off what is being read. */}
+      <div role="status" aria-live="polite" aria-atomic="false" style={{ position: 'fixed', top: 78, right: 26, zIndex: 9999, display: 'flex', flexDirection: 'column', gap: 10, pointerEvents: 'none', maxWidth: 'calc(100vw - 52px)' }}>
         {toasts.map((t) => (
           <div
             key={t.id}

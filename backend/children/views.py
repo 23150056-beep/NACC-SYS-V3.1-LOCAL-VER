@@ -17,7 +17,7 @@ from accounts.permissions import (ChildRecordAccess,
 from accounts.scoping import role_of, scope_to_visible, visible_pre_assessments
 from activity.models import ActivityLog
 from activity.services import log_activity
-from children import assignment, custodian, duplicates, termination
+from children import assignment, custodian, duplicates, termination, transfer
 from children.models import AssignmentRequest, Child, TerminationRecord
 from children.serializers import ChildSerializer
 
@@ -57,7 +57,7 @@ class ChildViewSet(viewsets.ModelViewSet):
         # psychologist), enforced in the action body - RecordsAccess would
         # block psychologists.
         if self.action in ("terminate", "advance_status", "presence", "reopen",
-                           "closure_reasons", "remove_duplicate", "exported"):
+                           "closure_reasons", "remove_duplicate", "exported", "transfer_records"):
             return [IsAuthenticated()]
         return super().get_permissions()
 
@@ -377,6 +377,29 @@ class ChildViewSet(viewsets.ModelViewSet):
                                      request.data.get("case_reference"), by=request.user)
         except duplicates.Refused as refusal:
             return Response({"detail": str(refusal)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(done)
+
+    @action(detail=False, methods=["post"], url_path="transfer")
+    def transfer_records(self, request):
+        """The ISA moves records from one social worker to another, many at a
+        time (children/transfer.py has the rules).
+
+        Body: from_social_worker, to_social_worker (account ids) and children
+        (the ids to move, 1 to 1,000). All or nothing: 400 for a request that
+        is malformed or names an account that cannot take part, 409 - with the
+        case numbers - when a record on the list is no longer the first
+        worker's active record. 200 gives the count, the receiving worker and
+        the records moved.
+
+        The role is checked before the body is read, so anyone else is told no
+        whatever they send."""
+        if role_of(request) != Role.ADMINISTRATOR:
+            return Response({"detail": "Only the ISA (Administrator) can move records between social workers."},
+                            status=status.HTTP_403_FORBIDDEN)
+        try:
+            done = transfer.move(request.user, *transfer.parse(request.data))
+        except transfer.Refused as refusal:
+            return Response(refusal.body, status=refusal.status)
         return Response(done)
 
     # What a screen may say it exported, and how the audit line names it. A

@@ -18,6 +18,12 @@ class ActivityLog(models.Model):
     # `exported`). The file is built on the screen, so this row is the only
     # record that anyone took the list out of the system and how long it was.
     EXPORTED = "exported"
+    # Records moved from one social worker to another by the ISA (children/
+    # transfer.py). Entity type "Child"; the id is the child's on the line for
+    # each record, and none on the lines that tell the workers. The label is
+    # the whole sentence: "Moved C-0042 · Ana Cruz from R. Santos to E. Pascua"
+    # for a record, "Moved 9 records from R. Santos to E. Pascua" for a worker.
+    TRANSFERRED = "transferred"
     ACTION_CHOICES = [
         (CREATED, "Created"), (UPDATED, "Updated"),
         (ARCHIVED, "Archived"), (LOGIN, "Login"),
@@ -26,6 +32,7 @@ class ActivityLog(models.Model):
         (FINALIZED, "Finalized"), (REOPENED, "Reopened"),
         (REMOVED, "Removed"),
         (EXPORTED, "Exported"),
+        (TRANSFERRED, "Transferred"),
     ]
 
     RECORD, USER, SECURITY = "record", "user", "security"
@@ -56,6 +63,12 @@ class ActivityLog(models.Model):
     # inserting rows during a deploy.
     KIND_APPROVAL, KIND_DECLINE, KIND_ROLE = "approval", "decline", "role"
     KIND_RESET, KIND_REACTIVATE = "reset", "reactivate"
+    # The two kinds of a RECORD line the feeds leave out (activity/views.py).
+    # A move of records writes a line for each record, as its audit trail, and
+    # a sentence for each worker told: the feeds hold the newest 50 lines, so
+    # the per-record ones would fill everybody's bell, and the administrator
+    # would read the second sentence as a repeat of the first.
+    KIND_MOVE_DETAIL, KIND_MOVE_COPY = "move_detail", "move_copy"
     kind = models.CharField(max_length=20, blank=True, default="", db_default="")
     created_at = models.DateTimeField(auto_now_add=True)
 

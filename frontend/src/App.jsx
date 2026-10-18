@@ -1,4 +1,5 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useLayoutEffect, useRef } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ActivityProvider } from './context/ActivityContext';
 import { AssistantProvider } from './context/AssistantContext';
@@ -43,12 +44,21 @@ import Survey from './pages/Survey';
  */
 function Shell({ children }) {
   const layout = useLayout();
+  // Every route renders its own Shell, but React reuses the one element across
+  // them, so <main> kept the previous screen's scroll: a button at the foot of
+  // the Dashboard opened Settings, or Users, half way down the page, with the
+  // header and the first card scrolled away. A new screen starts at its top.
+  // Only a change of PATH does it - an address that just gains a parameter
+  // (?tab=, ?edit=) is the same screen and keeps its place.
+  const { pathname } = useLocation();
+  const main = useRef(null);
+  useLayoutEffect(() => { main.current?.scrollTo({ top: 0 }); }, [pathname]);
   return (
     <div className="racco-shell" style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg-app)', overflow: 'hidden' }}>
       <AppHeader />
       <div className="racco-shell-row" style={{ flex: 1, minHeight: 0, display: 'flex', gap: layout.gap, padding: layout.pad, overflow: 'hidden' }}>
         {layout.leftRailOn && <Sidebar />}
-        <main className="racco-scroll" style={{ flex: 1, minWidth: 0, overflowX: 'hidden', overflowY: 'auto', paddingRight: 2 }}>
+        <main ref={main} className="racco-scroll" style={{ flex: 1, minWidth: 0, overflowX: 'hidden', overflowY: 'auto', paddingRight: 2 }}>
           {children}
         </main>
         {layout.rightRailOn && <RightRail />}

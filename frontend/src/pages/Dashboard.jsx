@@ -144,8 +144,10 @@ export default function Dashboard() {
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {actions.map((a) => (
+            // Hand-built, so it takes the Button's focus-ring class by name: the
+            // inline box-shadow below would otherwise hide where the keyboard is.
             <button
-              key={a.label} type="button" onClick={() => navigate(a.to)}
+              key={a.label} type="button" onClick={() => navigate(a.to)} className="racco-btn"
               style={{
                 display: 'inline-flex', alignItems: 'center', gap: 8, height: 38, padding: '0 15px',
                 border: `1px solid ${a.primary ? 'var(--blue-600)' : 'var(--border-strong)'}`,

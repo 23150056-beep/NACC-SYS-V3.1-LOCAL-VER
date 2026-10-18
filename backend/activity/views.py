@@ -13,7 +13,10 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     serializer_class = ActivityLogSerializer
 
     def get_queryset(self):
-        qs = ActivityLog.objects.all()
+        # What a move of records writes for each record is its audit trail, not
+        # news: see ActivityLog.KIND_MOVE_DETAIL. Left out of every feed, or one
+        # leaver's caseload fills the 50 lines below.
+        qs = ActivityLog.objects.exclude(kind=ActivityLog.KIND_MOVE_DETAIL)
         role = role_of(self.request)
         if role == Role.PSYCHOLOGIST:
             # Psychologists only see notifications targeted at them.
@@ -48,7 +51,11 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 | Q(recipient=self.request.user),
                 category=ActivityLog.RECORD,
             )
-        # Administrator: full audit stream (unchanged).
+        else:
+            # Administrator: the full audit stream, except the second copy of a
+            # move's sentence, which is addressed to the worker who gave the
+            # records up (they already have the receiving worker's).
+            qs = qs.exclude(kind=ActivityLog.KIND_MOVE_COPY)
         category = self.request.query_params.get("category")
         if category:
             qs = qs.filter(category=category)

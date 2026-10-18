@@ -146,14 +146,18 @@ const ACTION_META = {
   // A list of children saved to a file by the browser (backend children/views.py
   // `exported`). The label is the whole sentence: "Exported the Records list (CSV, 40 rows)".
   exported: { icon: 'file-down', tint: 'var(--amber-500)', verb: 'Exported a list', passive: 'Exported a list' },
+  // Records moved between social workers (backend children/transfer.py). The
+  // label is the whole sentence: "Moved 9 records from R. Santos to E. Pascua".
+  transferred: { icon: 'arrow-right-left', tint: 'var(--blue-500)', verb: 'Moved records', passive: 'Moved records' },
 };
 
 function ActivityRow({ entry }) {
   const meta = ACTION_META[entry.action] || { icon: 'dot', tint: 'var(--ink-400)', verb: entry.action, passive: entry.action };
-  const exported = entry.action === 'exported';
-  // An export's label already says what was taken out and how long it was.
-  const label = exported ? (entry.entity_label || meta.verb) : entry.by_them ? meta.verb : meta.passive;
-  const target = exported ? '' : (entry.entity_label || entry.entity_type || '');
+  const sentence = entry.action === 'exported' || entry.action === 'transferred';
+  // An export's label already says what was taken out and how long it was; a
+  // transfer's says which record and between whom.
+  const label = sentence ? (entry.entity_label || meta.verb) : entry.by_them ? meta.verb : meta.passive;
+  const target = sentence ? '' : (entry.entity_label || entry.entity_type || '');
   return (
     <li style={{ display: 'flex', gap: 10, padding: '9px 0', borderBottom: '1px solid var(--divider-row)' }}>
       <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, flex: 'none', borderRadius: '50%', background: 'var(--surface)', border: '1px solid var(--border)', color: meta.tint, marginTop: 1 }}>
@@ -273,8 +277,16 @@ export default function Users() {
    * the account is not in the directory. A link that asks for both gets the add
    * form, and `edit` is dropped with `new` in the one change to the address:
    * left behind it would open that account's drawer the moment the form was
-   * closed, or on the next reload. A blank `edit=` is cleared, not kept. */
-  useOpenFromLink('new', '1', () => openCreate(), !!form, ['edit']);
+   * closed, or on the next reload. A blank `edit=` is cleared, not kept.
+   *
+   * /users?reset=<id> is "Reset a password" on the console: it asks the same
+   * question the drawer's Temporary password button asks, for that account, and
+   * the one-time password is shown by the same dialog afterwards - nowhere else.
+   * It is built like `edit`, and only an ACTIVE account is asked about (the
+   * server refuses any other). `new` and `edit` outrank it and take it out of
+   * the address with them: two effects each rewriting the address from the one
+   * they read would put back what the other removed. */
+  useOpenFromLink('new', '1', () => openCreate(), !!form, ['edit', 'reset']);
   const editParam = searchParams.get('edit');
   const handledEdit = useRef(null);
   useEffect(() => {
@@ -284,6 +296,7 @@ export default function Users() {
     const clear = () => {
       const next = new URLSearchParams(searchParams);
       next.delete('edit');
+      next.delete('reset');
       setSearchParams(next, { replace: true });
     };
     if (editParam === '') { clear(); return; }
@@ -297,6 +310,44 @@ export default function Users() {
     // the drawer each time it was closed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editParam, loading, form, users]);
+
+  // A dialog gives the focus back to whatever had it when it opened. Arriving by
+  // a link, nothing has: the page was only just drawn, so closing the dialog
+  // left the focus on the page body and a keyboard user back at the top. Rest it
+  // on the account's own Actions button first - the one the dialog would have
+  // come from had they picked it in the row - else on the search box.
+  const pageRef = useRef(null);
+  const restFocusOn = (id) => {
+    const page = pageRef.current;
+    (page?.querySelector(`[data-actions-for="${id}"] button`)
+      || page?.querySelector('input[aria-label="Search users"]'))?.focus();
+  };
+
+  const resetParam = searchParams.get('reset');
+  const handledReset = useRef(null);
+  useEffect(() => {
+    if (resetParam === null) { handledReset.current = null; return; }
+    // The add form's link and the edit link clear this parameter with their own.
+    if (searchParams.get('new') === '1' || editParam !== null) return;
+    const clear = () => {
+      const next = new URLSearchParams(searchParams);
+      next.delete('reset');
+      setSearchParams(next, { replace: true });
+    };
+    if (resetParam === '') { clear(); return; }
+    if (loading || form || confirm || handledReset.current === resetParam) return;
+    handledReset.current = resetParam;
+    const target = users.find((u) => String(u.id) === resetParam);
+    clear();
+    if (target && target.status === 'active') {
+      restFocusOn(target.id);
+      setConfirm({ kind: 'reset', user: target });
+    } else toast.error(target
+      ? `${nameOf(target)}'s account is not active, so it has no password to reset.`
+      : 'That account could not be found.');
+    // One-shot, like ?edit= above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resetParam, editParam, loading, form, confirm, users]);
 
   const dirty = !!form && !!pristine && EDITABLE.some((k) => String(form[k] ?? '') !== String(pristine[k] ?? ''));
   const closeForm = () => { setForm(null); setPristine(null); setError(''); setSeekRole(false); };
@@ -534,7 +585,7 @@ export default function Users() {
   const formRole = roleName(form?.role);
 
   return (
-    <div style={{ ...PAGE, position: 'relative' }}>
+    <div ref={pageRef} style={{ ...PAGE, position: 'relative' }}>
       <PageHeader
         title="User Management"
         subtitle="Accounts, roles and the access queue — the only access control this system has"
@@ -705,7 +756,7 @@ export default function Users() {
                               ? <span style={{ color: 'var(--text-body)' }}>{timeAgo(u.last_login)}</span>
                               : <span style={{ color: 'var(--text-faint)' }}>Never</span>}
                           </td>
-                          <td style={{ ...TD, textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
+                          <td data-actions-for={u.id} style={{ ...TD, textAlign: 'right' }} onClick={(e) => e.stopPropagation()}>
                             <Menu label={`Actions for ${nameOf(u)}`} items={menuItems(u)} />
                           </td>
                         </tr>

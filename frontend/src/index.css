@@ -438,6 +438,15 @@ textarea:focus-visible {
   position: relative;
   z-index: 1;
 }
+/* A Button sets its own box-shadow inline (none for the plain and outlined
+   ones, a drop shadow for the filled ones), and an inline style outranks the
+   ring above, so no button showed where the keyboard was. !important is the
+   only thing that beats an inline style, and it is kept to the Button's own
+   class so the inset rings below, which belong to other controls, are not
+   overruled. */
+.racco-btn:focus-visible {
+  box-shadow: var(--shadow-focus) !important;
+}
 /* The header search is a pill with a bare input inside it. The ring above is
    a small-radius box, which on that input would square off the pill's ends
    and sit inside it; the pill carries the ring instead. The placeholder is
@@ -467,6 +476,32 @@ tr:focus-visible {
 .racco-queue-tile:focus-visible {
   box-shadow: inset 0 0 0 2px var(--blue-500);
   border-radius: 0;
+}
+/* The rows of a pick-list inside a scrolling box (the console's "Reset a
+   password"): the ring is drawn inside for the same reason, or the box's edge
+   would cut it. */
+.racco-pick-row:hover {
+  background: var(--ink-25);
+}
+.racco-pick-row:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--blue-500);
+  border-radius: 0;
+  background: var(--ink-25);
+}
+/* On a phone the role would sit beside the name and squeeze the name and the
+   email to three or four lines each; it drops under them instead, in line with
+   the text rather than the avatar (28px and the 11px gap). */
+@media (max-width: 420px) {
+  .racco-pick-row {
+    flex-wrap: wrap;
+  }
+  /* !important: the element's own inline style says flex: none and text-align
+     right, and an inline style outranks a rule. */
+  .racco-pick-role {
+    flex: 0 0 100% !important;
+    padding-left: 39px;
+    text-align: left !important;
+  }
 }
 
 /* Utility classes consumed by the kit */

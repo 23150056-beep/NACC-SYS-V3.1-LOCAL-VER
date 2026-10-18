@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Alert, Badge, Button, Card, FormField, Icon, Input, Note, PAGE, PageHeader, Switch, TD, TH, THEAD_ROW, TR,
 } from '../ui';
@@ -11,6 +11,8 @@ import {
 import { getAgencyProfile, saveAgencyProfile } from '../api/agency';
 import { testEmailDelivery } from '../api/email';
 import { checkSmsGateway, testSmsDelivery } from '../api/sms';
+import { assistantSwitchConfirm } from '../utils/assistantSwitch';
+import { useOpenFromLink } from '../utils/links';
 
 const FEATURE_LABELS = {
   brief: 'Pre-session briefs',
@@ -86,15 +88,27 @@ export default function Settings() {
     getUnansweredQuestions().then(setUnanswered).catch(() => setUnanswered(null));
   }, []);
 
+  /* "Agency details" on the ISA's admin console (/settings?section=agency, see
+   * utils/links.js): bring the card into view and put the cursor in its first
+   * field, once, and clear the parameter. It waits for the card to finish
+   * loading - before then there is no field to focus - and a card that failed to
+   * load still counts, so the link is used up rather than left armed. */
+  const agencyCard = useRef(null);
+  useOpenFromLink('section', 'agency', () => {
+    // The card is the first on the page, so it is usually in view already, and
+    // scrolling it to the top would only hide the page header for nothing: move
+    // the page only when the card's top is off screen. Focusing the first field
+    // then brings that field into view if the window is too short to show it.
+    const card = agencyCard.current;
+    const top = card?.getBoundingClientRect().top;
+    if (card && (top < 56 || top > window.innerHeight - 120)) card.scrollIntoView({ block: 'start' });
+    card?.querySelector('input, textarea')?.focus();
+  }, agency === null);
+
   const save = async (patch) => {
     // Agency-wide: every account feels it the moment it saves.
-    const ok = await confirm('enabled' in patch ? {
-      description: patch.enabled
-        ? 'This turns the assistant on for everyone in the agency.'
-        : 'This turns the assistant off for everyone in the agency — briefs, summaries, remark polishing and the chat panel stop until it is turned on again.',
-      confirmLabel: patch.enabled ? 'Yes, turn it on' : 'Yes, turn it off',
-      tone: patch.enabled ? 'brand' : 'warning',
-    } : {
+    // The switch's own words are shared with the admin console's button.
+    const ok = await confirm('enabled' in patch ? assistantSwitchConfirm(patch.enabled) : {
       description: 'This changes the model runtime the assistant uses, for everyone in the agency.',
       confirmLabel: 'Yes, save the runtime settings',
       details: [['Runtime URL', patch.ollama_url], ['Model', patch.model_name]],
@@ -151,6 +165,7 @@ export default function Settings() {
     <div style={{ ...PAGE, maxWidth: 780 }}>
       <PageHeader title="Settings" subtitle="Administrator only · agency-wide" />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div ref={agencyCard} id="settings-agency" style={{ scrollMarginTop: 12 }}>
         <Card eyebrow="Agency" title="Configuration" padding="16px">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {agency === 'error' && <Alert tone="warning">Could not load the agency details.</Alert>}
@@ -188,6 +203,7 @@ export default function Settings() {
             <Switch checked={sync} onChange={setSync} disabled label="Auto-sync signed reports to NACC" />
           </div>
         </Card>
+        </div>
 
         {/* Email is the one feature whose failures are invisible: the send
             happens on a background thread after the response, so a rejected

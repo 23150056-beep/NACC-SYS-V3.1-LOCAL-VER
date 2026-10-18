@@ -9,6 +9,7 @@ import { useConfirm } from '../../context/ConfirmContext';
 import { useLayout } from '../../context/LayoutContext';
 import { Avatar, Button, Icon, IconChip, ROLE_META, Skeleton } from '../../ui';
 import { clock, timeAgo } from '../../utils/time';
+import ConsoleActions from './ConsoleActions';
 
 /* The ISA's admin console, at the top of their Dashboard.
  *
@@ -19,8 +20,10 @@ import { clock, timeAgo } from '../../utils/time';
  *
  * Everything on it comes from ONE request, GET /api/admin/overview/
  * (backend accounts/admin_overview.py), made when the console opens and again
- * on Refresh. The only other calls are the three Test buttons, and each of
- * those asks for something an administrator can already ask for in Settings.
+ * on Refresh. The only other calls are the three Test buttons, each of which
+ * asks for something an administrator can already ask for in Settings, and the
+ * footer's actions (ConsoleActions.jsx), which are ones an administrator already
+ * had on the Users, Records and Settings screens.
  * Children appear by case number and name only where a queue has to say which
  * record to open; no case note, report, case study or custodian detail is in
  * the response, so none can be on this screen.
@@ -336,8 +339,7 @@ function ConsoleError({ message, onRetry, busy, canRetry }) {
   );
 }
 
-function NeedsYouNow({ needs, error, canRetry, busy, onRetry, accessCount, cols, narrow, tight }) {
-  const navigate = useNavigate();
+function NeedsYouNow({ needs, error, canRetry, busy, onRetry, accessCount, assistant, onChanged, cols, narrow, tight }) {
   const [openKey, setOpenKey] = useState(null);
   // The list that is open is forgotten once its queue has nothing to show (it
   // emptied, or a refresh cut its rows). Left remembered, it hides while the
@@ -359,19 +361,6 @@ function NeedsYouNow({ needs, error, canRetry, busy, onRetry, accessCount, cols,
   const waiting = all.reduce((sum, q) => sum + q.count, 0);
   const queues = all.filter((q) => q.count > 0).length;
   const meta = !needs ? '' : waiting === 0 ? 'All clear' : `${waiting} ${plural(waiting, 'item', 'items')} in ${queues} ${plural(queues, 'queue', 'queues')}`;
-
-  const actionGroups = [
-    {
-      label: 'Accounts',
-      items: [
-        // The count only when somebody is waiting: a permanent "(0)" is a number
-        // that cries wolf. The button stays, for the page it opens.
-        { label: accessCount > 0 ? `Review access (${accessCount})` : 'Review access', icon: 'user-check', to: '/users?tab=requests', primary: accessCount > 0 },
-        { label: 'Add user', icon: 'user-plus', to: '/users?new=1' },
-      ],
-    },
-    { label: 'System', items: [{ label: 'Settings', icon: 'settings', to: '/settings' }] },
-  ];
 
   return (
     <div style={cardStyle}>
@@ -412,28 +401,15 @@ function NeedsYouNow({ needs, error, canRetry, busy, onRetry, accessCount, cols,
         </>
       )}
       {/* The admin actions sit directly under the queues they act on, as the
-          card's footer band. Each one OPENS something (Dashboard.jsx's rule for
-          quick actions); resetting a password or moving records is reached from
-          the person or the record in the lists above, where who is chosen. One
-          grid, so the label column is as wide as the longest label. */}
-      <div style={{ padding: '11px 14px', background: 'var(--ink-25)', borderTop: '1px solid var(--divider)', display: 'grid', gridTemplateColumns: narrow ? 'minmax(0, 1fr)' : 'max-content minmax(0, 1fr)', columnGap: 14, rowGap: narrow ? 6 : 8, alignItems: 'center' }}>
-        {actionGroups.map((g, gi) => (
-          <Fragment key={g.label}>
-            <span className="racco-eyebrow" style={{ fontSize: 'var(--text-3xs)', marginTop: narrow && gi ? 4 : 0 }}>{g.label}</span>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {g.items.map((a) => (
-                <Button
-                  key={a.label} size="sm" variant={a.primary ? 'primary' : 'secondary'}
-                  iconLeft={<Icon name={a.icon} size={15} />}
-                  onClick={() => navigate(a.to)}
-                >
-                  {a.label}
-                </Button>
-              ))}
-            </div>
-          </Fragment>
-        ))}
-      </div>
+          card's footer band (ConsoleActions.jsx). Not while the first answer is
+          awaited: the placeholder tiles are shorter than the real ones, so the
+          band would slide tens of pixels down under the pointer as they arrived,
+          and a press aimed at one button would land on another thing. It is
+          drawn once there are tiles, and when the load failed - that is exactly
+          when "Add user" and "Settings" are still wanted. */}
+      {(needs || error) && (
+        <ConsoleActions accessCount={accessCount} narrow={narrow} assistant={assistant} onChanged={onChanged} />
+      )}
     </div>
   );
 }
@@ -1071,18 +1047,29 @@ export default function AdminConsole() {
   const [busy, setBusy] = useState(true);
   const [checkedAt, setCheckedAt] = useState(null);
   // A reply that arrives after a newer request, or after the console is gone,
-  // is dropped rather than written over what is on screen.
+  // is dropped rather than written over what is on screen. Every call takes the
+  // next number, and only the call that still holds the latest one may write.
   const latest = useRef(0);
   // One request at a time. Strict Mode mounts, unmounts and mounts again in
   // development, which would otherwise ask twice for the same answer.
   const inFlight = useRef(null);
 
-  const load = useCallback(async () => {
+  // A plain Refresh joins a request that is already out. A read asked for after
+  // a write (`fresh`: the footer's transfer and assistant switch) must not: that
+  // request left before the write and may carry the old picture, so it sends its
+  // own, and the older one's reply is dropped when it arrives, whichever of the
+  // two comes back first.
+  const load = useCallback(async ({ fresh = false } = {}) => {
     const mine = ++latest.current;
     setBusy(true);
     try {
-      if (!inFlight.current) {
-        inFlight.current = api.get('/admin/overview/').finally(() => { inFlight.current = null; });
+      if (fresh || !inFlight.current) {
+        const sent = api.get('/admin/overview/').finally(() => {
+          // Only the request that is still the current one clears the slot; an
+          // older one settling late must not hide a newer one still out.
+          if (inFlight.current === sent) inFlight.current = null;
+        });
+        inFlight.current = sent;
       }
       const res = await inFlight.current;
       if (mine !== latest.current) return;
@@ -1101,6 +1088,11 @@ export default function AdminConsole() {
       if (mine === latest.current) setBusy(false);
     }
   }, []);
+
+  // The three ways to ask are named so no button hands its click event to
+  // `load` as if it were the options.
+  const refresh = useCallback(() => load(), [load]);
+  const refreshAfterWrite = useCallback(() => load({ fresh: true }), [load]);
 
   useEffect(() => {
     load();
@@ -1124,13 +1116,16 @@ export default function AdminConsole() {
 
   const accessCount = data?.needs.find((q) => q.key === 'access_requests')?.count ?? pendingAccess ?? 0;
   const noSocialWorker = data?.needs.find((q) => q.key === 'no_social_worker')?.count ?? 0;
+  // The assistant's own row in System health: the footer's switch reads it.
+  const assistant = data?.health.find((h) => h.key === 'assistant') || null;
 
   return (
     <section aria-label="Admin console" style={{ display: 'flex', flexDirection: 'column', gap: 12, minWidth: 0, position: 'relative' }}>
-      <ConsoleHeader checkedAt={checkedAt} busy={busy} failed={!!error && !!data} onRefresh={load} />
+      <ConsoleHeader checkedAt={checkedAt} busy={busy} failed={!!error && !!data} onRefresh={refresh} />
       <NeedsYouNow
-        needs={data?.needs} error={data ? '' : error} canRetry={!refused} busy={busy} onRetry={load}
-        accessCount={accessCount} cols={tileCols} narrow={paneWidth < 560} tight={tight}
+        needs={data?.needs} error={data ? '' : error} canRetry={!refused} busy={busy} onRetry={refresh}
+        accessCount={accessCount} assistant={assistant} onChanged={refreshAfterWrite}
+        cols={tileCols} narrow={paneWidth < 560} tight={tight}
       />
       {data ? (
         <>
