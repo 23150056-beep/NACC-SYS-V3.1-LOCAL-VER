@@ -406,3 +406,53 @@ class InternalArgumentsTest(SimpleTestCase):
             with self.subTest(bad=bad):
                 self.assertFalse(tools.validate(
                     "get_child_summary", {"child_id": bad}, allow_internal=True).ok)
+
+
+class NoRestrictionWordsTest(SimpleTestCase):
+    def test_period_any_is_the_same_as_omitting_it(self):
+        for word in ("any", "all", "lahat", "ANY ", "anytime", "All Time",
+                     "none", ""):
+            call = tools.validate("get_statistics", {"period": word})
+            self.assertTrue(call.ok, word)
+            self.assertNotIn("period", call.args)
+            self.assertEqual("children", call.args["measure"])
+
+    def test_the_two_failing_questions(self):
+        for measure in ("first_session_wait", "pre_assessment_duration"):
+            call = tools.validate(
+                "get_statistics", {"measure": measure, "period": "any"})
+            self.assertTrue(call.ok)
+            self.assertEqual(measure, call.args["measure"])
+            self.assertNotIn("period", call.args)
+
+    def test_optional_enum_with_a_default_gets_the_default(self):
+        call = tools.validate("get_statistics", {"by": "any"})
+        self.assertTrue(call.ok)
+        self.assertEqual("none", call.args["by"])
+
+    def test_a_required_enum_still_rejects_any(self):
+        call = tools.validate("list_my_appointments", {"when": "any"})
+        self.assertFalse(call.ok)
+        self.assertIn("'when' must be one of", call.error)
+
+    def test_a_required_flag_is_never_treated_as_omitted(self):
+        meta = {"enum": ["a", "b"], "required": True}
+        self.assertFalse(tools._means_no_restriction("any", meta))
+
+    def test_an_enum_that_contains_the_word_keeps_it(self):
+        call = tools.validate("get_statistics", {"status": "any"})
+        self.assertEqual("any", call.args["status"])
+        call = tools.validate("get_statistics", {"status": "ALL"})
+        self.assertEqual("any", call.args["status"])
+
+    def test_role_any_still_means_anyone(self):
+        call = tools.validate("count_people", {"role": "any"})
+        self.assertEqual("anyone", call.args["role"])
+
+    def test_a_real_wrong_value_is_still_rejected(self):
+        call = tools.validate("get_statistics", {"period": "week"})
+        self.assertFalse(call.ok)
+        self.assertEqual(
+            "'period' must be one of today, yesterday, tomorrow, this_week, "
+            "last_week, next_week, this_month, last_month, this_year, "
+            "last_year — got 'week'.", call.error)

@@ -141,6 +141,22 @@ def _clean_key(key):
     return _PUNCT.sub("", str(key)).strip().lower()
 
 
+# Words that mean "no restriction". For an optional enum argument that does not
+# list the word itself, saying one is the same as leaving the argument out.
+_NO_RESTRICTION = frozenset({
+    "any", "all", "lahat", "anytime", "all time", "all_time", "none", "",
+})
+
+
+def _means_no_restriction(value, meta):
+    if "enum" not in meta or meta.get("required"):
+        return False
+    if not isinstance(value, str):
+        value = "" if value is None else str(value)
+    low = value.strip().lower()
+    return low in _NO_RESTRICTION and low not in meta["enum"]
+
+
 def _coerce(param, value, meta):
     """Return (value, error). Enums are matched case-insensitively, then via
     the alias table, and only then rejected."""
@@ -211,7 +227,10 @@ def validate(tool, raw_args, *, allow_internal=False):
                 args[param] = meta["default"]
             continue
         value, err = _coerce(param, supplied[param], meta)
-        if err:
+        if err and _means_no_restriction(supplied[param], meta):
+            if "default" in meta:
+                args[param] = meta["default"]
+        elif err:
             errors.append(err)
         else:
             args[param] = value
