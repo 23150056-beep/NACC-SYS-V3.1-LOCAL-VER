@@ -676,6 +676,34 @@ Built 26 Aug 2026. A docked panel on every protected screen, backed by
   discarded by the validator before it can reach a queryset.
 - **Stateless — no conversation history.** History would sit after the cached
   prefix and be re-prefilled at CPU speed every turn.
+- **Children's names never reach the chat model** (20 Oct 2026,
+  `assistant/redact.py`). A question is masked before it is sent - full names,
+  first+last and last names of the children in the asker's OWN
+  `visible_children` become `CHILD` / `CHILD 1`, phones `PHONE`, emails
+  `EMAIL` - and the server puts the name back into the tool's arguments. Only
+  the asker's own children are known, so another SW's child is never
+  recognised (and the model never learns it is a child). A first name alone is
+  not masked, and a last name alone only from four letters ("Ang" is Tagalog).
+  The stored question and tool call are the masked ones. CHAT_SYSTEM's
+  examples are in the token form; that change needs the owner's
+  `ai_eval --feature chat`.
+- **The model runtime stays on this machine**: `ollama_url` must be loopback
+  unless `ASSISTANT_ALLOW_REMOTE_RUNTIME=true`, checked by the Settings API,
+  the Django admin AND `get_ai_client()`, so an address saved any other way is
+  never used. Every change of address or model is a security ActivityLog entry
+  (hosts only).
+- **Assistant text is kept only as long as it is used**
+  (`assistant/retention.py`, run at most hourly per process from `run_job` and
+  the chat path, or `manage.py prune_assistant_text [--dry-run]`): chat text 30
+  days; brief and polish output 2 days; a summary once confirmed, after 30 days
+  or when its document goes; a self-report reason 30 days. Rows and their
+  metadata stay - the access log and metrics read them - and a non-chat
+  `input_ref` is never blanked. The admin view of `AssistantJob` is read-only
+  and shows no text. The ISA's unanswered-questions list shows the masked
+  question and names a role only when 3+ active users hold it.
+- **`ai_eval` against a hosted model** runs only the fixed chat and
+  self-report cases; the features that send real records are refused unless
+  `--allow-hosted-records` AND DEBUG.
 - **Concern search matches words, not the whole phrase.** The model says
   "school refusal"; this agency records "School attendance difficulty".
   Whole-phrase `icontains` returned **zero children for every real question**
@@ -2006,6 +2034,14 @@ are decoration and not held to the text rule.
 labelled without touching ~200 call sites. Pass your own `id` or `aria-label`
 to opt out.
 
+**Toasts are two live regions** (`ToastContext.jsx`, 20 Oct 2026): errors
+`role="alert"` and kept until dismissed, the rest `role="status"`, at least 5 s
+and longer for longer text. An assistant failure that matters (Polish, AI
+summary, the brief, the census narrative, a 503 saying it is switched off) is
+also said inline beside its button, persistently - a toast alone is gone
+before anyone reads it. A status that announces stages (`LiveStatus` in `ui`)
+stays mounted and changes its words; one that mounts with its text is not read.
+
 Audit with **axe-core**, never a hand-rolled probe. Mine gave three different
 answers and each was its own bug: it missed a fixed header's background, read
 `rgba(255,255,255,0.1)` as opaque white, then sampled a badge's coloured dot
@@ -2044,7 +2080,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,828 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 2,981 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 
