@@ -9,6 +9,7 @@ app-server workers, point CACHES at Redis or Memcached instead so every
 worker sees the same counters.
 """
 
+import re
 import time
 
 from django.conf import settings
@@ -16,9 +17,46 @@ from django.core.cache import cache
 
 _PREFIX = "login-lock:"
 
+# What the audit trail and the ISA's console say in place of a sign-in name
+# that is not an email address.
+NOT_AN_EMAIL = "an unrecognised sign-in name"
+# The letters an address is made of: word characters (so Ñ and the rest count),
+# and the few marks that turn up in a local part. A domain is dot-separated
+# labels of letters, digits and hyphens. Anything wider (a colon, a bracket, a
+# semicolon, an exclamation mark) is a sentence or a password, not an address.
+_EMAIL_SHAPE = re.compile(r"[\w.%+'-]+@[\w-]+(?:\.[\w-]+)+")
+
+# The audit line written when ONE ADDRESS is locked out, as opposed to one
+# sign-in name: after LOGIN_IP_MAX_ATTEMPTS failures from it, whoever signs in
+# from there is turned away, the ISA included. It names no address and no
+# person, so it can be a fixed sentence the console picks out whole.
+ADDRESS_LOCK_LABEL = "Sign-ins from one address locked after repeated failures"
+
+
+def readable_sign_in_name(typed):
+    """What may be written down about a name typed into the sign-in box.
+
+    The box is open to anyone, and people type the wrong thing into it: a
+    password, a sentence, a blank. Whatever was typed goes into the audit line
+    of a lockout and from there onto the ISA's screen, so only something that
+    looks like an email address (letters, digits and the few marks an address
+    uses, an at sign and a dotted host after it, short enough for the audit
+    column) is kept as typed. Everything else is `NOT_AN_EMAIL`.
+
+    A password that happens to look like an address ("Summer2024@home.net")
+    cannot be told from one, and is kept: that much of the risk stays.
+    """
+    text = typed.strip() if isinstance(typed, str) else ""
+    if len(text) <= 120 and text.isprintable() and _EMAIL_SHAPE.fullmatch(text):
+        return text
+    return NOT_AN_EMAIL
+
 
 def _norm_email(email):
-    return (email or "").strip().lower()
+    # The sign-in box is open to anyone and a JSON body can put a list, a
+    # number or an object where the address goes. Those have no address to
+    # key a lock on, so they share the key a blank one has.
+    return email.strip().lower() if isinstance(email, str) else ""
 
 
 def client_ip(request):
@@ -90,30 +128,33 @@ def _bump(counter_key):
 def register_failure(email, ip):
     """Record a failed login attempt against both the combo and IP counters.
 
-    Returns (locked, retry_after_seconds, new_lockout). `new_lockout` is
-    True only on the attempt that just crossed a threshold, so the caller
-    can log the lockout exactly once — once a lock exists, is_locked()
-    blocks the request before this function is called again for the same
-    combo/IP, so it never fires twice for the same lockout.
+    Returns (locked, retry_after_seconds, engaged). `engaged` names the locks
+    that were set by THIS attempt: "account" for the email+IP combination,
+    "address" for the IP-wide lock, both when one attempt crossed both
+    thresholds, and an empty tuple otherwise. It is only non-empty on the
+    attempt that just crossed a threshold, so the caller can log each lockout
+    exactly once — once a lock exists, is_locked() blocks the request before
+    this function is called again for the same combo/IP, so it never fires
+    twice for the same lockout.
     """
     combo_count = _bump(_combo_counter_key(email, ip))
     ip_count = _bump(_ip_counter_key(ip))
 
-    new_lockout = False
+    engaged = []
     retry_after = 0
     unlock_at = time.time() + _window_seconds()
 
     if combo_count >= settings.LOGIN_MAX_ATTEMPTS:
         if cache.add(_combo_lock_key(email, ip), unlock_at, timeout=_window_seconds()):
-            new_lockout = True
+            engaged.append("account")
         retry_after = max(retry_after, _window_seconds())
 
     if ip_count >= settings.LOGIN_IP_MAX_ATTEMPTS:
         if cache.add(_ip_lock_key(ip), unlock_at, timeout=_window_seconds()):
-            new_lockout = True
+            engaged.append("address")
         retry_after = max(retry_after, _window_seconds())
 
-    return retry_after > 0, retry_after, new_lockout
+    return retry_after > 0, retry_after, tuple(engaged)
 
 
 def clear_failures(email, ip):

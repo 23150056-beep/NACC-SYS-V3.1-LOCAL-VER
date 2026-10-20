@@ -293,12 +293,20 @@ REST_FRAMEWORK = {
             "ASSISTANT_CHAT_RATE", "30/hour"),
         "assistant_draft": None if _TESTING else os.getenv(
             "ASSISTANT_DRAFT_RATE", "20/hour"),
+        # The note a screen sends after it saves a list of children to a file
+        # (children/views.py `exported`). Twenty files an hour is far more than
+        # anyone makes by hand; it is the ceiling on a script.
+        "exports": None if _TESTING else os.getenv("EXPORT_LOG_RATE", "20/hour"),
     },
 }
 
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    # Stamp `last_login` on a password sign-in as the Google door always has.
+    # Left off, Users and the profile page said "Never" for everyone who signs
+    # in with a password.
+    "UPDATE_LAST_LOGIN": True,
 }
 
 # --- Google Sign-In (staff and psychologists) -----------------------------

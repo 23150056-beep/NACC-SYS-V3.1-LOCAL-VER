@@ -139,7 +139,14 @@ export default function Children() {
   const [apptsByChild, setApptsByChild] = useState({});
   const [searchParams, setSearchParams] = useSearchParams();
   const q = searchParams.get('q') || '';
-  const [status, setStatus] = useState('active');
+  // A link can ask for a tab (the ISA's console sends "Possible duplicates" here
+  // with status=all, because a repeat can be a closed record that the Active tab
+  // hides). It is read as the page opens and again whenever the address changes
+  // to one; after that, the tab the person picks is what counts.
+  const statusParam = searchParams.get('status');
+  const asked = ['active', 'inactive', 'all'].includes(statusParam) ? statusParam : null;
+  const [status, setStatus] = useState(asked || 'active');
+  useEffect(() => { if (asked) setStatus(asked); }, [asked]);
   const [sortMode, setSortMode] = useState('newest');
   const [reasonFilter, setReasonFilter] = useState(''); // Archived tab only (admin/staff)
   const [sel, setSel] = useState(null); // detail drawer record
@@ -213,8 +220,12 @@ export default function Children() {
   rows.forEach((c) => { counts[c.status] = (counts[c.status] || 0) + 1; });
 
   // Adviser: improve alphabetical sorting throughout the system.
+  // Both sides composed and with single spaces, so a name saved as N + a
+  // combining tilde is found by the same letters typed as one character.
+  const fold = (t) => String(t || '').normalize('NFC').toLowerCase().replace(/\s+/g, ' ').trim();
+  const wanted = fold(q);
   const visible = rows
-    .filter((c) => c.fullname.toLowerCase().includes(q.toLowerCase()) || c.ref.toLowerCase().includes(q.toLowerCase()))
+    .filter((c) => fold(c.fullname).includes(wanted) || c.ref.toLowerCase().includes(wanted))
     .filter((c) => status === 'all' || c.status === status)
     .filter((c) => !showArchiveColumns || !reasonFilter || c.termination?.reason_category === reasonFilter)
     .filter((c) => !isAdmin || !swFilter
@@ -287,6 +298,11 @@ export default function Children() {
     a.download = `racco1-records-${localDate(new Date())}.csv`;
     a.click();
     URL.revokeObjectURL(url);
+    // The file is made here, not by the server, so the server cannot know it
+    // was made unless told. This is a record of honest use and not a control:
+    // it is sent after the file is saved, and a failure to send is nobody's
+    // business and never stops or undoes the export.
+    api.post('/children/exported/', { rows: visible.length }).catch(() => {});
   };
 
   const canTerminate = (c) => c.status === 'active'

@@ -114,7 +114,7 @@ export function Badge({ children, tone = 'neutral', solid = false, size = 'md', 
 }
 
 /* ----------------------------- Button ----------------------------- */
-export function Button({ children, variant = 'primary', size = 'md', iconLeft = null, iconRight = null, fullWidth = false, disabled = false, type = 'button', onClick, style = {}, ...rest }) {
+export function Button({ children, variant = 'primary', size = 'md', iconLeft = null, iconRight = null, fullWidth = false, disabled = false, type = 'button', onClick, style = {}, className = '', ...rest }) {
   const sizes = {
     sm: { height: 32, padding: '0 13px', fontSize: 12.5, gap: 6, radius: 'var(--radius-sm)' },
     md: { height: 38, padding: '0 15px', fontSize: 13.5, gap: 8, radius: 'var(--radius-control)' },
@@ -138,6 +138,7 @@ export function Button({ children, variant = 'primary', size = 'md', iconLeft = 
   return (
     <button
       type={type} disabled={disabled} onClick={onClick}
+      className={className ? `racco-btn ${className}` : 'racco-btn'}
       style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: s.gap, height: s.height, padding: s.padding, fontSize: s.fontSize, fontFamily: 'var(--font-sans)', fontWeight: 700, lineHeight: 1, borderRadius: s.radius, cursor: disabled ? 'not-allowed' : 'pointer', width: fullWidth ? '100%' : 'auto', whiteSpace: 'nowrap', opacity: disabled ? 0.5 : 1, transition: 'transform var(--dur-fast) var(--ease-out), filter var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out)', ...v, ...style }}
       onMouseDown={(e) => { if (!disabled) e.currentTarget.style.transform = 'translateY(1px)'; }}
       onMouseUp={(e) => { if (!disabled) e.currentTarget.style.transform = 'translateY(-1px)'; }}

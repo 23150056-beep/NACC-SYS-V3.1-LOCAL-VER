@@ -5,6 +5,25 @@ const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
 
 const api = axios.create({ baseURL });
 
+// The hosted demo's server sleeps when nobody has used it for a while, and
+// waking it takes up to a minute (migrate and the address steps run before it
+// answers). So the pages someone signs in from call this on open: the server
+// is waking while they type, and the sign-in request finds it up instead of
+// being the thing that wakes it. /healthz/ sits beside /api, not under it, and
+// reads the database too, which wakes that as well. Fire and forget: the
+// answer is not wanted, a failure is nobody's business, and a page that asks
+// twice (Strict Mode, or sign-in then sign-up) still sends one request.
+const serverOrigin = baseURL.replace(/\/api\/?$/, '');
+let wakeSent = false;
+
+export function wakeServer() {
+  if (wakeSent) return;
+  wakeSent = true;
+  try {
+    fetch(`${serverOrigin}/healthz/`, { cache: 'no-store' }).catch(() => {});
+  } catch { /* never in the way of signing in */ }
+}
+
 api.interceptors.request.use((config) => {
   const token = getAccess();
   if (token) config.headers.Authorization = `Bearer ${token}`;

@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { wakeServer } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { Button, FormField, Input, PasswordInput, Alert, Icon, Modal, ROLE_META, roleLabel } from '../ui';
@@ -11,6 +12,48 @@ import GoogleSignInButton from '../components/GoogleSignInButton';
 // absent on purpose: that account is created by an existing administrator and
 // never through this door.
 const REQUESTABLE = ['Staff', 'Psychologist'];
+
+// What the sign-in says when it takes a while. On the hosted demo the server
+// sleeps when nobody has used it for a while and waking it takes up to a
+// minute, so a button that says "Logging in…" for twenty seconds reads as
+// broken. It takes the place of the footer links, which are no use mid
+// sign-in, and is cut to their size: two centred lines of the same type. The
+// card is centred, so anything that changes its height moves the fields, and
+// the button slid out from under the pointer of someone waiting on it - which
+// is also why it is not a boxed notice under the button, nor a reserved box
+// that would make every sign-in's card taller for a note most never see.
+//
+// SlowSignIn is mounted only while a sign-in is in progress: its clock starts
+// with the attempt and it is gone the moment the request settles, so a quick
+// answer never sees it. The region it speaks through is mounted before any of
+// that, so the sentence is announced when it appears. The seconds stay out of
+// what a screen reader is told - a count every second is noise.
+const SLOW_SIGN_IN_AFTER = 3;
+
+function SlowSignIn() {
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    const t = setInterval(() => setSecs(Math.floor((Date.now() - started) / 1000)), 500);
+    return () => clearInterval(t);
+  }, []);
+  if (secs < SLOW_SIGN_IN_AFTER) return null;
+  return (
+    <>
+      <div>
+        <span style={{ display: 'inline-flex', width: 14, height: 14, marginRight: 6,
+                       verticalAlign: 'middle', color: 'var(--blue-600)',
+                       animation: 'racco-spin 1.1s linear infinite' }}>
+          <Icon name="loader-2" size={14} />
+        </span>
+        Waking the server (up to a minute)
+      </div>
+      <div>
+        Keep this page open<span aria-hidden="true"> · {secs} s</span>
+      </div>
+    </>
+  );
+}
 
 export default function Login() {
   const { login, loginWithGoogle } = useAuth();
@@ -30,6 +73,9 @@ export default function Login() {
   // Held only between the role question and the answer. Google's credential is
   // short-lived and single-purpose, and nothing outside this component sees it.
   const [credential, setCredential] = useState(null);
+
+  // Wake the server while the person types, so their sign-in finds it up.
+  useEffect(() => { wakeServer(); }, []);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -110,7 +156,6 @@ export default function Login() {
   }[view] || 'Log in to your account';
 
   const subheading = {
-    login: 'Continue with Google, or use your agency credentials.',
     help: 'Password resets are handled by your administrator.',
     pending: 'An administrator has to approve your access.',
   }[view] || '';
@@ -118,13 +163,25 @@ export default function Login() {
   // The way out of every view. On the form it is the sign-up route; on the
   // two dead ends it is the way back, because a screen someone lands on with
   // nothing to click is where they decide the system is broken.
+  //
+  // On the form it is also where a slow sign-in speaks (SlowSignIn, above). The
+  // links stay in the flow and give the box its height; the note lies over
+  // them in the same grid cell, and the links are hidden rather than removed
+  // while signing in, so nothing changes size at the click or at 3 s. The live
+  // region is pinned to the top of the cell so that, empty, it never lies over
+  // the links.
   const footer = view === 'login'
     ? (
-      <>
-        No account yet? <AuthLink to="/signup">Request access</AuthLink>
-        <br />
-        Already asked for access? <AuthLink to="/signup?confirm=1">Confirm your email</AuthLink>
-      </>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)' }}>
+        <div style={{ gridArea: '1 / 1', visibility: busy ? 'hidden' : 'visible' }}>
+          No account yet? <AuthLink to="/signup">Request access</AuthLink>
+          <br />
+          Already asked for access? <AuthLink to="/signup?confirm=1">Confirm your email</AuthLink>
+        </div>
+        <div role="status" aria-live="polite" style={{ gridArea: '1 / 1', alignSelf: 'start' }}>
+          {busy && <SlowSignIn />}
+        </div>
+      </div>
     )
     : (
       <button type="button"

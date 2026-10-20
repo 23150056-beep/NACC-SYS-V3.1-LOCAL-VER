@@ -1,5 +1,6 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
+from accounts.admin_overview import AdminOverviewView
 from accounts.token_auth import PasswordBoundTokenRefreshView
 from accounts.views import (
     LoginView, MeView, ChangePasswordView, UserViewSet, RoleListView, PsychologistListView,
@@ -21,6 +22,8 @@ urlpatterns = [
     # Google Sign-In (staff and psychologists only — see accounts/google_auth.py)
     path("auth/google/", GoogleLoginView.as_view(), name="google-login"),
     path("auth/google/config/", GoogleAuthConfigView.as_view(), name="google-config"),
+    # The ISA's console: everything waiting on them, in one request.
+    path("admin/overview/", AdminOverviewView.as_view(), name="admin-overview"),
     path("sms-test/", SmsConfigTestView.as_view(), name="sms-test"),
     path("email-test/", EmailConfigTestView.as_view(), name="email-test"),
     path("auth/refresh/", PasswordBoundTokenRefreshView.as_view(), name="token_refresh"),

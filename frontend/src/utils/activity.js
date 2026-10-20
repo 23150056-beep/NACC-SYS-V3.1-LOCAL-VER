@@ -24,6 +24,12 @@ export const ACTION_META = {
   reopened: { icon: 'undo-2', color: 'var(--amber-700)', bg: 'var(--amber-50)' },
   // A duplicate record removed by the ISA (backend children/duplicates.py).
   removed: { icon: 'trash-2', color: 'var(--red-700)', bg: 'var(--red-50)' },
+  // A list of children saved to a file by the browser (backend children/views.py
+  // `exported`): who took it out, which list and how many rows.
+  exported: { icon: 'file-down', color: 'var(--amber-700)', bg: 'var(--amber-50)' },
+  // Records moved from one social worker to another by the ISA (backend
+  // children/transfer.py): who held them, who holds them now.
+  transferred: { icon: 'arrow-right-left', color: 'var(--blue-700)', bg: 'var(--blue-50)' },
 };
 
 // Worded so they read right to the psychologist asked, to the social worker
@@ -49,6 +55,12 @@ export function eventText(e) {
   // The record is gone, so the label is its case reference alone:
   // "C-0050 (duplicate of C-0049)".
   if (e.action === 'removed') return `Removed duplicate record ${e.entity_label || ''}`.trim();
+  // The label is the whole sentence: "Exported the Records list (CSV, 40 rows)".
+  if (e.action === 'exported') return e.entity_label || 'Exported a list';
+  // Likewise a transfer: "Moved 9 records from R. Santos to E. Pascua", the one
+  // sentence the feeds carry for a move (the line for each record is the audit
+  // trail and is left out of them, backend activity/views.py).
+  if (e.action === 'transferred') return e.entity_label || 'Moved records';
   if (e.entity_type === 'CaseStudy') {
     return `${CASE_STUDY_TEXT[e.action] || 'Edited the case study for'} ${e.entity_label || 'a child'}`;
   }
@@ -62,6 +74,10 @@ export function eventText(e) {
 
 export function eventDestination(e, role) {
   const type = (e.entity_type || '').toLowerCase();
+  // The sentence names nobody's record, and reaches the worker the records left
+  // (for whom a child's page is a 404 now) as well as the one they went to;
+  // Records is right for both, and for the ISA.
+  if (e.action === 'transferred') return '/children';
   // A psychologist's answer lives on their Dashboard: the child is not
   // theirs yet (or, after a transfer, no longer), so its page would 404.
   if (type === 'assignment') {

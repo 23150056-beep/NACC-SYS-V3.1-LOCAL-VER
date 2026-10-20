@@ -29,6 +29,7 @@ import re
 import unicodedata
 
 from django.db import transaction
+from django.db.models import Count
 from django.http import Http404
 from rest_framework import status
 from rest_framework.response import Response
@@ -107,6 +108,34 @@ def same_child(first, last, birth, exclude=None):
         qs = qs.exclude(pk=exclude)
     return [c for c in qs.order_by("-updated_at")
             if (_key(c.first_name), _key(c.last_name)) == wanted]
+
+
+def duplicate_groups():
+    """Every set of two or more records for what `same_child` calls one child,
+    whoever holds them and whether they are active or closed.
+
+    The ISA's console lists these, because the checks above stop a second
+    record being ADDED and say nothing about the pairs that got in before they
+    existed. It judges "the same" with `_key` and the three-part rule above and
+    nothing of its own, so the console and the intake form cannot disagree
+    about who counts as a repeat.
+
+    Two queries however many children there are: the birth dates held by more
+    than one record, then only the records on those dates. The names are
+    compared in Python for the reason `_key` gives.
+    """
+    shared = (Child.objects.filter(birth_date__isnull=False)
+              .values("birth_date").annotate(n=Count("pk")).filter(n__gt=1)
+              .values("birth_date"))
+    held = (Child.objects.filter(birth_date__in=shared)
+            .only("pk", "first_name", "last_name", "birth_date", "fullname", "status")
+            .order_by("pk"))
+    groups = {}
+    for child in held:
+        first, last = _key(child.first_name), _key(child.last_name)
+        if first and last:
+            groups.setdefault((first, last, child.birth_date), []).append(child)
+    return [g for g in groups.values() if len(g) > 1]
 
 
 def refusal_for_second_record(request, first, last, birth):

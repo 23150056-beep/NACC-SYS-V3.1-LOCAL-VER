@@ -26,6 +26,24 @@ function read() {
   return typeof window === 'undefined' ? 1440 : window.innerWidth;
 }
 
+/* The header's search bar, an inch (96px) longer than it was at the owner's
+ * request (12 Oct 2026): 306 under 1180, 364 to 1399, 416 from 1400. The tab
+ * strip beside it shrinks to make the room, down to its 36px a tab.
+ *
+ * Only a narrow window runs out of room. Under 842 the "More" button costs the
+ * strip 66px, so the bar takes what is spare - never less than it had - and
+ * reaches the full inch at 842. From there it always fits, so it only ever
+ * grows with the window. That is also why the account's name and role wait for
+ * 1280 (`identityOn`): they cost 151px, and at 1080 there was no room left for
+ * them AND the inch, so the bar had to shrink 96px as the window grew.
+ * `spare` is worked out against the widest header there is (the ISA: six tabs,
+ * the longest role label) with 30px to play with, so a different font does not
+ * push a tab under the bar. */
+function searchBarWidth(width) {
+  const was = width < 1180 ? 210 : width < 1400 ? 268 : 320;
+  return Math.min(was + 96, Math.max(was, width - 536));
+}
+
 export function LayoutProvider({ children }) {
   const [width, setWidth] = useState(read);
   // Which screen is showing decides whether there is a third column at all,
@@ -68,10 +86,14 @@ export function LayoutProvider({ children }) {
       // not reserve a 234px column once the rail is gone.
       brandWidth: railMode === 'hidden' ? 'auto' : leftRailW,
       brandTextOn: width >= 1080,
-      identityOn: width >= 1080,
+      // The rail's account card names the signed-in user from 1080, so the
+      // header repeats it only where it is cheap: 1280 leaves the tabs their
+      // room even for a long first name.
+      identityOn: width >= 1280,
       utilityIconsOn: width >= 1024,
-      searchWidth: width < 1180 ? 210 : width < 1400 ? 268 : 320,
+      searchWidth: searchBarWidth(width),
       searchHintOn: width >= 1180,
+      // Wider than the bar at every width (its longest is 416).
       searchPanelWidth: width < 1180 ? 340 : 430,
       tabWidth: width < 1180 ? 62 : width < 1400 ? 74 : 86,
       // Column folds, keyed off the PANE and not the window.
@@ -101,7 +123,7 @@ export function useLayout() {
     leftRailOn: true, railLabels: true, leftRailWidth: 234,
     rightRailOn: false, rightRailWidth: 0, brandWidth: 234,
     brandTextOn: true, identityOn: true, utilityIconsOn: true,
-    searchWidth: 320, searchHintOn: true, searchPanelWidth: 430, tabWidth: 86,
+    searchWidth: 416, searchHintOn: true, searchPanelWidth: 430, tabWidth: 86,
     recordsCategoryCol: true, recordsPsychCol: true,
     monitorPsychCol: true, monitorPaCol: true, monitorLastCol: true, monitorClassCol: true,
   };

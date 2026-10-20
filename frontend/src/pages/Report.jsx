@@ -84,6 +84,9 @@ export default function Report() {
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
     const a = document.createElement('a'); a.href = url; a.download = 'result-entries.csv'; a.click();
     URL.revokeObjectURL(url);
+    // Names every child in the first column, so it is written down like the
+    // Records list is (see Children.jsx exportCsv). Fire and forget.
+    api.post('/children/exported/', { rows: visibleEntries.length, what: 'results' }).catch(() => {});
   };
 
   const downloadCaseReferral = async (f) => {

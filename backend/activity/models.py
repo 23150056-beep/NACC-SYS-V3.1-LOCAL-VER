@@ -14,6 +14,16 @@ class ActivityLog(models.Model):
     # type "Child"; the label reads "C-0050 (duplicate of C-0049)", since the
     # record it names is gone.
     REMOVED = "removed"
+    # A list of children saved to a file by the browser (children/views.py
+    # `exported`). The file is built on the screen, so this row is the only
+    # record that anyone took the list out of the system and how long it was.
+    EXPORTED = "exported"
+    # Records moved from one social worker to another by the ISA (children/
+    # transfer.py). Entity type "Child"; the id is the child's on the line for
+    # each record, and none on the lines that tell the workers. The label is
+    # the whole sentence: "Moved C-0042 · Ana Cruz from R. Santos to E. Pascua"
+    # for a record, "Moved 9 records from R. Santos to E. Pascua" for a worker.
+    TRANSFERRED = "transferred"
     ACTION_CHOICES = [
         (CREATED, "Created"), (UPDATED, "Updated"),
         (ARCHIVED, "Archived"), (LOGIN, "Login"),
@@ -21,6 +31,8 @@ class ActivityLog(models.Model):
         (DECLINED, "Declined"), (WITHDRAWN, "Withdrawn"),
         (FINALIZED, "Finalized"), (REOPENED, "Reopened"),
         (REMOVED, "Removed"),
+        (EXPORTED, "Exported"),
+        (TRANSFERRED, "Transferred"),
     ]
 
     RECORD, USER, SECURITY = "record", "user", "security"
@@ -41,6 +53,23 @@ class ActivityLog(models.Model):
     entity_type = models.CharField(max_length=50, blank=True)
     entity_label = models.CharField(max_length=255, blank=True)
     entity_id = models.PositiveIntegerField(null=True, blank=True)
+    # What a USER line IS, for the ISA's console (accounts/admin_overview.py).
+    # The label cannot say: it opens with a person's name, and anyone may sign
+    # up under any name, including one that reads like the end of a sentence
+    # ("... access approved as Administrator"). So the code that writes the
+    # line says what it is, and nothing reads it back out of the words. Blank
+    # on lines written before this column existed and on kinds nothing needs
+    # told apart. `db_default` lets a release that predates the column keep
+    # inserting rows during a deploy.
+    KIND_APPROVAL, KIND_DECLINE, KIND_ROLE = "approval", "decline", "role"
+    KIND_RESET, KIND_REACTIVATE = "reset", "reactivate"
+    # The two kinds of a RECORD line the feeds leave out (activity/views.py).
+    # A move of records writes a line for each record, as its audit trail, and
+    # a sentence for each worker told: the feeds hold the newest 50 lines, so
+    # the per-record ones would fill everybody's bell, and the administrator
+    # would read the second sentence as a repeat of the first.
+    KIND_MOVE_DETAIL, KIND_MOVE_COPY = "move_detail", "move_copy"
+    kind = models.CharField(max_length=20, blank=True, default="", db_default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

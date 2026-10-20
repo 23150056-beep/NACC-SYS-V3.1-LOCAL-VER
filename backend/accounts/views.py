@@ -18,7 +18,8 @@ from accounts.google_auth import (
 )
 from accounts.display import display_name
 from accounts import email_verification
-from accounts.lockout import client_ip, clear_failures, is_locked, register_failure
+from accounts.lockout import (ADDRESS_LOCK_LABEL, client_ip, clear_failures, is_locked,
+                              readable_sign_in_name, register_failure)
 from accounts.models import AgencyProfile, Role, UserProfile
 from accounts import signup_limit
 from accounts.permissions import IsAdministrator, IsAdminOrStaff
@@ -58,7 +59,12 @@ class LoginView(TokenObtainPairView):
     serializer_class = LoginSerializer
 
     def post(self, request, *args, **kwargs):
-        email = request.data.get("email", "") or ""
+        # What was typed is only used to key the lock and to word its audit
+        # line, so anything that is not text counts as blank. The serializer
+        # turns the same request away with a 400, and a 400 is no failed
+        # attempt, so nothing is counted against anyone.
+        typed = _posted(request, "email")
+        email = typed if isinstance(typed, str) else ""
         ip = client_ip(request)
 
         # Locked means locked — don't even attempt authentication, correct
@@ -80,15 +86,26 @@ class LoginView(TokenObtainPairView):
         return response
 
     def _register_failure(self, email, ip):
-        _locked, _retry_after, new_lockout = register_failure(email, ip)
-        if new_lockout:
-            # No authenticated actor caused this — the system locked the
-            # account/IP out. log_activity accepts actor=None (logged as
-            # "System"), so there's no need to look up the user.
+        _locked, _retry_after, engaged = register_failure(email, ip)
+        # No authenticated actor caused either line — the system locked the
+        # account or the address out. log_activity accepts actor=None (logged
+        # as "System"), so there's no need to look up the user.
+        if "account" in engaged:
+            # The name goes in only if it is an email address: what was typed
+            # may be a password, and this line is read by the ISA.
             log_activity(
                 None, ActivityLog.UPDATED, ActivityLog.SECURITY,
                 entity_type="User",
-                entity_label=f"Login locked for {email} after repeated failures")
+                entity_label=(f"Login locked for {readable_sign_in_name(email)} "
+                              f"after repeated failures"))
+        if "address" in engaged:
+            # Every sign-in from this address is refused from here on, the
+            # ISA's included. It is a different thing from one account being
+            # locked, so it is a different line: it names nobody and nothing
+            # typed, because the lock is not about any one name.
+            log_activity(
+                None, ActivityLog.UPDATED, ActivityLog.SECURITY,
+                entity_type="User", entity_label=ADDRESS_LOCK_LABEL)
 
 
 class GoogleLoginView(generics.GenericAPIView):
@@ -587,12 +604,23 @@ class UserViewSet(viewsets.ModelViewSet):
             return UserWriteSerializer
         return UserSerializer
 
-    def _log(self, user, action_name):
+    # What the label says after the name, for the updates the ISA's console has
+    # to tell apart from an ordinary edit (see ActivityLog.kind). A reset and a
+    # reactivation are both saves of the account with the same action, so
+    # without a kind they read as a changed phone number.
+    _KIND_NOTES = {
+        ActivityLog.KIND_RESET: "password reset",
+        ActivityLog.KIND_REACTIVATE: "account reactivated",
+    }
+
+    def _log(self, user, action_name, kind=""):
+        name = user.fullname or user.email
+        note = self._KIND_NOTES.get(kind)
         log_activity(
             self.request.user, action_name, ActivityLog.USER,
             entity_type="User",
-            entity_label=(user.fullname or user.email),
-            entity_id=user.id)
+            entity_label=f"{name} — {note}" if note else name,
+            entity_id=user.id, kind=kind)
 
     def create(self, request, *args, **kwargs):
         """Create a user with a server-generated temporary password, returned
@@ -624,8 +652,16 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response(data, status=status.HTTP_201_CREATED)
 
     def perform_update(self, serializer):
+        # What the form sent and what was held, so the log can tell a change of
+        # role from an edit. A change of role writes its own line, which names
+        # both roles (UserWriteSerializer.update); a second "edited" line for
+        # the same save would only say less. The edit form resends every field,
+        # so it is what CHANGED besides the role that earns the ordinary line.
+        before = {k: getattr(serializer.instance, k, None) for k in serializer.validated_data}
         user = serializer.save()
-        self._log(user, ActivityLog.UPDATED)
+        changed = {k for k, v in before.items() if getattr(user, k, None) != v}
+        if changed - {"role"} or not changed:
+            self._log(user, ActivityLog.UPDATED)
 
     @action(detail=True, methods=["post"])
     def archive(self, request, pk=None):
@@ -684,7 +720,7 @@ class UserViewSet(viewsets.ModelViewSet):
         user.status = User.ACTIVE
         user.must_change_password = user.has_usable_password()
         user.save(update_fields=["status", "must_change_password", "updated_at"])
-        self._log(user, ActivityLog.UPDATED)
+        self._log(user, ActivityLog.UPDATED, ActivityLog.KIND_REACTIVATE)
         return Response(
             {"status": user.status,
              "must_change_password": user.must_change_password},
@@ -705,6 +741,11 @@ class UserViewSet(viewsets.ModelViewSet):
         entries = list(
             ActivityLog.objects
             .filter(Q(actor=user) | Q(entity_type="User", entity_id=user.id))
+            # A move of records writes a line for each record and a sentence
+            # for each worker told (children/transfer.py): 25 lines of one
+            # move would be the whole drawer, and its sentence twice. The
+            # drawer keeps the sentence once; the rest is in the table.
+            .exclude(kind__in=[ActivityLog.KIND_MOVE_DETAIL, ActivityLog.KIND_MOVE_COPY])
             .order_by("-created_at")[:25])
         data = ActivityLogSerializer(entries, many=True).data
         for row, entry in zip(data, entries):
@@ -772,7 +813,7 @@ class UserViewSet(viewsets.ModelViewSet):
             entity_type="User",
             entity_label=(f"{user.fullname or user.email} — access approved as "
                           f"{role.role_name} (asked for: {asked})"),
-            entity_id=user.id)
+            entity_id=user.id, kind=ActivityLog.KIND_APPROVAL)
         return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
@@ -796,7 +837,7 @@ class UserViewSet(viewsets.ModelViewSet):
             entity_type="User",
             entity_label=(f"{user.fullname or user.email} — access request "
                           f"declined (asked for: {asked})"),
-            entity_id=user.id)
+            entity_id=user.id, kind=ActivityLog.KIND_DECLINE)
         return Response({"status": user.status}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="reset-password")
@@ -818,7 +859,7 @@ class UserViewSet(viewsets.ModelViewSet):
         email_queued = send_temporary_password_notification(user, temp_password)
         # The password travels by email only. This says one is waiting.
         sms_queued = notify_temporary_password(user)
-        self._log(user, ActivityLog.UPDATED)
+        self._log(user, ActivityLog.UPDATED, ActivityLog.KIND_RESET)
         return Response({"temp_password": temp_password,
                          "email_queued": email_queued,
                          "sms_queued": sms_queued},

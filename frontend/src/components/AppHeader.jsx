@@ -268,7 +268,12 @@ export default function AppHeader() {
               <Icon name={t.icon} size={21} strokeWidth={on ? 2.2 : 1.9} />
               <span style={{ position: 'absolute', left: 14, right: 14, bottom: -6, height: 3, borderRadius: 3, background: on ? 'var(--amber-400)' : 'transparent' }} />
               {badge > 0 && (
-                <span className="racco-mono" style={{ position: 'absolute', top: 4, right: Math.max(8, layout.tabWidth / 2 - 23), minWidth: 16, height: 16, padding: '0 4px', borderRadius: 'var(--radius-pill)', background: 'var(--red-500)', color: '#fff', fontSize: 9.5, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '2px solid var(--chrome)' }}>
+                /* Hung off the icon's corner from the tab's OWN width (a
+                   percentage), not layout.tabWidth: the strip shrinks the
+                   tabs below that, and a badge placed for the wider tab sat
+                   over most of the icon. Never nearer the edge than 2px, so
+                   even three digits stay inside a 36px tab. */
+                <span className="racco-mono" style={{ position: 'absolute', top: 4, right: 'max(2px, calc(50% - 23px))', minWidth: 16, height: 16, padding: '0 4px', borderRadius: 'var(--radius-pill)', background: 'var(--red-500)', color: '#fff', fontSize: 9.5, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '2px solid var(--chrome)' }}>
                   {badge}
                 </span>
               )}

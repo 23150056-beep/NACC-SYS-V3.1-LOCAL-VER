@@ -1115,8 +1115,9 @@ are unchanged (their assigned children).
   field, or to nobody until one is assigned.
 - **A new record is its creator's** (`ChildViewSet.perform_create`), whatever
   the request says. **Only the ISA moves one** (a closed case taken over at
-  intake aside, below) - the record form's Social
-  Worker field, shown to the ISA only; a SW sending a different one gets 400,
+  intake aside, below) - through the record form's Social
+  Worker field, shown to the ISA only, or many at once through the console's
+  Transfer records (below); a SW sending a different one gets 400,
   sending the same one is fine because the edit form resends everything. It
   must be a Staff account.
 - **Existing records were backfilled** (children 0025): the uploader of the
@@ -1180,6 +1181,59 @@ are unchanged (their assigned children).
   staff account can see.
 - **Archiving a SW does not move their records.** The ISA transfers them; the
   Social Worker field lists an inactive holder as "(inactive)".
+- **The ISA can move many records at once** (15 Oct 2026, `children/transfer.py`,
+  `POST /api/children/transfer/`; the console's "Transfer records"). Body
+  `{from_social_worker, to_social_worker, children: [ids]}`; Administrator
+  only, 403 for anyone else before the body is read, 401 when not signed in.
+  The one they leave is any Staff account, an archived one included (the usual
+  reason); the one they go to must be an ACTIVE Staff account and a different
+  one - the record form's "who may hold a record" rule. **Every id must be an
+  ACTIVE record held by the one they leave.** A closed, missing, already moved
+  or someone else's record refuses the WHOLE request and moves nothing: 409
+  with `problems` (id, case number, why) when the list went stale, 400 when it
+  is malformed (empty, over 1,000, not whole numbers, an id twice). The rows
+  are locked (in id order, so two moves that share records take the locks the
+  same way round), moved by one conditional UPDATE and the count re-checked, so
+  a change in between rolls the move back rather than leaving part of it; the
+  log lines go in inside the same transaction, so a move whose lines could not
+  be written is not made. **A database that gives the transaction up because
+  another got there first is the same 409**, not a 500: SQLite's "database is
+  locked" (only where the connection does not start its transactions with
+  `transaction_mode: IMMEDIATE` - the local copy's own `DATABASES` does, which
+  makes the second move wait and then find the records gone, but a
+  `DATABASE_URL=sqlite:///...` copy does not) and PostgreSQL's deadlock or
+  serialization failure (`_lost_a_race`); any other `OperationalError` is still
+  an error. Two overlapping moves at once: 16 rounds on PostgreSQL 16, 12 on the
+  local copy and 15 on a plain SQLite copy were always one 200 and one 409,
+  never a part-move. **Only `social_worker` changes** (and `updated_at`,
+  bumped by hand because a bulk UPDATE skips `auto_now`: a record form opened
+  before the move is told "updated by someone else"). The psychologist, an
+  open request to one, the case study and the appointments stay; what a SW
+  sees of them follows the field - case study access, names on the calendar,
+  Records, and a psychologist's answer to a request, which goes to the child's
+  current SW. **The trail has two layers** (the action `transferred`, activity
+  0010, choices only): a RECORD line for each record, the audit trail ("Moved
+  C-0042 · Ana Cruz from R. Santos to E. Pascua", the ISA the actor, nobody
+  addressed, `kind` `move_detail`), and ONE sentence ("Moved 9 records from
+  ...", the label the whole sentence as for exports) for the worker receiving
+  the records and one for the worker who gave them up, unless that account
+  cannot sign in. The feeds show the newest 50 lines and a leaver's whole
+  caseload is the commonest move, so **`/api/activity/` leaves the per-record
+  lines out for everyone** and the ISA's feed also drops the second sentence
+  (`move_copy`, the same words again): a move of 60 records is one line in
+  each bell, and the assignment answers are not pushed out. **The Users
+  drawer** (the last 25 of what an account did, the ISA's own among them) keeps
+  one sentence per move for the same reason. The per-record rows stay in the
+  table, in no screen, for whoever asks who moved a child: "View full audit
+  trail" on the rail goes to Users, whose drawer keeps the one sentence, so the
+  ISA cannot read "who moved C-0042?" on screen today. That is a known gap,
+  not an oversight. If the owner wants it answered, it belongs on the child's
+  own page (a read of that child's `move_detail` lines), never in the feeds,
+  which the same 60-record move would fill again. The actor's name is
+  cut to its 150-character column like the labels: SQLite does not enforce a
+  length, PostgreSQL refuses the insert, and a log line must not be what stops
+  a move. `children/tests/test_transfer.py`, also run on PostgreSQL 16 - a
+  length test that only ever ran on SQLite could not fail.
 
 ## Assigning a psychologist is asking
 
@@ -1415,6 +1469,343 @@ Owner's request, 11 Oct 2026: the box in the header finds AND does
   and take the focus out of it. The header tabs give up width (36px at the
   least) below 1180 instead of running under the pill and the bell, where the
   first tab sat over the clear button.
+- **The bar is an inch (96px) longer than it was** (owner, 12 Oct 2026;
+  `searchBarWidth` in `LayoutContext.jsx`): 306 under 1180, 364 to 1399, 416
+  from 1400, against 210 / 268 / 320. The header tabs shrink to make the room,
+  down to their 36px minimum, and the results panel (340 / 430) stays wider than
+  the bar. Only under 842 (the "More" button) is there not room for all of it:
+  there the bar takes what is spare and never less than before, and the full
+  inch is in from 842. It never gets shorter as the window grows.
+  **The account's name and role wait for 1280 in the header** (`identityOn`, it
+  was 1080): they cost 151px, and at 1080 they left no room for the inch, so the
+  bar snapped 96px shorter as the window grew past 1079 and was barely longer
+  than before until 1244. The rail's own account card names the user from 1080,
+  so nothing goes unsaid, and 1280 also leaves the tabs their room for a
+  26-character first name. Sized against the ISA, whose role label is the
+  widest, with 30px in hand; a control added to the header means measuring again.
+- **The pending count on a tab hangs off the icon's corner from the tab's OWN
+  width** (`right: max(2px, calc(50% - 23px))`, `AppHeader.jsx`). It was worked
+  out from `layout.tabWidth`, but the strip shrinks the tabs below that, and a
+  badge placed for the wider tab lay over most of the icon. A percentage follows
+  the real width; the 2px floor keeps even three digits inside a 36px tab.
+
+## The ISA's admin console
+
+Built 14 Oct 2026, at the top of the ISA's Dashboard (`pages/dashboard/AdminConsole.jsx`,
+mounted for the Administrator alone). The ISA is the agency's IT support, not
+the Head of Office, so it answers three questions in this order: who is waiting
+on me, is anything broken, who has access to what. The figures, team, care gaps
+and census stay underneath, as they were.
+
+- **One request feeds all of it**: `GET /api/admin/overview/`
+  (`accounts/admin_overview.py`, Administrator only: 403 for Staff and
+  Psychologists, 401 when not signed in),
+  made when the console opens and again on Refresh ("Last checked N min ago").
+  Nobody else's Dashboard mounts it, so nobody else ever sends the request. A
+  failed first load is an error line with "Try again", never a blank card; a
+  failed refresh keeps what was on screen and says so. A re-read after a write
+  (the footer's transfer and assistant switch, `load({ fresh: true })`) never
+  reuses a request sent before it, because that reply may still carry the old
+  picture, and an older answer never overwrites a newer one (each call takes the
+  next sequence number and only the latest may write); a plain Refresh may
+  still join a request that is already out. The only other calls are the three
+  Test buttons and what the footer's actions do (below).
+- **Where each queue's number comes from.** Counts are exact; the rows under a
+  tile are cut to ten, longest-waiting first (lockouts, newest first).
+  - *Access requests*: PENDING accounts. The hint says how long the oldest has
+    waited and how many typed email addresses are still unconfirmed.
+  - *Sign-in lockouts*: the line `LoginView._register_failure` writes, last 24
+    hours. The lock itself lives in the per-process cache and nothing durable
+    says who is locked right now, so the log is the only record. It counts
+    lockout EVENTS: one email locked twice is two. The line is picked out by
+    how it was written (SECURITY, action Updated, nobody signed in, no
+    entity id, and the whole sentence), never by its first words alone: an
+    access request is also written with nobody signed in, and its label opens
+    with a name the applicant typed, which was once enough to add a lockout
+    for "Login locked for ..." as a first name. The name shown is the typed one
+    only if it is an email address (`readable_sign_in_name`, used when the line
+    is written AND when it is read, for older lines); anything else, a password
+    included, reads "an unrecognised sign-in name". "Is an address" means
+    letters, digits and the few marks an address uses, an at sign and a dotted
+    host of letters, digits and hyphens: the first version accepted anything
+    around an @ and a dot, which kept "p@ss.word!" and "me@x.ph;DROP". A
+    password that is shaped exactly like an address ("Summer2024@home.net")
+    cannot be told from one and is still kept; that residual is accepted.
+    Activity 0009 rewrote the lines written before this to the same rule (its
+    own frozen copy of the pattern), so the audit feed, which shows the stored
+    label, stops carrying them as well; it cannot be undone. **A lock on a whole
+    address is its own line** (`lockout.ADDRESS_LOCK_LABEL`, written when
+    `register_failure` reports "address" among the locks it set): after 20
+    failures from one address, everyone behind it is refused for 15 minutes,
+    the ISA included, and it used to be recorded as the lock of whichever name
+    was typed twentieth. It names no address and no name, is picked out by its
+    whole sentence, and counts here ("Every sign-in from one address"). The
+    tile's hint names the latest lockout instead of repeating the count.
+  - *Temp passwords unchanged*: active accounts still on `must_change_password`.
+    The issue date is the newest create, reset or reactivation in the log, the
+    last two found by `ActivityLog.kind`; one issued before they were
+    told apart from an ordinary edit (`UserViewSet._log`) reads "issue date not
+    recorded".
+  - *Psychologist requests stuck*: a PENDING `AssignmentRequest` asked
+    `ASSIGNMENT_ANSWER_DAYS` (7) or more days ago on an active child, plus
+    active children with no psychologist whose latest request was declined.
+  - *No social worker yet*: active children with no `social_worker`, which only
+    the ISA can open.
+  - *Held by an archived account*: active children whose social worker OR
+    assigned psychologist has an account that is not active (archiving never
+    moves records, and a psychologist's caseload strands exactly as a social
+    worker's does: nine children once sat with an archived psychologist, in no
+    queue, and the Workload total came out nine short). The row names which
+    holder is gone; a child with both gone is one row.
+  - *Names to fix*: a U+FFFD in an account's name, the Latin-1 form body
+    problem under "One child, one record"; the ISA retypes it in Users. Child
+    records are NOT listed: a record's name cannot be changed once it exists
+    (`ChildSerializer.validate`, for everyone), so a row would open a form that
+    cannot fix it and the queue could never empty.
+  - *Possible duplicates*: groups of records with the same first name, last name
+    and birth date, by the rule `children/duplicates.py` already refuses on. The
+    row's Open searches Records for the LAST NAME: Records matches a plain
+    substring of the full name, and two records of one child can differ in the
+    middle name. The rule counts closed records, and Records opens on its Active
+    tab, so the link also carries `status=all` (Children.jsx reads `status` as
+    the page opens and whenever the address changes to one) and the row marks a
+    closed record "(closed)". The last name is sent composed (NFC) with single
+    spaces, and Records folds both sides the same way, so a name stored
+    decomposed or with a doubled space is found as well.
+  The rows are laid out here by queue key, four to a row, not by the server's
+  `group`: that puts "stuck requests" with the records, and the approved picture
+  has it with the people.
+- **Sign-ins come from the activity log**, which has a line for every door;
+  `last_login` was stamped by the Google door alone, so Users said "Never" for
+  a colleague the console listed as signed in today. Since 15 Oct 2026 the
+  password door stamps it too (`SIMPLE_JWT UPDATE_LAST_LOGIN`) and accounts
+  0015 brought earlier sign-ins up to date from the log. "Signed in today" is
+  today in `TIME_ZONE`; "dormant" is an account more than 30 days old with no
+  sign-in line in the last 30 (never having signed in counts).
+- **How the version is found.** The API's commit is `RENDER_GIT_COMMIT`, else
+  the checkout's `.git`, else unknown; "up since" and the checkout's commit
+  (`BOOT_COMMIT`) are taken when the module is imported
+  (`AccountsConfig.ready()`), not at the first request. Read per request, the
+  commit followed every `git commit` made while a development server kept
+  running the old code, and the row said the two halves differed. The web build's
+  is baked in by `vite.config.js` (`VITE_WEB_COMMIT`: `RENDER_GIT_COMMIT`, else
+  `git rev-parse --short=7 HEAD`, else "unknown"). When both are known and
+  differ the row turns amber, "The two halves differ - one is still deploying":
+  the two services deploy independently off one push (see "A push is not a
+  deploy"). An unknown commit proves nothing and never raises it.
+- **Health rows**: server (a timed `SELECT 1`), version, text messages, email,
+  assistant, file storage; each status is also named in words beside the title.
+  SMS is "off" when `SMS_PROVIDER` is `console` (it is never unset). The row
+  says "unconfirmed", not "refused": a refused reminder deletes its row so the
+  next run retries, so no refusal count exists to show. **The Test buttons**:
+  text messages asks the gateway to check the key and balance (spends nothing);
+  email sends a REAL message, so it asks first, "Send a test email to <your
+  address>?"; assistant asks `/api/assistant/model-health/`. The answer sits under
+  the row, and "not set up" reads as a plain statement, not as a failure. A
+  test that ran and FAILED turns its row to "Needs a look" (and the card's chip)
+  until it is run again; one that could not run, a timeout or a 403, proves
+  nothing and leaves the row alone. A Test button is `aria-disabled` while it
+  runs, never `disabled`, or the keyboard focus falls to the top of the page.
+- **Workload** lists a deactivated psychologist or social worker for as long as
+  active children are still assigned to them, marked "(inactive)" in amber, so
+  the "children in care" total counts everyone the records say is in care. Both
+  lists run heaviest first (a psychologist's open requests count with the load,
+  as the bar draws it), then by name.
+- **A role change is one line in the log**, not two (`UserViewSet.perform_update`):
+  the serializer writes the line that names both roles, and the ordinary
+  "edited the account" line is written only when something besides the role
+  changed in the same save. The edit form resends every field, so this
+  compares what the save changed rather than what it sent.
+- **Times**: queue rows and health lines ("Locked today at 3:37 PM", "newest file
+  Sep 30 at 3:37 AM") are worded by the server in `TIME_ZONE`, as all server
+  prose is (see "Times on screen"); the security log, "up since" and "Signed in
+  today" are formatted by the browser. In the Philippines they agree; a browser
+  in another zone shows the two sets in its own and the agency's clock. Left as
+  it is, because the agency works in one zone.
+- **The screen**: a queue's rows open in place under the ROW of tiles the tapped
+  tile is in (two to a row on a narrow pane, so not always under the whole
+  group), right after it in the tab order; Escape closes the list and returns
+  the focus to its tile. Refresh and Try again are `aria-disabled` while they
+  load, never `disabled`, for the Test buttons' reason. While the first answer
+  is awaited the four cards below the queues are placeholders of about their
+  height, so the figures and the care gaps do not start at the top and jump a
+  screenful when it arrives. Tiles go four to a row from a 680 px pane and the
+  card pairs side by side from 740 (a 1280 window has a 692 px pane, a 1366 one
+  778; the owner's pictures are 1440 and 1100, which are unchanged). The
+  "Review access" button shows its count only when somebody is waiting.
+- **The footer holds every admin action** (owner, 15 Oct 2026: it carried only
+  three, and he named the rest; `pages/dashboard/ConsoleActions.jsx`). Accounts:
+  Review access (with its count only while somebody waits), Add user, Reset a
+  password, Transfer records. System: Send test text, Assistant: On/Off, Agency
+  details, Settings. Outlined small buttons that wrap in whatever pane there is
+  (checked at 1440, 1280, 1100, 820, 390 and 320; the group labels sit level
+  with the FIRST row of their buttons, not centred on the group, so at 1280,
+  where each group wraps onto a second line, "Accounts" and "System" stay with
+  the line they name), **all eight outlined** as in
+  the approved picture - Review access too, whose count is what says somebody
+  is waiting (it used to turn solid blue with one). Drawn once the overview has
+  answered, and also when it FAILED - a console that failed to load is when Add
+  user and Settings are still wanted - but not while the first answer is
+  awaited: the placeholder tiles are shorter than the real ones (a real tile is
+  96px with one-line text and 129px with the two-line label and hint that an
+  all-clear agency or a phone gives), so a footer drawn at once slid tens of
+  pixels down under the pointer as the tiles arrived, and a press aimed at one
+  button landed on another thing. Five go to another page (Review access, Add
+  user, Agency details, Settings, and Reset a password once it has been told
+  whose); Transfer records, Send test text and Assistant finish here. One that
+  is working is `aria-disabled`, never `disabled`, for the Test buttons' reason.
+  - *Reset a password* opens a picker (the shared `Modal`) of ACTIVE accounts
+    other than the ISA's own - the new password would end their own session -
+    from `GET /users/`; the search box has the focus, the arrow keys move
+    between rows. Under 420px the role drops under the email
+    (`.racco-pick-role`, `!important` because the element's inline style says
+    flex none and right-aligned, which a plain rule cannot beat): beside the
+    name, at 320, it left the name a few letters wide and a row 180px tall.
+    Picking one goes to `/users?reset=<id>`, and that is all the
+    console does: Users asks the same question the drawer's Temporary password
+    button asks and shows the one-time password in its own dialog. **The
+    password is never on the console.**
+  - *Transfer records* is a `Drawer` over `POST /api/children/transfer/` (see
+    "Each social worker's own records"). From lists the social workers holding
+    an active record, a deactivated account first and marked "(inactive)", with
+    their count; To lists ACTIVE social workers other than From; the checklist
+    of From's active records is all ticked until the ISA unticks ("Select all /
+    none"). Both lists are read when the drawer opens (`GET /users/` and
+    `GET /children/`, which the ISA already may), not taken from the overview:
+    the overview's workload is as of the last check, and the checklist needs
+    the rows anyway, so the counts beside the names are counted from the very
+    list that is ticked and cannot disagree with it. Every count the drawer
+    prints has its thousands separator (`num()`: "1,200", not "1200" in one
+    place and "1,200" in the next). The closed From select holds about 26
+    characters at 320px, so a long name still clips its "records"; the count
+    is repeated in the checklist header below it and the open list is whole,
+    which is why the line was shortened ("active" dropped) and not given a
+    second row, which a native select cannot do. "Move N records" asks
+    first, then an end dialog reads back how many moved and to whom; the
+    console is read again (the archived-holder tile and Workload follow) and so
+    is the activity feed. A 409 shows the server's sentence, reads the list again
+    and keeps ticked what is still the holder's to move; nothing moved. A 400
+    reads it again too: the receiver may have been deactivated since the drawer
+    opened, and without it that worker stayed picked and offered, and every
+    retry said the same thing. The refusal is scrolled into view
+    (`scrollIntoView`): it is drawn at the top of the same scrolling box as the
+    checklist, and with the box scrolled it was off screen while the list
+    quietly lost a row. **One move takes at most 1,000 records** (the server's
+    rule): for a holder with more, the first 1,000 are ticked, Select all means
+    those, the rest cannot be ticked, and a line says to open it again for the
+    rest. The fields lock only once the request is out, not while the question
+    is up.
+  - *Send test text* asks first (it costs a credit), then calls the same
+    `POST /sms-test/` as Settings; the answer is the end dialog. With no gateway
+    (`SMS_PROVIDER` console, the local copy) the server logs the text and answers
+    ok, so the dialog says "written to the log", not "sent". An ISA with no
+    verified number is told so and offered "Open my profile" (`/profile`).
+  - *Assistant: On/Off* reads the overview's `assistant` health row (status
+    "off" is off; unknown until the overview answers - which, since the footer
+    is drawn only once there are tiles or an error, means the load FAILED - and
+    the button then says "on/off", is `aria-disabled` and, when pressed, says in
+    a toast that the console has not loaded and to press Try again: a reason in
+    a `title` alone is never seen on a keyboard or a phone). **The label carries the state and there is no
+    `aria-pressed`**: a toggle button's name must not change with its state, so
+    both would have a screen reader say it twice. The confirmation
+    is `assistantSwitchConfirm()` in `utils/assistantSwitch.js`, **the one place
+    Settings and the console take their wording from** - two copies would drift,
+    and the one that drifts is the one that asks for less. It PUTs only
+    `{enabled}` to `/assistant/settings/` (Settings sends the whole form), then
+    reads the console again so the health row and the button agree, and ends
+    with a dialog saying what is now on or off for everyone (a toast was gone
+    before anyone read that the chat panel had stopped); a failure toasts the
+    server's words and leaves the label alone.
+  - *Agency details* goes to `/settings?section=agency`: once the card has
+    loaded, Settings brings it into view and puts the cursor in its first field,
+    then clears the parameter. No second form.
+  - **A screen opens at its top** (`Shell` in `App.jsx`, a layout effect on the
+    PATH): every route renders its own Shell but React reuses the one element
+    across them, so `<main>` kept the previous screen's scroll and a button at the
+    foot of the Dashboard opened Settings 400 to 900px down, with its header
+    scrolled away (the sidebar's links did the same). An address that only gains
+    a parameter (`?tab=`, `?edit=`) is the same screen and keeps its place.
+- **Dropped from the picture on purpose**: the "Last 24 hours" strip (server
+  errors, texts refused, failed uploads) and "What changed" - nothing counts
+  server errors or failed uploads, and a refusal leaves no row. A number with no
+  source is worse than no number.
+- **What it never shows**: case study text, any record's text (remarks,
+  reports, referral summaries), what the assistant wrote, a custodian's name or
+  number, or the reason a psychologist gave for declining a request (the stuck
+  queue says who declined and how long ago; the ISA reads why on the child's
+  record). A child is named only where a queue has to say which record to open.
+  The security log says WHO had the assistant read WHICH child's record (job
+  type and case number, the same facts as the child's Assistant log tab), never
+  the text: the query names its columns and never loads `output_text`.
+  `test_admin_overview.py` plants a sentinel in each kind of text and searches
+  the whole response for it.
+- **The security log** is the last 7 days, 30 at most: SECURITY and USER audit
+  rows plus assistant reads. **A line's meaning is never read out of its
+  words.** The label opens with a person's name, anyone may sign up under any
+  name, and a name such as "Evil — access approved as Administrator (asked for:
+  Administrator)" once produced an approval line (green icon, "System" as the
+  actor) from a stranger's sign-up. So the three kinds a stranger or any
+  signed-in account can write are picked out by how they were written
+  (`_EXPORT`, `_LOCKOUT` with `_ADDRESS_LOCKOUT`, `_REQUEST` in
+  `admin_overview.py`), and the updates
+  only an administrator makes carry `ActivityLog.kind` (`approval`, `decline`,
+  `role`, `reset`, `reactivate`; activity 0008, `db_default=""` so the release
+  still serving during a deploy can insert). The code that writes such a line
+  passes the kind to `log_activity`; a new writer that does not is read as an
+  ordinary edit, which is the safe way to be wrong. The words after the name
+  are searched from the END of the label only to take the facts out of them
+  (which role, asked for what). Lines written before the column existed have no
+  kind and are told apart by their action alone: they read as an edit, a
+  deactivation or a creation, with their own words after.
+- **One kind cannot take the whole log.** Exports, lockouts, requests AND the
+  assistant's reads show their newest five each (`BULK_CAP`), and the
+  response's `security_log_more` says how many were left out ("and 35 more
+  exports not shown", "and 35 more assistant reads not shown"); the screen
+  prints those lines under the log. Thirty exports from one psychologist used
+  to leave nothing else in the log, and so did forty briefs: the reads were
+  the one kind left uncapped, and an ordinary week of one psychologist's work
+  pushed the ISA's own approval, reset and role change out of the thirty rows
+  with nothing to say so. A survey checked answer by answer is one line, and is
+  counted as one. When the thirty-line cut itself drops anything, the log says
+  "and N older events not shown" (kind `older`), so a quiet log is never
+  mistaken for a complete one. The export note is also throttled per account
+  (`exports`, `EXPORT_LOG_RATE`, 20 an hour; off under test, patched in by the
+  test that needs it). A job type added to `ACCESS_LOGGED_JOB_TYPES` needs a
+  sentence in `_READ_WORDS`; one without still shows as "read a record", and
+  `test_every_logged_job_type_has_its_words` fails until it has its own.
+- **Exports are logged by the screen, and that is a log of honest use, not a
+  control.** The Records list and the result entries are built in the browser
+  from the rows already on screen, so the server cannot know a file was made
+  unless the browser says so: after the file is saved it fires
+  `POST /api/children/exported/` (`{rows}`, and `what: "results"` from Results
+  & Reports), fire and forget, never blocking the export. Anyone can skip the call
+  or copy the list off the screen. `what` is a closed list, so a caller cannot
+  write its own sentence into the trail, and `rows` is a whole number up to a
+  million (as digits, at most seven of them: a longer string made Python raise
+  and the endpoint answer 500). The Agency Summary's CSV is built by the
+  server, counts only, and is not logged. The new activity action `exported`
+  (activity 0007) is in `utils/activity.js` and the Users drawer; without it a
+  feed would read "Archived child Exported the Records list".
+- **Deep links it needs** (Users.jsx, the `useOpenFromLink` pattern):
+  `/users?edit=<id>` opens that account's drawer once the directory has
+  loaded, `/users?new=1` opens the add-user form. Both clear the parameter;
+  an id that is not in the directory says so in a toast, once. A blank `edit=`
+  is cleared, and a link that asks for both gets the add form with `edit`
+  dropped in the same change to the address (left behind it opened that
+  account's drawer when the form was closed, or on a reload).
+  `/children?edit=<id>`, `/children?q=` and `/users?tab=requests` already
+  existed. Two more for the footer: **`/users?reset=<id>`** asks the existing
+  reset confirmation (`setConfirm({kind: 'reset'})`, the drawer's own path) once
+  the directory has loaded, clears the parameter, and says so in a toast, once,
+  for an id that is not there or an account that is not active (the server
+  refuses any but an active one; the signed-in ISA's OWN id is accepted, as the
+  Users drawer's Temporary password button and the row menu accept it - the
+  confirmation says the current password stops working, and only the console's
+  picker leaves the ISA out); `new` and `edit` outrank it and drop it from
+  the address with them, because two effects each rewriting the address from
+  what they read would put back what the other removed. **`/settings?section=agency`**
+  scrolls to the agency card and focuses its first field when it has loaded
+  (`useOpenFromLink`, so it is used up and does not fire again on a reload).
 
 ## Text messages (Semaphore)
 
@@ -1559,6 +1950,41 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   every boot). A refresh in that minute used to show a bare "Loading…" that
   read as broken; `ProtectedRoute`'s `WaitingForServer` now says the server is
   waking after 3 s and offers "Try again" after 75 s. Not a fault to debug.
+  Signing in was the same wait with less said (owner, 14 Oct 2026: "20 to 30
+  seconds or more"), so three things changed, none of them touching
+  `entrypoint.sh`:
+  - **`seed_psgc` writes only what changed.** It asked `update_or_create`
+    about all 3,394 places on every wake-up: a lookup, an update and a
+    savepoint pair apiece, 13,578 statements to Neon to learn that nothing
+    had changed. It now reads each table once, compares in Python and bulk
+    writes only the rows that are missing or differ, so a run with nothing to
+    do is 3 reads (5 statements with BEGIN and COMMIT). Measured locally on
+    SQLite: 13,578 -> 5 queries, 1.9 s -> 0.04 s; not measured against Neon,
+    where the saving is the round trips. Rows still update in place on the
+    PSGC code, so no primary key moves. `test_locations.py` pins the count and
+    checks it does not grow with the number of rows.
+  - **The sign-in and sign-up pages wake the server on open** (`wakeServer()`
+    in `api/client.js`): one GET to `/healthz/`, which also touches Neon, once
+    per page load, so the server is waking while the person types and their
+    request finds it up. Fire and forget, never a toast. It overlaps the boot
+    with the typing; it does not shorten the boot, which still runs migrate
+    and both PSGC steps.
+  - **The sign-in says what is happening after 3 s** (`SlowSignIn` in
+    `Login.jsx`, tied to `busy`): "Waking the server (up to a minute)" and
+    "Keep this page open" with the seconds so far, a small spinner beside the
+    first line. It takes the place of the "Request access" links under the
+    divider and their size - two centred lines of the same type, no box - not a
+    spot under the button: the card is centred, so anything that changes its
+    height moves the fields, and the button slid out from under the pointer of
+    someone waiting on it. The links stay in the flow, hidden while signing
+    in, and give the footer its height; the note lies over them in the same
+    grid cell, so the card is exactly its idle size at the click and at 3 s
+    (measured 0 px on the fields, the button and the card at 1280x800,
+    375x667 and 320x568; the idle card is the size it was before the note
+    existed). Keep it no taller than the links: on a 320-wide phone
+    they are three lines and the note two. Gone the moment the request
+    settles, the links back in the same space; a quick sign-in never sees it.
+    The Google door shares `busy`, so it gets the line too.
 - **A deploy that times out on the health check is usually Render, not the
   code.** It happened on 24 Sep and again on 5 Oct, both times on a deploy
   that carried new migrations; each time a manual redeploy of the same commit
@@ -1593,12 +2019,32 @@ violations either, so the audit records element and text counts beside the
 verdict. One known violation remains on `/schedule`, and it is
 react-big-calendar's own `role="rowgroup"` markup rather than ours.
 
+**A `Button` shows where the keyboard is** (`.racco-btn:focus-visible` in
+index.css). `Button` sets its own `box-shadow` inline (none for the plain and
+outlined ones, a drop shadow for the filled ones), and an inline style beats the
+global `button:focus-visible` ring, so no `Button` in the app - the console's
+eight, the Dashboard's quick actions - had a visible focus until 18 Oct 2026. The
+rule is `!important`, the one thing that outranks an inline style, and is kept
+to the Button's own class so the inset rings of `.racco-queue-tile` and
+`.racco-pick-row`, which are plain buttons, are not overruled. The Dashboard's
+quick-action row is hand-built with the same inline shadow and carries the class
+by hand. Other hand-built `<button>`s that set `boxShadow` inline have the same
+fault and have not been swept: give them `racco-btn`, do not drop the shadow. A computed-style
+check needs a wait after focusing: the shadow transitions in, and a read straight
+away says `none`.
+
+**Toasts are announced** (`ToastContext.jsx`): the stack is a polite live
+region that is always in the page. It was a plain `div`, so the only feedback of
+`/users?reset=` for an account that is not there, or of a button that cannot act
+yet, was silent to a screen reader. A toast is still not a place for anything
+that must be read: the end dialogs (`useNotice`) are.
+
 ## Before committing or bundling anything
 
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,603 tests, ~1 min
+cd backend && .venv/Scripts/python.exe manage.py test   # 2,828 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

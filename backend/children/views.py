@@ -17,7 +17,7 @@ from accounts.permissions import (ChildRecordAccess,
 from accounts.scoping import role_of, scope_to_visible, visible_pre_assessments
 from activity.models import ActivityLog
 from activity.services import log_activity
-from children import assignment, custodian, duplicates, termination
+from children import assignment, custodian, duplicates, termination, transfer
 from children.models import AssignmentRequest, Child, TerminationRecord
 from children.serializers import ChildSerializer
 
@@ -36,6 +36,9 @@ class ChildViewSet(viewsets.ModelViewSet):
     serializer_class = ChildSerializer
     permission_classes = [ChildRecordAccess]
     pagination_class = None
+    # The throttle scope, set per action where one is wanted (`exported`). The
+    # attribute has to exist here for an action to be allowed to name one.
+    throttle_scope = None
     # No DELETE, for the reason written above it. RecordsAccess's write rule is
     # Admin OR STAFF, so DELETE was the archive action all over again: a
     # staff-reachable way to end a case with none of it recorded - except worse,
@@ -54,7 +57,7 @@ class ChildViewSet(viewsets.ModelViewSet):
         # psychologist), enforced in the action body - RecordsAccess would
         # block psychologists.
         if self.action in ("terminate", "advance_status", "presence", "reopen",
-                           "closure_reasons", "remove_duplicate"):
+                           "closure_reasons", "remove_duplicate", "exported", "transfer_records"):
             return [IsAuthenticated()]
         return super().get_permissions()
 
@@ -375,6 +378,79 @@ class ChildViewSet(viewsets.ModelViewSet):
         except duplicates.Refused as refusal:
             return Response({"detail": str(refusal)}, status=status.HTTP_400_BAD_REQUEST)
         return Response(done)
+
+    @action(detail=False, methods=["post"], url_path="transfer")
+    def transfer_records(self, request):
+        """The ISA moves records from one social worker to another, many at a
+        time (children/transfer.py has the rules).
+
+        Body: from_social_worker, to_social_worker (account ids) and children
+        (the ids to move, 1 to 1,000). All or nothing: 400 for a request that
+        is malformed or names an account that cannot take part, 409 - with the
+        case numbers - when a record on the list is no longer the first
+        worker's active record. 200 gives the count, the receiving worker and
+        the records moved.
+
+        The role is checked before the body is read, so anyone else is told no
+        whatever they send."""
+        if role_of(request) != Role.ADMINISTRATOR:
+            return Response({"detail": "Only the ISA (Administrator) can move records between social workers."},
+                            status=status.HTTP_403_FORBIDDEN)
+        try:
+            done = transfer.move(request.user, *transfer.parse(request.data))
+        except transfer.Refused as refusal:
+            return Response(refusal.body, status=refusal.status)
+        return Response(done)
+
+    # What a screen may say it exported, and how the audit line names it. A
+    # closed list rather than free text: the line is written from the client's
+    # word, and a caller must not be able to put its own sentence in the trail.
+    EXPORT_LISTS = {"records": "the Records list", "results": "the result entries"}
+    # Far above any real roster; it only stops a nonsense number being logged.
+    EXPORT_MAX_ROWS = 1_000_000
+    # A count written as digits is taken only if it is short enough to be one.
+    # Python refuses to turn more than 4,300 digits into an integer and raises,
+    # which is a 500 for whoever sent them.
+    EXPORT_MAX_DIGITS = len(str(EXPORT_MAX_ROWS))
+
+    # Per account, because the line is about the caller and anyone who can read
+    # the list can write it: without a ceiling one signed-in account could fill
+    # the ISA's security log with its own exports. The rate is `exports` in
+    # settings (REST_FRAMEWORK, DEFAULT_THROTTLE_RATES).
+    @action(detail=False, methods=["post"], url_path="exported", throttle_scope="exports")
+    def exported(self, request):
+        """A screen built a CSV of children in the browser; write down that it
+        did, who did it and how many rows.
+
+        There is no export endpoint to log (the file is made from the rows
+        already on screen, so it can only hold what its maker could see), which
+        left nobody able to say who took the Records list out of the system.
+        The browser reports it after saving the file. Body: `rows`, and
+        optionally `what` - "records" (the default) or "results".
+
+        Any role that can read the list may say so; the line is about the
+        caller, so it carries nobody else's name.
+        """
+        if role_of(request) not in (Role.ADMINISTRATOR, Role.STAFF, Role.PSYCHOLOGIST):
+            return Response({"detail": "Not allowed."}, status=status.HTTP_403_FORBIDDEN)
+        data = request.data if hasattr(request.data, "get") else {}
+        rows = data.get("rows")
+        if (isinstance(rows, str) and rows.isascii() and rows.isdigit()
+                and len(rows) <= self.EXPORT_MAX_DIGITS):
+            rows = int(rows)
+        if isinstance(rows, bool) or not isinstance(rows, int) or not 0 <= rows <= self.EXPORT_MAX_ROWS:
+            return Response({"rows": "Say how many rows the file holds, as a whole number."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        which = data.get("what") or "records"
+        what = self.EXPORT_LISTS.get(which) if isinstance(which, str) else None
+        if what is None:
+            return Response({"what": "That is not a list that can be exported."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        log_activity(
+            request.user, ActivityLog.EXPORTED, ActivityLog.SECURITY,
+            entity_type="Child",
+            entity_label=f"Exported {what} (CSV, {rows} {'row' if rows == 1 else 'rows'})")
+        return Response(status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["get"], url_path="check-duplicate")
     def check_duplicate(self, request):
