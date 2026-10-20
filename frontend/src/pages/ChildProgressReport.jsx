@@ -70,7 +70,7 @@ export default function ChildProgressReport() {
   // False on a hosted deployment, where the server refuses every drafting
   // feature (the chatbot is unaffected). Above the early returns below: a hook
   // under `if (!data) return` crashed this page once already.
-  const { drafting, brief: briefKind } = useAssistant();
+  const { drafting, brief: briefKind, enabled: assistantOn, openAssistant } = useAssistant();
   const isPsych = user?.role_name === 'Psychologist';
   // Which brief this person gets (owner, 8 Oct 2026): the psychologist's is the
   // facts and a written brief; everyone else's is the case facts alone - the
@@ -753,6 +753,19 @@ export default function ChildProgressReport() {
             <Button variant="secondary" onClick={() => openBrief()} iconLeft={<Icon name="sparkles" size={17} />}>
               {briefBusy ? 'Preparing…' : caseBrief ? 'Case brief' : 'Pre-session brief'}
             </Button>
+            {/* Opens the assistant with chips for THIS child and nothing
+                typed: the chips look the child up by number with no model, so
+                the child's name never leaves the system. */}
+            {assistantOn && (
+              <Button
+                variant="secondary"
+                onClick={() => openAssistant({ child: { id: child.id, name: child.fullname } })}
+                title="Ask the assistant about this child"
+                iconLeft={<Icon name="message-square" size={17} />}
+              >
+                Ask about this child
+              </Button>
+            )}
             <Button variant="secondary" onClick={printPage}
               disabled={printsCaseStudy && !printTarget.ready}
               title={!printsCaseStudy ? "Print this child's psychological report"
