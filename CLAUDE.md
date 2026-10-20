@@ -701,6 +701,30 @@ Built 26 Aug 2026. A docked panel on every protected screen, backed by
   `input_ref` is never blanked. The admin view of `AssistantJob` is read-only
   and shows no text. The ISA's unanswered-questions list shows the masked
   question and names a role only when 3+ active users hold it.
+- **A starter question or chip never goes through the model** (20 Oct
+  2026). `/assistant/capabilities/` gives each example as `{label, tool,
+  args}` and the panel runs it through `/assistant/followup/`, so it works with
+  the model stopped and sends nothing outside. A schema entry marked
+  `internal` (`child_id` on `get_child_summary` and `list_care_gaps`) is left
+  out of what the model sees and dropped from a typed question; only
+  `validate(..., allow_internal=True)` on the follow-up path takes it, and it
+  is looked up in `visible_children`, so another SW's child is "none". "Ask
+  about this child" sends only the id: the name never leaves the system.
+- **"Tell me about CHILD" answers with the brief facts** (`brief_facts`, the
+  same scope and carry-history; next steps only for the record's own SW), and
+  `list_care_gaps` answers "what do I need to do" grouped by child, 15 shown
+  with totals. That description change and four CHAT_CASES (`todo en`, `todo
+  left en`, `todo tl`, `consent tl`) await the owner's `ai_eval --feature
+  chat`; "Sino ang walang consent?" has the shape that once pulled questions
+  into `list_unassigned_children`.
+- **The panel is a dialog** (`components/AssistantPanel.jsx`): one toggle with
+  `aria-expanded`, Esc returns focus to whatever opened it, modal below 640px,
+  a polite log, the input readOnly (not disabled) while answering. Its dot is
+  green only after the model actually answered; a 503 carries a fixed
+  `reason` (`switched_off`, `runtime_unreachable`, `hosted_not_allowed`) that
+  the panel says in words. Doors: the header button (1024px+), Ctrl+/ (not
+  while another modal is up), the launcher, "Ask about this child", and the
+  header search's "Ask the assistant" row, which sends only when chosen.
 - **`ai_eval` against a hosted model** runs only the fixed chat and
   self-report cases; the features that send real records are refused unless
   `--allow-hosted-records` AND DEBUG.
@@ -2080,7 +2104,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,981 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 3,025 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 
