@@ -144,6 +144,16 @@ def _clean_key(key):
 def _coerce(param, value, meta):
     """Return (value, error). Enums are matched case-insensitively, then via
     the alias table, and only then rejected."""
+    if meta.get("type") == "int":
+        # Booleans are ints to Python and a record number to nobody.
+        if isinstance(value, bool):
+            return "", f"'{param}' must be a number."
+        try:
+            number = int(str(value).strip())
+        except ValueError:
+            return "", f"'{param}' must be a number."
+        return (number, "") if number > 0 else ("", f"'{param}' must be a number.")
+
     if not isinstance(value, str):
         value = "" if value is None else str(value)
     value = value.strip()
@@ -162,8 +172,19 @@ def _coerce(param, value, meta):
                 f"— got '{value}'.")
 
 
-def validate(tool, raw_args):
-    """Turn the model's output into a ToolCall, or explain why it cannot be."""
+def validate(tool, raw_args, *, allow_internal=False):
+    """Turn the model's output into a ToolCall, or explain why it cannot be.
+
+    A schema entry marked `internal` is the server's own: it is not in the
+    tools array the model reads (ollama_payload), and what the model sends for
+    it is discarded like any other invented argument. Only a call the panel
+    built from an answer the server offered - a chip, through
+    /assistant/followup/ - passes `allow_internal=True`. That is how a chip can
+    name a child by id, which a typed question never can.
+
+    `unless` on an entry names an internal argument that stands in for it: a
+    chip carrying `child_id` needs no `name`.
+    """
     spec = REGISTRY.get(tool)
     if spec is None:
         return ToolCall(tool=tool, ok=False,
@@ -173,9 +194,16 @@ def validate(tool, raw_args):
     supplied = {_clean_key(k): v for k, v in (raw_args or {}).items()}
     args, errors = {}, []
 
+    def usable(param):
+        return allow_internal or not schema[param].get("internal")
+
     for param, meta in schema.items():
+        if not usable(param):
+            continue
         if param not in supplied:
-            if meta.get("required"):
+            standin = meta.get("unless")
+            if (meta.get("required") and not (
+                    standin and standin in supplied and usable(standin))):
                 errors.append(f"'{param}' is required.")
             elif "default" in meta:
                 # Filled here rather than in the resolver so the echo, the log
@@ -448,31 +476,42 @@ _CAN_ASK = {
         "and why, "
         "attendance and no-shows, the wait for a first session, and time in "
         "pre-assessment — "
-        "children with a particular concern, a summary of one child, and who "
-        "needs follow-up"),
+        "children with a particular concern, a summary of one child, who "
+        "needs follow-up, and which children have flagged something in their "
+        "own words"),
 }
 _CAN_ASK_DEFAULT = _CAN_ASK["Psychologist"]
 
 # Shown in the empty panel. Questions, not features — someone who arrives by
 # clicking a button has typed nothing and needs a starting point, not a menu.
+#
+# Each is (label, tool, args): the panel runs it through /assistant/followup/,
+# WITHOUT the model, so a starter answers in milliseconds, still answers when
+# the model is stopped, and cannot be misrouted. The label is what the person
+# sees as having asked. They are still ai_eval cases (CHAT_CASES) where the
+# label is a question a person might type - a starter that routes wrong when
+# typed is worse than no starter - and capability_examples() puts every one
+# through the validator, so one the server would refuse cannot be offered.
 _EXAMPLES = {
-    "Psychologist": ["Who am I seeing today?",
-                     "How many children do I have?",
-                     "Who flagged something worrying?",
-                     "Who needs follow-up?"],
+    "Psychologist": [("Who am I seeing today?", "list_my_appointments", {"when": "today"}),
+                     ("How many children do I have?", "get_statistics", {}),
+                     ("Who flagged something worrying?", "list_self_report_flags", {}),
+                     ("Who needs follow-up?", "list_care_gaps", {})],
     # One statistics question per role that has the Agency Summary, taken
-    # from what that screen answers. Each one is an ai_eval case: a suggested
-    # question that routes wrong is worse than no suggestion.
-    "Administrator": ["Who needs follow-up?",
-                      "Who flagged something worrying?",
-                      "Active children by case type?",
-                      "What was scheduled last week?"],
+    # from what that screen answers.
+    "Administrator": [("Who needs follow-up?", "list_care_gaps", {}),
+                      ("Who flagged something worrying?", "list_self_report_flags", {}),
+                      ("Active children by case type?", "get_statistics", {"by": "case_type"}),
+                      ("What was scheduled last week?", "list_my_appointments",
+                       {"when": "last_week"})],
     # "Tell me about a child by name" went: it is an instruction, not a
-    # question, and typed as-is it names no child.
-    "Staff": ["Who needs follow-up?",
-              "Any children with anxiety?",
-              "What's on this week?",
-              "Caseload per psychologist?"],
+    # question, and typed as-is it names no child. The care-gap list is a social
+    # worker's to-do list, so it leads.
+    "Staff": [("What do I need to do?", "list_care_gaps", {}),
+              ("Any children with anxiety?", "search_children_by_concern",
+               {"concern": "anxiety"}),
+              ("What's on this week?", "list_my_appointments", {"when": "this_week"}),
+              ("Caseload per psychologist?", "get_statistics", {"by": "psychologist"})],
 }
 
 GREETING_REPLY = "Hello — what would you like to look up?"
@@ -489,7 +528,15 @@ def capability_text(role):
 
 
 def capability_examples(role):
-    return list(_EXAMPLES.get(role, _EXAMPLES["Psychologist"]))
+    """[{label, tool, args}] for the empty panel, the args as the validator
+    returns them (defaults filled), exactly what a chip sends back."""
+    out = []
+    for label, tool, args in _EXAMPLES.get(role, _EXAMPLES["Psychologist"]):
+        call = validate(tool, args)
+        if not call.ok:             # a bad table entry is a bug, never a quiet gap
+            raise ValueError(f"Starter question {label!r} is not a valid call: {call.error}")
+        out.append({"label": label, "tool": tool, "args": call.args})
+    return out
 
 
 def _scope(request):
@@ -1027,6 +1074,12 @@ def _name_words(term):
     return sorted(words - _NAME_NOISE)
 
 
+# How many problem descriptions a child's row carries, and how many recorded
+# concerns are offered as chips when a search finds nothing.
+MATCHED_PROBLEMS = 3
+AVAILABLE_CONCERNS = 12
+
+
 def _resolve_concern(request, args):
     """Match on shared words, not on the whole phrase.
 
@@ -1053,68 +1106,107 @@ def _resolve_concern(request, args):
     for word in _search_words(term):
         query |= Q(description__icontains=word) | Q(category__icontains=word)
     if query:
-        hits = list(open_problems.filter(query))
+        hits = list(open_problems.filter(query).order_by("identified_on", "id"))
 
-    # Names, never the problem text: ProblemEntry is one of the two models the
-    # carry-history block does not filter, and returning descriptions would
-    # walk straight into that gap.
-    seen, items = set(), []
+    # The matched problem is carried beside each name: a list of names alone
+    # cannot be acted on, and "Separation anxiety" is what the reader wanted to
+    # confirm. Problems are not an opinion record - ProblemEntryViewSet has
+    # hides_history = False and the child's page shows them whoever logged them
+    # - so the carry-history control has nothing to hide here. Scope is the
+    # `child__in=_scope(request)` above, as for every tool. Case notes
+    # (remarks) are what that control covers, and none is read here.
+    found = {}
     for p in hits:
-        if p.child_id not in seen:
-            seen.add(p.child_id)
-            items.append({"id": p.child_id, "name": p.child.fullname})
+        entry = found.setdefault(p.child_id, {"id": p.child_id, "name": p.child.fullname,
+                                              "problems": []})
+        if (p.description and p.description not in entry["problems"]
+                and len(entry["problems"]) < MATCHED_PROBLEMS):
+            entry["problems"].append(p.description)
+    items = sorted(found.values(), key=lambda i: (i["name"].casefold(), i["id"]))
 
     out = {"kind": "children", "concern": term, "items": items}
     if not items:
         out["available"] = sorted(
-            {p.description for p in open_problems if p.description})[:12]
+            {p.description for p in open_problems if p.description})[:AVAILABLE_CONCERNS]
     return out
 
 
+def _child_ref(child):
+    from scheduling.visibility import case_ref
+    return case_ref(child)
+
+
+def _record_link(child_id):
+    return {"label": "Open record", "path": f"/report/child/{child_id}"}
+
+
 def _resolve_summary(request, args):
+    """"Tell me about <child>": the facts the brief panel opens with
+    (assistant/brief_facts.py - the same dict, under the same scope and the
+    same carry-history rules, with the record's social worker's next steps),
+    the latest case notes, and a link to the record.
+
+    `child_id` is a chip's: it names the child outright, so two children with
+    one name are not "several" and a chip needs no name. It is looked up in the
+    asker's scope like the name is, so a number that is not theirs is "none".
+    """
+    from assistant.brief_facts import brief_facts
     from assistant.views import _brief_only_author, _role
-    from clinical.care_gaps import alerts_for
-    from children.models import Child
 
     from django.db.models import Q
 
-    # The exact phrase first, so a full name keeps matching exactly as before
-    # and nothing gets looser. Only when that finds nothing does the search
-    # widen to any single word — which is what rescues "Maria Reyes" for a
-    # record reading "Maria Santos", and "si Maria" for "Maria".
-    #
-    # Before either: a name that is EXACTLY one child's recorded name means that
-    # child, even when it also sits inside another record — "Maria Santos"
-    # inside "Maria Santos-Cruz". Without this, choosing a name from the
-    # "which one?" list asked the same question again. Two children recorded
-    # under the identical name still come back as "several": a name cannot
-    # tell them apart, and guessing between them would be worse.
-    exact = list(_scope(request).filter(fullname__iexact=args["name"].strip())[:2])
-    matches = (exact if len(exact) == 1 else
-               list(_scope(request).filter(fullname__icontains=args["name"])[:6]))
-    if not matches:
-        query = Q()
-        for word in _name_words(args["name"]):
-            query |= Q(fullname__icontains=word)
-        if query:
-            matches = list(_scope(request).filter(query)[:6])
-    if not matches:
-        return {"kind": "summary", "match": "none", "name": args["name"]}
-    if len(matches) > 1:
-        return {"kind": "summary", "match": "several", "name": args["name"],
-                "items": [{"id": c.id, "name": c.fullname} for c in matches]}
+    child_id = args.get("child_id")
+    if child_id is not None:
+        matches = list(_scope(request).filter(pk=child_id)[:1])
+        if not matches:
+            return {"kind": "summary", "match": "none", "name": ""}
+    else:
+        # The exact phrase first, so a full name keeps matching exactly as
+        # before and nothing gets looser. Only when that finds nothing does the
+        # search widen to any single word - which is what rescues "Maria Reyes"
+        # for a record reading "Maria Santos", and "si Maria" for "Maria".
+        #
+        # Before either: a name that is EXACTLY one child's recorded name means
+        # that child, even when it also sits inside another record - "Maria
+        # Santos" inside "Maria Santos-Cruz". Without this, choosing a name from
+        # the "which one?" list asked the same question again. Two children
+        # recorded under the identical name still come back as "several": a
+        # name cannot tell them apart, and guessing between them would be worse
+        # (the chips tell them apart by number).
+        exact = list(_scope(request).filter(fullname__iexact=args["name"].strip())[:2])
+        matches = (exact if len(exact) == 1 else
+                   list(_scope(request).filter(fullname__icontains=args["name"])[:6]))
+        if not matches:
+            query = Q()
+            for word in _name_words(args["name"]):
+                query |= Q(fullname__icontains=word)
+            if query:
+                matches = list(_scope(request).filter(query)[:6])
+        if not matches:
+            return {"kind": "summary", "match": "none", "name": args["name"]}
+        if len(matches) > 1:
+            return {"kind": "summary", "match": "several", "name": args["name"],
+                    "items": [{"id": c.id, "name": c.fullname, "ref": _child_ref(c)}
+                              for c in matches]}
 
     child = matches[0]
     remarks = child.remarks.select_related("author")
     only = _brief_only_author(child, request.user, _role(request))
     if only is not None:
         remarks = remarks.filter(author=only)
-    gaps = alerts_for(request, Child.objects.filter(pk=child.pk))
     return {"kind": "summary", "match": "one", "child": {
         "id": child.id, "name": child.fullname, "status": child.status,
+        "ref": _child_ref(child),
         "psychologist": display_name(child.assigned_psychologist) or None},
-        "remarks": [{"date": str(r.date), "text": r.text} for r in remarks[:5]],
-        "gaps": [a.get("type") for a in gaps]}
+        "facts": brief_facts(request, child),
+        "link": _record_link(child.id),
+        "remarks": [{"date": str(r.date), "text": r.text} for r in remarks[:5]]}
+
+
+# How many children one care-gap answer lists. The ISA's list covers the whole
+# agency, and a long list cut short without saying so reads as the whole list;
+# `total` and `gap_total` always carry the real counts.
+CARE_GAP_CHILDREN = 15
 
 
 def _resolve_care_gaps(request, args):
@@ -1122,10 +1214,16 @@ def _resolve_care_gaps(request, args):
     which is the same call the Dashboard's care-gap card makes, so the chatbot
     can never disagree with the card the user is looking at.
 
-    `message` is carried through rather than `type`: the type is a slug
-    ("consent_missing") that means nothing to a psychologist, while the message
-    is the sentence the screen already shows them. `child_id` is there so the
-    panel can link the row.
+    Grouped by child, because "what do I need to do?" is answered one child at
+    a time: the children are in order of their most urgent gap, and a child's
+    gaps are in the card's own order. `message` is carried through rather than
+    `type`: the type is a slug ("consent_missing") that means nothing to a
+    psychologist, while the message is the sentence the screen already shows
+    them. `child_id` is there so the panel can link the row, and the panel
+    sends each gap where the Dashboard's card sends it (config/careGaps.js).
+
+    `child_id` is a chip's (see validate): the same answer for that one child
+    in the asker's scope, empty when it is not theirs.
 
     A social worker's answer carries its own empty sentence, as
     `_resolve_unassigned_children` does: "Nobody is overdue" is not what their
@@ -1134,12 +1232,23 @@ def _resolve_care_gaps(request, args):
     from accounts.models import Role
     from accounts.scoping import role_of
     from clinical.care_gaps import alerts_for
-    alerts = alerts_for(request, _scope(request))
-    out = {"kind": "care_gaps", "items": [
-        {"child_id": a.get("child_id"), "child": a.get("child_name") or a.get("child"),
-         "type": a.get("type"), "message": a.get("message"),
-         "severity": a.get("severity")}
-        for a in alerts]}
+
+    scope = _scope(request)
+    if args.get("child_id") is not None:
+        scope = scope.filter(pk=args["child_id"])
+    alerts = alerts_for(request, scope)
+
+    by_child = {}
+    for a in alerts:         # already most urgent first, so a child's first gap ranks it
+        key = a.get("child_id") or a.get("child_name") or a.get("child")
+        entry = by_child.setdefault(key, {
+            "child_id": a.get("child_id"),
+            "child": a.get("child_name") or a.get("child"), "gaps": []})
+        entry["gaps"].append({"type": a.get("type"), "message": a.get("message"),
+                              "severity": a.get("severity")})
+    groups = list(by_child.values())
+    out = {"kind": "care_gaps", "total": len(groups), "gap_total": len(alerts),
+           "groups": groups[:CARE_GAP_CHILDREN]}
     if role_of(request) == Role.STAFF:
         out["empty"] = "Nothing outstanding in your records."
     return out
@@ -1375,15 +1484,26 @@ REGISTRY = {
         "description": (
             "The case summary for ONE named child. Use whenever the user names "
             "a specific child and wants their history, rundown or summary."),
-        "schema": {"name": {"required": True}},
-        "echo": lambda a: f"Looking up: {a['name']}",
+        # `child_id` is a chip's, never the model's: internal entries are not in
+        # the tools array and are dropped from a typed question's arguments (see
+        # validate). It means no description change, and a chip needs no name.
+        "schema": {"name": {"required": True, "unless": "child_id"},
+                   "child_id": {"type": "int", "required": False, "internal": True}},
+        "echo": lambda a: (f"Looking up: {a['name']}" if a.get("name")
+                           else "Looking up: the child you chose"),
         "resolve": _resolve_summary,
     },
     "list_care_gaps": {
         "description": (
+            # The second sentence is new (Oct 2026): what is LEFT TO DO on a
+            # user's cases is this tool's answer too - the Dashboard's list of
+            # gaps is exactly that. English only, and no "not for": a Tagalog
+            # example attracts by shape and a negation is dropped by the router.
             "Children with overdue follow-ups, missing pre-assessments or "
-            "missing reports. Use for 'who needs follow-up', 'who is overdue'."),
-        "schema": {},
+            "missing reports, and what is left to do on the signed-in user's "
+            "cases. Use for 'who needs follow-up', 'who is overdue', 'what do "
+            "I need to do', 'what is left to do on my cases'."),
+        "schema": {"child_id": {"type": "int", "required": False, "internal": True}},
         "echo": lambda a: "Looking up: children needing follow-up",
         "resolve": _resolve_care_gaps,
     },
@@ -1536,11 +1656,28 @@ def _followup_flags(args, result, role):
 
 
 def _followup_summary(args, result, role):
-    # "Several children match — which one?" becomes a choice, not a retype.
-    # Exact full names: the resolver lets an exact match win, so this lands.
+    # "Several children match — which one?" becomes a choice, not a retype. A
+    # chip carries the child's NUMBER (the server's own argument, see validate):
+    # two children recorded under one name are both offered, told apart by case
+    # number, and a chip never has to put a name through a lookup again.
     if result.get("match") == "several":
+        names = [item["name"] for item in result["items"]]
         for item in result["items"]:
-            yield item["name"], {"name": item["name"]}
+            label = (item["name"] if names.count(item["name"]) == 1
+                     else f"{item['name']} ({item['ref']})")
+            yield label, {"child_id": item["id"]}
+
+
+def _followup_concern(args, result, role):
+    # A search that found nothing lists what the agency does record; each is a
+    # chip that searches for exactly that, with no model to translate it.
+    if result.get("kind") == "children" and not result.get("items"):
+        for term in result.get("available") or []:
+            yield term, {"concern": term}
+
+
+def _no_followups(args, result, role):
+    return ()
 
 
 _FOLLOWUPS = {
@@ -1549,9 +1686,19 @@ _FOLLOWUPS = {
     "find_availability": _followup_availability,
     "list_self_report_flags": _followup_flags,
     "get_child_summary": _followup_summary,
+    "search_children_by_concern": _followup_concern,
+    # Starter questions and "Ask about this child" run these without the model;
+    # nothing is offered after them.
+    "list_care_gaps": _no_followups,
+    "list_unassigned_children": _no_followups,
 }
-# The only tools the follow-up endpoint will run: the ones chips come from.
+# The only tools the follow-up endpoint will run: the ones chips come from, and
+# the ones the starter questions are made of.
 FOLLOWUP_TOOLS = frozenset(_FOLLOWUPS)
+
+# Most chips an answer offers. A choice between children and the recorded
+# concerns are lists to pick from, so they run longer than a refinement.
+_FOLLOWUP_LIMITS = {"get_child_summary": 6, "search_children_by_concern": AVAILABLE_CONCERNS}
 
 
 def followups(call, result, role):
@@ -1564,10 +1711,10 @@ def followups(call, result, role):
     make = _FOLLOWUPS.get(call.tool)
     if not call.ok or make is None or result.get("kind") == "message":
         return []
-    limit = 6 if call.tool == "get_child_summary" else FOLLOWUP_LIMIT
+    limit = _FOLLOWUP_LIMITS.get(call.tool, FOLLOWUP_LIMIT)
     out = []
     for label, raw in make(call.args, result, role):
-        offer = validate(call.tool, raw)
+        offer = validate(call.tool, raw, allow_internal=True)
         if offer.ok:
             out.append({"label": label, "tool": call.tool, "args": offer.args})
         if len(out) == limit:
@@ -1612,6 +1759,8 @@ def ollama_payload():
     for name, spec in REGISTRY.items():
         props, required = {}, []
         for param, meta in spec["schema"].items():
+            if meta.get("internal"):
+                continue                      # the server's own: the model never reads it
             prop = {"type": "string"}
             if "enum" in meta:
                 prop["enum"] = meta["enum"]

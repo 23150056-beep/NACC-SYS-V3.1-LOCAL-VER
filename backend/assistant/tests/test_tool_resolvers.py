@@ -310,9 +310,26 @@ class ConcernResolverTest(ResolverTestBase):
         out = self._search("sleep")
         self.assertEqual(["Maria Santos"], [i["name"] for i in out["items"]])
 
-    def test_returns_names_not_problem_text(self):
+    def test_returns_the_matched_problem_beside_each_name(self):
+        # Problems are not carry-history filtered (ProblemEntryViewSet has
+        # hides_history = False), so the description that matched is shown.
         out = self._search("sleep")
-        self.assertNotIn("Sleep disturbance", str(out["items"]))
+        self.assertEqual([{"id": self.mine.id, "name": "Maria Santos",
+                           "problems": ["Sleep disturbance"]}], out["items"])
+
+    def test_a_child_with_two_matching_problems_is_one_row(self):
+        ProblemEntry.objects.create(child=self.mine, description="Sleep walking")
+        out = self._search("sleep")
+        self.assertEqual(1, len(out["items"]))
+        self.assertCountEqual(["Sleep disturbance", "Sleep walking"],
+                              out["items"][0]["problems"])
+
+
+def gaps_of(out):
+    """Every gap in a care-gap answer as a flat list of dicts, each with its
+    child's name and id - the answer is grouped by child."""
+    return [dict(g, child=grp["child"], child_id=grp["child_id"])
+            for grp in out["groups"] for g in grp["gaps"]]
 
 
 class CareGapResolverTest(ResolverTestBase):
@@ -324,30 +341,34 @@ class CareGapResolverTest(ResolverTestBase):
     def test_carries_the_human_message_not_the_slug(self):
         # An active child with no upcoming appointment is a gap by definition.
         out = self._resolve(self.psy, "list_care_gaps", {})
-        self.assertTrue(out["items"], "expected the no-appointment gap")
-        item = out["items"][0]
-        self.assertEqual("Maria Santos", item["child"])
-        self.assertTrue(item["message"])
-        self.assertNotIn("_", item["message"])
+        self.assertTrue(out["groups"], "expected the no-appointment gap")
+        group = out["groups"][0]
+        self.assertEqual("Maria Santos", group["child"])
+        gap = group["gaps"][0]
+        self.assertTrue(gap["message"])
+        self.assertNotIn("_", gap["message"])
 
     def test_is_scoped_to_the_caller(self):
         out = self._resolve(self.psy, "list_care_gaps", {})
-        self.assertNotIn("Juan Dela Cruz", [i["child"] for i in out["items"]])
+        self.assertNotIn("Juan Dela Cruz", [g["child"] for g in out["groups"]])
 
-    def test_items_carry_the_child_id(self):
+    def test_groups_carry_the_child_id(self):
         # The panel links the row to the child's page by it.
         out = self._resolve(self.psy, "list_care_gaps", {})
-        self.assertEqual(self.mine.id, out["items"][0]["child_id"])
+        self.assertEqual(self.mine.id, out["groups"][0]["child_id"])
 
     def test_a_psychologists_gaps_are_unchanged(self):
         out = self._resolve(self.psy, "list_care_gaps", {})
         expected = compute_alerts(Child.objects.filter(assigned_psychologist=self.psy))
-        self.assertEqual([a["type"] for a in expected], [i["type"] for i in out["items"]])
+        # The same gaps the Dashboard's card shows; only their grouping is new.
+        self.assertCountEqual([a["type"] for a in expected],
+                              [g["type"] for g in gaps_of(out)])
+        self.assertEqual(len(expected), out["gap_total"])
         self.assertNotIn("empty", out)
 
     def test_the_isa_keeps_the_agency_rules(self):
         out = self._resolve(self.admin, "list_care_gaps", {})
-        unbooked = {i["child"] for i in out["items"] if i["type"] == "no_upcoming_appointment"}
+        unbooked = {g["child"] for g in gaps_of(out) if g["type"] == "no_upcoming_appointment"}
         self.assertEqual({"Maria Santos", "Juan Dela Cruz"}, unbooked)
 
     def test_a_social_worker_gets_their_own_gaps(self):
@@ -359,8 +380,9 @@ class CareGapResolverTest(ResolverTestBase):
                 email="t@racco1.gov.ph", username="t", password="pass1234",
                 role=sw.role))
         out = self._resolve(sw, "list_care_gaps", {})
-        types = {i["type"] for i in out["items"]}
-        self.assertEqual({"Maria Santos"}, {i["child"] for i in out["items"]})
+        gaps = gaps_of(out)
+        types = {g["type"] for g in gaps}
+        self.assertEqual({"Maria Santos"}, {g["child"] for g in gaps})
         self.assertIn("no_case_referral", types)
         # Booking stays theirs; the psychologist's clinical rules do not.
         self.assertIn("no_upcoming_appointment", types)
@@ -377,8 +399,46 @@ class CareGapResolverTest(ResolverTestBase):
             child=self.mine, psychologist=self.psy,
             start=timezone.now() + timedelta(days=3))
         out = self._resolve(sw, "list_care_gaps", {})
-        self.assertEqual([], out["items"])
+        self.assertEqual([], out["groups"])
+        self.assertEqual(0, out["total"])
         self.assertEqual("Nothing outstanding in your records.", out["empty"])
+
+
+class CareGapGroupingTest(ResolverTestBase):
+    """"What do I need to do?" is answered one child at a time, and a long
+    answer says it is cut short."""
+
+    def test_a_childs_gaps_are_listed_together_most_urgent_child_first(self):
+        # Two gaps on one child (no referral, nobody booked) and one on another.
+        sw = self._social_worker()
+        Child.objects.filter(pk__in=[self.mine.pk, self.theirs.pk]).update(
+            social_worker=sw, created_at=timezone.now() - timedelta(days=30))
+        CaseReferral.objects.create(
+            child=self.theirs, uploaded_by=sw, file="case-referrals/y.pdf")
+        ConsentRecord.objects.create(child=self.theirs, status=ConsentRecord.SIGNED)
+        out = self._resolve(sw, "list_care_gaps", {})
+        self.assertEqual(2, out["total"])
+        by_child = {g["child"]: [x["type"] for x in g["gaps"]] for g in out["groups"]}
+        self.assertGreater(len(by_child["Maria Santos"]), 1)
+        self.assertEqual("Maria Santos", out["groups"][0]["child"])
+        self.assertEqual(sum(len(g["gaps"]) for g in out["groups"]), out["gap_total"])
+
+    def test_a_long_list_is_cut_by_child_and_the_totals_are_the_real_ones(self):
+        for n in range(tools.CARE_GAP_CHILDREN + 5):
+            Child.objects.create(fullname=f"Child Number{n:02d}",
+                                 assigned_psychologist=self.psy)
+        out = self._resolve(self.psy, "list_care_gaps", {})
+        self.assertEqual(tools.CARE_GAP_CHILDREN, len(out["groups"]))
+        self.assertEqual(tools.CARE_GAP_CHILDREN + 5 + 1, out["total"])
+        self.assertGreaterEqual(out["gap_total"], out["total"])
+        # The count the log and ai_eval read is the whole answer, not the page.
+        self.assertEqual(out["total"], tools.result_size(out))
+
+    def test_a_chip_can_ask_for_one_childs_gaps_and_only_within_scope(self):
+        out = self._resolve(self.psy, "list_care_gaps", {"child_id": self.mine.id})
+        self.assertEqual(["Maria Santos"], [g["child"] for g in out["groups"]])
+        other = self._resolve(self.psy, "list_care_gaps", {"child_id": self.theirs.id})
+        self.assertEqual([], other["groups"])
 
 
 class SummaryResolverTest(ResolverTestBase):
@@ -417,15 +477,38 @@ class SummaryResolverTest(ResolverTestBase):
         self.assertIn("Earlier note", [r["text"] for r in out["remarks"]])
 
     def test_a_social_workers_summary_lists_their_gaps(self):
-        # The same gap types list_care_gaps gives them, not the psychologist's.
+        # The same gap types list_care_gaps gives them, not the psychologist's -
+        # the summary's facts carry the gaps the social worker's steps do not
+        # already say, so the two are compared once the steps are added back.
         sw = self._social_worker()
         Child.objects.filter(pk=self.mine.pk).update(
             social_worker=sw, created_at=timezone.now() - timedelta(days=30))
-        gaps = self._resolve(sw, "get_child_summary", {"name": "Maria Santos"})["gaps"]
-        self.assertIn("no_case_referral", gaps)
-        self.assertNotIn("pre_assessment_overdue", gaps)
-        self.assertEqual(
-            gaps, [i["type"] for i in self._resolve(sw, "list_care_gaps", {})["items"]])
+        facts = self._resolve(sw, "get_child_summary", {"name": "Maria Santos"})["facts"]
+        listed = {g["type"] for g in gaps_of(self._resolve(sw, "list_care_gaps", {}))}
+        self.assertTrue({g["type"] for g in facts["care_gaps"]} <= listed)
+        self.assertNotIn("pre_assessment_overdue", listed)
+        self.assertTrue(facts["next_steps"])           # their own record: told what to do next
+
+    def test_it_returns_the_briefs_facts_and_a_link_to_the_record(self):
+        out = self._resolve(self.psy, "get_child_summary", {"name": "Maria Santos"})
+        self.assertEqual("clinical", out["facts"]["kind"])
+        self.assertEqual({"label": "Open record", "path": f"/report/child/{self.mine.id}"},
+                         out["link"])
+        # Only the record's own social worker is told what to do next.
+        self.assertNotIn("next_steps", out["facts"])
+
+    def test_a_chip_names_the_child_by_number_within_scope(self):
+        out = self._resolve(self.psy, "get_child_summary", {"child_id": self.mine.id})
+        self.assertEqual(("one", "Maria Santos"), (out["match"], out["child"]["name"]))
+        theirs = self._resolve(self.psy, "get_child_summary", {"child_id": self.theirs.id})
+        self.assertEqual("none", theirs["match"])
+        missing = self._resolve(self.psy, "get_child_summary", {"child_id": 99999})
+        self.assertEqual("none", missing["match"])
+
+    def test_two_children_with_one_name_are_told_apart_by_number(self):
+        twin = Child.objects.create(fullname="Maria Santos", assigned_psychologist=self.psy)
+        out = self._resolve(self.psy, "get_child_summary", {"child_id": twin.id})
+        self.assertEqual(twin.id, out["child"]["id"])
 
 
 class DirectResolverTest(ResolverTestBase):

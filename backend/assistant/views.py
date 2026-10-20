@@ -22,7 +22,7 @@ from assistant.redact import Masker
 from assistant.runtime import record_runtime_change
 from assistant.serializers import AssistantSettingSerializer
 from assistant.services import (AIUnavailable, DISCLAIMER,
-                                HOSTED_DRAFTING_REFUSED, OpenAICompatibleClient,
+                                HOSTED_DRAFTING_REFUSED, HOSTED_NOT_ALLOWED_CODE, OpenAICompatibleClient,
                                 drafting_available, gate, get_ai_client, run_job,
                                 services_lock)
 from children.models import Child
@@ -86,7 +86,9 @@ class AssistantBaseView(generics.GenericAPIView):
 
     def handle_exception(self, exc):
         if isinstance(exc, AIUnavailable):
-            return Response({"detail": str(exc)},
+            # `reason` is a fixed code (services.*_CODE), never worked out from
+            # the sentence, which can carry the runtime's own error text.
+            return Response({"detail": str(exc), "reason": exc.reason},
                             status=status.HTTP_503_SERVICE_UNAVAILABLE)
         return super().handle_exception(exc)
 
@@ -361,7 +363,7 @@ class PrefetchBriefsView(AssistantBaseView):
             # audited as a failure - a row per child per schedule visit, in a
             # background thread, for nobody. prefetchBriefs() on the schedule
             # screen already swallows the 503.
-            raise AIUnavailable(HOSTED_DRAFTING_REFUSED)
+            raise AIUnavailable(HOSTED_DRAFTING_REFUSED, HOSTED_NOT_ALLOWED_CODE)
         today = timezone.localdate()
         visible = visible_children(request)
         appts = Appointment.objects.filter(
@@ -866,6 +868,10 @@ class AssistantCapabilitiesView(AssistantBaseView):
     facts alone, and for the social worker what to do next). It follows the role, not the deployment, so the screen can
     choose the button before anything else has answered.
 
+    `examples` are {label, tool, args}: the panel runs each through
+    /assistant/followup/ without the model. `enabled` is the administrator's
+    switch.
+
     `drafting` is False where the model is hosted, because get_ai_client()
     refuses every caller without allow_hosted. A brief's prose, polish, summary
     or census narrative there can only answer 503, so the screens hide those
@@ -879,6 +885,10 @@ class AssistantCapabilitiesView(AssistantBaseView):
         return Response({"can_ask": tools.capability_text(role),
                          "examples": tools.capability_examples(role),
                          "drafting": drafting_available(),
+                         # The administrator's switch: a fact about the agency,
+                         # the same for everyone, so the panel can say "switched
+                         # off by the ISA" before anyone asks anything.
+                         "enabled": AssistantSetting.load().enabled,
                          "brief": brief_kind(role)})
 
 
@@ -1041,7 +1051,9 @@ class AssistantAskView(AssistantBaseView):
 
 
 class AssistantFollowupView(AssistantBaseView):
-    """A follow-up chip: a ready-made tool call, run without the model.
+    """A follow-up chip: a ready-made tool call, run without the model. The
+    starter questions in the empty panel (/assistant/capabilities/) and "Ask
+    about this child" arrive here too.
 
     The panel only sends calls it was offered by tools.followups, but nothing
     here relies on that. The tool must be one that chips come from, the
@@ -1068,7 +1080,10 @@ class AssistantFollowupView(AssistantBaseView):
         if not isinstance(label, str) or not label.strip() or len(label) > MAX_QUESTION:
             return Response({"detail": "A follow-up needs the label it was offered with."},
                             status=status.HTTP_400_BAD_REQUEST)
-        call = tools.validate(tool, args)
+        # The one door that may name a child by number: a chip is built by the
+        # server from an answer it gave, and the number is looked up in the
+        # asker's own scope like every other argument.
+        call = tools.validate(tool, args, allow_internal=True)
         if not call.ok:
             return Response({"detail": call.error}, status=status.HTTP_400_BAD_REQUEST)
         masker = Masker(request)

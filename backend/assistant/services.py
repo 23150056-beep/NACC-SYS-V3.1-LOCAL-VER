@@ -32,8 +32,25 @@ DISCLAIMER = ("AI-drafted decision support, not a diagnosis. The licensed "
 _GENERATION_LOCK = threading.Lock()
 
 
+# Why the assistant could not answer, as a fixed code a screen can act on. The
+# 503 carries one of these beside its sentence (AssistantBaseView): the
+# sentence may hold the runtime's own error text, so nothing is ever worked out
+# from it, and the panel says "switched off" or "not running" from the code.
+SWITCHED_OFF_CODE = "switched_off"
+RUNTIME_UNREACHABLE_CODE = "runtime_unreachable"
+HOSTED_NOT_ALLOWED_CODE = "hosted_not_allowed"
+
+
 class AIUnavailable(Exception):
-    """Raised whenever a draft cannot be produced. Always surfaces as a 503."""
+    """Raised whenever a draft cannot be produced. Always surfaces as a 503.
+
+    `reason` is one of the three codes above. A raise that names none is the
+    runtime not answering, which is what most of them are.
+    """
+
+    def __init__(self, message="", reason=RUNTIME_UNREACHABLE_CODE):
+        super().__init__(message)
+        self.reason = reason
 
 
 SWITCHED_OFF = "The assistant is switched off."
@@ -50,14 +67,15 @@ class NullClient:
     available = False
     model = ""
 
-    def __init__(self, reason=SWITCHED_OFF):
+    def __init__(self, reason=SWITCHED_OFF, code=SWITCHED_OFF_CODE):
         self.reason = reason
+        self.code = code
 
     def generate(self, prompt, system=None):
-        raise AIUnavailable(self.reason)
+        raise AIUnavailable(self.reason, self.code)
 
     def choose_tool(self, question, tool_payload, system=None):
-        raise AIUnavailable(self.reason)
+        raise AIUnavailable(self.reason, self.code)
 
 
 class OllamaClient:
@@ -180,7 +198,7 @@ def get_ai_client(*, allow_hosted=False):
 
     if hosted_model_configured():
         if not allow_hosted:
-            return NullClient(HOSTED_DRAFTING_REFUSED)
+            return NullClient(HOSTED_DRAFTING_REFUSED, HOSTED_NOT_ALLOWED_CODE)
         # Said out loud, every time, so "which model answered this" is never a
         # guess. The token is never logged.
         logger.info("Assistant is using the HOSTED model %s at %s",
@@ -195,7 +213,7 @@ def get_ai_client(*, allow_hosted=False):
     # anything. A remote address is not used unless the deployment allows one.
     refusal = runtime_url_refusal(cfg.ollama_url)
     if refusal:
-        return NullClient(refusal)
+        return NullClient(refusal, RUNTIME_UNREACHABLE_CODE)
     return OllamaClient(cfg.ollama_url, cfg.model_name)
 
 
@@ -225,7 +243,7 @@ def gate():
     """
     cfg = AssistantSetting.load()
     if not cfg.enabled:
-        raise AIUnavailable("The assistant is switched off.")
+        raise AIUnavailable(SWITCHED_OFF, SWITCHED_OFF_CODE)
     return cfg
 
 

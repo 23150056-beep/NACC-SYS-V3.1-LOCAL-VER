@@ -120,14 +120,26 @@ class SchemaShapeTest(SimpleTestCase):
         for name, spec in tools.REGISTRY.items():
             for arg, meta in spec["schema"].items():
                 with self.subTest(tool=name, arg=arg):
-                    if not meta.get("required"):
+                    # An internal entry is the server's: the model is never
+                    # shown it (test_internal_arguments_are_not_the_models).
+                    if not meta.get("required") and not meta.get("internal"):
                         self.assertIn("enum", meta)
 
     def test_no_tool_accepts_a_scope_argument(self):
         banned = {"assigned_to_me", "psychologist", "user", "child_id", "all"}
         for name, spec in tools.REGISTRY.items():
             with self.subTest(tool=name):
-                self.assertFalse(banned & set(spec["schema"]))
+                # What the MODEL can pass: the internal entries (a chip's
+                # child_id) are checked in InternalArgumentsTest.
+                visible = {a for a, meta in spec["schema"].items()
+                           if not meta.get("internal")}
+                self.assertFalse(banned & visible)
+
+    def test_the_only_internal_arguments_are_the_two_child_ids(self):
+        internal = {(name, arg) for name, spec in tools.REGISTRY.items()
+                    for arg, meta in spec["schema"].items() if meta.get("internal")}
+        self.assertEqual({("get_child_summary", "child_id"),
+                          ("list_care_gaps", "child_id")}, internal)
 
     def test_every_tool_has_a_resolver(self):
         for name, spec in tools.REGISTRY.items():
@@ -363,3 +375,34 @@ class AppointmentDescriptionCoversThePastTest(SimpleTestCase):
         for period in tools.APPOINTMENT_PERIODS:
             self.assertTrue(
                 tools.validate("list_my_appointments", {"when": period}).ok, period)
+
+
+class InternalArgumentsTest(SimpleTestCase):
+    """A chip may name a child by number; the model never can. The number is
+    looked up in the asker's own scope by the resolver, so this is only the
+    door: who may pass it."""
+
+    def test_the_model_is_not_shown_them(self):
+        for tool in tools.ollama_payload():
+            fn = tool["function"]
+            with self.subTest(tool=fn["name"]):
+                self.assertNotIn("child_id", fn["parameters"]["properties"])
+                self.assertNotIn("child_id", fn["parameters"]["required"])
+
+    def test_a_typed_question_cannot_pass_one(self):
+        call = tools.validate("get_child_summary", {"name": "Ana", "child_id": 7})
+        self.assertEqual({"name": "Ana"}, call.args)
+        # And without a name, the number does not stand in for it.
+        self.assertFalse(tools.validate("get_child_summary", {"child_id": 7}).ok)
+        self.assertEqual({}, tools.validate("list_care_gaps", {"child_id": 7}).args)
+
+    def test_a_followup_can(self):
+        call = tools.validate("get_child_summary", {"child_id": "7"}, allow_internal=True)
+        self.assertTrue(call.ok)
+        self.assertEqual({"child_id": 7}, call.args)
+
+    def test_it_must_be_a_positive_whole_number(self):
+        for bad in ("abc", "", "0", "-3", "1.5", True, None):
+            with self.subTest(bad=bad):
+                self.assertFalse(tools.validate(
+                    "get_child_summary", {"child_id": bad}, allow_internal=True).ok)

@@ -77,6 +77,15 @@ CHAT_CASES = [
      "search_children_by_concern", True, None),
     ("gaps en", "Who still needs a follow-up?", "list_care_gaps", False, None),
     ("gaps tl", "Sino ang kailangan ng follow-up?", "list_care_gaps", False, None),
+    # list_care_gaps was reworded to claim "what is left to do on my cases"
+    # (the only description change in the chat-panel batch). "Sino ang walang
+    # consent?" is here because 'sino ang walang psychologist' once pulled a
+    # neighbouring question into list_unassigned_children 3/3; read the result
+    # for it before trusting the new wording.
+    ("todo en", "What do I need to do today?", "list_care_gaps", False, None),
+    ("todo left en", "What is left to do on my cases?", "list_care_gaps", False, None),
+    ("todo tl", "Ano ang kailangan kong gawin?", "list_care_gaps", False, None),
+    ("consent tl", "Sino ang walang consent?", "list_care_gaps", False, None),
     ("chitchat", "Good morning!", "answer_directly", False,
      {"reason": "greeting_or_closing"}),
     # Regression: seen in the browser answering "40 active children". The
