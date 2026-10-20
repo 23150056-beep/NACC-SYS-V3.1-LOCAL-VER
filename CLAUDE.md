@@ -717,6 +717,23 @@ Built 26 Aug 2026. A docked panel on every protected screen, backed by
   left en`, `todo tl`, `consent tl`) await the owner's `ai_eval --feature
   chat`; "Sino ang walang consent?" has the shape that once pulled questions
   into `list_unassigned_children`.
+  **Measured on the owner's PC, 20 Oct 2026** (47 cases x 2, local 3B,
+  median 4.2 s): the three to-do cases and both `CHILD` cases 2/2 clean, so
+  the masking and the to-do wording hold. `consent tl` 0/2 (unassigned, then
+  concern search) - left as a known limit: the guards only ever DECLINE, and
+  re-routing it would be a guard asserting an answer; the "What do I need to
+  do?" chip answers it without the model. `stats pending tl` went to
+  `list_care_gaps` 1/2 - possibly the new wording; watch it on the next run.
+  "What did I do last week?" (`get_statistics`) and "Caseload per
+  psychologist?" (`count_people`) failed 2/2 before this work too. A runner
+  that cannot reach Ollama mid-run dies with a traceback: leave
+  `start-ollama.bat`'s window open, and check the run says 47 cases.
+- **"any" on an optional enum is "not given"** (`_means_no_restriction` in
+  `tools.py`): the model sent `period: "any"` to `get_statistics` and the call
+  was refused. Only for an argument that is optional, has an enum, and does
+  not list the word itself, and only after the aliases have had their turn -
+  `status: "any"` and `role: "any"` -> `anyone` are unchanged, and a required
+  `when` still refuses it.
 - **The panel is a dialog** (`components/AssistantPanel.jsx`): one toggle with
   `aria-expanded`, Esc returns focus to whatever opened it, modal below 640px,
   a polite log, the input readOnly (not disabled) while answering. Its dot is
@@ -2104,7 +2121,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 3,025 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 3,033 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 
