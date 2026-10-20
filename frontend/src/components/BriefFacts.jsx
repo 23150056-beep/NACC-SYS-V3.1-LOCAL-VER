@@ -87,7 +87,7 @@ function Row({ label, children }) {
   );
 }
 
-function FactRows({ f, onOpenOverview }) {
+function FactRows({ f, onOpenOverview, badgeSize }) {
   const next = f.next_session;
   const last = f.last_session;
   const plan = f.treatment_plan;
@@ -107,7 +107,7 @@ function FactRows({ f, onOpenOverview }) {
             {f.open_problems.map((p, i) => (
               <li key={`${p.identified_on}-${i}`}>
                 {p.description}
-                {p.category && <> <Badge tone="neutral" size="sm">{p.category}</Badge></>}
+                {p.category && <> <Badge tone="neutral" size={badgeSize}>{p.category}</Badge></>}
               </li>
             ))}
           </ul>
@@ -126,7 +126,7 @@ function FactRows({ f, onOpenOverview }) {
       <Row label="Self-reports to read">
         {waiting > 0 ? (
           <>
-            <Badge tone="danger" size="sm">{waiting} answer{waiting === 1 ? '' : 's'} awaiting review</Badge>
+            <Badge tone="danger" size={badgeSize}>{waiting} answer{waiting === 1 ? '' : 's'} awaiting review</Badge>
             {' '}
             {/* A button, not a pointer to one: it closes this and opens the tab. */}
             <Button size="sm" variant="secondary" onClick={onOpenOverview}>
@@ -144,7 +144,7 @@ function FactRows({ f, onOpenOverview }) {
                 <li key={g.type} style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 6px', alignItems: 'flex-start', padding: '2px 0' }}>
                   <Icon name="alert-triangle" size={13} aria-hidden="true"
                         style={{ color: sev.colour, flex: 'none', marginTop: 3 }} />
-                  <Badge tone={sev.tone} size="sm">{sev.label}</Badge>
+                  <Badge tone={sev.tone} size={badgeSize}>{sev.label}</Badge>
                   <span style={{ flex: '1 1 160px', minWidth: 0 }}>{g.message}</span>
                 </li>
               );
@@ -195,7 +195,9 @@ function NextSteps({ steps, onGo }) {
 
 // `onRetry` asks for the facts again after a failure; `onOpenOverview` closes the
 // modal and shows the Overview tab, where the child's own words are.
-export default function BriefFacts({ facts, failed, onGo, onRetry, onOpenOverview }) {
+// `badgeSize` is 'sm' in the brief's modal; the assistant panel, which allows no
+// text under 12px, passes 'md'.
+export default function BriefFacts({ facts, failed, onGo, onRetry, onOpenOverview, badgeSize = 'sm' }) {
   // The Retry button leaves the screen the moment it is pressed, and focus goes
   // with it. The section takes the focus first, so the keyboard stays in the
   // dialog instead of dropping to the page behind it.
@@ -225,7 +227,7 @@ export default function BriefFacts({ facts, failed, onGo, onRetry, onOpenOvervie
               <div key={i} style={{ padding: '7px 0' }}><Skeleton height={12} /></div>
             ))}
           </div>
-        ) : <FactRows f={facts} onOpenOverview={onOpenOverview} />}
+        ) : <FactRows f={facts} onOpenOverview={onOpenOverview} badgeSize={badgeSize} />}
       </section>
       {Array.isArray(facts?.next_steps) && <NextSteps steps={facts.next_steps} onGo={onGo} />}
     </>
