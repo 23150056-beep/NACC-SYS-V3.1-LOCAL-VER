@@ -4,5 +4,11 @@
     "CLAUDE_CODE_SUBAGENT_MODEL": "claude-sonnet-5-5"
   },
   "enableWorkflows": true,
-  "ultracode": true
+  "ultracode": true,
+  "skillOverrides": {
+    "anthropic-skills:ponytail": "off",
+    "anthropic-skills:ponytail-review": "off",
+    "anthropic-skills:ponytail-audit": "off",
+    "anthropic-skills:ponytail-debt": "off"
+  }
 }

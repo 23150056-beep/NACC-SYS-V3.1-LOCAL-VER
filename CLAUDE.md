@@ -85,6 +85,124 @@ whatever is newest. The Agent tool takes only the alias, and on 3 Oct
   rule above still keeps them out of every commit message, PR body and code
   comment.
 
+## Ponytail: the four skills, on by default
+
+Owner's request, 21 Oct 2026: use the ponytail skills fully on this system.
+They come from claude.ai plugins the owner turned on, and were copied into
+`.claude/skills/` that day, so the local CLI and cloud sessions run the same
+text whatever the account sync does:
+
+- **`/ponytail`**, the working mode: the smallest change that fully solves the
+  task. **On in every session at level full**, because the line below imports
+  it into this file - and so into every worker, which gets this file but would
+  never invoke a skill nobody named to it (the built-in Explore and Plan agents
+  skip this file, so they skip ponytail too). `/ponytail lite` or `/ponytail
+  ultra` changes the level and "stop ponytail" turns it off, for that session.
+- **`/ponytail-review`**: one change - uncommitted work, the last commit, a
+  branch, a PR. The reviewer when the owner says "review this" and names none.
+- **`/ponytail-audit`**: the whole repo or one app. **`/ponytail-debt`**: the
+  ledger of `shortcut:` comments. These two and the review are reports; they
+  change no code.
+
+@.claude/skills/ponytail/SKILL.md
+
+- **The copies are pinned, like the model IDs.** The account's own,
+  `anthropic-skills:ponytail*`, are switched off for this project
+  (`skillOverrides` in `.claude/settings.json`), or every skill is listed
+  twice. To take a newer version, copy
+  `~/.claude/skills/synced/<bucket>/<name>/SKILL.md` over the repo's and read
+  the diff before committing (`%USERPROFILE%\.claude\skills\synced\` on
+  Windows; it exists only when the CLI is signed in with the claude.ai
+  account).
+- **Measured on 21 Oct** with `claude -p` in a throwaway repo: the project
+  copies list under their bare names beside the account's `anthropic-skills:`
+  ones; the `@` import put the skill's text into the session AND into a
+  general-purpose subagent, which also had the Skill tool; a namespaced key in
+  `skillOverrides` hides only the account copy, a short key only the project
+  copy. Each is the model's report of its own context, not a dump of the
+  prompt.
+- **A worker cannot write these files.** On 21 Oct Claude Code's permission
+  classifier refused a Sonnet worker every write to `.claude/skills/`,
+  `.claude/settings.json` and CLAUDE.md, as instruction poisoning: they load
+  into every later session. Changing them is the main session's, on the
+  owner's word, the one exception to the split above.
+
+**Who runs what**, under the model split above:
+
+- Review, audit and debt are reading and deciding, so the main session runs
+  them. Under ultracode an audit is a workflow: one `model: "opus"` reader per
+  app or screen area, every finding put to a skeptic who tries to refute it,
+  the survivors merged to the skill's 20 with the number left out said.
+- Fixes are the owner's pick ("fix 2 and 5") and go to `model: "sonnet"`
+  workers like any other change; the hand-over carries each finding's number
+  and its Fix line.
+- Ultra's push-back belongs to the main session, as a question to the owner,
+  never to a worker. A worker builds the whole plan it is handed: ponytail
+  decides how small each part is, never which parts are dropped.
+
+**Where ponytail meets this file, this file wins:**
+
+- **Comments.** "Comment only the why the code cannot show" is how this code
+  is already written. "In one line" is not: a comment runs as long as its
+  reason needs and matches the code around it, and a docstring that records a
+  decision or an incident is never trimmed - it is what stops the next cleanup.
+- **Kept on purpose is a decision, not a finding** - the standing of a
+  `shortcut:` comment, unless the reason it gives no longer holds. With one
+  example each: stored names that outlive the code (`ALL_KEYS_EVER`,
+  `db_column="surrendered_by"`); code with no live caller kept to measure again
+  or to recover (`build_case_brief_prompt`, `LEXICON_REVIEWED`,
+  `dump_adoption_samd`); a server rule and its browser copy pinned by a test
+  (`intake.py` / `caseData.js` - the complete diff edits both, and the test is
+  the merge); look-alikes that enforce a different rule (`case_study/access.py`
+  is not the clinical base class - reuse only what enforces the SAME rule);
+  layered checks (the three layers of "One child, one record", the lexicon
+  under the model - removing one is cutting validation); decision lists with a
+  guard test (`STAFF_DRAFTING`, `KEEPS_IT`/`TAKEN_ALONG`); hand-built where
+  the platform was measured wrong (`clock()`, `fits_one_segment()`, names
+  compared NFC in Python - ponytail's own "correct on edge cases"); consent,
+  safety and launch flags (`ASSISTANT_ALLOW_HOSTED_MODEL` - "never cut", not
+  yagni); and every dated owner's decision.
+- **Schema is additive.** "Deletion beats addition" is about code. For
+  columns, keys and stored values the smallest safe change is add, copy, drop
+  later, because the old release keeps serving through a deploy (0020, 0028).
+- **The check that finishes lazy code** is the one this file names for it:
+  `ai_eval` for model output, a test through the real rule
+  (`booking.bookable_slots`) for a seeder, and the two commands under "Before
+  committing" for everything. A test that counts rows is not it.
+- **Scope.** An audit reads `render.yaml`, `backend/entrypoint.sh` and the
+  deploy config to judge the load and for nothing else; they and the live
+  services are never a finding (see Scope).
+- **A bullet here that the change makes untrue is part of the change** - one
+  of the places it must reach.
+
+**Shortcut markers.** A deliberate shortcut with a known limit opens its
+comment with `shortcut: <the limit>, <when to upgrade>` after `#`, `//`, `/*`
+or `{/*` (`REM shortcut:` in a .bat), the reasoning on the lines below as
+usual - never in a docstring alone, where the ledger cannot see it. None exist
+yet, so `/ponytail-debt` reports a clean ledger, while older deferrals are
+written as plain prose (`accounts/views.py`, "Unpaginated on purpose");
+marking those is a change of its own. The skill's own grep misses `REM`, `::`,
+`/**`, ` * ` continuation lines, a capital S and two spaces; this one catches
+them, skips Markdown and "keyboard shortcut:", and finds nothing today. It is
+written for Git Bash; PowerShell and cmd quote differently.
+
+```
+git grep --no-index --exclude-standard -niE '(#|//|/[*]+|^[[:space:]]*[*]|^[[:space:]]*(rem|::)|<!--)[[:space:]]*(shortcut|ponytail):' -- . ':!*.md'
+```
+
+**The load a review or audit judges "Scale" against**, and says it assumed:
+one regional office, RACCO I - tens of accounts and hundreds to low thousands
+of child records (one transfer moves at most 1,000, at most 50 sign-ups wait;
+the real headcount is written down nowhere, so ask before a finding turns on
+it). The local copy is ONE threaded `runserver` on SQLite (`transaction_mode:
+IMMEDIATE`), Ollama doing one generation at a time, and management commands
+run by hand as separate processes. Hosted, 2-3 gunicorn sync workers share
+Neon, and with no `CACHES` setting every cache is per worker. What bites is not
+volume. It is per-process state, right locally and split per worker hosted
+(login lockout, the sign-up limits, DRF throttles, the generation lock, the
+brief's `_IN_FLIGHT`), and two writers doing the same thing: a second Save
+press (C-0049/C-0050), two transfers at once.
+
 ## Getting changes onto GitHub
 
 **What is safe is the REPOSITORY, not the remote name.** Corrected 20 Sep
