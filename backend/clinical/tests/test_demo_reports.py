@@ -4,10 +4,9 @@ What the demo holds has to be what an upload would have produced: each file is
 read by the real extractor and checked by the real check before it is saved.
 """
 import shutil
+import tempfile
 from io import StringIO
-from pathlib import Path
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.core.management import call_command
@@ -19,11 +18,26 @@ from clinical import demo_reports
 from clinical.models import PsychologicalReport
 from locations.models import Barangay, Municipality, Province
 
-MEDIA = Path(settings.BASE_DIR) / "test-media-demo-reports"
+
+class _OwnMediaFolder:
+    """A temporary MEDIA_ROOT for each test class, removed when the class is done.
+
+    Both classes here used to write into one fixed folder under backend/ and
+    remove it after every test. `manage.py test --parallel 4` runs them on
+    different workers, so one removed the folder while the other was writing a
+    report into it (21 Oct 2026): a FileNotFoundError the parallel runner could
+    not pickle, which aborted the whole run.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.media_root = tempfile.mkdtemp(prefix="nacc-test-demo-reports-")
+        cls.addClassCleanup(shutil.rmtree, cls.media_root, ignore_errors=True)
+        cls.enterClassContext(override_settings(MEDIA_ROOT=cls.media_root))
+        super().setUpClass()
 
 
-@override_settings(MEDIA_ROOT=str(MEDIA))
-class InstallReportsTest(TestCase):
+class InstallReportsTest(_OwnMediaFolder, TestCase):
     def setUp(self):
         role = Role.objects.create(role_name=Role.PSYCHOLOGIST)
         make = get_user_model().objects.create_user
@@ -35,9 +49,6 @@ class InstallReportsTest(TestCase):
             Child.objects.create(fullname=f"{f} {l}", first_name=f, last_name=l,
                                  assigned_psychologist=self.pia if i % 2 else self.oscar)
             for i, (f, l) in enumerate(names)]
-
-    def tearDown(self):
-        shutil.rmtree(MEDIA, ignore_errors=True)
 
     def install(self):
         return demo_reports.install_reports(Child.objects.order_by("pk"))
@@ -80,11 +91,8 @@ class InstallReportsTest(TestCase):
             child=self.children[0]).values_list("original_filename", flat=True)))
 
 
-@override_settings(DEBUG=True, MEDIA_ROOT=str(MEDIA))
-class SeederTest(TestCase):
-    def tearDown(self):
-        shutil.rmtree(MEDIA, ignore_errors=True)
-
+@override_settings(DEBUG=True)
+class SeederTest(_OwnMediaFolder, TestCase):
     def test_the_seeder_writes_a_report_for_every_active_child(self):
         province = Province.objects.create(psgc_code="012800000", name="Ilocos Norte")
         town = Municipality.objects.create(psgc_code="012812000", name="Laoag City",
