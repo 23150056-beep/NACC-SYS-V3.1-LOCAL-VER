@@ -21,6 +21,7 @@ from scheduling.models import AvailabilityBlock, Appointment, Unavailability
 from scheduling.serializers import (
     AvailabilityBlockSerializer, AppointmentSerializer, UnavailabilitySerializer,
 )
+from scheduling.session_mail import BOOKED, CANCELLED, MOVED, session_changed
 
 
 
@@ -374,6 +375,9 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         # (children/custodian.py). Queued for after the save commits.
         if obj.status == Appointment.SCHEDULED and obj.start > timezone.now():
             notify_custodian(obj, "booked")
+        # The psychologist whose calendar it is, and the social worker whose
+        # child it is, unless either made the booking (scheduling/session_mail.py).
+        session_changed(obj, BOOKED, by=self.request.user)
 
     def perform_update(self, serializer):
         """Moving an appointment is booking it again, and checked as such.
@@ -400,7 +404,8 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             data.get("duration_minutes", instance.duration_minutes),
             exclude_id=instance.pk,
         )
-        was_at = instance.start
+        was_at, was_for, was_with = (instance.start, instance.duration_minutes,
+                                     instance.psychologist)
         obj = serializer.save(psychologist=psychologist)
         log_activity(self.request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type="Appointment", entity_label=obj.child.fullname,
@@ -408,6 +413,16 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         if (obj.start != was_at and obj.status == Appointment.SCHEDULED
                 and obj.start > timezone.now()):
             notify_custodian(obj, "moved")
+        # A change to the plan is a new time, a different length or a different
+        # psychologist; notes and purpose are nobody's business by email. Only
+        # for a session still to come, like the custodian's text above: one
+        # that was never marked completed stays "scheduled" in the past, and an
+        # invite for last week's date helps nobody.
+        if obj.status == Appointment.SCHEDULED and obj.start > timezone.now() and (
+                obj.start != was_at or obj.duration_minutes != was_for
+                or obj.psychologist_id != was_with.pk):
+            session_changed(obj, MOVED, by=self.request.user, was_start=was_at,
+                            was_duration=was_for, was_psychologist=was_with)
 
     def _set_status(self, request, pk, new_status):
         obj = self.get_object()
@@ -444,6 +459,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         if was == Appointment.SCHEDULED:
             if new_status == Appointment.CANCELLED and obj.start > timezone.now():
                 notify_custodian(obj, "cancelled")
+                session_changed(obj, CANCELLED, by=request.user)
             elif (new_status == Appointment.NO_SHOW
                   and timezone.localtime(obj.start).date() == timezone.localdate()):
                 notify_custodian(obj, "missed")

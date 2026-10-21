@@ -1,7 +1,8 @@
 # Email Notifications for Psychologists and Social Workers
 
 **Date:** 2026-10-21
-**Status:** Designed; built on `claude/busy-faraday-jl44nl`
+**Status:** Built on `claude/busy-faraday-jl44nl`. The calendar invite is not
+yet checked in a real Gmail inbox.
 **Owner's request:** "I need to have my users each of them have their own
 google notifications for example the psychologist: when a child as been assign
 to them it will notify them from their google email account, Im open for your
@@ -241,3 +242,47 @@ a single `/` that is not `/login` is followed; anything else goes to `/`.
 - Sending from each user's own Gmail: not practical. It needs Google's
   restricted `gmail.send` scope, a security assessment and changes to the live
   OAuth app.
+
+## Settled in review
+
+Found by reading the built change against the rules above, 21 Oct 2026. Each is
+a gap in the table or the wording, not a change of what is emailed to whom.
+
+- **Names, never addresses.** `username` is the email address on every way an
+  account is made and a name is optional, so `display_name` would have put a
+  colleague's address in a subject line. Emails and invites name people through
+  `accounts.display.entered_name`: the name typed, else "A colleague" / "A
+  psychologist" / "The ISA" / "Attendee". A recipient with no name is mailed by
+  address alone.
+- **Closing a case** withdraws its open request (`terminate`), and the email to
+  the psychologist who was asked now says the case was closed and names nobody,
+  where it read "{by} withdrew the request".
+- **A session already in the past** (never marked completed, still
+  "scheduled") is not mailed about when its length or psychologist is edited,
+  the same rule the custodian's text has.
+- **Handing a session to another psychologist**: the social worker's email
+  carries a Psychologist row ("Jose Rizal (was Marivic Bulan)"), and the one it
+  left is told the session goes ahead with the other.
+- **The calendar invite is numbered under a row lock**, so two changes handled
+  together are numbered one after the other; a file that cannot be built
+  rolls the count back. `sent_at` is stamped on every send.
+- **A 400 from Brevo for a message with an attachment** is sent once more
+  without it: the message is the point, the invite the extra.
+- **Invisible formatting characters** (right-to-left overrides, zero-width
+  spaces) are dropped from names in the invite.
+- **The `records_transferred` switch** says "Transfer records": only the ISA's
+  bulk move sends it, not a single Social Worker pick on the record form.
+- `request_withdrawn` accepts a string only if it is a case reference; the
+  queue's `on_commit` callback is `robust`.
+
+Left open, with the owner:
+
+- **A session pointed at a different child** (API only; the calendar never
+  sends it) changes the invite's case but sends nothing. It needs a decision:
+  tell both social workers and update the invite, or refuse the change.
+- **The event UID** is derived from `CORS_ALLOWED_ORIGINS` as specified above, so
+  editing that list while sessions are booked would give each a second event.
+  Storing the UID on the first `CalendarInvite` row would fix it.
+- **"No case details are included"** (the footer, the My Profile line) is
+  stronger than a session email's date and time; the deployment document now
+  says what they carry. The wording is the owner's to settle.

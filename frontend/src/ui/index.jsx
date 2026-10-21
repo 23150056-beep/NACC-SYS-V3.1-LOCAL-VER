@@ -520,7 +520,7 @@ export function TimeInput({ value = '', onChange, id, disabled = false, style = 
 }
 
 /* ----------------------------- Switch ----------------------------- */
-export function Switch({ checked = false, onChange, size = 'md', disabled = false, label = null, style = {} }) {
+export function Switch({ checked = false, onChange, size = 'md', disabled = false, label = null, describedBy = undefined, style = {} }) {
   const dims = { sm: { w: 34, h: 20, k: 14 }, md: { w: 44, h: 26, k: 20 } };
   const d = dims[size] || dims.md;
   const toggle = () => { if (!disabled && onChange) onChange(!checked); };
@@ -528,7 +528,7 @@ export function Switch({ checked = false, onChange, size = 'md', disabled = fals
     <span
       role="switch" aria-checked={checked} tabIndex={disabled ? -1 : 0} onClick={toggle}
       aria-label={typeof label === 'string' ? label : undefined}
-      aria-disabled={disabled || undefined}
+      aria-disabled={disabled || undefined} aria-describedby={describedBy}
       onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); toggle(); } }}
       style={{ position: 'relative', width: d.w, height: d.h, flex: 'none', borderRadius: 'var(--radius-pill)', background: checked ? 'var(--blue-600)' : 'var(--ink-300)', cursor: disabled ? 'not-allowed' : 'pointer', opacity: disabled ? 0.5 : 1, transition: 'background var(--dur-base) var(--ease-out)', display: 'inline-block' }}
     >
@@ -539,7 +539,11 @@ export function Switch({ checked = false, onChange, size = 'md', disabled = fals
   return (
     <label style={{ display: 'inline-flex', alignItems: 'center', gap: 10, cursor: disabled ? 'not-allowed' : 'pointer', ...style }}>
       {control}
-      <span style={{ fontFamily: 'var(--font-sans)', fontSize: 'var(--text-base)', color: 'var(--text-body)', fontWeight: 600 }}>{label}</span>
+      {/* A <label> forwards a click only to a labelable control, and a span
+          with role=switch is not one, so the words toggle it themselves. They
+          are a sibling of the control, so a click on the track is not counted
+          twice. */}
+      <span onClick={toggle} style={{ fontFamily: 'var(--font-sans)', fontSize: 'var(--text-base)', color: 'var(--text-body)', fontWeight: 600 }}>{label}</span>
     </label>
   );
 }

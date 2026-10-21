@@ -9,6 +9,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from accounts import email_notifications
 from accounts.display import display_name
 from accounts.phone import as_typed as phone_as_typed
 from accounts.models import Role
@@ -353,6 +354,8 @@ class ChildViewSet(viewsets.ModelViewSet):
         log_activity(request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type="Child", entity_label=child.fullname, entity_id=child.id,
                      recipient=previous if taking_over else child.assigned_psychologist)
+        if taking_over and previous is not None:
+            email_notifications.case_taken_over(child, previous, by=request.user)
         return Response({"status": child.status, "case_status": child.case_status,
                          "social_worker": child.social_worker_id})
 

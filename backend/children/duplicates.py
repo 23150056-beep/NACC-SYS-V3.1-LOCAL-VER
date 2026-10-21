@@ -34,6 +34,7 @@ from django.http import Http404
 from rest_framework import status
 from rest_framework.response import Response
 
+from accounts import email_notifications
 from accounts.display import display_name
 from accounts.scoping import scope_to_visible
 from activity.models import ActivityLog
@@ -335,12 +336,14 @@ def remove(duplicate_pk, original_pk, case_reference, *, by):
         # The psychologist whose question disappeared - only a request still
         # PENDING, since a declined one was already answered and needs no
         # notice. No child's name, like every other notice about a request
-        # (children/assignment.py).
+        # (children/assignment.py); the email gets the reference, because the
+        # record it is about is gone.
         for psychologist in asked:
             log_activity(by, ActivityLog.WITHDRAWN, ActivityLog.RECORD,
                          entity_type="Assignment",
                          entity_label=f"record {dup_ref}, which was a duplicate",
                          recipient=psychologist)
+            email_notifications.request_withdrawn(psychologist, dup_ref, by=by)
         transaction.on_commit(lambda: _delete_files(files))
     return {"removed": dup_ref, "duplicate_of": orig_ref}
 

@@ -284,3 +284,37 @@ class EmailVerification(models.Model):
 
     def __str__(self):
         return f"Email verification for {self.user.email}"
+
+
+class EmailOptOut(models.Model):
+    """One email a person has switched off (accounts/email_notifications.py).
+
+    **A row means OFF.** No row means on, so a kind added to the catalogue
+    later starts on for everybody, and an account that never opened the
+    profile card gets every email its role is sent. Storing the "on" ones
+    instead would leave all of them silently off until each person found the
+    card.
+
+    A table of its own rather than a column on User, so the release still
+    serving while a deploy migrates is untouched: it never asks for this
+    table, and the new one never asks for a column the old one lacks. `kind`
+    is a catalogue key, kept as text and not checked against the catalogue
+    here, because a key that was retired must not make an old row unreadable.
+    Unique on (user, kind), so switching the same email off twice is one row.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="email_opt_outs")
+    kind = models.CharField(max_length=40)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "tbl_email_opt_out"
+        constraints = [
+            models.UniqueConstraint(fields=["user", "kind"],
+                                    name="one_email_opt_out_per_user_and_kind"),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} opted out of {self.kind}"

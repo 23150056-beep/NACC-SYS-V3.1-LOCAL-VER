@@ -1,19 +1,27 @@
-"""Transactional mail for case assignment.
+"""Transactional mail: the sender every email in this system goes through,
+and the messages that are not about a person's work.
 
-Restored from V2, with two deliberate changes.
+Restored from V2, with two deliberate changes that every email since keeps.
 
-**No name, no case details.** V2's email carried the child's full name and case
-number in the body. Brevo is a processor outside the agency's data-processing
-agreements (see the data-residency section of docs/CLOUD-DEPLOYMENT.md), and a
-child's name in a third party's mail logs is exactly the disclosure that section
-exists to prevent. The email now carries the case number and nothing else — the
-psychologist signs in to see who it is.
+**No name, no case details.** V2's assignment email carried the child's full
+name and case number in the body. Brevo is a processor outside the agency's
+data-processing agreements (see the data-residency section of
+docs/CLOUD-DEPLOYMENT.md), and a child's name in a third party's mail logs is
+exactly the disclosure that section exists to prevent. An email about a case
+carries its reference and nothing else - the person signs in to see who it is.
 
 **Off the request thread.** V2 called Brevo synchronously with a 20-second
 timeout, inside the request that saved the child record. A slow or unreachable
 Brevo would have held the save open and, on a small instance, tied up the
-worker. The send now happens after the transaction commits, on a daemon thread:
+worker. A send now happens after the transaction commits, on a daemon thread:
 the record is the source of truth and the mail must never be able to break it.
+
+What lives here: the Brevo request itself (`_post`, `_build_request`), the
+sign-in address and the palette every email shares, the configuration test,
+the temporary password and the sign-up verification code. The emails sent to
+psychologists and social workers about their work - a case waiting for an
+answer, an answer, a handover - are a catalogue of their own with a switch
+each: accounts/email_notifications.py.
 """
 import html
 import json
@@ -72,6 +80,14 @@ def _post(payload, description):
             detail = "(no response body)"
         logger.error("Brevo %s failed: HTTP %s — %s",
                      description, exc.code, detail)
+        if exc.code == 400 and payload.get("attachment"):
+            # A file Brevo will not take as written (an account that restricts
+            # attachments, a type it does not allow) must not cost the person
+            # the email itself: the calendar invite is the extra, the message
+            # is the point. Once, and without the file.
+            logger.warning("Brevo %s: sending again without the attachment", description)
+            return _post({k: v for k, v in payload.items() if k != "attachment"},
+                         description)
         return False
     except urllib.error.URLError:
         logger.exception("Brevo %s failed: could not reach Brevo", description)
@@ -79,57 +95,6 @@ def _post(payload, description):
     except Exception:
         logger.exception("Unexpected error sending Brevo %s", description)
         return False
-
-
-def build_payload(psychologist, case_number):
-    """The message itself. Split out so a test can assert what leaves the
-    building without standing up an HTTP server."""
-    recipient_name = html.escape(display_name(psychologist, "Psychologist"))
-    return {
-        "sender": {
-            "name": settings.BREVO_SENDER_NAME,
-            "email": settings.BREVO_SENDER_EMAIL,
-        },
-        "to": [{"email": psychologist.email, "name": recipient_name}],
-        # A question, not a fact, since 28 Sep 2026: the case is theirs only
-        # once they accept it (children/assignment.py).
-        "subject": "A case is waiting for your answer",
-        "htmlContent": (
-            "<h2>A case is waiting for your answer</h2>"
-            f"<p>Dear {recipient_name},</p>"
-            "<p>You have been asked to take a case. It joins your records once "
-            "you accept it.</p>"
-            f"<p><strong>Case number:</strong> {case_number}</p>"
-            "<p>Sign in to the RACCO I Child Care Management System to accept or "
-            "decline it. No case details are included in this email.</p>"
-            "<br><small>This is an automated notification.</small>"
-        ),
-    }
-
-
-def send_assignment_notification(child, psychologist=None):
-    """Queue one email to the psychologist asked to take the child - by
-    default the one assigned.
-
-    Returns True when a send was queued, False when there was nothing to send
-    (no assignee, no address, no API key). Never raises — the caller is in the
-    middle of saving a case record.
-    """
-    psychologist = psychologist or getattr(child, "assigned_psychologist", None)
-    if psychologist is None or not getattr(psychologist, "email", ""):
-        return False
-    if not settings.BREVO_API_KEY:
-        logger.warning(
-            "BREVO_API_KEY is not set; skipped assignment email for case %s", child.id)
-        return False
-
-    payload = build_payload(psychologist, child.id)
-    # on_commit so a rolled-back save cannot send mail about a case that does
-    # not exist; the thread so a slow Brevo cannot hold the response open.
-    transaction.on_commit(
-        lambda: threading.Thread(
-            target=_post, args=(payload, "assignment email"), daemon=True).start())
-    return True
 
 
 def sign_in_url():

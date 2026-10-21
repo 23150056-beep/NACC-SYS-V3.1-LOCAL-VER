@@ -404,11 +404,12 @@ LOGGING = {
 
 # --- Transactional mail (Brevo) -------------------------------------------
 #
-# One message only: "a case has been assigned to you", carrying the case
-# number and nothing else. Brevo is a processor outside the agency's DPAs, so
-# no child name or case detail is put in an email body — see the
-# data-residency section of docs/CLOUD-DEPLOYMENT.md. Leave BREVO_API_KEY
-# unset and the notification is skipped; nothing else changes.
+# Temporary passwords, sign-up codes and the notifications to psychologists
+# and social workers (accounts/email_notifications.py). Brevo is a processor
+# outside the agency's DPAs, so no child name or case detail is put in an
+# email — a case is named by its reference alone; see the data-residency
+# section of docs/CLOUD-DEPLOYMENT.md. Leave BREVO_API_KEY unset and the
+# notification is logged instead of sent; nothing else changes.
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL", "racco1nacc@gmail.com")
 BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "NACC RACCO1")

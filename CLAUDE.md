@@ -1807,6 +1807,56 @@ and census stay underneath, as they were.
   scrolls to the agency card and focuses its first field when it has loaded
   (`useOpenFromLink`, so it is used up and does not fire again on a reload).
 
+## Email notifications
+
+Owner's request, 21 Oct 2026: each user gets their own emails, starting with
+the psychologist asked to take a child. Design and what was settled in review:
+`docs/superpowers/specs/2026-10-21-email-notifications-design.md`.
+
+- **The "Google notification" the owner meant is the existing Brevo sender**
+  (`children/notifications.py _post`, `BREVO_API_KEY`, from
+  `racco1nacc@gmail.com`). It was what mailed temporary passwords; nothing new
+  was added to send. Sending from each user's own Gmail would need Google's
+  restricted `gmail.send` scope and the live OAuth app changed.
+- **One catalogue, `KINDS` in `accounts/email_notifications.py`**: psychologist
+  `case_request`, `request_withdrawn`, `my_calendar`; SW `case_accepted`,
+  `case_declined`, `records_transferred` (the console's Transfer records only,
+  not a single Social Worker pick), `case_taken_over`, `child_sessions`. The
+  ISA gets none yet; the design note lists the suggested ones. **A key is never
+  renamed**: opt-outs are stored by key, and the test pins the list.
+- **Fired from the domain functions, never from `log_activity`.** The bell
+  addresses lines to the psychologist even for their own actions and every
+  line names the child.
+- **No child's name, ever**, in a subject, body, text part or invite: the case
+  reference (`case_ref`), session times, staff names and counts only. People
+  are named through `accounts.display.entered_name`, never `display_name`:
+  `username` is the email address, so a nameless colleague would have read as
+  their address in someone else's subject line. The privacy tests plant a token
+  in every free-text Child column (`children/tests/payloads.planted_text`).
+- **Never for your own action**, except the psychologist's "Calendar update":
+  moving or cancelling a session they hold an invite for re-sends the invite,
+  or Google Calendar keeps the old time.
+- **Session emails carry an `.ics` invite** (`scheduling/calendar_invite.py`,
+  `scheduling/session_mail.py`), the psychologist's only. `CalendarInvite`
+  counts SEQUENCE per (appointment, attendee), under a row lock, and only when
+  the email is really queued. **Not yet seen in a real Gmail inbox** - this was
+  built with no Brevo key. Book a session as a SW with the key set and check the
+  psychologist's Gmail shows an invitation before relying on it. A 400 from
+  Brevo for a message with an attachment is sent again without it.
+- **Each person's switches** are `EmailOptOut` rows (a row means OFF, so a new
+  kind starts on), at `GET/PUT /api/auth/me/email-notifications/`, shown on My
+  Profile under the mobile number. Only the caller's role's keys are accepted.
+- **With no `BREVO_API_KEY`** (the local copy) each email is one WARNING line,
+  `EMAIL (console) <kind> to <address>: <subject>`, and nothing is recorded as
+  sent - so the Calendar update cannot happen locally.
+- **A link in an email opens a signed-out tab** (tokens are per tab), so
+  `ProtectedRoute` passes `state.from` and `Login` returns there after any
+  sign-in (`returnPath`: a single leading `/`, never `/login`).
+- **Left open for the owner**: a session PATCHed onto another child (API only)
+  sends nothing; the invite UID is tagged from `CORS_ALLOWED_ORIGINS`, so
+  editing that list while sessions are booked duplicates events; the footer's
+  "No case details are included" is stronger than a session's date and time.
+
 ## Text messages (Semaphore)
 
 Audited 26 Sep 2026 when the owner chose Semaphore. `SMS_PROVIDER` picks the
@@ -2044,7 +2094,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,828 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 3,026 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

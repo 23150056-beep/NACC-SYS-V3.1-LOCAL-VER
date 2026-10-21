@@ -16,13 +16,13 @@ Design: docs/superpowers/specs/2026-09-28-assignment-acceptance-design.md
 from django.db import transaction
 from django.utils import timezone
 
+from accounts import email_notifications
 from accounts.display import display_name
 from accounts.models import Role
 from accounts.sms_notifications import notify_new_assignment
 from activity.models import ActivityLog
 from activity.services import log_activity
 from children.models import AssignmentRequest, Child
-from children.notifications import send_assignment_notification
 
 PENDING = AssignmentRequest.PENDING
 
@@ -88,9 +88,9 @@ def request_assignment(child, psychologist, *, by, carry_history=None):
         previous_psychologist=child.assigned_psychologist,
         carry_history=True if carry_history is None else carry_history)
     _log(by, ActivityLog.REQUESTED, req, psychologist)
-    # Same two messages an assignment used to send, now saying there is a
-    # question to answer. Neither carries the child's name.
-    send_assignment_notification(child, psychologist)
+    # An email and a text, each saying there is a question to answer. Neither
+    # carries the child's name.
+    email_notifications.case_request(child, psychologist, by=by)
     notify_new_assignment(child, psychologist)
     return req
 
@@ -137,6 +137,7 @@ def accept(req, *, by):
     moved_from = (req.previous_psychologist
                   if req.previous_psychologist_id not in (None, req.psychologist_id) else None)
     _log(by, ActivityLog.ACCEPTED, req, moved_from or _record_holder(req))
+    email_notifications.case_answered(req, by=by)
     return req
 
 
@@ -152,6 +153,7 @@ def decline(req, *, by, reason):
         raise _already(req)
     req.refresh_from_db()
     _log(by, ActivityLog.DECLINED, req, _record_holder(req))
+    email_notifications.case_answered(req, by=by)
     return req
 
 
@@ -162,6 +164,7 @@ def withdraw(req, *, by):
     # To the psychologist, so the request does not vanish from their panel
     # with nothing to say why.
     _log(by, ActivityLog.WITHDRAWN, req, req.psychologist)
+    email_notifications.request_withdrawn(req.psychologist, req.child, by=by)
     return req
 
 

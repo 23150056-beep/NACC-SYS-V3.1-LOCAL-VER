@@ -172,3 +172,42 @@ class CustodianReminder(models.Model):
 
     class Meta:
         db_table = "tbl_custodian_reminder"
+
+
+class CalendarInvite(models.Model):
+    """The record that one person was sent a calendar invite for one
+    appointment (scheduling/calendar_invite.py, scheduling/session_mail.py).
+
+    One row per (appointment, attendee), and its EXISTENCE is what "already
+    sent an invite" means: a psychologist who moves or cancels a session they
+    were sent an invite for is mailed an update, because the event in their
+    Google Calendar would otherwise stay at the old time; one who never was
+    is not, because there is nothing out there to correct.
+
+    `sequence` is RFC 5545's SEQUENCE. A calendar applies an invite only when
+    its sequence is higher than the one it holds, so every re-send must go up
+    by one. It is bumped when an invite is actually queued and not before, so
+    a copy with no mail service set up (the local one) records nothing and an
+    opted-out psychologist's counter does not run ahead of what they hold.
+    `cancelled` says the last invite sent was a cancellation. `sent_at` is
+    stamped on every save, which is every send.
+    """
+
+    appointment = models.ForeignKey(
+        Appointment, on_delete=models.CASCADE, related_name="calendar_invites")
+    attendee = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="calendar_invites")
+    sequence = models.PositiveIntegerField(default=0)
+    cancelled = models.BooleanField(default=False)
+    sent_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "tbl_calendar_invite"
+        constraints = [
+            models.UniqueConstraint(fields=["appointment", "attendee"],
+                                    name="one_calendar_invite_per_attendee"),
+        ]
+
+    def __str__(self):
+        return f"Invite for appointment {self.appointment_id} to {self.attendee_id}"

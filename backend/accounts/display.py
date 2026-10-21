@@ -35,3 +35,20 @@ def display_name(person, fallback=""):
     return (getattr(person, "fullname", "")
             or getattr(person, "username", "")
             or fallback)
+
+
+def entered_name(person, fallback=""):
+    """The name somebody typed into their account, and NOTHING else: not the
+    username, which on this model is their email address.
+
+    `display_name` is right for a screen behind the sign-in and wrong for an
+    email, whose subject, text part and calendar invite are kept by Brevo and
+    Google. A member of staff with no first or last name (the ISA may create
+    one with just an address, and Google may send no given name) would read as
+    their address in a colleague's subject line, "sw@agency.ph booked a session
+    on your calendar". The emails to psychologists and social workers
+    (accounts/email_notifications.py, scheduling/session_mail.py,
+    scheduling/calendar_invite.py) name people through this and say `fallback`
+    when there is no name.
+    """
+    return getattr(person, "fullname", "") or fallback
