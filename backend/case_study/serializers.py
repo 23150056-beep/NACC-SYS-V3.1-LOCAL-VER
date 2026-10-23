@@ -1,9 +1,10 @@
 """The shapes the case study API answers with.
 
-Hand-built dicts rather than model serializers, because three callers get three
+Hand-built dicts rather than model serializers, because two callers get two
 different answers from one set of rows and the difference IS the access rule:
-the social worker gets everything, the psychologist block A, and the ISA a
-status with no text anywhere in it. Each shape is built by one function here so
+the social worker gets everything and the ISA a status with no text anywhere
+in it. Anyone else, a psychologist included, is refused in access.py before
+any shape is built. Each shape is built by one function here so
 a field cannot slip into the wrong one.
 
 The catalogue (titles, kinds, columns, hints) is not repeated in the answers:
@@ -54,8 +55,7 @@ def _age(born, on):
 def record_facts(child, on):
     """Part I (Identifying Information) read from the child's record, which is
     where it is kept; the case study never stores it. Field names are the
-    child record's own, plus what the report derives from them. Nothing here is
-    beyond what the child's page shows a psychologist."""
+    child record's own, plus what the report derives from them."""
     abandoned = child.case_category in ABANDONED
     found = child.date_found
     return {

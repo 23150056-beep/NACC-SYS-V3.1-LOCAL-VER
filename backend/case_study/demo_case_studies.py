@@ -1,7 +1,7 @@
 """Invented case studies for demo children (8 and 10 Oct 2026).
 
 A third of the adoption children get a draft with block A partly filled, so the
-tab, the psychologist's read-only view and the ISA's status card have something
+tab and the ISA's status card have something
 to show. A few others (up to three) get a complete case study that is FINAL, so
 the print of a final, "Finals on file" and Reopen have something to work on
 too. Block A is every case type's, so a few children of the other case types
@@ -200,7 +200,7 @@ def _summary(child):
 
 def _boxes(child, today, turn):
     """The demo text for each box worth showing, in the catalogue's order. Only
-    block A: the psychologist reads it, and block B stays empty. It is every
+    block A, and block B stays empty. It is every
     case type's, so the wording does not assume an adoption."""
     start = _started_on(child, today)
     signed = start - timedelta(days=12)

@@ -567,12 +567,8 @@ ALL_KEYS_EVER = (
 
 SECTION_BY_KEY = {entry["key"]: entry for entry in SCSR_SECTIONS}
 
-# Block A is all a psychologist may read (owner's decision 1, 8 Oct 2026).
+# The keys of block A (the child), which every case type gets.
 BLOCK_A_KEYS = tuple(e["key"] for e in SCSR_SECTIONS if e["block"] == "A")
-# Their findings reach the case study through the social worker's text, so a
-# psychologist whose history is not carried (Child.assignee_sees_history False)
-# must not read it back: that would go around the carry-history control.
-PSYCH_HIGHLIGHTS = "a3_psych_highlights"
 
 DVC_SIGNED = "a5_dvc_signed"
 DVC_NOTARIZED = "a5_dvc_notarized"

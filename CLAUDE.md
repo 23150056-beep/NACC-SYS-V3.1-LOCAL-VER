@@ -880,7 +880,6 @@ App `case_study` (never `adoption`, see "Removed").
   per tab, so the commonest conflict is the same person in two tabs.
 - **Not applicable hides, never deletes**: a ticked box keeps its text and
   unticking brings it back; a PUT without a `value` key leaves the text alone.
-  The psychologist's read sends null for a ticked box.
 - **Pre-fills are offered, never saved**: referral source and reason, medical
   notes, and the latest psychological report's summary ONLY if confirmed. That
   is the SW reading the psychologist's report, the other direction from the

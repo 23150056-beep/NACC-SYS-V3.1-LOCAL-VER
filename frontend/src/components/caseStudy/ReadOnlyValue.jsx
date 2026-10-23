@@ -1,7 +1,7 @@
 import { PAP_ROWS } from '../../config/scsr';
 import { PAP_SIDES, TICK_SENTENCES, ageAtText, canonical, isBlank, longDate, partialDate } from './model';
 
-/* A box as it stands, for reading: the psychologist's view of block A, a social
+/* A box as it stands, for reading: a social
  * worker's closed or final case study, and "the other version" a conflict
  * puts beside yours. Nothing here can be changed or saved. */
 

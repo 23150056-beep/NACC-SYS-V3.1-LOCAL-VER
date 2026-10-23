@@ -149,7 +149,7 @@ export default function ChildProgressReport() {
   // arrives (this component is re-used between routes), so it counts only once
   // it is this child's.
   const dataIsThisChild = !!data && data !== 'error' && String(data.child?.id) === String(id);
-  const caseStudy = useCaseStudy(id, dataIsThisChild);
+  const caseStudy = useCaseStudy(id, dataIsThisChild && user?.role_name !== 'Psychologist');
   const hasCaseStudyTab = caseStudy.phase === 'ready' || caseStudy.phase === 'error';
   // Print follows the tab: on the Case study tab the social worker who holds
   // the record prints the case study; everyone else, and every other tab, the

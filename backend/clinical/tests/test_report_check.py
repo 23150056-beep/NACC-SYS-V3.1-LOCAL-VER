@@ -5,12 +5,12 @@ another child's name, their case number, age, birthday or sex. Every finding
 points at text that is really in the document; nothing here uses a model.
 """
 import shutil
+import tempfile
 from datetime import date
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -113,7 +113,8 @@ def user(email, role):
         role=Role.objects.get_or_create(role_name=role)[0])
 
 
-MEDIA = Path(settings.BASE_DIR) / "test-media-check"
+# One folder per test process: parallel workers must not share (and delete) one.
+MEDIA = Path(tempfile.mkdtemp(prefix="test-media-check-"))
 
 
 @override_settings(MEDIA_ROOT=str(MEDIA))
@@ -130,9 +131,6 @@ class ScopeAndEndpointTest(TestCase):
         self.juan = Child.objects.create(fullname="Juan Cruz", first_name="Juan",
                                          last_name="Cruz", assigned_psychologist=self.oscar)
         self.text = "Maria Santos attended. Ana Reyes and Juan Cruz were mentioned." + FILLER
-
-    def tearDown(self):
-        shutil.rmtree(MEDIA, ignore_errors=True)
 
     def named(self, who):
         return sorted(f["message"].split(",")[0] for f in
