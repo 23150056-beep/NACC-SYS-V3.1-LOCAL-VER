@@ -862,14 +862,19 @@ App `case_study` (never `adoption`, see "Removed").
 - **Access lives in `case_study/access.py`, not the clinical base class**,
   where "Administrators see everything" would hand IT support every case
   study, the adoptive parents' incomes included. The record's SW reads and
-  writes; the ASSIGNED psychologist reads block A, drafts included (a pending
-  one is nobody), minus the psychological-evaluation highlights where the
-  history is not carried to them - otherwise the previous psychologist's
-  findings reach them through the SW's text; the ISA gets status only (exists,
-  state, holder, "(inactive)", how much is missing) - never text, never print;
-  anyone else 404. Not registered in Django admin, where the seeded ISA is a
-  superuser. No chatbot tool, prompt, export of counts or duplicate check
-  reads it.
+  writes; the ISA gets status only (exists, state, holder, "(inactive)", how
+  much is missing) - never text, never print; **anyone else, a psychologist
+  included, gets a 404** (owner, 23 Oct 2026: "the psychologist must not be
+  able to access the case study of the SW, but they can see the uploaded file
+  of case referral"). The assigned psychologist used to read block A; that
+  level (`BLOCK_A`, the psychologist payload, the tab's reader) is gone, so
+  the Case study tab does not exist for them (`useCaseStudy` treats the 404 as
+  "none"). They read why the child was referred from the case referral file,
+  which the assigned psychologist (not a pending one, not another) still
+  lists, downloads and sees on the child's page, and cannot change
+  (`clinical/tests/test_psychologist_reads_the_referral.py`). Not registered
+  in Django admin, where the seeded ISA is a superuser. No chatbot tool,
+  prompt, export of counts or duplicate check reads it.
 - **Each section saves on its own with the version the writer saw**: a
   conditional UPDATE, 409 with the saved text on a stale version. Sessions are
   per tab, so the commonest conflict is the same person in two tabs.
@@ -877,7 +882,9 @@ App `case_study` (never `adoption`, see "Removed").
   unticking brings it back; a PUT without a `value` key leaves the text alone.
   The psychologist's read sends null for a ticked box.
 - **Pre-fills are offered, never saved**: referral source and reason, medical
-  notes, and the latest psychological report's summary ONLY if confirmed.
+  notes, and the latest psychological report's summary ONLY if confirmed. That
+  is the SW reading the psychologist's report, the other direction from the
+  rule above, and it stays.
 - **Ages are as of Date prepared**, not today. Domestic Relative asks whether
   the PAPs had the child more than two years (pre-answered from the placement
   date; unknown when there is none); a yes hides Placement History, as for
@@ -900,8 +907,10 @@ App `case_study` (never `adoption`, see "Removed").
   response carries `case_study_updated_at` for that reason.
 - **Reopen** puts it back to draft; every final stays on file ("Finals on
   file", each printable). A closed case cannot be reopened - its finals still
-  print. Finalized is addressed to the ASSIGNED psychologist
-  (a pending one is told nothing); Reopened to nobody; neither carries text.
+  print. Finalized and Reopened are addressed to nobody (a psychologist is not
+  told a case study exists, 23 Oct 2026; `/api/activity/` also drops every
+  `CaseStudy` line for a psychologist, so ones written earlier with their name
+  on stay out of the bell); neither carries text.
 - **Demo data**: about a third of the active Adoption children get a draft and
   a few others a final (`case_study/demo_case_studies.py`). The export blanks
   the preparer's license and every phone, email and employer address in the
@@ -2044,7 +2053,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,828 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 2,833 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

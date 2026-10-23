@@ -376,14 +376,13 @@ class SavingABoxTest(CaseStudyTestCase):
         self.assertEqual("", res.data["value"])
         self.assertIn("Family description", res.data["missing"])
 
-    def test_a_psychologist_does_not_read_text_that_is_hidden(self):
+    def test_a_ticked_box_keeps_its_text_for_the_social_worker_and_a_psychologist_reads_nothing(self):
         self.save_section("a4_family_description", "Both parents are farmers.")
         self.tick("a4_family_description", 1, not_applicable=True)
         mine = {s["key"]: s for s in self.as_user(self.sw).get(self.url()).data["sections"]}
-        theirs = {s["key"]: s for s in self.as_user(self.psy).get(self.url()).data["sections"]}
         self.assertEqual("Both parents are farmers.", mine["a4_family_description"]["value"])
-        self.assertTrue(theirs["a4_family_description"]["not_applicable"])
-        self.assertIsNone(theirs["a4_family_description"]["value"])
+        self.assertTrue(mine["a4_family_description"]["not_applicable"])
+        self.assertEqual(404, self.as_user(self.psy).get(self.url()).status_code)
 
     def test_a_box_can_be_emptied(self):
         self.save_section("a2_sources", ["The child"])

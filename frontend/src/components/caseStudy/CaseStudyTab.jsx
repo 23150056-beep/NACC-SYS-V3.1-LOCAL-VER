@@ -4,18 +4,16 @@ import { useAuth } from '../../context/AuthContext';
 import { useConfirm } from '../../context/ConfirmContext';
 import { useToast } from '../../context/ToastContext';
 import { startCaseStudy } from '../../api/caseStudy';
-import { exactDate, shortDate } from '../../utils/time';
-import { NOT_AN_ADOPTION_NOTE, blockTitle, blocksFor, isAdoptionRecord, recordNotes, sentence } from './model';
+import { exactDate } from '../../utils/time';
+import { NOT_AN_ADOPTION_NOTE, isAdoptionRecord, sentence } from './model';
 import Editor from './Editor';
-import PartOne from './PartOne';
-import ReadOnlyValue from './ReadOnlyValue';
 
 /* The Case study tab on a child's record, in the shape the reader is allowed.
  * The server decides what each role is given (backend case_study/serializers.py);
  * this chooses the screen to draw it with:
  *
  *   the record's social worker   starts and writes the whole case study
- *   the assigned psychologist    reads block A, drafts included, and never writes
+ *   a psychologist               no tab at all: the server answers 404 (owner, 23 Oct 2026)
  *   the ISA                      a status card, with no text anywhere in it
  */
 
@@ -69,80 +67,6 @@ function StatusCard({ study }) {
         The ISA sees the status of a case study, never its text. Items still to complete are the sections with nothing in them yet, and the date prepared if it is not set.
       </p>
     </Card>
-  );
-}
-
-/* ----------------------------- the psychologist ----------------------------- */
-function BlockAReader({ child, study }) {
-  if (!study.exists) {
-    return (
-      <Card title="Case study" padding="20px">
-        <p style={SMALL}>The social worker has not started a case study for this child yet.</p>
-      </Card>
-    );
-  }
-  const stored = new Map(study.sections.map((s) => [s.key, s]));
-  const block = blocksFor(child, study).find((b) => b.block === 'A');
-  const writer = child.social_worker_name || 'the social worker';
-  const adoption = isAdoptionRecord(child);
-  return (
-    <div className="racco-stack" style={{ gap: 12 }}>
-      {study.status === 'final' ? (
-        <Alert tone="success" icon={<Icon name="file-check" size={18} />}>
-          <strong>Final since {study.last_finalized_at ? exactDate(study.last_finalized_at) : 'an earlier date'}.</strong>{' '}
-          {writer} can reopen it to revise it.
-        </Alert>
-      ) : (
-        <Alert tone="info" icon={<Icon name="pencil" size={18} />}>
-          Draft &ndash; being written by {writer}. What is shown can still change.
-        </Alert>
-      )}
-      <Aside>
-        {adoption
-          ? <>You can read the child&apos;s side of the case study (block A). The adoptive parents and the placement are not shared with psychologists, and only {writer} can change any of it.</>
-          : <>You can read the child&apos;s case study (block A). Only {writer} can change any of it. {NOT_AN_ADOPTION_NOTE}</>}
-      </Aside>
-      <h2 style={{ margin: '4px 0 0', fontFamily: 'var(--font-sans)', fontSize: 16, fontWeight: 800, color: 'var(--text-strong)' }}>A. {blockTitle('A', adoption)}</h2>
-      <PartOne facts={study.record_facts} />
-      {(block?.entries || []).filter((entry) => stored.has(entry.key)).map((entry) => {
-        const row = stored.get(entry.key);
-        const notes = recordNotes(entry.key, study.record_facts, shortDate);
-        return (
-          <section key={entry.key} aria-label={`${entry.number}. ${entry.title}`}>
-            <Card title={`${entry.number}. ${entry.title}`} padding="14px 15px">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {notes.length > 0 && (
-                  <dl style={{ margin: 0, display: 'grid', gridTemplateColumns: 'auto 1fr', gap: '3px 12px', fontSize: 13 }}>
-                    {notes.map(([k, v]) => (
-                      <div key={k} style={{ display: 'contents' }}>
-                        <dt style={{ fontWeight: 700, color: 'var(--text-muted)' }}>{k}</dt>
-                        <dd style={{ margin: 0 }}>{v}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                )}
-                <ReadOnlyValue entry={entry} value={row?.value} notApplicable={!!row?.not_applicable} birthDate={study.record_facts.birth_date} />
-                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  {row && row.version > 0
-                    ? `Saved${row.updated_by_name ? ` by ${row.updated_by_name}` : ''}, ${exactDate(row.updated_at)}`
-                    : 'Not written yet'}
-                </div>
-              </div>
-            </Card>
-          </section>
-        );
-      })}
-    </div>
-  );
-}
-
-// A quiet line, in the same voice as the page's other notes.
-function Aside({ children }) {
-  return (
-    <div style={{ display: 'flex', gap: 10, padding: '10px 14px', background: 'var(--ink-50)', borderRadius: 'var(--radius-md)' }}>
-      <Icon name="info" size={16} style={{ color: 'var(--text-muted)', marginTop: 2 }} />
-      <p style={{ ...SMALL, fontSize: 12.5 }}>{children}</p>
-    </div>
   );
 }
 
@@ -220,7 +144,6 @@ export default function CaseStudyTab({ child, cs, print }) {
 
   const role = user?.role_name;
   if (role === 'Administrator') return <StatusCard study={study} />;
-  if (role === 'Psychologist') return <BlockAReader child={child} study={study} />;
   if (!study.exists) return <Start child={child} cs={cs} />;
   return <Editor child={child} cs={cs} print={print} />;
 }

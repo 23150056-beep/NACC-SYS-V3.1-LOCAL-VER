@@ -451,23 +451,13 @@ class WhatEachRoleGetsTest(FinalTestCase):
         CaseStudyFinal.objects.update(finalized_by=None)
         self.assertIsNone(self.as_user(self.sw).get(self.url()).data["finals"][0]["finalized_by_name"])
 
-    def test_the_psychologist_is_told_when_it_was_last_final_and_nothing_more(self):
-        before = self.as_user(self.psy).get(self.url()).data
-        self.assertIsNone(before["last_finalized_at"])
-        self.assertEqual("draft", before["status"])
+    def test_the_psychologist_is_told_nothing_of_it_in_any_state(self):
+        client = self.as_user(self.psy)
+        self.assertEqual(404, client.get(self.url()).status_code)
         self.make_final()
-        after = self.as_user(self.psy).get(self.url()).data
-        self.assertEqual("final", after["status"])
-        self.assertEqual(iso_datetime(CaseStudyFinal.objects.get().finalized_at),
-                         after["last_finalized_at"])
-        self.assertNotIn("finals", after)
-        self.assertNotIn("can_finalize", after)
-        self.assertNotIn("missing", after)
-        # Reopened: a draft again, and the time of the last final stays.
+        self.assertEqual(404, client.get(self.url()).status_code)
         self.reopen()
-        again = self.as_user(self.psy).get(self.url()).data
-        self.assertEqual("draft", again["status"])
-        self.assertEqual(after["last_finalized_at"], again["last_finalized_at"])
+        self.assertEqual(404, client.get(self.url()).status_code)
 
     def test_the_isa_sees_status_and_the_real_time_it_was_made_final_and_no_text(self):
         self.assertIsNone(self.as_user(self.isa).get(self.url()).data["last_finalized_at"])
@@ -492,21 +482,24 @@ class WhatEachRoleGetsTest(FinalTestCase):
 
 
 class WhoMayDoWhatTest(FinalTestCase):
-    def test_the_psychologist_and_the_isa_may_not_finalize_or_reopen(self):
-        for user in (self.psy, self.isa):
-            res = self.make_final(user=user)
-            self.assertEqual(403, res.status_code, user)
-            self.assertEqual(403, self.reopen(user=user).status_code, user)
+    def test_the_psychologist_finds_nothing_and_the_isa_may_not_finalize_or_reopen(self):
+        self.assertEqual(404, self.make_final(user=self.psy).status_code)
+        self.assertEqual(404, self.reopen(user=self.psy).status_code)
+        res = self.make_final(user=self.isa)
+        self.assertEqual(403, res.status_code)
+        self.assertEqual(403, self.reopen(user=self.isa).status_code)
         self.assertEqual(0, CaseStudyFinal.objects.count())
         self.assertEqual(CaseStudy.DRAFT, CaseStudy.objects.get(pk=self.study.pk).status)
 
     def test_nor_open_a_final_copy(self):
         self.make_final()
         final = CaseStudyFinal.objects.get()
-        for user in (self.psy, self.isa):
-            res = self.as_user(user).get(self.finals_url(final.pk))
-            self.assertEqual(403, res.status_code, user)
-            self.assertNotIn("Written text", json.dumps(res.data))
+        res = self.as_user(self.psy).get(self.finals_url(final.pk))
+        self.assertEqual(404, res.status_code)
+        self.assertNotIn("Written text", json.dumps(res.data))
+        res = self.as_user(self.isa).get(self.finals_url(final.pk))
+        self.assertEqual(403, res.status_code)
+        self.assertNotIn("Written text", json.dumps(res.data))
 
     def test_anybody_else_is_told_there_is_nothing_there(self):
         self.make_final()
@@ -582,14 +575,14 @@ class TheActivityFeedTest(FinalTestCase):
         return [e for e in self.as_user(user).get("/api/activity/").data
                 if e["entity_type"] == "CaseStudy"]
 
-    def test_final_is_addressed_to_the_assigned_psychologist(self):
+    def test_final_is_addressed_to_nobody(self):
         self.make_final()
         event = ActivityLog.objects.get(action=ActivityLog.FINALIZED)
         self.assertEqual("CaseStudy", event.entity_type)
         self.assertEqual(self.child.pk, event.entity_id)
         self.assertEqual("Ana Cruz", event.entity_label)
         self.assertEqual(self.sw, event.actor)
-        self.assertEqual(self.psy, event.recipient)
+        self.assertIsNone(event.recipient)
         self.assertEqual(ActivityLog.RECORD, event.category)
 
     def test_reopen_is_addressed_to_nobody(self):
@@ -600,15 +593,22 @@ class TheActivityFeedTest(FinalTestCase):
         self.assertEqual("Ana Cruz", event.entity_label)
         self.assertEqual(self.child.pk, event.entity_id)
 
-    def test_the_social_worker_sees_both_and_so_does_the_assigned_psychologist_the_first(self):
+    def test_the_social_worker_and_the_isa_see_both_and_no_psychologist_sees_either(self):
         self.make_final()
         self.reopen()
         mine = self.feed(self.sw)
         self.assertEqual({"finalized", "reopened"}, {e["action"] for e in mine})
-        self.assertEqual(["finalized"], [e["action"] for e in self.feed(self.psy)])
+        self.assertEqual([], self.feed(self.psy))
         self.assertEqual({"finalized", "reopened"}, {e["action"] for e in self.feed(self.isa)})
         self.assertEqual([], self.feed(self.sw2))
         self.assertEqual([], self.feed(self.psy2))
+
+    def test_a_line_written_before_the_rule_that_names_a_psychologist_is_not_shown_to_them(self):
+        self.make_final()
+        ActivityLog.objects.filter(action=ActivityLog.FINALIZED).update(recipient=self.psy)
+        self.assertEqual([], self.feed(self.psy))
+        self.assertEqual([], [e for e in self.as_user(self.psy).get("/api/activity/").data
+                              if e["entity_type"] == "CaseStudy"])
 
     def test_no_event_holds_any_of_the_text(self):
         self.make_final()

@@ -1,8 +1,8 @@
 """Who sees what of a child's case study (owner's decisions, 8 Oct 2026).
 
-The record's social worker reads and writes everything; the assigned
-psychologist reads block A only and never writes; the ISA sees a status and no
-text at all; anyone else is told there is no such child. The rules live in
+The record's social worker reads and writes everything; the ISA sees a status
+and no text at all; anyone else - a psychologist, assigned or not (owner,
+23 Oct 2026) - is told there is no such child. The rules live in
 case_study/access.py and nowhere else.
 """
 import json
@@ -11,7 +11,7 @@ from django.contrib import admin
 
 from accounts.models import User
 from case_study.models import CaseStudy, CaseStudyFinal, CaseStudySection
-from case_study.sections import BLOCK_A_KEYS, SCSR_SECTIONS
+from case_study.sections import SCSR_SECTIONS
 from case_study.tests.base import CaseStudyTestCase
 from children import assignment
 from children.models import AssignmentRequest, Child
@@ -64,7 +64,8 @@ class AnonymousAndStrangersTest(AccessBase):
             previous_psychologist=self.psy)
         assignment.accept(request, by=self.psy2)
         self.assertEqual(404, self.as_user(self.psy).get(self.url()).status_code)
-        self.assertEqual(200, self.as_user(self.psy2).get(self.url()).status_code)
+        # Nor does the one who now holds the child.
+        self.assertEqual(404, self.as_user(self.psy2).get(self.url()).status_code)
 
     def test_a_child_that_does_not_exist(self):
         self.assertEqual(404, self.as_user(self.sw).get("/api/case-studies/child/999999/").status_code)
@@ -93,55 +94,41 @@ class SocialWorkerTest(AccessBase):
 
 
 class PsychologistTest(AccessBase):
-    def get(self, user=None):
-        return self.as_user(user or self.psy).get(self.url())
+    """The assigned psychologist gets the same answer as a stranger: 404 on
+    every case study endpoint, so it is not even known to exist."""
 
-    def test_block_a_only_and_drafts_included(self):
-        res = self.get()
-        self.assertEqual(200, res.status_code)
-        self.assertEqual("draft", res.data["status"])
-        keys = [s["key"] for s in res.data["sections"]]
-        self.assertEqual(list(BLOCK_A_KEYS), keys)
-        self.assertTrue(all(k.startswith("a") for k in keys))
-        text = json.dumps(res.data)
-        self.assertIn("Circumstances", text)
-        self.assertNotIn("Motivation", text)
-        self.assertNotIn("Assessment", text)
-
-    def test_it_is_read_only_and_says_so(self):
-        res = self.get()
-        self.assertIs(True, res.data["read_only"])
-        self.assertIn("social worker", res.data["read_only_reason"])
-
-    def test_no_seeds_no_missing_list_and_no_custody(self):
-        res = self.get()
-        for absent in ("seeds", "missing", "custody_over_two_years", "custody_pre_answer",
-                       "finals", "can_finalize"):
-            self.assertNotIn(absent, res.data)
-        self.assertIn("record_facts", res.data)
-
-    def test_the_psychological_highlights_are_hidden_where_history_is_not_carried(self):
-        self.assertIn("a3_psych_highlights", [s["key"] for s in self.get().data["sections"]])
-        Child.objects.filter(pk=self.child.pk).update(assignee_sees_history=False)
-        res = self.get()
-        self.assertNotIn("a3_psych_highlights", [s["key"] for s in res.data["sections"]])
-        self.assertNotIn("Findings", json.dumps(res.data))
-        self.assertIn("a2_circumstances", [s["key"] for s in res.data["sections"]])
-
-    def test_a_psychologist_cannot_write_anything(self):
+    def test_every_endpoint_answers_404_to_the_assigned_psychologist(self):
         client = self.as_user(self.psy)
-        self.assertEqual(403, self.save_section("a2_sources", ["x"], user=self.psy).status_code)
-        self.assertEqual(403, client.post(self.url(), {}, format="json").status_code)
-        self.assertEqual(403, client.patch(self.url(), {"date_prepared": "2026-10-01"},
+        url = self.url()
+        self.assertEqual(404, client.get(url).status_code)
+        self.assertEqual(404, client.post(url, {}, format="json").status_code)
+        self.assertEqual(404, client.patch(url, {"date_prepared": "2026-10-01"},
                                            format="json").status_code)
+        self.assertEqual(404, self.save_section("a2_sources", ["x"], user=self.psy).status_code)
+        self.assertEqual(404, client.put(self.section_url("a2_circumstances"),
+                                         {"value": "x", "version": 1}, format="json").status_code)
+
+    def test_nothing_of_the_text_reaches_the_response(self):
+        res = self.as_user(self.psy).get(self.url())
+        self.assertEqual(404, res.status_code)
+        self.assertNotIn(SECRET, json.dumps(res.data))
+
+    def test_the_answer_is_the_same_as_a_stranger_gets(self):
+        mine = self.as_user(self.psy).get(self.url())
+        stranger = self.as_user(self.psy2).get(self.url())
+        self.assertEqual(stranger.status_code, mine.status_code)
+        self.assertEqual(stranger.data, mine.data)
+
+    def test_it_makes_no_difference_whether_one_was_started(self):
+        CaseStudy.objects.all().delete()
+        self.assertEqual(404, self.as_user(self.psy).get(self.url()).status_code)
+
+    def test_nothing_is_written_by_the_refused_requests(self):
+        client = self.as_user(self.psy)
+        self.save_section("a2_sources", ["x"], user=self.psy)
+        client.patch(self.url(), {"date_prepared": "2026-10-01"}, format="json")
         self.assertFalse(CaseStudySection.objects.filter(key="a2_sources").exists())
         self.assertIsNone(CaseStudy.objects.get(pk=self.study.pk).date_prepared)
-
-    def test_a_psychologist_sees_that_none_has_been_started(self):
-        CaseStudy.objects.all().delete()
-        res = self.get()
-        self.assertFalse(res.data["exists"])
-        self.assertEqual([], res.data["sections"])
 
 
 class AdministratorTest(AccessBase):

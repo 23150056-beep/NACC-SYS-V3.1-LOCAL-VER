@@ -140,14 +140,11 @@ class WhatAFosterCareRecordGetsTest(NonAdoptionCase):
             self.assertTrue(applying, case_type)
             self.assertTrue(all(key in BLOCK_A_KEYS for key in applying), case_type)
 
-    def test_the_psychologist_reads_block_a_of_it_as_before(self):
+    def test_the_psychologist_finds_no_case_study_of_it(self):
         self.fill_block_a(self.foster)
         res = self.get(self.foster, self.psy)
-        self.assertEqual(200, res.status_code)
-        self.assertTrue(res.data["read_only"])
-        self.assertNotIn("missing", res.data)
-        self.assertEqual(list(BLOCK_A_KEYS), [s["key"] for s in res.data["sections"]])
-        self.assertEqual("Foster Care", res.data["record_facts"]["case_type"])
+        self.assertEqual(404, res.status_code)
+        self.assertNotIn("sections", res.data)
 
     def test_the_isa_sees_a_status_that_counts_block_a_only(self):
         res = self.get(self.foster, self.isa)
@@ -259,11 +256,11 @@ class FinalAndReopenForAFosterCareRecordTest(NonAdoptionCase):
 
     def test_only_the_social_worker_who_holds_the_record_may_finalize_or_reopen(self):
         self.fill_block_a(self.foster)
-        self.assertEqual(403, self.make_final(user=self.psy, child=self.foster).status_code)
+        self.assertEqual(404, self.make_final(user=self.psy, child=self.foster).status_code)
         self.assertEqual(403, self.make_final(user=self.isa, child=self.foster).status_code)
         self.assertEqual(404, self.make_final(user=self.sw2, child=self.foster).status_code)
         self.make_final(child=self.foster)
-        self.assertEqual(403, self.reopen(user=self.psy, child=self.foster).status_code)
+        self.assertEqual(404, self.reopen(user=self.psy, child=self.foster).status_code)
         self.assertEqual(404, self.reopen(user=self.sw2, child=self.foster).status_code)
 
 

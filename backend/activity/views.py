@@ -20,7 +20,11 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         role = role_of(self.request)
         if role == Role.PSYCHOLOGIST:
             # Psychologists only see notifications targeted at them.
-            qs = qs.filter(recipient=self.request.user)
+            #
+            # Never a case study line: a psychologist is not told one exists
+            # (owner, 23 Oct 2026). New lines are addressed to nobody; this
+            # drops the ones written earlier, which named the psychologist.
+            qs = qs.filter(recipient=self.request.user).exclude(entity_type="CaseStudy")
         elif role == Role.STAFF:
             # Staff see what happened to their OWN records, plus anything
             # addressed to them personally.

@@ -15,7 +15,7 @@ from rest_framework import serializers
 
 from accounts.display import display_name
 from accounts.scoping import hide_earlier_history, scope_to_visible
-from case_study.access import FULL, BLOCK_A, writes_refused
+from case_study.access import FULL, writes_refused
 from case_study.completeness import missing_sections
 from case_study.sections import (
     ABANDONED, ADOPTION, DOMESTIC_RELATIVE, SCSR_SECTIONS, applies)
@@ -162,16 +162,12 @@ def custody_pre_answer(child, on):
 
 # --- Sections ----------------------------------------------------------------------
 
-def section_payload(entry, row, child, case_study, hide_kept_text=False):
+def section_payload(entry, row, child, case_study):
     """One box as saved, or as it stands before anything is saved (version 0).
 
     A box ticked Not applicable keeps its text, hidden (the social worker can
-    untick it to bring it back), so the social worker's own screen gets it.
-    `hide_kept_text` is for readers who only see the report as it prints: the
-    text is not part of it, and is not theirs to read."""
+    untick it to bring it back), so the social worker's own screen gets it."""
     value = row.value if row is not None else None
-    if hide_kept_text and row is not None and row.not_applicable:
-        value = None
     return {
         "key": entry["key"],
         "value": value,
@@ -195,10 +191,10 @@ def conflict_current(row):
     }
 
 
-def _sections(case_study, child, keys, hide_kept_text=False):
+def _sections(case_study, child, keys):
     stored = {s.key: s for s in case_study.sections.all()}
     wanted = set(keys)
-    return [section_payload(e, stored.get(e["key"]), child, case_study, hide_kept_text)
+    return [section_payload(e, stored.get(e["key"]), child, case_study)
             for e in SCSR_SECTIONS if e["key"] in wanted]
 
 
@@ -256,28 +252,6 @@ def social_worker_payload(request, access, case_study):
     return body
 
 
-def psychologist_payload(access, case_study):
-    """Block A, read only. No seeds, no `missing` (it would name boxes of
-    blocks B and C), and nothing about custody: that question only decides
-    block C."""
-    child = access.child
-    on = as_of(case_study)
-    return {
-        "exists": case_study is not None,
-        "read_only": True,
-        "read_only_reason": access.not_writable_reason(),
-        "status": case_study.status if case_study else None,
-        "date_prepared": iso_date(case_study.date_prepared) if case_study else None,
-        "updated_at": iso_datetime(case_study.updated_at) if case_study else None,
-        # So the screen can say "Final since ..." for a final one. Just a time:
-        # nothing of a final copy's content is the psychologist's to read.
-        "last_finalized_at": last_finalized_at(case_study),
-        "sections": (_sections(case_study, child, access.readable_keys(), hide_kept_text=True)
-                     if case_study else []),
-        "record_facts": record_facts(child, on),
-    }
-
-
 def status_payload(access, case_study):
     """The ISA's view. Counts and dates only - no section text, by design."""
     child = access.child
@@ -296,7 +270,5 @@ def status_payload(access, case_study):
 def payload_for(request, access, case_study):
     if access.level == FULL:
         return social_worker_payload(request, access, case_study)
-    if access.level == BLOCK_A:
-        return psychologist_payload(access, case_study)
     return status_payload(access, case_study)
 

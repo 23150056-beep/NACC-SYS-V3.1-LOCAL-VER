@@ -104,9 +104,9 @@ class AgeFollowsTheDatePreparedTest(FactsBase):
         self.update_child(birth_date=None)
         self.assertIsNone(self.facts()["age"])
 
-    def test_a_psychologist_sees_the_same_age(self):
+    def test_a_psychologist_gets_no_facts_at_all(self):
         self.start(date_prepared=date(2024, 3, 1))
-        self.assertEqual(4, self.facts(self.psy)["age"])
+        self.assertEqual(404, self.as_user(self.psy).get(self.url()).status_code)
 
 
 class CustodyAnswerTest(FactsBase):

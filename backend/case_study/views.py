@@ -298,12 +298,10 @@ class FinalView(APIView):
             if exc.missing is not None:
                 body["missing"] = exc.missing
             return Response(body, status=exc.status)
-        # Addressed to the psychologist the child is with now (a pending
-        # request is not an assignment, so nobody is told then). It names the
-        # child and never any of the case study's text.
+        # Addressed to nobody: a psychologist is not told a case study exists.
         log_activity(request.user, ActivityLog.FINALIZED, ActivityLog.RECORD,
                      entity_type="CaseStudy", entity_label=child.fullname,
-                     entity_id=child.pk, recipient=child.assigned_psychologist)
+                     entity_id=child.pk, recipient=None)
         return Response(shapes.payload_for(request, access, _case_study_of(child)))
 
 

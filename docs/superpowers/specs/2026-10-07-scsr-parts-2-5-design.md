@@ -6,6 +6,15 @@ blank NACC template. Its Part I (Identifying Information) has been the record
 form since 7 Oct 2026; see CLAUDE.md "The record form". This document covers
 the rest of it.
 
+> **23 Oct 2026, owner's decision: a psychologist cannot access the social
+> worker's case study, assigned or not.** Wherever this document says a
+> psychologist reads block A (decision 2, the access table, the highlights
+> note, the activity events, the tab) it is superseded: `access_for` answers a
+> psychologist 404 like anyone else, so there is no tab, no read, no print and
+> no "Finalized" line. The ISA and the SW are unchanged. The psychologist
+> reads why the child was referred from the **case referral file**, which the
+> assigned psychologist can still see and download (and cannot change).
+
 The owner's aim, in his words: put the SCSR "digitally on the child record
 module". So it lives **inside the child's record**, on a Case Study tab, and
 prints from there. It is not a file to export: no Word download is planned.
@@ -14,7 +23,7 @@ prints from there. It is not a file to export: no Word download is planned.
 
 1. **The ISA is the agency's IT support, not the Head of Office.** Nobody in the
    system approves an SCSR. The Head of Office signs the printed copy.
-2. **Psychologists read block A**, drafts included: the child, the birth
+2. **(Superseded 23 Oct 2026: psychologists read nothing.)** Psychologists read block A, drafts included: the child, the birth
    family, and the termination or abandonment facts. They never see block B
    (the adoptive parents) or block C (the placement).
 3. **There is one case study per child.**
@@ -147,7 +156,7 @@ studies, the adoptive parents' incomes included.
 | Who | Draft | Final |
 |---|---|---|
 | The record's SW (`child.social_worker`) | read, write | read, print, Reopen |
-| The assigned psychologist (not a pending one) | block A, read only | block A, read only |
+| The assigned psychologist (not a pending one) | 404 (since 23 Oct 2026; was block A) | 404 |
 | The ISA | status only | status only |
 | Anyone else | 404 | 404 |
 
@@ -161,7 +170,7 @@ studies, the adoptive parents' incomes included.
 
   No text, no print, no write. The model is **not registered in Django
   admin**, where the seeded ISA is a superuser.
-- **Psychologists:** `a3_psych_highlights` is hidden from a psychologist
+- **Psychologists (superseded 23 Oct 2026, they read nothing):** `a3_psych_highlights` was hidden from a psychologist
   reader when the child's history is not carried to them
   (`assignee_sees_history` False). Otherwise the previous psychologist's
   findings would reach them through the SW's text, past the carry-history
@@ -194,7 +203,7 @@ studies, the adoptive parents' incomes included.
 - **Activity events:** only on creation, Final and Reopen, never on a save.
   - They use `entity_type="CaseStudy"` with `entity_id` = the child.
   - They are added to the SW's activity filter.
-  - Final is addressed to the assigned psychologist.
+  - Final is addressed to nobody (was: the assigned psychologist, until 23 Oct 2026).
   - The label is the child's name, never section text.
 
 ## Saving a document written over weeks
@@ -217,7 +226,7 @@ studies, the adoptive parents' incomes included.
 ## On the child's record
 
 - A **Case Study** tab on the child's page, for Adoption records, shown to
-  the SW, the assigned psychologist (block A) and the ISA (status card).
+  the SW and the ISA (status card); a psychologist gets a 404 and no tab (23 Oct 2026).
 - The page's **Print** button prints the SCSR while that tab is open, and the
   psychological report otherwise. `ScsrPrint` becomes the page's print-only
   element in place of `PsychReportPrint` on that tab; see index.css

@@ -170,7 +170,7 @@ class SeededDraftsAreWhatTheEndpointWouldTake(CaseStudyTestCase):
         self.assertEqual(0, demo_case_studies.install_case_studies(
             list(Child.objects.filter(case_type="Foster Care")), today=TODAY))
 
-    def test_the_social_worker_the_psychologist_and_the_isa_each_read_a_foster_care_draft(self):
+    def test_the_social_worker_and_the_isa_read_a_foster_care_draft_and_the_psychologist_finds_none(self):
         child = self.care_children(1, ["Foster Care"])[0]
         demo_case_studies.install_case_studies([child], today=TODAY)
         self.assertTrue(CaseStudy.objects.filter(child=child).exists())
@@ -179,8 +179,7 @@ class SeededDraftsAreWhatTheEndpointWouldTake(CaseStudyTestCase):
         self.assertFalse(mine.data["read_only"])
         self.assertTrue([s for s in mine.data["sections"] if s["version"] == 1])
         theirs = self.as_user(self.psy).get(self.url(child))
-        self.assertEqual(200, theirs.status_code)
-        self.assertTrue(theirs.data["read_only"])
+        self.assertEqual(404, theirs.status_code)
         isa = self.as_user(self.isa).get(self.url(child))
         self.assertNotIn("sections", isa.data)
         self.assertGreater(isa.data["missing_count"], 0)
@@ -300,7 +299,7 @@ class SeededDraftsAreWhatTheEndpointWouldTake(CaseStudyTestCase):
         self.assertIn("a5_abandonment", draft)
         self.assertNotIn(DVC_SIGNED, draft)
 
-    def test_the_social_worker_the_psychologist_and_the_isa_each_read_it_their_own_way(self):
+    def test_the_social_worker_and_the_isa_read_it_their_own_way_and_the_psychologist_finds_none(self):
         kids = self.children(7)
         demo_case_studies.install_case_studies(list(Child.objects.order_by("pk")), today=TODAY)
         mine = next(c for c in [self.child] + kids if CaseStudy.objects.filter(child=c).exists())
@@ -310,8 +309,7 @@ class SeededDraftsAreWhatTheEndpointWouldTake(CaseStudyTestCase):
         filled = [s for s in sw_view.data["sections"] if s["version"] == 1]
         self.assertTrue(filled)
         psychologist = self.as_user(self.psy).get(self.url(mine))
-        self.assertEqual(200, psychologist.status_code)
-        self.assertTrue(psychologist.data["read_only"])
+        self.assertEqual(404, psychologist.status_code)
         isa = self.as_user(self.isa).get(self.url(mine))
         self.assertNotIn("sections", isa.data)
         self.assertGreater(isa.data["missing_count"], 0)
@@ -424,7 +422,7 @@ class SeededFinalsAreWhatTheEndpointWouldMakeTest(CaseStudyTestCase):
         self.assertLessEqual(snap["sections"]["c4_measurements"]["value"]["measured_on"],
                              TODAY.isoformat())
 
-    def test_the_social_worker_and_the_psychologist_read_a_seeded_final(self):
+    def test_the_social_worker_reads_a_seeded_final_and_the_psychologist_finds_none(self):
         child = self.adoption("Surrendered", "Regular")
         demo_case_studies._write_final(child, 0, TODAY)
         url = f"/api/case-studies/child/{child.pk}/"
@@ -436,9 +434,9 @@ class SeededFinalsAreWhatTheEndpointWouldMakeTest(CaseStudyTestCase):
         self.assertEqual("Rosa Santos", mine["finals"][0]["finalized_by_name"])
         copy = self.as_user(self.sw2).get(f"{url}finals/{mine['finals'][0]['id']}/")
         self.assertEqual(200, copy.status_code)
-        theirs = self.as_user(self.psy).get(url).data
-        self.assertEqual("final", theirs["status"])
-        self.assertIsNotNone(theirs["last_finalized_at"])
+        self.assertEqual(404, self.as_user(self.psy).get(url).status_code)
+        self.assertEqual(404, self.as_user(self.psy).get(
+            f"{url}finals/{mine['finals'][0]['id']}/").status_code)
         self.assertEqual(0, self.as_user(self.isa).get(url).data["missing_count"])
         # And the social worker can reopen it and finalize it again.
         self.assertEqual(200, self.as_user(self.sw2).post(f"{url}reopen/", {}, format="json").status_code)

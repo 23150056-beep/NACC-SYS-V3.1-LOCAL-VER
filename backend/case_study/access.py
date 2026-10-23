@@ -6,9 +6,10 @@ social worker's case study, the adoptive parents' incomes included. The
 owner's decisions of 8 Oct 2026 (docs/superpowers/specs/2026-10-07-scsr-parts-2-5-design.md):
 
 * The record's social worker reads and writes all of it.
-* The assigned psychologist reads block A only, drafts included, and never
-  writes. A pending assignment request is not an assignment, and the
-  previous psychologist after an accepted transfer is nobody.
+* A psychologist, assigned or not, gets nothing (owner, 23 Oct 2026): the
+  case study is the social worker's own, so for a psychologist it is not even
+  known to exist. They read why the child was referred from the case
+  referral file instead.
 * The ISA (Administrator) sees status only: that it exists, its state, who
   holds it and how much is left. Never text.
 * Anyone else gets a 404, so the case study is not even known to exist.
@@ -21,11 +22,10 @@ from django.http import Http404
 
 from accounts.models import Role
 from accounts.scoping import role_of, visible_children
-from case_study.sections import (
-    BLOCK_A_KEYS, PSYCH_HIGHLIGHTS, SCSR_SECTIONS)
+from case_study.sections import SCSR_SECTIONS
 from children.models import Child
 
-FULL, BLOCK_A, STATUS = "full", "block_a", "status"
+FULL, STATUS = "full", "status"
 
 # What a write is answered with once the case study is final. The screens tell
 # "final" from "closed" by this sentence (frontend caseStudy/model.js
@@ -48,15 +48,6 @@ class Access:
         """The catalogue keys this caller may read, in catalogue order."""
         if self.level == FULL:
             return [e["key"] for e in SCSR_SECTIONS]
-        if self.level == BLOCK_A:
-            keys = list(BLOCK_A_KEYS)
-            # Their predecessor's findings reach this box through the social
-            # worker's text, so it is withheld wherever the history is not
-            # carried (Child.assignee_sees_history) - otherwise the case study
-            # would be a way round that control.
-            if not self.child.assignee_sees_history:
-                keys.remove(PSYCH_HIGHLIGHTS)
-            return keys
         return []
 
     def not_writable_reason(self):
@@ -64,8 +55,6 @@ class Access:
         case itself being closed - see `writes_refused`."""
         if self.level == FULL:
             return None
-        if self.level == BLOCK_A:
-            return "Only the social worker who holds this record can change the case study."
         return "The ISA can see the status of a case study but not change it."
 
     def not_printable_reason(self):
@@ -74,8 +63,6 @@ class Access:
         and placement included, so it is the holder's alone."""
         if self.level == FULL:
             return None
-        if self.level == BLOCK_A:
-            return "Only the social worker who holds this record can open a final copy of the case study."
         return "The ISA can see the status of a case study but not its text or its print."
 
 
@@ -94,8 +81,6 @@ def access_for(request, child):
     role = role_of(request)
     if role == Role.STAFF and child.social_worker_id == user.pk:
         return Access(child, FULL)
-    if role == Role.PSYCHOLOGIST and child.assigned_psychologist_id == user.pk:
-        return Access(child, BLOCK_A)
     if role == Role.ADMINISTRATOR:
         return Access(child, STATUS)
     raise Http404

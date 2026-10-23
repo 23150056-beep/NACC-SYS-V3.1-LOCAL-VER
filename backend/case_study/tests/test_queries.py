@@ -9,7 +9,7 @@ from case_study.tests.base import CaseStudyTestCase
 
 class QueryCountTest(CaseStudyTestCase):
     def test_reading_does_not_cost_a_query_per_section(self):
-        """Every reader gets the same number of queries whether no box is
+        """Every reader who may read it gets the same number of queries whether no box is
         filled or all of them are."""
         study = self.start()
 
@@ -18,11 +18,11 @@ class QueryCountTest(CaseStudyTestCase):
                 self.assertEqual(200, self.as_user(user).get(self.url()).status_code)
             return len(captured)
 
-        before = {u.pk: queries(u) for u in (self.sw, self.psy, self.isa)}
+        before = {u.pk: queries(u) for u in (self.sw, self.isa)}
         for entry in SCSR_SECTIONS:
             CaseStudySection.objects.create(
                 case_study=study, key=entry["key"], value=None, updated_by=self.sw)
-        after = {u.pk: queries(u) for u in (self.sw, self.psy, self.isa)}
+        after = {u.pk: queries(u) for u in (self.sw, self.isa)}
         self.assertEqual(before, after)
         self.assertLess(max(after.values()), 20)
 
