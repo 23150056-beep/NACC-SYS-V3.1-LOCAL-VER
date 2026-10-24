@@ -10,6 +10,7 @@ from datetime import timedelta
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
+from accounts import email_notifications
 from accounts.sms_notifications import notify_session_reminder, remind_custodian
 from children.custodian import texts_allowed
 from scheduling.models import Appointment, CustodianReminder, SessionReminder
@@ -108,7 +109,26 @@ def send_session_reminders(*, today=False, dry_run=False):
     if not counts:
         report["lines"].append(f"no scheduled sessions {word} ({target})")
     _remind_custodians(target, word, dry_run, report)
+    _mail_overdue_acceptances(dry_run, report)
     return report
+
+
+def _mail_overdue_acceptances(dry_run, report):
+    """Email the social workers whose psychologist accepted a case ten minutes
+    or more ago and whose acceptance nothing has mailed yet
+    (accounts/email_notifications.py `mail_overdue_answers`). It is the second
+    place that runs, beside the activity feed's once-a-minute sweep, and here it
+    is not throttled: whatever calls this is on a timer already.
+
+    A dry run counts them and claims none, or the real run after it would find
+    nothing to send. The line carries a number and never a name, like the rest
+    of this report."""
+    count = email_notifications.mail_overdue_answers(dry_run=dry_run)
+    report["answers_mailed"] = 0 if dry_run else count
+    if count:
+        report["lines"].append(
+            f"would email {count} overdue acceptance(s) to social workers" if dry_run
+            else f"emailed {count} overdue acceptance(s) to social workers")
 
 
 def _claim_custodian(appointment):

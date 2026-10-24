@@ -18,6 +18,10 @@ and WHAT they are sent, and counts the calendar invites.
   email anybody gets about their own action would be noise. It says so.
 * The social worker whose record the child is gets `child_sessions`, the same
   words with no invite: the invite is for the person who has to be in the room.
+  The one exception is the first session a psychologist books right after
+  accepting the case: the social worker is waiting on that acceptance, and gets
+  it and the booking as ONE "accepted and booked the first session" email
+  (round three; accounts/email_notifications.py `accepted_with_first_session`).
 * A session that moves to a different psychologist is a cancellation for the
   one it left and a booking for the one it came to. The one it left is told
   it was given on and not called off, and the social worker's email names
@@ -32,12 +36,10 @@ import logging
 import secrets
 
 from django.db import transaction
-from django.utils import timezone
 
 from accounts.display import entered_name
-from accounts.email_notifications import notify, when
-from config.clock import clock
-from scheduling.booking import ends_at
+from accounts.email_notifications import (
+    SCHEDULE, accepted_with_first_session, notify, span)
 from scheduling.calendar_invite import build_ics, legacy_uid
 from scheduling.models import Appointment, CalendarInvite
 from scheduling.visibility import case_ref
@@ -45,7 +47,6 @@ from scheduling.visibility import case_ref
 logger = logging.getLogger(__name__)
 
 BOOKED, MOVED, CANCELLED = "booked", "moved", "cancelled"
-SCHEDULE = ("Open the schedule", "/schedule")
 
 # Sent with an email that carries an invite, by what the invite does.
 ATTACHED = {
@@ -55,25 +56,13 @@ ATTACHED = {
 }
 
 
-def _span(start, duration_minutes):
-    """"Wed 21 Oct 2026, 9:30 AM to 10:30 AM", local time. A session that runs
-    past midnight - possible only on a psychologist's own calendar - names the
-    day it ends as well."""
-    if timezone.is_naive(start):
-        start = timezone.make_aware(start)
-    end = timezone.localtime(ends_at(start, duration_minutes))
-    local = timezone.localtime(start)
-    tail = clock(end) if end.date() == local.date() else when(end)
-    return f"{when(start)} to {tail}"
-
-
 def _facts(appointment, was):
     """The Case, the When and, on a move, the Was. Never the purpose or the
     notes: Brevo and Google both keep a copy."""
     facts = [("Case", case_ref(appointment.child_id)),
-             ("When", _span(appointment.start, appointment.duration_minutes))]
+             ("When", span(appointment.start, appointment.duration_minutes))]
     if was is not None:
-        facts.append(("Was", _span(*was)))
+        facts.append(("Was", span(*was)))
     return facts
 
 
@@ -184,6 +173,10 @@ def _tell_social_worker(appointment, event, *, by, was, was_psychologist=None):
     row says what did move."""
     worker = appointment.child.social_worker
     if worker is None or worker.pk == by.pk:
+        return
+    if event == BOOKED and accepted_with_first_session(appointment, by=by):
+        # The psychologist who has just accepted this child booked the first
+        # session: the social worker has had ONE email for both, from there.
         return
     ref, who = case_ref(appointment.child_id), entered_name(by, "A colleague")
     subject = f"{who} {event} a session for case {ref}"

@@ -1,5 +1,6 @@
 from django.db.models import Q
 from rest_framework import mixins, viewsets, permissions
+from accounts import email_notifications
 from accounts.models import Role
 from activity.models import ActivityLog
 from activity.serializers import ActivityLogSerializer
@@ -11,6 +12,16 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = None
     serializer_class = ActivityLogSerializer
+
+    def list(self, request, *args, **kwargs):
+        # Every screen reads this feed, after every save and at sign-in, which
+        # makes it the one request that is certain to come while the app is in
+        # use and there is no scheduler (Render's free plan runs none). So it
+        # also mails the acceptances that nothing else has: a psychologist who
+        # accepted and then closed the browser before the email went. At most
+        # once a minute per process, and one cache call the rest of the time.
+        email_notifications.maybe_sweep()
+        return super().list(request, *args, **kwargs)
 
     def get_queryset(self):
         # What a move of records writes for each record is its audit trail, not

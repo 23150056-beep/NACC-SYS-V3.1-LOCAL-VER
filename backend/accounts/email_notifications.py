@@ -37,9 +37,12 @@ import html
 import logging
 import re
 import threading
+import time
 from collections import namedtuple
+from datetime import timedelta
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db import transaction
 from django.utils import timezone
 
@@ -73,7 +76,8 @@ KINDS = (
          "calendar. Each email carries a calendar invite, and turning it off "
          "also stops updates to sessions already added."),
     Kind("case_accepted", Role.STAFF, "A psychologist accepts",
-         "When a psychologist accepts a case you asked them to take."),
+         "When a psychologist accepts a case you asked them to take. If they book "
+         "its first session as they accept it, the same email gives the time."),
     Kind("case_declined", Role.STAFF, "A psychologist declines",
          "When a psychologist declines a case you asked them to take. Their "
          "reason is never in the email; you read it on the record."),
@@ -85,7 +89,8 @@ KINDS = (
          "intake and it moves to their records."),
     Kind("child_sessions", Role.STAFF, "Sessions for my children",
          "When someone else books, moves or cancels a session for a child in "
-         "your records."),
+         "your records. A psychologist's first session, booked as they accept "
+         "the case, comes in the acceptance email instead."),
 )
 KIND = {k.key: k for k in KINDS}
 
@@ -178,6 +183,20 @@ def when(dt):
         dt = timezone.make_aware(dt)
     local = timezone.localtime(dt)
     return f"{local:%a} {local.day} {local:%b} {local.year}, {clock(local)}"
+
+
+def span(start, duration_minutes):
+    """"Wed 21 Oct 2026, 9:30 AM to 10:30 AM", local time. A session that runs
+    past midnight - possible only on a psychologist's own calendar - names the
+    day it ends as well. Shared by the session emails (scheduling/session_mail.py)
+    and the acceptance email, which both print a session's time."""
+    from scheduling.booking import ends_at
+    if timezone.is_naive(start):
+        start = timezone.make_aware(start)
+    end = timezone.localtime(ends_at(start, duration_minutes))
+    local = timezone.localtime(start)
+    tail = clock(end) if end.date() == local.date() else when(end)
+    return f"{when(start)} to {tail}"
 
 
 # A time and its AM/PM: "10:00 AM". Joined with a no-break space in the page so
@@ -395,6 +414,10 @@ def render(heading, paragraphs, facts=(), button=None, *, preview=None, chip=Non
 # 4. Sending
 # --------------------------------------------------------------------------
 
+# What `_queue` calls its threads, so `wait_for_queued` can find them.
+_THREAD_NAME = "nacc-email"
+
+
 def _queue(payload, description):
     """Hand one message to Brevo after the surrounding transaction commits, on
     a daemon thread. on_commit so a rolled-back save cannot mail about
@@ -403,12 +426,26 @@ def _queue(payload, description):
     transaction.on_commit(
         lambda: threading.Thread(
             target=notifications._post, args=(payload, description),
-            daemon=True).start(),
+            name=_THREAD_NAME, daemon=True).start(),
         # Inside an explicit atomic block this runs at the COMMIT, outside
         # notify's try/except: a thread that cannot start would otherwise
         # surface as a 500 after the save was already made (and skip the other
         # callbacks queued with it). Robust callbacks are logged and dropped.
         robust=True)
+
+
+def wait_for_queued(timeout=20):
+    """Wait, up to `timeout` seconds, for the emails `_queue` has started.
+
+    For a management command only. A daemon thread dies with its process, and a
+    command exits the moment it has queued, so the message it queued would be
+    lost with it - the same reason session reminders are sent before their
+    command returns (see "Text messages" in CLAUDE.md). A long-lived server
+    never needs this."""
+    deadline = time.monotonic() + timeout
+    for thread in threading.enumerate():
+        if thread.name == _THREAD_NAME and thread is not threading.current_thread():
+            thread.join(max(0.0, deadline - time.monotonic()))
 
 
 def notify(kind_key, user, *, subject, heading, paragraphs, facts=(), button=None,
@@ -470,6 +507,7 @@ def notify(kind_key, user, *, subject, heading, paragraphs, facts=(), button=Non
 # each function is wrapped as well: rule 6 covers the whole of it.
 
 OPEN_NACC = ("Open NACC SYS", "/")
+SCHEDULE = ("Open the schedule", "/schedule")
 
 
 def _never_raises(send):
@@ -547,32 +585,278 @@ def request_withdrawn(psychologist, child_or_ref, *, by):
            paragraphs=[said], button=OPEN_NACC)
 
 
+# How long an acceptance may wait for its first session before the sweep mails
+# it anyway (round three, 24 Oct 2026). Long enough for the "When will you see
+# them first?" dialog to be answered, short enough that nobody wonders.
+ANSWER_MAIL_GRACE = timedelta(minutes=10)
+
+# The most acceptances one sweep mails, so a long outage cannot turn the next
+# activity-feed read into hundreds of emails. The rest go on the next sweep.
+SWEEP_BATCH = 50
+
+# The most the activity feed's own sweep mails in the request it rides on. That
+# request is the one every screen waits for, and each acceptance costs a handful
+# of queries and a rendered page (about 250 queries for a batch of 50), which
+# on a database across a network is seconds added to a screen. A backlog clears
+# ten a minute instead; the daily reminder run, which nobody waits for, takes
+# the whole `SWEEP_BATCH`.
+FEED_SWEEP_BATCH = 10
+
+# The sweep runs at most once a minute per process (`maybe_sweep`). The cache is
+# per process, so several workers each run it; the claim below is what keeps
+# that from mailing anyone twice.
+_SWEEP_KEY = "email-answer-sweep"
+_SWEEP_EVERY = 60
+
+
+def claim_answer_mail(req):
+    """Make the email for this ACCEPTED request ours to send, once. True only
+    for the caller whose UPDATE set `answer_mailed_at`; everyone else - a
+    booking, the dialog's call, the sweep, a second tab - gets False and sends
+    nothing, so however they race the social worker has one email.
+
+    The claim stands even when the email is then not sent (the social worker
+    switched it off, no mail service, nobody to tell): the answer has been dealt
+    with, and a row left unstamped would be logged by the sweep every minute for
+    good."""
+    from children.models import AssignmentRequest
+    return bool(AssignmentRequest.objects
+                .filter(pk=req.pk, status=AssignmentRequest.ACCEPTED,
+                        answer_mailed_at__isnull=True)
+                .update(answer_mailed_at=timezone.now()))
+
+
+def _next_session(req):
+    """The earliest session still to come that this psychologist has with this
+    child, or None. Anyone may have booked it: by the time the acceptance is
+    mailed without the psychologist's own booking, the social worker or the ISA
+    may have."""
+    from scheduling.models import Appointment
+    return (Appointment.objects
+            .filter(child_id=req.child_id, psychologist_id=req.psychologist_id,
+                    status=Appointment.SCHEDULED, start__gt=timezone.now())
+            .order_by("start", "pk").first())
+
+
+def _superseded(req):
+    """True when this acceptance is no longer what the child's record says: the
+    child is not with that psychologist any more (another accepted, or the
+    social worker took the psychologist off), or a later request for the child
+    has been accepted since. Mailing it then would tell the social worker
+    something that has stopped being so - "accepted ... in their records" of a
+    child who is with someone else - and the acceptance that replaced it has its
+    own email. Whoever reaches a superseded acceptance first (the dialog's call
+    or the sweep) claims it and sends nothing, so it is not come back to.
+
+    Requests are answered in the order they are made (a child has one open at a
+    time), so a higher id is a later one."""
+    from children.models import AssignmentRequest
+    if req.child.assigned_psychologist_id != req.psychologist_id:
+        return True
+    return AssignmentRequest.objects.filter(
+        child_id=req.child_id, status=AssignmentRequest.ACCEPTED, pk__gt=req.pk).exists()
+
+
 @_never_raises
-def case_answered(req, *, by):
+def case_answered(req, *, by, first_session=None):
     """A psychologist accepted or declined (children/assignment.py), told to
     the social worker whose record it is, or whoever asked where it has none.
     Only a social worker is told: the ISA asking on a record nobody holds gets
     nothing, because the ISA reads the answer on the record.
 
+    A decline is mailed at once. An acceptance is mailed by whoever claims it
+    first (`claim_answer_mail`) and this function does not claim: the caller
+    has, or it is a decline. It reads differently by what is known:
+
+    * `first_session`, the session the psychologist has just booked: ONE email
+      for the acceptance and the booking, so the social worker is not mailed
+      twice seconds apart (round three, 24 Oct 2026).
+    * otherwise the child's next session with this psychologist, if there is
+      one: the acceptance, naming it.
+    * otherwise the acceptance alone, saying no session is booked yet, and
+      promising an email when one is only to a social worker who gets those -
+      or, for a case closed since, saying so and promising nothing.
+
+    An acceptance that has been superseded is not mailed (`_superseded`).
+
     The decline reason is NEVER included. It is the psychologist's words about
     a child, and the social worker reads it on the record, behind the sign-in."""
-    from children.models import AssignmentRequest
-    if req.status == AssignmentRequest.ACCEPTED:
-        kind_key, verb = "case_accepted", "accepted"
-        more = "It is now in their records, and a session can be booked."
-    elif req.status == AssignmentRequest.DECLINED:
-        kind_key, verb = "case_declined", "declined"
-        more = "Sign in to read their reason and ask another psychologist."
-    else:
+    _send_answer(req, by=by, first_session=first_session)
+
+
+def _send_answer(req, *, by, first_session=None):
+    """The work of `case_answered`, which swallows whatever this raises. The
+    booking path calls it directly (`accepted_with_first_session`): it has
+    already claimed the acceptance, so it must know whether the email failed to
+    be prepared, to give the claim back and let the booking's own email go."""
+    from children.models import AssignmentRequest, Child
+    if req.status not in (AssignmentRequest.ACCEPTED, AssignmentRequest.DECLINED):
+        return
+    if req.status == AssignmentRequest.ACCEPTED and _superseded(req):
         return
     recipient = req.child.social_worker or req.requested_by
     if recipient is None or recipient.pk == by.pk:
         return
     ref, psych = _ref(req.child), entered_name(req.psychologist, "A psychologist")
-    subject = f"{psych} {verb} case {ref}"
+
+    if req.status == AssignmentRequest.DECLINED:
+        kind_key = "case_declined"
+        subject = f"{psych} declined case {ref}"
+        lead = (f"{psych} declined case {ref}. Sign in to read their reason and ask "
+                "another psychologist.")
+        facts, button = (), ("Open the record", f"/report/child/{req.child_id}")
+    else:
+        kind_key = "case_accepted"
+        in_records = f"{psych} accepted case {ref}. It is now in their records"
+        session = first_session or _next_session(req)
+        if first_session is not None:
+            subject = f"{psych} accepted case {ref} and booked the first session"
+            lead = f"{in_records}, and the first session is booked."
+            facts = [("Case", ref), ("First session", span(
+                session.start, session.duration_minutes))]
+            button = SCHEDULE
+        elif session is not None:
+            subject = f"{psych} accepted case {ref}"
+            lead = f"{in_records}, and a session is booked."
+            facts = [("Case", ref), ("Next session", span(
+                session.start, session.duration_minutes))]
+            button = SCHEDULE
+        else:
+            subject = f"{psych} accepted case {ref}"
+            if req.child.status == Child.INACTIVE:
+                # Closed since it was accepted (the email waits for the dialog
+                # or the sweep): no session will follow, so no promise of one.
+                lead = f"{psych} accepted case {ref}, which has since been closed."
+            else:
+                promise = ("; you will get an email when one is."
+                           if wants(recipient, "child_sessions") else ".")
+                lead = f"{in_records}. No session is booked yet{promise}"
+            facts, button = (), ("Open the record", f"/report/child/{req.child_id}")
     notify(kind_key, recipient, subject=subject, heading=subject,
-           paragraphs=[f"{psych} {verb} case {ref}. {more}"],
-           button=("Open the record", f"/report/child/{req.child_id}"))
+           paragraphs=[lead], facts=facts, button=button)
+
+
+def accepted_with_first_session(appointment, *, by):
+    """The psychologist who accepted a case has just booked a session for it
+    (scheduling/session_mail.py). True when the acceptance email has gone out
+    as ONE message with that booking, in which case the caller sends the social
+    worker nothing more for this booking.
+
+    Only the psychologist who accepted can make it combine. A booking by the
+    social worker or the ISA is the ordinary "booked a session" email, and the
+    acceptance still goes by the dialog's call or the sweep, naming that
+    session. A session that is not one to come (already past, or not
+    "scheduled") does not combine either, and does not use up the acceptance:
+    "the first session is booked" would be untrue of it. Nor does a session
+    that is not the FIRST one: if this psychologist already has another with
+    the child that has not been called off (the ISA booked 9:30, the child came
+    back to the same psychologist), the acceptance stays owed and goes naming
+    the earliest session, as "Next session".
+
+    False, and the ordinary email goes, when the acceptance was already mailed
+    (it is only the first booking that combines), when there is no such
+    acceptance, when it has been superseded, when the email could not be
+    prepared (the claim is given back, so the dialog's call or the sweep sends
+    the acceptance later), and when the social worker has switched "A
+    psychologist accepts" off - then the claim is taken all the same, and they
+    hear of the booking as "Sessions for my children". Never raises."""
+    claimed = None
+    try:
+        from children.models import AssignmentRequest
+        from scheduling.models import Appointment
+        if (by is None or by.pk != appointment.psychologist_id
+                or appointment.status != Appointment.SCHEDULED
+                or appointment.start <= timezone.now()):
+            return False
+        req = (AssignmentRequest.objects
+               .select_related("child", "child__social_worker", "psychologist",
+                               "requested_by")
+               .filter(child_id=appointment.child_id, psychologist_id=by.pk,
+                       status=AssignmentRequest.ACCEPTED, answer_mailed_at__isnull=True)
+               .order_by("-decided_at", "-pk").first())
+        if req is None or _superseded(req):
+            return False
+        earlier = (Appointment.objects
+                   .filter(child_id=appointment.child_id, psychologist_id=by.pk)
+                   .exclude(pk=appointment.pk)
+                   .exclude(status=Appointment.CANCELLED))
+        if earlier.exists() or not claim_answer_mail(req):
+            return False
+        claimed = req
+        if not wants(req.child.social_worker or req.requested_by, "case_accepted"):
+            return False
+        _send_answer(req, by=by, first_session=appointment)
+        return True
+    except Exception:                                            # noqa: BLE001
+        logger.exception("Could not prepare the combined acceptance email")
+        if claimed is not None:
+            _release_answer_mail(claimed)
+        return False
+
+
+def _release_answer_mail(req):
+    """Give back a claim whose email could not be prepared, so the dialog's call
+    or the sweep sends the acceptance later and the booking's own email goes now.
+    Safe because the claim is exclusive: nobody else has touched the row since
+    it was taken. Never raises."""
+    from children.models import AssignmentRequest
+    try:
+        AssignmentRequest.objects.filter(
+            pk=req.pk, status=AssignmentRequest.ACCEPTED,
+        ).update(answer_mailed_at=None)
+    except Exception:                                            # noqa: BLE001
+        logger.exception("Could not give back the claim on an acceptance email")
+
+
+def mail_overdue_answers(now=None, *, dry_run=False, limit=None):
+    """Mail every acceptance that has waited `ANSWER_MAIL_GRACE` with no
+    booking and no call from the dialog - the browser crashed, the network
+    dropped, the tab was closed before the call went. Oldest first, at most
+    `limit` at a time (`SWEEP_BATCH` unless the caller says fewer). Returns how
+    many were claimed, which counts one dealt with and not mailed (switched off,
+    superseded) as well; a dry run: how many would be, without claiming any.
+    Never raises.
+
+    The email names the child's next session if somebody has booked one since
+    (`case_answered`), and says none is booked yet otherwise."""
+    from children.models import AssignmentRequest
+    try:
+        now = now or timezone.now()
+        due = (AssignmentRequest.objects
+               .select_related("child", "child__social_worker", "psychologist",
+                               "requested_by", "decided_by")
+               .filter(status=AssignmentRequest.ACCEPTED, answer_mailed_at__isnull=True,
+                       decided_at__lte=now - ANSWER_MAIL_GRACE)
+               .order_by("decided_at", "pk")[:limit or SWEEP_BATCH])
+        if dry_run:
+            return len(due)
+        claimed = 0
+        for req in due:
+            try:
+                if not claim_answer_mail(req):
+                    continue
+                claimed += 1
+                # decided_by is cleared if that account is ever deleted; the
+                # psychologist asked is the one who accepted.
+                case_answered(req, by=req.decided_by or req.psychologist)
+            except Exception:                                    # noqa: BLE001
+                logger.exception("Could not mail an overdue acceptance")
+        return claimed
+    except Exception:                                            # noqa: BLE001
+        logger.exception("Could not look for overdue acceptances")
+        return 0
+
+
+def maybe_sweep():
+    """`mail_overdue_answers`, at most once a minute per process and at most
+    `FEED_SWEEP_BATCH` at a time. It is called from a request that every screen
+    makes (the activity feed), so otherwise it costs one cache call. Never
+    raises."""
+    try:
+        if cache.add(_SWEEP_KEY, True, _SWEEP_EVERY):
+            mail_overdue_answers(limit=FEED_SWEEP_BATCH)
+    except Exception:                                            # noqa: BLE001
+        logger.exception("Could not sweep for overdue acceptances")
 
 
 @_never_raises

@@ -505,3 +505,144 @@ Left open, with the owner:
   can make up for that: a look-alike from a free account looks the same. Sending
   from a domain the agency controls, with SPF, DKIM and DMARC set in Brevo,
   is what lets a mail app tell the real one from a copy.
+
+## Round three: one email for "accepted" and the first session (24 Oct 2026)
+
+**Owner's request:** "combine them into one email" - when a psychologist
+accepts a child and books the first session in the same dialog, the social
+worker got two emails seconds apart ("accepted", then "booked a session").
+
+### Why it cannot simply be one send
+
+Accepting and booking are two saves: `POST /assignment-requests/<id>/accept/`,
+then the "When will you see them first?" dialog (`ScheduleFirstSession` in
+`components/AssignmentRequests.jsx`) books through `POST /appointments/` -
+or the psychologist picks "Book later", or closes the dialog, or closes the
+tab. The acceptance email therefore waits until the dialog is over, and there
+is no background scheduler to hold it (daemon threads die with the process;
+see "Text messages"). So the acceptance is recorded as **not yet mailed**,
+and whichever of these comes first sends it, once:
+
+1. **The psychologist books** (the dialog's Schedule now or From my
+   availability, or the Calendar): ONE email to the social worker -
+   "Maria Santos accepted case C-0042 and booked the first session" - with the
+   session's time, and the usual "booked a session" email to the social worker
+   is not sent for that booking.
+2. **The dialog ends without a booking** (Book later, Finish, the close
+   button, Escape): the screen calls
+   `POST /assignment-requests/<id>/mail-answer/`, and the email goes as an
+   acceptance only: "... No session is booked yet; you will get an email when
+   one is." Closing the tab with the dialog open sends the same call with
+   `fetch(..., {keepalive: true})` on `pagehide`.
+3. **Nothing came at all** (the browser crashed, the network dropped): a
+   sweep sends every acceptance still unmailed **10 minutes** after it was
+   made (`ANSWER_MAIL_GRACE`). It runs when anybody's screen reads the
+   activity feed (every screen does after every save, and at sign-in), at most
+   once a minute per process, and from `send_session_reminders`. If a session
+   was booked by then, by anyone, the email names the next one.
+
+"Sent once" is a conditional UPDATE on `answer_mailed_at IS NULL`: whoever
+sets it sends, everyone else does nothing, so a booking, the dialog's call and
+the sweep can race and the social worker still gets one email.
+
+### The data
+
+`AssignmentRequest.answer_mailed_at` (children 0032, nullable, additive). The
+same migration stamps every request already answered (accepted, declined,
+withdrawn) with its `decided_at`, so the sweep never mails an old acceptance.
+A request accepted by the release still serving during a deploy has it NULL
+and is mailed by the sweep - after that release mailed it on accepting, as it
+always did, so for that window the social worker can get the acceptance twice.
+Rare, bounded by the length of one deploy, and not worth a boot-time check.
+
+A **decline** is mailed at once, as before: nothing follows it. It stamps
+`answer_mailed_at` too, so the column means the same for every answer.
+
+### Who gets what
+
+- The combined email is kind `case_accepted`. A social worker who switched
+  "A psychologist accepts" off but keeps "Sessions for my children" on gets the
+  ordinary "booked a session" email for that booking instead.
+- Only a booking BY the psychologist who accepted combines. The ISA or the
+  social worker booking in the meantime sends what it always sent, and the
+  acceptance still goes by 2 or 3, naming the next session.
+- After the acceptance is mailed, every later booking is the ordinary email.
+- The psychologist still gets nothing about their own booking.
+
+### Wording
+
+- With the psychologist's booking: subject "{psych} accepted case {ref} and
+  booked the first session"; body "{psych} accepted case {ref}. It is now in
+  their records, and the first session is booked."; facts Case, First session
+  (the time span); button Open the schedule -> /schedule.
+- Without a session: subject "{psych} accepted case {ref}"; body "{psych}
+  accepted case {ref}. It is now in their records. No session is booked yet;
+  you will get an email when one is." (the last clause only when the social
+  worker has "Sessions for my children" on); button Open the record ->
+  /report/child/<id>.
+- Without the psychologist's booking but with one found: subject "{psych}
+  accepted case {ref}"; facts Case, Next session.
+
+### `POST /assignment-requests/<id>/mail-answer/`
+
+Only the psychologist who accepted (403 for anyone else, 404 outside their
+scope as the viewset already does), only for an ACCEPTED request (409
+otherwise). Idempotent: `{"mailed": true}` the first time, `{"mailed": false}`
+after. Never sends anything but the acceptance email of that request.
+
+### After review (24 Oct 2026)
+
+What a read of the built change found, and what was done. Each change has a
+test; the rest is left, below.
+
+- **"Booked the first session" is said only of a first session.** The combined
+  email used to fire for any booking by the psychologist who accepted, so after
+  the ISA had booked 9:30 their own 10:30 went out as "the first session", and
+  so did a booking for a child who had sessions with them before. It now
+  combines only when the psychologist has no other session with the child that
+  is not cancelled (`accepted_with_first_session`); otherwise the booking is
+  the ordinary email and the acceptance stays owed, going by the dialog's call
+  or the sweep as "Next session" naming the earliest. In that case the
+  acceptance can wait for the sweep (up to ten minutes): the dialog sends no
+  call after a booking.
+- **A superseded acceptance is dealt with and not mailed** (`_superseded`): the
+  child is no longer with that psychologist, or a later request for the child
+  has been accepted. Marivic accepted, Jose accepted, Marivic accepted again
+  used to mean three acceptance emails, the first two untrue by the time they
+  went. A question still open to somebody else does not supersede: until they
+  accept, the child is where it was.
+- **A failure in the combined email gives the claim back.** The claim was taken
+  first and the email prepared after, so a failure left the social worker with
+  neither email and the sweep with nothing to find. Now the booking's own email
+  goes and the acceptance stays owed. A social worker who switched the
+  acceptance off is not a failure: the claim stays taken.
+- **A case closed before the mail goes** reads "{psych} accepted case {ref},
+  which has since been closed." and promises no email. The recipient is still
+  whoever holds the record when it is sent, as for every session email: a
+  record the ISA has moved since is the new holder's to act on, and the bell
+  and the "Records moved to me" email follow it the same way.
+- **The feed's own sweep mails ten at a time** (`FEED_SWEEP_BATCH`). It rides on
+  the one request every screen waits for, and a full batch of 50 cost about 250
+  queries. The reminder run, which nobody waits for, still takes `SWEEP_BATCH`.
+- **The dialog cannot be left while the booking is in flight.** Escape, the
+  close button and "Book later" sent the acceptance on its own, and the booking
+  then landing sent a second email. They are off while "Booking..." shows
+  (`dismissible={!busy}`, as in the upload and transfer drawers). A request that
+  never answers would hold the dialog; reloading still sends the call
+  (`pagehide`).
+- **The two switches say what they cover.** "A psychologist accepts" also gives
+  the first session's time when the psychologist books it as they accept, and
+  "Sessions for my children" says that booking comes in the acceptance email
+  instead. The combined email is governed by `case_accepted` alone.
+
+Left as it is, with the reason:
+
+- **Withdrawn requests keep `answer_mailed_at` empty.** Nothing is owed on a
+  withdrawal (an accepted request cannot be withdrawn), and every query that
+  looks for owed emails filters on `status`, which a test now pins.
+- **The "booked a session" email can arrive before "accepted"** when a booking
+  and the dialog's call race. Both are true and each is sent once.
+- **Browser Back, or a killed browser, leaves the acceptance to the sweep.** A
+  route change unmounts the dialog without sending, on purpose (development's
+  StrictMode would send it on open); the sweep sends it after ten minutes.
+

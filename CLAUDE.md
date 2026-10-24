@@ -1868,6 +1868,26 @@ the psychologist asked to take a child. Design and what was settled in review:
   built with no Brevo key. Book a session as a SW with the key set and check the
   psychologist's Gmail shows an invitation before relying on it. A 400 from
   Brevo for a message with an attachment is sent again without it.
+- **"Accepted" and the first session are ONE email** (owner, 24 Oct 2026).
+  Accepting no longer mails the social worker; the acceptance is owed
+  (`AssignmentRequest.answer_mailed_at` NULL, children 0032) until the first
+  of: the psychologist books (one `case_accepted` email, "... and booked the
+  first session" with its time, and no "booked" email for that booking - only
+  when it is their first non-cancelled session with the child); the
+  "When will you see them first?" dialog ends without a booking (Book later,
+  Finish, X, Escape, or `pagehide` with `fetch keepalive`) and calls
+  `POST /api/assignment-requests/<id>/mail-answer/`; or the sweep
+  (`mail_overdue_answers`), 10 minutes after the acceptance
+  (`ANSWER_MAIL_GRACE`), run by `GET /api/activity/` at most once a minute per
+  process and ten at a time, and by `send_session_reminders` (fifty, then it
+  waits for the send threads). One conditional UPDATE claims it, so the three
+  can race and the SW still gets one email. A superseded acceptance (the child
+  moved on, or a later one accepted) is dropped, a closed case says so, and a
+  send that fails gives the claim back. The dialog ignores its close buttons
+  while a booking is in flight; leaving the page by Back leaves it to the
+  sweep (StrictMode runs unmount cleanups, so sending there would mail at
+  once). A request accepted by the release still serving during the deploy
+  that adds 0032 can be mailed twice; accepted.
 - **Each person's switches** are `EmailOptOut` rows (a row means OFF, so a new
   kind starts on), at `GET/PUT /api/auth/me/email-notifications/`, shown on My
   Profile under the mobile number. Only the caller's role's keys are accepted.

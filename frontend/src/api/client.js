@@ -1,7 +1,9 @@
 import axios from 'axios';
 import { clearTokens, getAccess, getRefresh, setTokens } from './session';
 
-const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
+// Exported for the one call that cannot go through axios: a request sent as the
+// page is being closed (api/assignment.js), which needs fetch's keepalive.
+export const baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api';
 
 const api = axios.create({ baseURL });
 

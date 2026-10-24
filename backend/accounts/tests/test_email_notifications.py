@@ -80,6 +80,16 @@ class MailBase(TestCase):
         client.force_authenticate(user)
         return client
 
+    def _accepted(self, child, psychologist, **fields):
+        """An accepted request as accepting leaves it: the child is with the
+        psychologist. An acceptance of a child who is with somebody else has
+        been superseded and is not mailed (email_notifications._superseded)."""
+        child.assigned_psychologist = psychologist
+        child.save(update_fields=["assigned_psychologist"])
+        return AssignmentRequest.objects.create(
+            child=child, psychologist=psychologist, requested_by=self.sw,
+            status=AssignmentRequest.ACCEPTED, **fields)
+
     @contextmanager
     def outbox(self):
         """A mail service is set up, and everything handed to the sender is
@@ -691,7 +701,7 @@ class QueueTest(MailBase):
             callbacks[0]()
         thread.assert_called_once_with(
             target=notifications._post, args=(self.PAYLOAD, "case_request email"),
-            daemon=True)
+            name=email_notifications._THREAD_NAME, daemon=True)
         thread.return_value.start.assert_called_once_with()
 
     def test_the_callback_is_robust_so_a_thread_that_cannot_start_cannot_fail_the_save(self):
@@ -774,11 +784,16 @@ class WordingTest(MailBase):
         ref = self._ref(self.child)
         for status, verb, kind, more in (
                 (AssignmentRequest.ACCEPTED, "accepted", "case_accepted",
-                 "It is now in their records, and a session can be booked."),
+                 "It is now in their records. No session is booked yet; you will get "
+                 "an email when one is."),
                 (AssignmentRequest.DECLINED, "declined", "case_declined",
                  "Sign in to read their reason and ask another psychologist.")):
-            req = AssignmentRequest.objects.create(
-                child=self.child, psychologist=self.psy, requested_by=self.sw, status=status)
+            if status == AssignmentRequest.ACCEPTED:
+                req = self._accepted(self.child, self.psy)
+            else:
+                req = AssignmentRequest.objects.create(
+                    child=self.child, psychologist=self.psy, requested_by=self.sw,
+                    status=status)
             with patch("accounts.email_notifications._queue") as queue:
                 case_answered(req, by=self.psy)
             payload, description = queue.call_args.args
@@ -883,11 +898,7 @@ class NamelessStaffTest(MailBase):
         self.assertIn("The ISA moved 2 records to you from a colleague.", text)
 
     def test_a_psychologist_with_no_name_is_not_an_address_in_their_answer(self):
-        self.child.assigned_psychologist = None
-        self.child.save()
-        req = AssignmentRequest.objects.create(
-            child=self.child, psychologist=self.nameless_psy, requested_by=self.sw,
-            status=AssignmentRequest.ACCEPTED)
+        req = self._accepted(self.child, self.nameless_psy)
         with self.outbox() as sent:
             case_answered(req, by=self.nameless_psy)
         self.assertNoAddress(sent)
@@ -1122,9 +1133,7 @@ class HostileNameTest(MailBase):
 
     def test_the_console_line_is_one_line_when_no_mail_service_is_set_up(self):
         self._rename(self.psy, "Marivic\r\nFAKE LOG LINE", "Bulan")
-        req = AssignmentRequest.objects.create(
-            child=self.child, psychologist=self.psy, requested_by=self.sw,
-            status=AssignmentRequest.ACCEPTED)
+        req = self._accepted(self.child, self.psy)
         with override_settings(BREVO_API_KEY=""), self.assertLogs(
                 "accounts.email_notifications", level="WARNING") as logged:
             case_answered(req, by=self.psy)
@@ -1231,10 +1240,15 @@ class TriggersTest(MailBase):
             self.assertNotIn(closer.fullname, payload["textContent"] + payload["htmlContent"])
 
     def test_the_psychologist_accepting_tells_the_social_worker(self):
+        """Not at the moment of accepting: the acceptance waits for what the
+        psychologist does next (test_answer_email.py has the three ways it goes).
+        Here the dialog ends with no booking."""
         req = self._ask(self.psy)
         with self.outbox() as sent:
             res = self._answer(req, "accept")
-        self.assertEqual(200, res.status_code, res.data)
+            self.assertEqual(200, res.status_code, res.data)
+            self.assertEqual([], sent)
+            self.assertEqual(200, self._answer(req, "mail-answer").status_code)
         self.assertEqual(["case_accepted"], self.kinds_to(sent, self.sw))
         self.assertEqual(1, len(sent))
         payload = sent[0][1]
@@ -1268,6 +1282,7 @@ class TriggersTest(MailBase):
         req = self._ask(self.psy, by=self.admin)
         with self.outbox() as sent:
             self._answer(req, "accept")
+            self._answer(req, "mail-answer")
         self.assertEqual(["case_accepted"], self.kinds_to(sent, self.sw))
         self.assertEqual([], self.to(sent, self.admin))
 
@@ -1286,9 +1301,7 @@ class TriggersTest(MailBase):
         has no social worker. Not reachable through the endpoints (a social
         worker asks only on their own records), so the function is called."""
         orphan = self._held(None, "Cara", "Diaz")
-        req = AssignmentRequest.objects.create(
-            child=orphan, psychologist=self.psy, requested_by=self.sw,
-            status=AssignmentRequest.ACCEPTED)
+        req = self._accepted(orphan, self.psy)
         with self.outbox() as sent:
             case_answered(req, by=self.psy)
         self.assertEqual(["case_accepted"], self.kinds_to(sent, self.sw))
@@ -1396,9 +1409,7 @@ class NeverForYourOwnActionTest(MailBase):
     domain functions are called with the actor as the recipient directly."""
 
     def test_nobody_is_emailed_about_what_they_did_themselves(self):
-        accepted = AssignmentRequest.objects.create(
-            child=self.child, psychologist=self.psy, requested_by=self.sw,
-            status=AssignmentRequest.ACCEPTED)
+        accepted = self._accepted(self.child, self.psy)
         with self.outbox() as sent:
             case_request(self.child, self.psy, by=self.psy)
             request_withdrawn(self.psy, self.child, by=self.psy)
@@ -1409,9 +1420,7 @@ class NeverForYourOwnActionTest(MailBase):
         self.assertEqual([], sent)
 
     def test_the_same_calls_do_mail_someone_else(self):
-        accepted = AssignmentRequest.objects.create(
-            child=self.child, psychologist=self.psy, requested_by=self.sw,
-            status=AssignmentRequest.ACCEPTED)
+        accepted = self._accepted(self.child, self.psy)
         with self.outbox() as sent:
             case_request(self.child, self.psy, by=self.sw)
             request_withdrawn(self.psy, self.child, by=self.sw)
@@ -1422,9 +1431,7 @@ class NeverForYourOwnActionTest(MailBase):
                           "records_transferred", "case_taken_over"], [k for k, _ in sent])
 
     def test_a_failure_while_preparing_one_is_logged_and_the_save_stands(self):
-        accepted = AssignmentRequest.objects.create(
-            child=self.child, psychologist=self.psy, requested_by=self.sw,
-            status=AssignmentRequest.ACCEPTED)
+        accepted = self._accepted(self.child, self.psy)
         with self.outbox() as sent, \
                 patch("accounts.email_notifications.entered_name", side_effect=ValueError), \
                 self.assertLogs("accounts.email_notifications", level="ERROR") as logged:
@@ -1459,6 +1466,7 @@ class OptOutTest(MailBase):
         declined = self._ask(self.psy2, child=self._held(self.sw))
         with self.outbox() as sent:
             self._answer(accepted, "accept")
+            self._answer(accepted, "mail-answer")
             self._answer(declined, "decline", user=self.psy2, reason="Full.")
         self.assertEqual(["case_declined"], self.kinds_to(sent, self.sw))
 
@@ -1511,6 +1519,7 @@ class PrivacyTest(MailBase):
             # Accepted.
             req = AssignmentRequest.objects.get(child=new, status=AssignmentRequest.PENDING)
             self.assertEqual(200, self._answer(req, "accept", user=self.psy2).status_code)
+            self.assertEqual(200, self._answer(req, "mail-answer", user=self.psy2).status_code)
             # Declined, with a reason.
             held = self._sentinel_child(self.sw)
             req = self._ask(self.psy, child=held)
