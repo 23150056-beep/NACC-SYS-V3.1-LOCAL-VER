@@ -930,6 +930,18 @@ class HostileNameTest(SessionMailBase):
         user.first_name, user.last_name = first, last
         user.save()
 
+    def _as_long_as_a_name_can_be(self, text):
+        """`text` repeated and cut to the column. These tests are about a name
+        far longer than the 60 characters a mail prints, but it has to be
+        STORED to be read back from the account, and tbl_user.first_name and
+        last_name are varchar(150): SQLite lets 200 characters in, PostgreSQL
+        refuses the UPDATE (CI run 40069844463), so the tests were green where
+        the column was not enforced and red where it is."""
+        limit = self.psy._meta.get_field("first_name").max_length
+        long = (text * (limit // len(text) + 1))[:limit]
+        self.assertGreater(len(long), 60)
+        return long
+
     def test_a_booking_by_somebody_whose_name_has_a_newline_and_an_override_is_one_plain_line(self):
         self._rename(self.sw, "Editha\r\nBcc: attacker@evil.example", "Pas\u202ecua")
         appointment, sent = self.booked(self.sw)
@@ -946,7 +958,7 @@ class HostileNameTest(SessionMailBase):
 
     def test_a_psychologists_long_name_is_cut_in_the_row_a_social_worker_reads(self):
         appointment, _ = self.booked(self.sw)
-        self._rename(self.psy2, "Jose " * 40)
+        self._rename(self.psy2, self._as_long_as_a_name_can_be("Jose "))
         with self.outbox() as sent:
             res = self.change(self.admin, appointment, psychologist=self.psy2)
         self.assertEqual(200, res.status_code, res.data)
@@ -956,7 +968,8 @@ class HostileNameTest(SessionMailBase):
         self.assertEqual(len("Psychologist: ") + 60 + len(" (was Marivic Bulan)"), len(row))
 
     def test_the_invite_names_the_attendee_as_one_short_plain_line(self):
-        self._rename(self.psy, "Marivic\nBulan\u202e", "Santos " * 30)
+        self._rename(self.psy, "Marivic\nBulan\u202e",
+                     self._as_long_as_a_name_can_be("Santos "))
         appointment, sent = self.booked(self.sw)
         (attendee,) = [t for t in unfolded(attachment(self.one(sent, self.psy)))
                        if t.startswith("ATTENDEE")]

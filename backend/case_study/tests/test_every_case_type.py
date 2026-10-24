@@ -192,14 +192,16 @@ class FinalAndReopenForAFosterCareRecordTest(NonAdoptionCase):
         snap = final.snapshot
         wanted = [e["key"] for e in SCSR_SECTIONS
                   if e["block"] == "A" and applies(e, self.foster, self.foster_study)]
-        self.assertEqual(wanted, list(snap["sections"]))
+        # The boxes, not their order: PostgreSQL's jsonb keeps keys by length
+        # then bytes, SQLite's text as written (the print finds each by key).
+        self.assertCountEqual(wanted, snap["sections"])
         self.assertEqual("Foster Care", snap["child"]["case_type"])
         self.assertEqual("Foster Care", snap["part_one"]["case_type"])
         self.assertEqual("2026-10-01", snap["date_prepared"])
         # The social worker prints it through the same endpoint as an adoption's.
         copy = self.as_user(self.sw).get(self.finals_url(final.pk, self.foster))
         self.assertEqual(200, copy.status_code)
-        self.assertEqual(wanted, list(copy.data["snapshot"]["sections"]))
+        self.assertCountEqual(wanted, copy.data["snapshot"]["sections"])
 
     def test_a_ticked_not_applicable_box_is_copied_without_its_text(self):
         self.fill_block_a(self.foster)
