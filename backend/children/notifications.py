@@ -98,14 +98,37 @@ def _post(payload, description):
 
 
 def sign_in_url():
-    """Where to send someone to use the password we just gave them.
+    """The address every email's button points at: where people open NACC SYS.
 
-    Taken from CORS_ALLOWED_ORIGINS, which already holds the frontend's own
-    origin on every deployment — a separate setting would be a second place to
-    get wrong, and one that only ever shows up as a dead link in an email
-    nobody reports. A localhost entry is skipped when a deployed one exists,
-    since the mail is read on someone else's machine.
+    `SITE_URL` when it is set, and it is the right answer wherever it is. It
+    exists because the old rule (`origin_from_cors`) fails on a local copy: the
+    CORS list there is localhost only, so the link opened nowhere but the PC
+    running the app, and a psychologist reading the email on a phone got a dead
+    button.
+
+    **Always from configuration, never from the request.** Building a link
+    from the `Host` header is the classic password-reset poisoning hole: send
+    the server a request with a forged Host and it mails a colleague a link to
+    your site, in a message that really does come from the agency. Nothing
+    here reads a request, and `SITE_URL` is checked when settings load
+    (config/guards.py `checked_site_url`).
+
+    Unset, the old rule stands, so a deployment that has not set it behaves
+    exactly as before.
     """
+    return settings.SITE_URL or origin_from_cors()
+
+
+def origin_from_cors():
+    """The site's address as it was worked out before `SITE_URL` existed: the
+    first entry of CORS_ALLOWED_ORIGINS, which already holds the frontend's own
+    origin on every hosted copy. A localhost entry is skipped when a deployed
+    one exists, since the mail is read on someone else's machine.
+
+    Kept as a function of its own for two reasons: it is `sign_in_url`'s answer
+    when `SITE_URL` is unset, and it is what the calendar UIDs sent before the
+    UID was stored were built from (scheduling/calendar_invite.py
+    `legacy_uid`), which must not change when `SITE_URL` is set."""
     origins = [o.strip().rstrip("/") for o in settings.CORS_ALLOWED_ORIGINS
                if o and o.strip()]
     deployed = [o for o in origins

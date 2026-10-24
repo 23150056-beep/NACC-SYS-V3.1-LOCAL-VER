@@ -65,7 +65,7 @@ class AssignmentEmailContentTest(TestCase):
 
     def test_it_says_who_asked(self):
         (payload,) = self._sent(Child.objects.create(fullname="Ana Reyes"))
-        self.assertIn("Editha Pascua asked you", payload["textContent"])
+        self.assertIn("Editha Pascua, a social worker, asked you", payload["textContent"])
 
     def test_it_goes_to_the_psychologist(self):
         (payload,) = self._sent(Child.objects.create(fullname="Ana Reyes"))

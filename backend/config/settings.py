@@ -414,6 +414,27 @@ BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL", "racco1nacc@gmail.com")
 BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "NACC RACCO1")
 
+# The address people open NACC SYS at, used in every email's button
+# (children.notifications.sign_in_url). Read from here and never from a
+# request's Host header: a link built from the request is how a forged Host
+# turns the system into a sender of links to somebody else's site. Checked
+# when settings load; a value that fails the guard is ignored with a warning
+# and the old rule (the first deployed CORS origin) stands, because an email
+# link is not worth a failed boot. The reason never repeats the value, so a
+# password typed into it is not written to the log.
+SITE_URL, _site_url_problem = guards.checked_site_url(
+    os.getenv("SITE_URL", ""), debug=DEBUG)
+if _site_url_problem:
+    import logging as _logging
+    _logging.getLogger("config.guards").warning(
+        "SITE_URL is ignored: %s Email links use the first deployed "
+        "CORS_ALLOWED_ORIGINS entry instead.", _site_url_problem)
+if _TESTING:
+    # The suite pins its own addresses (override_settings on CORS_ALLOWED_ORIGINS
+    # and SITE_URL). One a developer set in backend/.env for a copy others reach
+    # would otherwise win over the CORS list every email test relies on.
+    SITE_URL = ""
+
 # --- SMS (temporary passwords, assignments, session reminders) -------------
 #
 # Unset provider = "console": messages are written to the log and no gateway is

@@ -202,6 +202,37 @@ anything in Google.
 Comment the variable out of `backend/.env` and restart the API. The button
 disappears again; nothing else changes.
 
+## Emails (Brevo)
+
+Off by default. With no `BREVO_API_KEY` in `backend/.env` nothing is sent: each
+email is written to the **API window** as one line starting `EMAIL (console)`,
+and the sign-up code is written there too, so the flows work without a mail
+service. Real emails, from the same Brevo account the hosted copies use, need
+the key (see `backend/.env.example`).
+
+The button in an email opens the address in the `SITE_URL` setting, and the
+emails about cases and sessions also print it in words under the button:
+
+```
+SITE_URL=https://nacc.example.gov.ph
+```
+
+- **Without it the links point at `localhost`**, which opens nowhere but the PC
+  running the copy. A psychologist reading the email on a phone gets a dead
+  button. `SITE_URL` is the address colleagues really open NACC SYS at, so set
+  it whenever the copy is reached from another device, and leave it unset for
+  a copy only you use.
+- **Serve a copy that others reach over https.** On plain `http` a password
+  typed into the sign-in page crosses the network readable by anyone on it.
+  The setting is refused with `http` when `DJANGO_DEBUG` is `False`; on a local
+  copy (`DJANGO_DEBUG=True`) it is accepted, but https is still the right
+  address for anyone else.
+- It must be the bare site: no path, no query, no user name. A value that is
+  not is ignored, with a warning in the API window saying why, and the links
+  fall back to the first non-localhost entry of `CORS_ALLOWED_ORIGINS`.
+- It only changes the links in emails. It does not make the copy reachable
+  from other devices; that is the network's and the frontend's business.
+
 ## Text messages (Semaphore)
 
 Off by default. Every text is written to the **API window** instead —

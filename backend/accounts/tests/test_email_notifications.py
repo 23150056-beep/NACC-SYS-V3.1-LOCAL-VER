@@ -15,8 +15,11 @@ renamed key would silently switch everybody's opt-out back on.
 """
 import base64
 import json
+import unicodedata
 from contextlib import contextmanager
 from datetime import date, datetime, timezone as dt_timezone
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
@@ -26,9 +29,11 @@ from django.urls import reverse
 from rest_framework.test import APIClient
 
 from accounts import email_notifications
+from accounts.display import NAME_LIMIT, entered_name, one_line
 from accounts.email_notifications import (
-    FOOTER, KIND, KINDS, _queue, case_answered, case_request, case_taken_over, kinds_for,
-    notify, records_transferred, render, request_withdrawn, wants, when)
+    _AMBER_TEXT, _AMBER_TINT, FOOTER, KIND, KINDS, SAFETY, _queue, case_answered,
+    case_request, case_taken_over, kinds_for, notify, records_transferred, render,
+    request_withdrawn, wants, when)
 from accounts.models import EmailOptOut, Role
 from children import notifications
 from children.models import AssignmentRequest, Child
@@ -252,7 +257,17 @@ class RenderTest(SimpleTestCase):
                       "(My Profile, Email notifications). No case details are included. "
                       "Automated message; replies are not monitored.", FOOTER)
         self.assertIn(FOOTER, page)
+        self.assertIn(FOOTER, text)
+        # The way to the switches follows it, as text, in both parts.
+        profile = f"Choose which emails you get: My Profile, Email notifications - {ORIGIN}/profile"
+        self.assertIn(profile, page)
+        self.assertTrue(text.endswith(f"{FOOTER}\n{profile}"))
+
+    @override_settings(CORS_ALLOWED_ORIGINS=[])
+    def test_with_no_address_the_footer_is_just_the_footer(self):
+        page, text = render("H", ["P"])
         self.assertTrue(text.endswith(FOOTER))
+        self.assertNotIn("Choose which emails", page + text)
 
     def test_everything_interpolated_is_escaped_in_the_page_and_raw_in_the_text(self):
         page, text = render('<b>Hi</b>', ["a & b <script>x</script>"],
@@ -263,6 +278,300 @@ class RenderTest(SimpleTestCase):
         self.assertIn("a &amp; b &lt;script&gt;", page)
         self.assertIn("/x?a=1&amp;b=2", page)
         self.assertIn("a & b <script>x</script>", text)
+
+
+@override_settings(CORS_ALLOWED_ORIGINS=[ORIGIN])
+class EveryEmailTest(SimpleTestCase):
+    """What the shared layout adds to every notification (23 Oct 2026): the
+    preview line, the plain address under the button, the safety line and the
+    way to the switches. The first two of those are text on purpose - a mail
+    service rewrites links for click tracking, so a link cannot show the
+    address it really goes to."""
+
+    SAFETY_WORDS = ("NACC SYS never asks for your password or a code by email, and nothing "
+                    "in this email signs you in. Not sure it is from us? Do not use the "
+                    "button: open NACC SYS from your bookmark or the address you already "
+                    "know, and tell the ISA.")
+
+    def _page(self, **over):
+        args = dict(button=("Open it", "/schedule"))
+        args.update(over)
+        return render("Heading", ["First paragraph.", "Second."], **args)
+
+    def test_the_hidden_preview_is_the_first_thing_in_the_body(self):
+        page, _ = self._page(preview="Case C-0007 is waiting for you.")
+        body = page[page.index("<body"):]
+        first = body[body.index(">") + 1:]
+        self.assertTrue(first.startswith(
+            '<div style="display:none;font-size:1px;line-height:1px;max-height:0;'
+            'max-width:0;opacity:0;overflow:hidden;mso-hide:all;color:#f4f6fa;">'
+            "Case C-0007 is waiting for you."), first[:300])
+        # Padded, so the mail list does not run on into the body text.
+        self.assertIn("&zwnj;&nbsp;" * 20, first)
+        hidden = first[:first.index("</div>")]
+        self.assertNotIn("Heading", hidden)
+
+    def test_without_a_preview_it_is_the_first_paragraph(self):
+        page, _ = self._page()
+        hidden = page[page.index("color:#f4f6fa;"):page.index("</div>")]
+        self.assertIn("First paragraph.", hidden)
+        self.assertNotIn("Second.", hidden)
+
+    def test_the_preview_is_escaped_and_an_empty_one_leaves_no_hidden_line(self):
+        page, _ = self._page(preview="a & <b>")
+        self.assertIn("a &amp; &lt;b&gt;", page)
+        bare, _ = render("Heading", [])
+        self.assertNotIn("display:none", bare)
+
+    def test_the_page_says_its_language_and_is_titled_by_the_subject(self):
+        page, _ = self._page(subject="The subject & more")
+        self.assertIn('<html lang="en">', page)
+        self.assertIn("<title>The subject &amp; more</title>", page)
+        untitled, _ = self._page()
+        self.assertIn("<title>Heading</title>", untitled)
+
+    def test_notify_titles_the_page_with_the_subject(self):
+        with override_settings(BREVO_API_KEY="k"), \
+                patch("accounts.email_notifications._queue") as queue:
+            psy = Mock(is_active=True, email="p@t.ph", fullname="P", role=Mock(
+                role_name=Role.PSYCHOLOGIST), pk=1)
+            with patch("accounts.email_notifications.wants", return_value=True):
+                notify("case_request", psy, subject="The subject", heading="The heading",
+                       paragraphs=["Body."], preview="Hidden line.")
+        payload = queue.call_args.args[0]
+        self.assertIn("<title>The subject</title>", payload["htmlContent"])
+        self.assertIn("Hidden line.", payload["htmlContent"])
+
+    def test_the_site_is_printed_in_words_under_the_button_and_is_not_a_link(self):
+        page, text = self._page()
+        self.assertIn("Or open NACC SYS at ", page)
+        self.assertIn(f">{ORIGIN}</span>", page)
+        # Exactly one link, the button. The address is text: no second anchor,
+        # and nowhere an href that is the bare site.
+        self.assertEqual(1, page.count("<a "))
+        self.assertNotIn(f'href="{ORIGIN}"', page)
+        self.assertIn(f'href="{ORIGIN}/schedule"', page)
+        # The bare site, not the deep path.
+        line = [t for t in text.split("\n") if t.startswith("Or open")][0]
+        self.assertEqual(f"Or open NACC SYS at {ORIGIN}", line)
+
+    def test_the_address_is_escaped_in_the_page(self):
+        with override_settings(SITE_URL='https://nacc.example"><b>'):
+            page, _ = self._page()
+        self.assertNotIn("<b>", page)
+
+    def test_the_safety_line_follows_the_address_in_both_parts(self):
+        self.assertEqual(self.SAFETY_WORDS, SAFETY)
+        page, text = self._page()
+        self.assertIn(self.SAFETY_WORDS, page)
+        self.assertIn(self.SAFETY_WORDS, text)
+        for part in (page, text):
+            self.assertLess(part.index("Or open NACC SYS at"), part.index("NACC SYS never asks"))
+
+    def test_the_way_to_the_switches_is_text_with_the_address(self):
+        page, text = self._page()
+        line = f"Choose which emails you get: My Profile, Email notifications - {ORIGIN}/profile"
+        self.assertIn(line, page)
+        self.assertIn(line, text)
+        self.assertNotIn('href="https://nacc.example.test/profile"', page)
+
+    def test_the_safety_line_does_not_offer_a_check_that_a_look_alike_passes(self):
+        """The first wording asked the reader to compare the address printed
+        under the button with the one they know. That text is independent of
+        where the button goes: a forged email can print the genuine address,
+        carry the same sentence and point its button elsewhere, and so pass the
+        very check the email taught. The check left is the one that does not
+        use the email at all."""
+        self.assertNotIn("address above", SAFETY)
+        self.assertNotIn("is not the one you know", SAFETY)
+        self.assertIn("Do not use the button", SAFETY)
+        self.assertIn("open NACC SYS from your bookmark or the address you already know", SAFETY)
+        self.assertIn("tell the ISA", SAFETY)
+
+    def test_the_safety_line_does_not_say_where_the_button_goes(self):
+        """A button called "Open the schedule" under a line saying it "only
+        opens the sign-in page" read as a contradiction, and was only true in a
+        tab that was signed out. What is certain is that nothing signs anyone in."""
+        self.assertNotIn("sign-in page", SAFETY)
+        self.assertIn("nothing in this email signs you in", SAFETY)
+
+    def test_the_button_keeps_the_look_that_makes_it_something_to_tap(self):
+        page, _ = self._page()
+        anchor = page[page.index("<a "):page.index("</a>")]
+        for style in ("display:inline-block", f"background:{notifications._BRAND}",
+                      "color:#ffffff", "padding:13px 30px", "border-radius:8px",
+                      "text-decoration:none"):
+            self.assertIn(style, anchor)
+
+    def test_the_address_is_on_its_own_line_and_breaks_only_when_it_must(self):
+        """`word-break:break-all` cut a short address in the middle of a word
+        on a phone ("exam" / "ple.ph"). The address now drops whole to a line
+        of its own and is split only if it is longer than the card."""
+        page, _ = self._page()
+        span = page[page.index('<span style="display:block'):page.index(f">{ORIGIN}</span>")]
+        self.assertIn("overflow-wrap:anywhere", span)
+        self.assertIn("word-wrap:break-word", span)
+        self.assertNotIn("break-all", page)
+
+    def test_the_address_in_the_footer_wraps_too(self):
+        """It is one unbreakable word as well, and a long host overflowed the
+        footer on a narrow phone."""
+        page, _ = self._page()
+        start = page.index('<div style="padding-top:6px;')
+        footer_line = page[start:page.index("Choose which emails")]
+        self.assertIn("overflow-wrap:anywhere", footer_line)
+        self.assertIn("word-wrap:break-word", footer_line)
+
+    def test_a_time_never_parts_from_its_am_or_pm_in_the_page_only(self):
+        """"Fri 23 Oct 2026, 10:00" over a lone "AM" on a phone. A no-break
+        space in the page keeps them together; the text part, which a person
+        copies from, keeps the ordinary space."""
+        page, text = render("H", ["P"], facts=[
+            ("When", "Tue 27 Oct 2026, 9:30 AM to 10:30 AM"),
+            ("Was", "Mon 26 Oct 2026, 2:00 PM"),
+            ("Case", "C-0042 PMS 12 AM")])
+        self.assertIn(">Tue 27 Oct 2026, 9:30&nbsp;AM to 10:30&nbsp;AM</td>", page)
+        self.assertIn(">Mon 26 Oct 2026, 2:00&nbsp;PM</td>", page)
+        self.assertIn(">C-0042 PMS 12 AM</td>", page)          # not a time, left alone
+        self.assertIn("When: Tue 27 Oct 2026, 9:30 AM to 10:30 AM", text)
+        self.assertNotIn("\u00a0", text)
+        self.assertNotIn("&nbsp;", text)
+
+    def test_the_preview_line_is_hidden_in_a_client_that_drops_display_none(self):
+        """The hiding recipe's other half: a collapsed box and the page's own
+        background as the text colour, so the sentence is not seen there."""
+        page, _ = self._page(preview="Hidden.")
+        style = page[page.index("<div style=") + 12:page.index('">Hidden.')]
+        for part in ("display:none", "font-size:1px", "line-height:1px", "max-height:0",
+                     "max-width:0", "opacity:0", "overflow:hidden", "mso-hide:all",
+                     f"color:{notifications._PAPER}"):
+            self.assertIn(part, style)
+
+    def test_a_button_path_that_does_not_begin_with_a_slash_is_refused(self):
+        """The path is appended to the site's address, so "@elsewhere.example"
+        would give https://site.example@elsewhere.example. Nothing passes one
+        today; the guard is for the next caller."""
+        for path in ("@evil.example", ".evil.example", "evil.example", "",
+                     "https://evil.example/"):
+            with self.subTest(path=path), self.assertRaises(ValueError):
+                render("H", ["P"], button=("Go", path))
+        page, _ = render("H", ["P"], button=("Go", "/"))
+        self.assertIn(f'href="{ORIGIN}/"', page)
+        render("H", ["P"])                                        # no button, no path to check
+
+    def test_such_a_path_sends_nothing_and_is_logged(self):
+        psy = Mock(is_active=True, email="p@t.ph", fullname="P",
+                   role=Mock(role_name=Role.PSYCHOLOGIST), pk=1)
+        with override_settings(BREVO_API_KEY="k"), \
+                patch("accounts.email_notifications._queue") as queue, \
+                patch("accounts.email_notifications.wants", return_value=True), \
+                self.assertLogs("accounts.email_notifications", level="ERROR"):
+            queued = notify("case_request", psy, subject="S", heading="H",
+                            paragraphs=["P"], button=("Go", "@evil.example"))
+        self.assertFalse(queued)
+        queue.assert_not_called()
+
+    @override_settings(CORS_ALLOWED_ORIGINS=[])
+    def test_with_no_address_known_none_of_it_is_printed(self):
+        page, text = self._page()
+        for part in (page, text):
+            self.assertNotIn("Or open", part)
+            self.assertNotIn("NACC SYS never asks", part)
+            self.assertNotIn("Choose which emails", part)
+            self.assertNotIn("Open it", part)
+        self.assertNotIn("<a ", page)
+
+    def test_with_no_button_there_is_no_address_line_or_safety_line_either(self):
+        """Both talk about "the button"; the footer's way to the switches does
+        not, and stays."""
+        page, text = render("H", ["P"])
+        for part in (page, text):
+            self.assertNotIn("Or open", part)
+            self.assertNotIn("NACC SYS never asks", part)
+            self.assertIn("Choose which emails you get", part)
+
+    def test_the_site_setting_wins_over_the_cors_list_in_every_link(self):
+        with override_settings(SITE_URL="https://sw.example.gov.ph"):
+            page, text = self._page()
+        for part in (page, text):
+            self.assertIn("https://sw.example.gov.ph", part)
+            self.assertNotIn(ORIGIN, part)
+        self.assertIn('href="https://sw.example.gov.ph/schedule"', page)
+
+    def test_the_optional_parts_are_escaped_in_the_page_and_raw_in_the_text(self):
+        page, text = render("H", ["P"], chip="<i>Now</i>", greeting="Hello <b>Ana</b>,",
+                            steps=["Open <u>it</u> & go"])
+        for raw in ("<i>Now</i>", "<b>Ana</b>", "<u>it</u>"):
+            self.assertNotIn(raw, page)
+            self.assertIn(raw, text)
+        self.assertIn("&lt;u&gt;it&lt;/u&gt; &amp; go", page)
+
+    def test_an_email_that_asks_for_none_of_the_optional_parts_has_none_of_them(self):
+        page, text = self._page()
+        self.assertNotIn("What to do next", page + text)
+        self.assertNotIn("Hello", page + text)
+        self.assertNotIn("border-radius:999px", page)         # the chip
+
+
+class AmberChipTest(SimpleTestCase):
+    def test_the_chip_text_clears_wcag_aa_on_its_tint(self):
+        """4.5:1 is what AA asks of text this size. Worked out here from the two
+        colours rather than quoted, so changing one cannot go unnoticed."""
+        def luminance(hex_colour):
+            r, g, b = (int(hex_colour[i:i + 2], 16) / 255 for i in (1, 3, 5))
+            lin = lambda c: c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4  # noqa: E731
+            return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b)
+        light, dark = sorted((luminance(_AMBER_TEXT), luminance(_AMBER_TINT)), reverse=True)
+        ratio = (light + 0.05) / (dark + 0.05)
+        self.assertEqual(("#92400e", "#fef3c7"), (_AMBER_TEXT, _AMBER_TINT))
+        self.assertGreaterEqual(ratio, 4.5)
+        self.assertAlmostEqual(6.37, ratio, places=2)
+
+
+class EnteredNameTest(SimpleTestCase):
+    """A name is printed inside an email that really does come from the agency
+    (23 Oct 2026, security review). Anyone can ask for an account under any
+    name, so it comes back as one plain, short line."""
+
+    def _name(self, text, fallback=""):
+        return entered_name(SimpleNamespace(fullname=text), fallback)
+
+    def test_an_ordinary_name_is_left_exactly_as_typed(self):
+        for name in ("Editha Pascua", "Ma. Cristina Dela Cruz-Villanueva",
+                     "PE\u00d1AMORA, Jose Jr.", "Mar\u00eda Jos\u00e9 Pe\u00f1a", "Li Wei"):
+            self.assertEqual(name, self._name(name))
+
+    def test_a_right_to_left_override_and_zero_width_characters_are_dropped(self):
+        self.assertEqual("Ana Bulan", self._name("Ana \u202eBulan"))
+        self.assertEqual("AnaBulan", self._name("Ana\u200b\u200dBulan\ufeff"))
+        for name in (self._name("Ana\u2066 Bulan\u2069"), self._name("\u202e")):
+            for ch in name:
+                self.assertNotEqual("Cf", unicodedata.category(ch), repr(name))
+
+    def test_newlines_and_other_whitespace_become_one_space(self):
+        self.assertEqual("Editha Pascua Please reply",
+                         self._name("Editha\r\nPascua\n\n\tPlease\u2028reply"))
+        self.assertEqual("Ana Bulan", self._name("  Ana   Bulan  "))
+
+    def test_other_control_characters_are_dropped(self):
+        self.assertEqual("AnaBulan", self._name("Ana\x00\x1b[31mBulan".replace("[31m", "")))
+
+    def test_a_long_name_is_cut_with_an_ellipsis_to_the_limit(self):
+        name = self._name("Maria " * 60)
+        self.assertEqual(NAME_LIMIT, len(name))
+        self.assertTrue(name.endswith("\u2026"))
+        self.assertFalse(name[:-1].endswith(" "))
+        self.assertEqual("x" * NAME_LIMIT, one_line("x" * NAME_LIMIT))       # at the limit: whole
+        self.assertEqual(NAME_LIMIT, len(one_line("x" * (NAME_LIMIT + 1))))
+
+    def test_a_name_that_is_nothing_visible_is_no_name(self):
+        for name in ("", "   ", "\u202e\u200b", "\n\r\n"):
+            self.assertEqual("A colleague", self._name(name, "A colleague"), repr(name))
+            self.assertEqual("", self._name(name))
+
+    def test_the_fallback_is_used_for_a_person_with_no_name_at_all(self):
+        self.assertEqual("Fallback", entered_name(None, "Fallback"))
+        self.assertEqual("Fallback", entered_name(SimpleNamespace(), "Fallback"))
 
 
 # --------------------------------------------------------------------------
@@ -437,9 +746,9 @@ class WordingTest(MailBase):
         payload = self._one(lambda: case_request(self.child, self.psy, by=self.sw))
         ref = self._ref(self.child)
         self.assertEqual("A case is waiting for your answer", payload["subject"])
-        self.assertIn(f"Editha Pascua asked you to take case {ref}. It joins your records "
-                      "once you accept it.", payload["textContent"])
-        self.assertIn(f"Answer the request: {ORIGIN}/", payload["textContent"])
+        self.assertIn(f"Editha Pascua, a social worker, asked you to take case {ref}. It "
+                      "joins your records only once you accept it.", payload["textContent"])
+        self.assertIn(f"Review the request: {ORIGIN}/", payload["textContent"])
 
     def test_request_withdrawn_for_a_child_and_for_a_reference_already_written(self):
         ref = self._ref(self.child)
@@ -559,7 +868,8 @@ class NamelessStaffTest(MailBase):
         self.assertEqual(["case_request", "request_withdrawn", "case_request",
                           "case_taken_over"], [k for k, _ in sent])
         self.assertNoAddress(sent)
-        self.assertIn("A colleague asked you to take case", sent[0][1]["textContent"])
+        self.assertIn("A colleague, a social worker, asked you to take case",
+                      sent[0][1]["textContent"])
         self.assertIn("A colleague withdrew the request", sent[1][1]["textContent"])
         self.assertEqual(f"Case {self._ref(held)} was reopened by A colleague",
                          sent[3][1]["subject"])
@@ -589,6 +899,238 @@ class NamelessStaffTest(MailBase):
             case_request(self.child, self.nameless_psy, by=self.sw)
         (payload,) = [p for _, p in sent]
         self.assertEqual([{"email": "nopsy@gmail.com"}], payload["to"])
+
+
+class CaseRequestEmailTest(MailBase):
+    """The fuller layout of "A case is waiting for your answer" (23 Oct 2026):
+    the one email that asks something of its reader, so the one a look-alike
+    would copy. It says who asked and in what role, where to find the question
+    once signed in, and what the button is and is not."""
+
+    LEAD_END = "asked you to take case {ref}. It joins your records only once you accept it."
+
+    def _sent(self, by=None, to=None, child=None):
+        with self.outbox() as sent:
+            case_request(child or self.child, to or self.psy, by=by or self.sw)
+        ((kind, payload),) = sent
+        self.assertEqual("case_request", kind)
+        return payload
+
+    def test_the_subject_is_the_question_it_always_was(self):
+        self.assertEqual("A case is waiting for your answer", self._sent()["subject"])
+
+    def test_an_action_needed_chip_sits_over_the_heading_in_both_parts(self):
+        payload = self._sent()
+        page, text = payload["htmlContent"], payload["textContent"]
+        self.assertIn("Action needed", page)
+        self.assertIn(f"background:{_AMBER_TINT};color:{_AMBER_TEXT}", page)
+        self.assertLess(page.index(">Action needed<"),
+                        page.index(">A case is waiting for your answer</div>"))
+        self.assertTrue(text.startswith("Action needed\nA case is waiting for your answer\n\n"))
+
+    def test_the_recipient_is_greeted_by_the_name_they_typed(self):
+        payload = self._sent()
+        self.assertIn(">Hello Marivic Bulan,</p>", payload["htmlContent"])
+        self.assertIn("\n\nHello Marivic Bulan,\n\n", payload["textContent"])
+        self.assertLess(payload["htmlContent"].index("Hello Marivic Bulan,"),
+                        payload["htmlContent"].index("asked you to take case"))
+
+    def test_a_recipient_with_no_name_is_not_greeted_by_an_empty_one(self):
+        nameless = User.objects.create_user(
+            email="nopsy@gmail.com", username="nopsy@gmail.com", password="pass12345",
+            role=self.roles[Role.PSYCHOLOGIST])
+        payload = self._sent(to=nameless)
+        for part in (payload["htmlContent"], payload["textContent"]):
+            self.assertNotIn("Hello", part)
+        # And not by the address either.
+        self.assertNotIn("nopsy", json.dumps({k: v for k, v in payload.items() if k != "to"}))
+
+    def test_the_lead_names_the_social_worker_and_their_role(self):
+        ref = self._ref(self.child)
+        payload = self._sent()
+        lead = f"Editha Pascua, a social worker, {self.LEAD_END.format(ref=ref)}"
+        self.assertIn(lead, payload["textContent"])
+        self.assertIn(lead, payload["htmlContent"])
+
+    def test_the_lead_names_the_isa_as_the_isa(self):
+        payload = self._sent(by=self.admin)
+        self.assertIn(f"Ada Admin, the ISA, {self.LEAD_END.format(ref=self._ref(self.child))}",
+                      payload["textContent"])
+
+    def test_a_nameless_asker_is_a_colleague_with_a_role_and_never_an_address(self):
+        nameless = User.objects.create_user(
+            email="noname@gmail.com", username="noname@gmail.com", password="pass12345",
+            role=self.roles[Role.STAFF])
+        payload = self._sent(by=nameless)
+        self.assertIn(f"A colleague, a social worker, "
+                      f"{self.LEAD_END.format(ref=self._ref(self.child))}",
+                      payload["textContent"])
+        self.assertIn("Asked by: A colleague", payload["textContent"])
+        self.assertNotIn("noname", json.dumps({k: v for k, v in payload.items() if k != "to"}))
+
+    def test_a_role_that_is_not_one_of_the_two_that_ask_is_not_named(self):
+        payload = self._sent(by=self.psy2)
+        self.assertIn(f"Jose Rizal {self.LEAD_END.format(ref=self._ref(self.child))}",
+                      payload["textContent"])
+
+    def test_the_fact_card_says_the_case_who_asked_and_when(self):
+        payload = self._sent()
+        text = payload["textContent"]
+        self.assertIn(f"Case: {self._ref(self.child)}\nAsked by: Editha Pascua\n"
+                      "Asked on: Wed 21 Oct 2026, 10:00 AM", text)
+        for label in ("Case", "Asked by", "Asked on"):
+            self.assertIn(f">{label}</td>", payload["htmlContent"])
+        self.assertIn(">Wed 21 Oct 2026, 10:00&nbsp;AM</td>", payload["htmlContent"])
+
+    def test_three_steps_that_name_the_panel_where_the_question_waits(self):
+        ref = self._ref(self.child)
+        payload = self._sent()
+        steps = ["Open NACC SYS and sign in.",
+                 f'Find {ref} under "Waiting for your answer" at the top of your Dashboard.',
+                 "Accept it, or decline it with a reason for the social worker."]
+        self.assertIn("What to do next:\n" + "\n".join(
+            f"{i}. {step}" for i, step in enumerate(steps, 1)), payload["textContent"])
+        page = payload["htmlContent"]
+        self.assertEqual(3, page.count("<li>"))
+        self.assertIn("<ol ", page)
+        self.assertIn(f"Find {ref} under &quot;Waiting for your answer&quot; at the top",
+                      page)
+        # Facts card, then the steps, then the button.
+        self.assertLess(page.index("Asked on"), page.index("What to do next"))
+        self.assertLess(page.index("What to do next"), page.index("Review the request"))
+
+    def test_the_panel_the_steps_name_is_the_one_the_dashboard_really_has(self):
+        """The wording is in two places, here and in the screen. A psychologist
+        told to look for a panel that is called something else is lost."""
+        screen = (Path(__file__).resolve().parents[3] / "frontend" / "src" / "components"
+                  / "AssignmentRequests.jsx")
+        if not screen.exists():
+            self.skipTest("the frontend is not checked out beside the backend")
+        self.assertIn("Waiting for your answer", screen.read_text(encoding="utf-8"))
+
+    def test_the_button_is_review_the_request_and_opens_the_front_door(self):
+        payload = self._sent()
+        self.assertIn(f'href="{ORIGIN}/"', payload["htmlContent"])
+        self.assertIn(">Review the request</a>", payload["htmlContent"])
+        self.assertIn(f"Review the request: {ORIGIN}/", payload["textContent"])
+
+    def test_the_plain_address_and_the_safety_line_are_there(self):
+        payload = self._sent()
+        for part in (payload["htmlContent"], payload["textContent"]):
+            self.assertIn("Or open NACC SYS at", part)
+            self.assertIn(SAFETY, part)
+        self.assertIn(f"Or open NACC SYS at {ORIGIN}\n", payload["textContent"])
+        self.assertEqual(1, payload["htmlContent"].count("<a "))
+
+    def test_the_inbox_preview_says_which_case_and_what_to_do(self):
+        payload = self._sent()
+        page = payload["htmlContent"]
+        self.assertIn(f"color:#f4f6fa;\">Case {self._ref(self.child)} is waiting for you to "
+                      "accept or decline.&zwnj;", page)
+        self.assertLess(page.index("mso-hide:all"), page.index("NACC &ndash; RACCO 1"))
+
+    def test_with_no_address_known_there_is_no_button_and_no_address_line(self):
+        with override_settings(BREVO_API_KEY="k", CORS_ALLOWED_ORIGINS=[]), \
+                patch("accounts.email_notifications._queue") as queue:
+            case_request(self.child, self.psy, by=self.sw)
+        payload = queue.call_args.args[0]
+        for part in (payload["htmlContent"], payload["textContent"]):
+            self.assertNotIn("Or open", part)
+            self.assertNotIn("Review the request", part)
+            self.assertNotIn("NACC SYS never asks", part)
+            self.assertIn("What to do next", part)        # the email still says what to do
+        self.assertNotIn("<a ", payload["htmlContent"])
+
+    def test_it_is_sent_with_the_site_setting_when_there_is_one(self):
+        with override_settings(SITE_URL="https://nacc.example.gov.ph"):
+            payload = self._sent()
+        self.assertIn('href="https://nacc.example.gov.ph/"', payload["htmlContent"])
+        self.assertIn("Or open NACC SYS at https://nacc.example.gov.ph\n", payload["textContent"])
+        self.assertNotIn(ORIGIN, payload["htmlContent"] + payload["textContent"])
+
+
+class HostileNameTest(MailBase):
+    """The same, end to end: a name typed to be read as something else reaches
+    nobody as anything but a plain name. Searched for in every part that
+    leaves, because a name is in the subject, the page, the text part and the
+    log line."""
+
+    def _rename(self, user, first, last=""):
+        user.first_name, user.last_name = first, last
+        user.save()
+        return user
+
+    def assertPlain(self, payload):
+        for part in ("subject", "htmlContent", "textContent"):
+            for ch in payload[part]:
+                category = unicodedata.category(ch)
+                self.assertNotEqual("Cf", category, f"{part}: U+{ord(ch):04X}")
+                if category == "Cc":
+                    self.assertIn(ch, "\n", f"{part}: U+{ord(ch):04X}")
+        self.assertNotIn("\n", payload["subject"])
+
+    def _sent(self, by):
+        with self.outbox() as sent:
+            case_request(self.child, self.psy, by=by)
+        ((_, payload),) = sent
+        return payload
+
+    def test_a_right_to_left_override_in_the_askers_name_does_not_reach_the_email(self):
+        payload = self._sent(self._rename(self.sw, "Ana \u202eBulan", "-- skae"))
+        self.assertPlain(payload)
+        self.assertIn("Ana Bulan -- skae, a social worker, asked you to take case",
+                      payload["textContent"])
+        self.assertIn("Ana Bulan -- skae, a social worker, asked you to take case",
+                      payload["htmlContent"])
+
+    def test_a_name_with_newlines_stays_on_one_line_of_the_lead_and_the_fact(self):
+        payload = self._sent(self._rename(
+            self.sw, "Editha\nPascua\n\nPlease reply with your password"))
+        self.assertPlain(payload)
+        lines = payload["textContent"].split("\n")
+        (lead,) = [t for t in lines if "asked you to take case" in t]
+        (fact,) = [t for t in lines if t.startswith("Asked by:")]
+        self.assertTrue(lead.startswith("Editha Pascua Please reply with your password, "), lead)
+        self.assertEqual("Asked by: Editha Pascua Please reply with your password", fact)
+
+    def test_a_long_name_is_a_name_and_not_a_paragraph(self):
+        sentence = ("Notice: your NACC SYS session expired. Sign in again at "
+                    "https://nacc-v3-demo.onrender.com.evil.example/login to keep your cases")
+        payload = self._sent(self._rename(self.sw, sentence[:150], sentence[150:]))
+        self.assertPlain(payload)
+        (fact,) = [t for t in payload["textContent"].split("\n") if t.startswith("Asked by:")]
+        self.assertEqual(len("Asked by: ") + NAME_LIMIT, len(fact))
+        self.assertNotIn("evil.example", payload["textContent"] + payload["htmlContent"])
+
+    def test_a_psychologists_name_is_cleaned_in_their_answers_subject_too(self):
+        self._rename(self.psy, "Marivic\r\nBcc: attacker@evil.example", "Bu\u202elan")
+        req = AssignmentRequest.objects.create(
+            child=self.child, psychologist=self.psy, requested_by=self.sw,
+            status=AssignmentRequest.DECLINED)
+        with self.outbox() as sent:
+            case_answered(req, by=self.psy)
+        ((_, payload),) = sent
+        self.assertPlain(payload)
+        self.assertEqual(f"Marivic Bcc: attacker@evil.example Bulan declined case "
+                         f"{self._ref(self.child)}", payload["subject"])
+
+    def test_the_greeting_uses_the_cleaned_name(self):
+        self._rename(self.psy, "Marivic\n", "Bu\u200blan")
+        payload = self._sent(self.sw)
+        self.assertPlain(payload)
+        self.assertIn("\n\nHello Marivic Bulan,\n\n", payload["textContent"])
+
+    def test_the_console_line_is_one_line_when_no_mail_service_is_set_up(self):
+        self._rename(self.psy, "Marivic\r\nFAKE LOG LINE", "Bulan")
+        req = AssignmentRequest.objects.create(
+            child=self.child, psychologist=self.psy, requested_by=self.sw,
+            status=AssignmentRequest.ACCEPTED)
+        with override_settings(BREVO_API_KEY=""), self.assertLogs(
+                "accounts.email_notifications", level="WARNING") as logged:
+            case_answered(req, by=self.psy)
+        (line,) = logged.output
+        self.assertNotIn("\n", line)
+        self.assertIn("Marivic FAKE LOG LINE Bulan accepted case", line)
 
 
 # --------------------------------------------------------------------------
@@ -998,6 +1540,14 @@ class PrivacyTest(MailBase):
         self.assertEqual({"case_request", "request_withdrawn", "case_accepted",
                           "case_declined", "records_transferred", "case_taken_over"},
                          {kind for kind, _ in sent})
+        # And the request searched is the fuller layout of 23 Oct 2026: its
+        # greeting, fact card and steps are the new places a name could slip in.
+        requests = [p for kind, p in sent if kind == "case_request"]
+        self.assertTrue(requests)
+        for payload in requests:
+            for part in ("Action needed", "Hello ", "Asked by", "What to do next",
+                         "Or open NACC SYS at", SAFETY):
+                self.assertIn(part, payload["htmlContent"])
         planted = planted_text()
         self.assertGreaterEqual(len(planted), 15, "the columns to plant were not found")
         sentinels = ("Zyxwanita", "Qorvath", "Brunhilda", "Vexley", "Quillon", "March",

@@ -15,10 +15,15 @@ outside:
 The failures share a shape: the service reports healthy, and the application is
 broken. These guards make each one say so.
 """
+import os
+import subprocess
+import sys
+from pathlib import Path
+
 from django.conf import settings
 from django.test import SimpleTestCase, TestCase
 
-from config.guards import cors_is_unconfigured, sqlite_fallback_is_a_mistake
+from config.guards import checked_site_url, cors_is_unconfigured, sqlite_fallback_is_a_mistake
 
 
 class SqliteFallbackTest(SimpleTestCase):
@@ -64,6 +69,171 @@ class CorsGuardTest(SimpleTestCase):
     def test_a_real_origin_alongside_the_local_ones_is_configured(self):
         self.assertFalse(cors_is_unconfigured(
             debug=False, origins=self.LOCAL + ["https://demo.example.gov.ph"]))
+
+
+class SiteUrlGuardTest(SimpleTestCase):
+    """SITE_URL goes into the button of every email, on somebody else's
+    machine. It must be a bare site, and a refusal must say why without ever
+    repeating what was typed: a password in the value would otherwise be
+    written to the API log."""
+
+    def test_nothing_set_is_nothing_wrong(self):
+        for raw in ("", "   ", None):
+            with self.subTest(raw=raw):
+                self.assertEqual(("", ""), checked_site_url(raw, debug=False))
+
+    def test_an_https_address_is_accepted(self):
+        self.assertEqual(("https://nacc.example.gov.ph", ""),
+                         checked_site_url("https://nacc.example.gov.ph", debug=False))
+
+    def test_a_port_and_an_address_with_digits_are_accepted(self):
+        self.assertEqual(("https://192.168.1.20:8443", ""),
+                         checked_site_url("https://192.168.1.20:8443", debug=False))
+        self.assertEqual(("https://[::1]:5173", ""),
+                         checked_site_url("https://[::1]:5173", debug=True))
+
+    def test_http_is_accepted_only_while_debugging(self):
+        self.assertEqual(("http://192.168.1.20:5173", ""),
+                         checked_site_url("http://192.168.1.20:5173", debug=True))
+        url, reason = checked_site_url("http://192.168.1.20:5173", debug=False)
+        self.assertEqual("", url)
+        self.assertIn("https://", reason)
+
+    def test_a_trailing_slash_is_dropped_and_so_is_the_space_around_it(self):
+        for raw in ("https://nacc.example/", "  https://nacc.example/  ",
+                    "https://nacc.example"):
+            with self.subTest(raw=raw):
+                self.assertEqual(("https://nacc.example", ""),
+                                 checked_site_url(raw, debug=False))
+
+    def test_the_scheme_and_host_are_written_in_lower_case(self):
+        self.assertEqual(("https://nacc.example.gov.ph", ""),
+                         checked_site_url("HTTPS://NACC.Example.GOV.ph/", debug=False))
+
+    def test_every_other_shape_is_refused_with_a_reason(self):
+        refused = {
+            "a path": "https://nacc.example/children",
+            "a deep path": "https://nacc.example/a/b/c/",
+            "a query": "https://nacc.example/?next=/evil",
+            "an empty query": "https://nacc.example?",
+            "a fragment": "https://nacc.example/#top",
+            "an empty fragment": "https://nacc.example#",
+            "a user name": "https://colleague@elsewhere.example",
+            "an empty user name": "https://@nacc.example",
+            "a user name and password": "https://admin:hunter2@nacc.example",
+            "ftp": "ftp://nacc.example",
+            "javascript": "javascript:alert(1)",
+            "no scheme": "nacc.example.gov.ph",
+            "a protocol-relative address": "//nacc.example",
+            "no host": "https://",
+            "no host but a path": "https:///children",
+            "a port that is not a number": "https://nacc.example:abc",
+            "a port out of range": "https://nacc.example:99999",
+            "an unclosed address": "https://[::1",
+            "words": "not a url",
+            "a space in the host": "https://nacc example.gov.ph",
+            "an underscore in the host": "https://nacc_sys.example",
+            "a host outside ASCII": "https://b\u00fccher.example",
+            "a zone on an IPv6 address": "https://[fe80::1%25eth0]",
+            "text after the zone": "https://[::1%x y]",
+            "a quote after the zone": 'https://[::1%"onmouseover="x]',
+            "a control character after the zone": "https://[::1%\x00]",
+            "a right-to-left override after the zone": "https://[::1%\u202e]",
+        }
+        for why, raw in refused.items():
+            with self.subTest(why):
+                url, reason = checked_site_url(raw, debug=True)
+                self.assertEqual("", url)
+                self.assertTrue(reason.strip(), "a refusal has to say why")
+                self.assertTrue(reason.endswith("."), "a sentence")
+
+    def test_a_plain_ipv6_address_is_still_accepted(self):
+        """The zone is what is refused, not the address. A browser cannot open
+        a zone, and `ipaddress` takes almost any text after one."""
+        for raw in ("https://[::1]", "https://[2001:db8::1]:8443",
+                    "https://[2001:DB8::1]"):
+            with self.subTest(raw=raw):
+                url, reason = checked_site_url(raw, debug=False)
+                self.assertEqual("", reason)
+                self.assertTrue(url.startswith("https://[2001:db8::1]")
+                                or url == "https://[::1]", url)
+
+    def test_the_reason_never_repeats_what_was_typed(self):
+        """The guard is the thing between a mistyped credential and the log."""
+        for raw in ("https://admin:hunter2@nacc.example", "https://hunter2@nacc.example/",
+                    "https://nacc.example/?token=hunter2", "https://nacc.example/hunter2",
+                    "ftp://hunter2.example", "hunter2", "https://hunter2",
+                    "http://hunter2.example", "https://hunter2.example:hunter2",
+                    "https://hunter2 .example"):
+            with self.subTest(raw=raw):
+                for debug in (True, False):
+                    url, reason = checked_site_url(raw, debug=debug)
+                    if not reason:                       # a bare host passes: nothing to say
+                        self.assertTrue(url, raw)
+                    self.assertNotIn("hunter2", reason)
+                    self.assertNotIn("admin", reason)
+
+    def test_the_first_thing_wrong_is_what_is_reported(self):
+        """A user name AND a path: the user name is the dangerous one."""
+        _, reason = checked_site_url("https://admin@nacc.example/children", debug=False)
+        self.assertIn("user name", reason)
+
+
+class SiteUrlSettingsTest(SimpleTestCase):
+    """settings.py reads SITE_URL through the guard. Settings load once at
+    import, so each case is a fresh interpreter importing them."""
+
+    BACKEND = Path(__file__).resolve().parents[2]
+
+    def _load(self, site_url, **env):
+        code = ("import sys; sys.path.insert(0, %r); import config.settings as s; "
+                "print(repr(s.SITE_URL))" % str(self.BACKEND))
+        full = {**os.environ, "SITE_URL": site_url, "DJANGO_DEBUG": "True"}
+        full.update(env)
+        done = subprocess.run([sys.executable, "-c", code], env=full, capture_output=True,
+                              text=True, timeout=120, cwd=str(self.BACKEND))
+        self.assertEqual(0, done.returncode, done.stderr)
+        return done.stdout.strip(), done.stderr
+
+    def test_a_good_value_is_used_and_nothing_is_said(self):
+        shown, noise = self._load("https://nacc.example.gov.ph/")
+        self.assertEqual("'https://nacc.example.gov.ph'", shown)
+        self.assertNotIn("SITE_URL", noise)
+
+    def test_unset_is_empty_and_nothing_is_said(self):
+        shown, noise = self._load("")
+        self.assertEqual("''", shown)
+        self.assertNotIn("SITE_URL", noise)
+
+    def test_a_bad_value_is_ignored_with_a_warning_and_the_boot_goes_on(self):
+        shown, noise = self._load("https://admin:hunter2@nacc.example/children")
+        self.assertEqual("''", shown)
+        self.assertIn("SITE_URL is ignored", noise)
+        self.assertIn("user name", noise)
+        self.assertNotIn("hunter2", noise)
+        self.assertNotIn("admin", noise)
+
+    def test_http_is_ignored_on_a_deployed_copy(self):
+        shown, noise = self._load(
+            "http://192.168.1.20:5173", DJANGO_DEBUG="False", DJANGO_SECRET_KEY="a-test-key",
+            DATABASE_URL="postgresql://u:p@127.0.0.1:5432/db",
+            CORS_ALLOWED_ORIGINS="https://nacc.example.gov.ph")
+        self.assertEqual("''", shown)
+        self.assertIn("SITE_URL is ignored", noise)
+        self.assertIn("https://", noise)
+
+    def test_https_is_used_on_a_deployed_copy(self):
+        shown, _ = self._load(
+            "https://nacc.example.gov.ph", DJANGO_DEBUG="False", DJANGO_SECRET_KEY="a-test-key",
+            DATABASE_URL="postgresql://u:p@127.0.0.1:5432/db",
+            CORS_ALLOWED_ORIGINS="https://nacc.example.gov.ph")
+        self.assertEqual("'https://nacc.example.gov.ph'", shown)
+
+    def test_the_test_run_never_reads_it_from_a_developers_environment(self):
+        """A SITE_URL set in backend/.env for a copy others reach would
+        otherwise win over the CORS list every email test pins. Under
+        `manage.py test` the setting is empty whatever the environment says."""
+        self.assertEqual("", settings.SITE_URL)
 
 
 class HealthzTest(TestCase):

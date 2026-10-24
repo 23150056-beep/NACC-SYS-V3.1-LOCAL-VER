@@ -29,6 +29,7 @@ and WHAT they are sent, and counts the calendar invites.
 """
 import copy
 import logging
+import secrets
 
 from django.db import transaction
 from django.utils import timezone
@@ -37,8 +38,8 @@ from accounts.display import entered_name
 from accounts.email_notifications import notify, when
 from config.clock import clock
 from scheduling.booking import ends_at
-from scheduling.calendar_invite import build_ics
-from scheduling.models import CalendarInvite
+from scheduling.calendar_invite import build_ics, legacy_uid
+from scheduling.models import Appointment, CalendarInvite
 from scheduling.visibility import case_ref
 
 logger = logging.getLogger(__name__)
@@ -76,6 +77,36 @@ def _facts(appointment, was):
     return facts
 
 
+def _event_uid(appointment, row, created):
+    """The identity of `appointment`'s event in everybody's calendar, and the
+    one place it is decided. Called with the appointment locked.
+
+    * Any row of this appointment that already holds one: the same string goes
+      to every attendee and in every move or cancellation, whoever is being
+      sent to now, and whatever the site's address has become since.
+    * Otherwise, a row of this appointment that was there before this send and
+      holds none comes from before the column existed. An invite is already out
+      under the value the old code worked out, so that value is written into
+      those rows and carried on: a fresh one would put a second event in the
+      calendar beside the first.
+    * Otherwise this is the appointment's first invite, and one is drawn. Random
+      rather than derived from anything: nothing about the deployment can then
+      move it, and two copies that number their appointments from 1 still never
+      share an id.
+
+    `created` says `row` was made by this send, which is why it does not count
+    as "a row from before"."""
+    rows = list(CalendarInvite.objects.filter(appointment=appointment).order_by("pk"))
+    known = next((r.uid for r in rows if r.uid), "")
+    if known:
+        return known
+    if any(r.pk != row.pk or not created for r in rows):
+        known = legacy_uid(appointment)
+        CalendarInvite.objects.filter(appointment=appointment, uid="").update(uid=known)
+        return known
+    return f"appointment-{appointment.pk}-{secrets.token_hex(5)}@nacc-sys"
+
+
 def _invite(appointment, attendee, method):
     """The callable `notify` calls once the email is certain to be queued:
     counts the invite as sent, and builds it with the number it was sent as.
@@ -91,16 +122,27 @@ def _invite(appointment, attendee, method):
     each mail carries the number written for it. Counted with an UPDATE and
     read back afterwards, both could read the later number: the same SEQUENCE
     twice, which a calendar settles by timestamp, and one never sent. A file
-    that fails to build rolls the count back too."""
+    that fails to build rolls the count back too.
+
+    The appointment is locked first, for the UID. A row is per attendee, so two
+    first invites to two different people (a session handed over while another
+    change is handled) would each lock only their own row, and each draw an
+    identity of their own. The lock is always taken in this order, appointment
+    then rows, so it cannot deadlock against itself. Rolled back with the rest,
+    so an invite that fails to build leaves no UID behind either."""
     def attach():
         with transaction.atomic():
-            row, _ = CalendarInvite.objects.select_for_update().get_or_create(
+            list(Appointment.objects.select_for_update().filter(pk=appointment.pk))
+            row, created = CalendarInvite.objects.select_for_update().get_or_create(
                 appointment=appointment, attendee=attendee)
+            if not row.uid:
+                row.uid = _event_uid(appointment, row, created)
             row.sequence += 1
             row.cancelled = method == "CANCEL"
             row.save()
             return "invite.ics", build_ics(
-                appointment, attendee, method=method, sequence=row.sequence)
+                appointment, attendee, method=method, sequence=row.sequence,
+                uid=row.uid)
     return attach
 
 

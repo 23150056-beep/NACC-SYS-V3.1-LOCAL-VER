@@ -1831,15 +1831,40 @@ the psychologist asked to take a child. Design and what was settled in review:
   reference (`case_ref`), session times, staff names and counts only. People
   are named through `accounts.display.entered_name`, never `display_name`:
   `username` is the email address, so a nameless colleague would have read as
-  their address in someone else's subject line. The privacy tests plant a token
-  in every free-text Child column (`children/tests/payloads.planted_text`).
+  their address in someone else's subject line. `entered_name` also makes the
+  name one plain line of at most 60 characters (no control, bidi or zero-width
+  characters, no newlines): a colleague's typed name lands in genuine agency
+  mail. The privacy tests plant a token in every free-text Child column
+  (`children/tests/payloads.planted_text`).
+- **Links come from `SITE_URL`** (23 Oct 2026), the address people actually
+  open NACC SYS at, checked by `config/guards.checked_site_url` (http/https,
+  a host, no user/password, query, fragment or path; https unless DEBUG; a bad
+  value is ignored with a warning). Unset, `sign_in_url()` falls back to the
+  first non-localhost CORS origin, as before - on the local copy that is
+  `localhost`, a link that opens only on the host PC. **Never from the
+  request's Host header**: that is password-reset poisoning. Forced to '' under
+  `manage.py test` so a developer's .env cannot change pinned links. A button
+  path must start with `/` or `render()` refuses it.
+- **Every notification email shows the site address in plain text under the
+  button, and a safety line**: "NACC SYS never asks for your password or a code
+  by email, and nothing in this email signs you in. Not sure it is from us? Do
+  not use the button: open NACC SYS from your bookmark ...". It deliberately
+  does NOT say "check the address above": a clone can print the same address.
+  **Never add a link that signs someone in** (forwarded mail, link scanners,
+  tokens in history). `case_request` has its own fuller layout (an "Action
+  needed" chip, greeting, fact card, three steps naming "Waiting for your
+  answer").
 - **Never for your own action**, except the psychologist's "Calendar update":
   moving or cancelling a session they hold an invite for re-sends the invite,
   or Google Calendar keeps the old time.
 - **Session emails carry an `.ics` invite** (`scheduling/calendar_invite.py`,
   `scheduling/session_mail.py`), the psychologist's only. `CalendarInvite`
   counts SEQUENCE per (appointment, attendee), under a row lock, and only when
-  the email is really queued. **Not yet seen in a real Gmail inbox** - this was
+  the email is really queued. **The event UID is stored** (`CalendarInvite.uid`,
+  scheduling 0007): drawn at random for an appointment's first invite, under
+  the appointment's row lock, and reused for every later invite to anyone, so
+  changing `SITE_URL` or CORS never gives a session a second event. A row from
+  before the column keeps the old CORS-derived value (`legacy_uid`). **Not yet seen in a real Gmail inbox** - this was
   built with no Brevo key. Book a session as a SW with the key set and check the
   psychologist's Gmail shows an invitation before relying on it. A 400 from
   Brevo for a message with an attachment is sent again without it.
@@ -1853,9 +1878,13 @@ the psychologist asked to take a child. Design and what was settled in review:
   `ProtectedRoute` passes `state.from` and `Login` returns there after any
   sign-in (`returnPath`: a single leading `/`, never `/login`).
 - **Left open for the owner**: a session PATCHed onto another child (API only)
-  sends nothing; the invite UID is tagged from `CORS_ALLOWED_ORIGINS`, so
-  editing that list while sessions are booked duplicates events; the footer's
-  "No case details are included" is stronger than a session's date and time.
+  sends nothing; the footer's "No case details are included" is stronger than
+  a session's date and time; nothing caps how many emails one account's
+  actions can send a colleague (re-asking back and forth); dark mode is
+  unchecked on a real phone. **The sender is the bigger risk**: gmail.com sent
+  through Brevo cannot pass DMARC, so it is spoofable and spam-prone - send
+  from an agency-controlled domain with SPF/DKIM/DMARC. Brevo also rewrites
+  links for click tracking (no API switch; support only).
 
 ## Text messages (Semaphore)
 
@@ -2094,7 +2123,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 3,026 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 3,130 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

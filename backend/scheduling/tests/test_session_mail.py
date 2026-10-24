@@ -22,7 +22,9 @@ payload's base64 attachment. Three things are held:
   through every change, and the last class searches everything for them.
 """
 import base64
+import hashlib
 import json
+import re
 from contextlib import contextmanager
 from datetime import date, datetime, timedelta, timezone as dt_timezone
 from unittest.mock import patch
@@ -38,6 +40,7 @@ from accounts.models import EmailOptOut, Role
 from children.models import Child
 from children.tests.payloads import planted_text
 from scheduling.models import Appointment, AvailabilityBlock, CalendarInvite
+from scheduling.calendar_invite import legacy_uid
 from scheduling.session_mail import _invite, session_changed
 from scheduling.tests.test_api import give_referral
 
@@ -677,6 +680,170 @@ class InviteCountingTest(SessionMailBase):
 
 
 # --------------------------------------------------------------------------
+# The event's identity
+# --------------------------------------------------------------------------
+
+class EventIdentityTest(SessionMailBase):
+    """One appointment is one event in everybody's calendar, for good. The UID
+    is drawn with the appointment's first invite and STORED
+    (`CalendarInvite.uid`), so nothing about the deployment - its address
+    included - can change it. It used to be worked out from the site's address
+    on every send, which setting `SITE_URL` would have changed under every
+    booked session, leaving each with a second event."""
+
+    SHAPE = r"^appointment-{pk}-[0-9a-f]{{10}}@nacc-sys$"
+
+    def uid_of(self, payload):
+        return prop(attachment(payload), "UID")
+
+    def old_uid(self, appointment):
+        """What the code before the column worked out for `appointment` on the
+        deployment these tests send as (its address is ORIGIN)."""
+        return (f"appointment-{appointment.pk}-"
+                f"{hashlib.sha256(ORIGIN.encode()).hexdigest()[:10]}@nacc-sys")
+
+    def test_the_first_invite_draws_an_id_and_stores_it(self):
+        appointment, sent = self.booked(self.sw)
+        uid = self.uid_of(self.one(sent, self.psy))
+        self.assertRegex(uid, self.SHAPE.format(pk=appointment.pk))
+        self.assertEqual(uid, self.invite_row(appointment, self.psy).uid)
+
+    def test_a_move_sends_the_same_id_again(self):
+        appointment, sent = self.booked(self.sw)
+        first = self.uid_of(self.one(sent, self.psy))
+        with self.outbox() as sent:
+            self.change(self.sw, appointment, start=self.later())
+        self.assertEqual(first, self.uid_of(self.one(sent, self.psy)))
+        with self.outbox() as sent:
+            self.cancel(self.sw, appointment)
+        self.assertEqual(first, self.uid_of(self.one(sent, self.psy)))
+        self.assertEqual(first, self.invite_row(appointment, self.psy).uid)
+
+    def test_handing_the_session_over_gives_the_new_psychologist_the_same_id(self):
+        appointment, sent = self.booked(self.sw)
+        first = self.uid_of(self.one(sent, self.psy))
+        with self.outbox() as sent:
+            self.change(self.admin, appointment, psychologist=self.psy2)
+        self.assertEqual(first, self.uid_of(self.one(sent, self.psy)))     # the cancellation
+        self.assertEqual(first, self.uid_of(self.one(sent, self.psy2)))    # their first invite
+        self.assertEqual({first}, set(CalendarInvite.objects.filter(
+            appointment=appointment).values_list("uid", flat=True)))
+
+    def test_changing_the_sites_address_between_two_sends_does_not_change_it(self):
+        appointment, sent = self.booked(self.sw)
+        first = self.uid_of(self.one(sent, self.psy))
+        with self.outbox() as sent, override_settings(
+                SITE_URL="https://moved.example.gov.ph",
+                CORS_ALLOWED_ORIGINS=["https://elsewhere.example.test"]):
+            self.change(self.sw, appointment, start=self.later())
+        payload = self.one(sent, self.psy)
+        self.assertEqual(first, self.uid_of(payload))
+        # The mail itself did follow the new address; only the identity held.
+        self.assertIn("https://moved.example.gov.ph", payload["textContent"])
+        self.assertEqual("2", prop(attachment(payload), "SEQUENCE"))
+
+    def test_two_appointments_are_two_events(self):
+        one, sent_one = self.booked(self.sw)
+        two, sent_two = self.booked(self.sw, start=self.later(1))
+        first, second = (self.uid_of(self.one(sent_one, self.psy)),
+                         self.uid_of(self.one(sent_two, self.psy)))
+        self.assertNotEqual(first, second)
+        self.assertRegex(first, self.SHAPE.format(pk=one.pk))
+        self.assertRegex(second, self.SHAPE.format(pk=two.pk))
+
+    def test_the_tag_is_drawn_not_derived_so_two_deployments_never_share_one(self):
+        """Two copies both number their appointments from 1. The address tag
+        used to keep their ids apart; a random one does it without following
+        the address."""
+        tags = set()
+        for _ in range(6):
+            appointment = Appointment.objects.create(
+                child=self.child, psychologist=self.psy, start=self.start,
+                duration_minutes=60, booked_by=self.sw)
+            _, ics = _invite(appointment, self.psy, "REQUEST")()
+            uid = prop(ics, "UID")
+            self.assertRegex(uid, self.SHAPE.format(pk=appointment.pk))
+            self.assertNotEqual(legacy_uid(appointment), uid)
+            tags.add(uid.split("-")[2])
+        self.assertEqual(6, len(tags), "a tag repeated")
+
+    def test_a_row_from_before_the_column_keeps_the_id_its_invite_went_out_under(self):
+        """The invite is already in somebody's calendar under the value the old
+        code worked out from the address. Carrying on under it is what makes
+        the next move an update and not a second event."""
+        appointment, _ = self.booked(self.sw)
+        CalendarInvite.objects.filter(appointment=appointment).update(uid="")
+        old = self.old_uid(appointment)
+        with override_settings(CORS_ALLOWED_ORIGINS=[ORIGIN]):
+            self.assertEqual(old, legacy_uid(appointment))
+        with self.outbox() as sent:
+            self.change(self.sw, appointment, start=self.later())
+        payload = self.one(sent, self.psy)
+        self.assertEqual(old, self.uid_of(payload))
+        self.assertEqual("2", prop(attachment(payload), "SEQUENCE"))
+        self.assertEqual(old, self.invite_row(appointment, self.psy).uid, "written back")
+
+    def test_the_old_id_survives_a_site_setting_arriving_in_the_same_release(self):
+        """A deployment that sets SITE_URL when it takes this change: the
+        calendars hold the id built from the CORS address, and that is the one
+        carried on - not one built from the new setting."""
+        appointment, _ = self.booked(self.sw)
+        CalendarInvite.objects.filter(appointment=appointment).update(uid="")
+        old = self.old_uid(appointment)
+        with self.outbox() as sent, override_settings(SITE_URL="https://new.example.gov.ph"):
+            self.change(self.sw, appointment, start=self.later())
+        self.assertEqual(old, self.uid_of(self.one(sent, self.psy)))
+
+    def test_a_hand_over_of_a_row_from_before_the_column_keeps_one_id_for_both(self):
+        appointment, _ = self.booked(self.sw)
+        CalendarInvite.objects.filter(appointment=appointment).update(uid="")
+        old = self.old_uid(appointment)
+        with self.outbox() as sent:
+            self.change(self.admin, appointment, psychologist=self.psy2)
+        self.assertEqual(old, self.uid_of(self.one(sent, self.psy)))
+        self.assertEqual(old, self.uid_of(self.one(sent, self.psy2)))
+        self.assertEqual({old}, set(CalendarInvite.objects.filter(
+            appointment=appointment).values_list("uid", flat=True)))
+
+    def test_a_row_from_before_the_column_is_not_what_a_new_invite_draws_from(self):
+        """Only an appointment with an invite already out inherits the old id.
+        A different appointment's first invite is drawn as a new one."""
+        old_appointment, _ = self.booked(self.sw)
+        CalendarInvite.objects.filter(appointment=old_appointment).update(uid="")
+        new_appointment, sent = self.booked(self.sw, start=self.later(1))
+        uid = self.uid_of(self.one(sent, self.psy))
+        self.assertNotEqual(self.old_uid(new_appointment), uid)
+        self.assertTrue(re.match(self.SHAPE.format(pk=new_appointment.pk), uid), uid)
+
+    def test_an_invite_that_cannot_be_built_leaves_no_id_behind(self):
+        """The first invite, failing: the row and the id drawn for it go with
+        it, and the next try draws afresh."""
+        appointment = Appointment.objects.create(
+            child=self.child, psychologist=self.psy, start=self.start,
+            duration_minutes=60, booked_by=self.sw)
+        with patch("scheduling.session_mail.build_ics", side_effect=ValueError("no")):
+            with self.assertRaises(ValueError):
+                _invite(appointment, self.psy, "REQUEST")()
+        self.assertFalse(CalendarInvite.objects.filter(appointment=appointment).exists())
+        _, ics = _invite(appointment, self.psy, "REQUEST")()
+        self.assertEqual(prop(ics, "UID"), self.invite_row(appointment, self.psy).uid)
+        self.assertEqual("1", prop(ics, "SEQUENCE"))
+
+    def test_nothing_is_stored_by_a_copy_with_no_mail_service(self):
+        with override_settings(BREVO_API_KEY="", CORS_ALLOWED_ORIGINS=[ORIGIN]), \
+                self.assertLogs("accounts.email_notifications", level="WARNING"):
+            res = self.book(self.sw)
+        self.assertEqual(201, res.status_code, res.data)
+        self.assertFalse(CalendarInvite.objects.exists())
+
+    def test_the_id_fits_its_column_and_the_default_is_empty(self):
+        field = CalendarInvite._meta.get_field("uid")
+        self.assertEqual("", field.default)
+        self.assertEqual("", field.db_default)
+        self.assertLessEqual(len(f"appointment-{10 ** 12}-{'f' * 10}@nacc-sys"), field.max_length)
+
+
+# --------------------------------------------------------------------------
 # People with no name
 # --------------------------------------------------------------------------
 
@@ -751,6 +918,52 @@ class NamelessStaffTest(SessionMailBase):
                       self.one(sent, self.sw)["textContent"])
         self.assertIn("it was given to another psychologist.",
                       self.one(sent, self.psy)["textContent"])
+
+
+class HostileNameTest(SessionMailBase):
+    """A name typed to be read as something else (23 Oct 2026, security
+    review): it is printed in a colleague's subject line, the page, the text
+    part and the invite's attendee line, so each comes back as one plain line
+    (`accounts.display.entered_name`)."""
+
+    def _rename(self, user, first, last=""):
+        user.first_name, user.last_name = first, last
+        user.save()
+
+    def test_a_booking_by_somebody_whose_name_has_a_newline_and_an_override_is_one_plain_line(self):
+        self._rename(self.sw, "Editha\r\nBcc: attacker@evil.example", "Pas\u202ecua")
+        appointment, sent = self.booked(self.sw)
+        payload = self.one(sent, self.psy)
+        self.assertEqual(
+            "Editha Bcc: attacker@evil.example Pascua booked a session on your calendar",
+            payload["subject"])
+        for part in ("subject", "htmlContent", "textContent"):
+            self.assertNotIn("\u202e", payload[part])
+            self.assertNotIn("\r", payload[part])
+        (lead,) = [t for t in payload["textContent"].split("\n")
+                   if "booked a session on your calendar for case" in t]
+        self.assertTrue(lead.startswith("Editha Bcc: attacker@evil.example Pascua booked"), lead)
+
+    def test_a_psychologists_long_name_is_cut_in_the_row_a_social_worker_reads(self):
+        appointment, _ = self.booked(self.sw)
+        self._rename(self.psy2, "Jose " * 40)
+        with self.outbox() as sent:
+            res = self.change(self.admin, appointment, psychologist=self.psy2)
+        self.assertEqual(200, res.status_code, res.data)
+        payload = self.one(sent, self.sw)
+        (row,) = [t for t in payload["textContent"].split("\n") if t.startswith("Psychologist:")]
+        self.assertTrue(row.endswith("\u2026 (was Marivic Bulan)"), row)
+        self.assertEqual(len("Psychologist: ") + 60 + len(" (was Marivic Bulan)"), len(row))
+
+    def test_the_invite_names_the_attendee_as_one_short_plain_line(self):
+        self._rename(self.psy, "Marivic\nBulan\u202e", "Santos " * 30)
+        appointment, sent = self.booked(self.sw)
+        (attendee,) = [t for t in unfolded(attachment(self.one(sent, self.psy)))
+                       if t.startswith("ATTENDEE")]
+        name = attendee.split('CN="', 1)[1].split('"', 1)[0]
+        self.assertTrue(name.startswith("Marivic Bulan Santos"), name)
+        self.assertLessEqual(len(name), 60)
+        self.assertNotIn("\u202e", attendee)
 
 
 # --------------------------------------------------------------------------

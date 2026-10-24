@@ -32,7 +32,7 @@ from django.utils import timezone
 
 from accounts.display import entered_name
 from accounts.models import AgencyProfile
-from children.notifications import sign_in_url
+from children.notifications import origin_from_cors, sign_in_url
 from scheduling.booking import ends_at
 from scheduling.visibility import case_ref
 
@@ -44,15 +44,28 @@ FALLBACK_LOCATION = "RACCO I office"
 LINE_LIMIT = 75
 
 
-def uid(appointment):
-    """The event's identity in everybody's calendar: stable for one
-    appointment, so a move or a cancellation finds the event it is about.
+def legacy_uid(appointment):
+    """The identity the first invites were sent under, before the UID was
+    stored on `CalendarInvite`.
 
-    The tag is the first ten hex characters of the SHA-256 of the deployment's
-    address (or "local"), so the demo, the live system and a developer's copy
-    - which all number their appointments from 1 - never share an id for one
-    person's calendar."""
-    tag = hashlib.sha256((sign_in_url() or "local").encode("utf-8")).hexdigest()[:10]
+    Stable for one appointment, so a move or a cancellation finds the event it
+    is about; the tag is the first ten hex characters of the SHA-256 of the
+    deployment's address (or "local"), so the demo, the live system and a
+    developer's copy - which all number their appointments from 1 - never
+    shared an id for one person's calendar.
+
+    It follows the site's address, which is why it is no longer used for a new
+    invite: changing the address would give every booked session a second
+    event. It is kept for one thing, session_mail.py: an invite sent before the
+    column existed is in somebody's calendar under THIS value, so the next send
+    writes it into the row and goes on using it.
+
+    The address is the one those invites were built from, `origin_from_cors`,
+    and not `sign_in_url`: a deployment that sets `SITE_URL` in the same
+    release would otherwise work out a different tag than the one its calendars
+    hold, and the move it is meant to protect would add an event beside the
+    old one."""
+    tag = hashlib.sha256((origin_from_cors() or "local").encode("utf-8")).hexdigest()[:10]
     return f"appointment-{appointment.pk}-{tag}@nacc-sys"
 
 
@@ -123,13 +136,15 @@ def fold(line):
     return physical
 
 
-def build_ics(appointment, attendee, *, method, sequence):
+def build_ics(appointment, attendee, *, method, sequence, uid):
     """The .ics file for `attendee`'s copy of `appointment`.
 
     `method` is "REQUEST" (a booking, or a move: the same UID with a higher
-    `sequence` replaces the event) or "CANCEL" (removes it). `sequence` is
-    counted by the caller, session_mail.py, which is the one place that knows
-    how many invites this person has really been sent.
+    `sequence` replaces the event) or "CANCEL" (removes it). `sequence` and
+    `uid` are the caller's, session_mail.py, which is the one place that knows
+    how many invites this person has really been sent and which identity the
+    appointment was given. Nothing here works the UID out, so nothing about
+    the deployment can change it.
 
     RSVP is FALSE because a reply would land in the agency's own inbox, which
     nobody reads."""
@@ -147,7 +162,7 @@ def build_ics(appointment, attendee, *, method, sequence):
         "CALSCALE:GREGORIAN",
         f"METHOD:{method}",
         "BEGIN:VEVENT",
-        f"UID:{uid(appointment)}",
+        f"UID:{''.join(_plain(uid).split())}",
         f"DTSTAMP:{_utc(timezone.now())}",
         f"DTSTART:{_utc(appointment.start)}",
         f"DTEND:{_utc(ends_at(appointment.start, appointment.duration_minutes))}",

@@ -191,6 +191,16 @@ class CalendarInvite(models.Model):
     opted-out psychologist's counter does not run ahead of what they hold.
     `cancelled` says the last invite sent was a cancellation. `sent_at` is
     stamped on every save, which is every send.
+
+    `uid` is the event's identity in everybody's calendar, STORED so that it
+    cannot change: the same string goes to every attendee and in every move
+    or cancellation of one appointment (scheduling/session_mail.py draws it
+    with the first invite). It used to be worked out from the site's address
+    each time, and changing that address would then have given every booked
+    session a second event. Empty on a row from before the column; the next
+    send writes the value those invites were given into it.
+    `db_default` lets a release that predates the column keep inserting rows
+    during a deploy.
     """
 
     appointment = models.ForeignKey(
@@ -200,6 +210,7 @@ class CalendarInvite(models.Model):
         related_name="calendar_invites")
     sequence = models.PositiveIntegerField(default=0)
     cancelled = models.BooleanField(default=False)
+    uid = models.CharField(max_length=120, blank=True, default="", db_default="")
     sent_at = models.DateTimeField(auto_now=True)
 
     class Meta:

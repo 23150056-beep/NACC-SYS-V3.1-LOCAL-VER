@@ -18,15 +18,18 @@ from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.utils import timezone
 
+from accounts.display import NAME_LIMIT
 from accounts.models import AgencyProfile, Role
 from scheduling.calendar_invite import (
-    FALLBACK_LOCATION, LINE_LIMIT, _cn, _text, build_ics, fold, uid)
+    FALLBACK_LOCATION, LINE_LIMIT, _cn, _text, build_ics, fold, legacy_uid)
 from scheduling.models import Appointment
 
 User = get_user_model()
 
 ORIGIN = "https://nacc.example.test"
 NOW = datetime(2026, 10, 19, 2, 0, tzinfo=dt_timezone.utc)
+# What the caller (session_mail.py) hands build_ics. It is not worked out here.
+UID = "appointment-7-0a1b2c3d4e@nacc-sys"
 
 
 def logical(ics):
@@ -66,7 +69,7 @@ class BuildIcsTest(TestCase):
         self.addCleanup(clock.stop)
 
     def ics(self, **over):
-        args = dict(method="REQUEST", sequence=1)
+        args = dict(method="REQUEST", sequence=1, uid=UID)
         args.update(over)
         return build_ics(self.appt, self.psy, **args)
 
@@ -97,29 +100,62 @@ class BuildIcsTest(TestCase):
 
     # -- identity ------------------------------------------------------------
 
-    def test_the_event_id_is_stable_for_one_appointment_whatever_is_sent(self):
-        first = value(self.ics(sequence=1), "UID")
-        self.assertEqual(first, value(self.ics(sequence=4), "UID"))
-        self.assertEqual(first, value(self.ics(method="CANCEL", sequence=9), "UID"))
-        self.assertEqual(first, uid(self.appt))
+    def test_the_event_id_is_the_one_the_caller_gives_whatever_is_sent(self):
+        self.assertEqual(UID, value(self.ics(sequence=1), "UID"))
+        self.assertEqual(UID, value(self.ics(sequence=4), "UID"))
+        self.assertEqual(UID, value(self.ics(method="CANCEL", sequence=9), "UID"))
 
-    def test_the_event_id_differs_between_appointments(self):
+    def test_the_event_id_is_never_worked_out_from_the_deployment(self):
+        """It used to be a hash of the site's address, so changing the address
+        moved it. Now nothing here reads either."""
+        before = value(self.ics(), "UID")
+        with override_settings(CORS_ALLOWED_ORIGINS=["https://elsewhere.example.test"],
+                               SITE_URL="https://another.example.test"):
+            after = value(self.ics(), "UID")
+        self.assertEqual(before, after)
+
+    def test_a_different_id_is_a_different_event(self):
+        self.assertNotEqual(value(self.ics(uid="appointment-7-aaaaaaaaaa@nacc-sys"), "UID"),
+                            value(self.ics(uid="appointment-8-aaaaaaaaaa@nacc-sys"), "UID"))
+
+    def test_the_caller_must_give_one(self):
+        with self.assertRaises(TypeError):
+            build_ics(self.appt, self.psy, method="REQUEST", sequence=1)
+
+    def test_an_id_cannot_start_a_new_line_of_the_file(self):
+        ics = self.ics(uid="appointment-7-x@nacc-sys\r\nATTENDEE:mailto:evil@x.ph")
+        self.assertEqual(ics.count("\n"), ics.count("\r\n"))
+        self.assertEqual(1, len([t for t in logical(ics) if t.startswith("ATTENDEE")]))
+        self.assertEqual("appointment-7-x@nacc-sysATTENDEE:mailto:evil@x.ph",
+                         value(ics, "UID"))
+
+    # -- the identity invites were sent under before it was stored ------------
+
+    def test_the_old_event_id_is_stable_and_tagged_with_the_deployment(self):
+        self.assertRegex(legacy_uid(self.appt), r"^appointment-7-[0-9a-f]{10}@nacc-sys$")
+        self.assertEqual(legacy_uid(self.appt), legacy_uid(self.appt))
         other = Appointment(pk=8, child_id=42, start=self.start)
-        self.assertNotEqual(uid(self.appt), uid(other))
-
-    def test_the_event_id_is_tagged_with_the_deployment(self):
-        self.assertRegex(uid(self.appt), r"^appointment-7-[0-9a-f]{10}@nacc-sys$")
+        self.assertNotEqual(legacy_uid(self.appt), legacy_uid(other))
         with override_settings(CORS_ALLOWED_ORIGINS=["https://demo.example.test"]):
-            demo = uid(self.appt)
+            demo = legacy_uid(self.appt)
         with override_settings(CORS_ALLOWED_ORIGINS=[]):
-            local = uid(self.appt)
+            local = legacy_uid(self.appt)
         with override_settings(CORS_ALLOWED_ORIGINS=["http://localhost:5173"]):
-            localhost = uid(self.appt)
-        self.assertEqual(4, len({uid(self.appt), demo, local, localhost}),
+            localhost = legacy_uid(self.appt)
+        self.assertEqual(4, len({legacy_uid(self.appt), demo, local, localhost}),
                          "two deployments share an id for one calendar")
         # With no address at all the tag is a fixed word, not a changing value.
         self.assertEqual(f"appointment-7-{hashlib.sha256(b'local').hexdigest()[:10]}@nacc-sys",
                          local)
+
+    def test_the_old_event_id_is_the_cors_tag_even_with_a_site_setting(self):
+        """Invites sent before the UID was stored were built from the CORS rule.
+        A deployment that sets SITE_URL in the same release must still find
+        them, or the first move adds an event beside each old one."""
+        expected = f"appointment-7-{hashlib.sha256(ORIGIN.encode()).hexdigest()[:10]}@nacc-sys"
+        self.assertEqual(expected, legacy_uid(self.appt))
+        with override_settings(SITE_URL="https://another.example.test"):
+            self.assertEqual(expected, legacy_uid(self.appt))
 
     # -- time ----------------------------------------------------------------
 
@@ -170,6 +206,11 @@ class BuildIcsTest(TestCase):
         self.assertEqual(f"Case C-0042. Sign in to NACC SYS for the details: {ORIGIN}",
                          value(ics, "DESCRIPTION"))
 
+    @override_settings(SITE_URL="https://nacc.example.gov.ph")
+    def test_the_description_follows_the_site_setting(self):
+        self.assertEqual("Case C-0042. Sign in to NACC SYS for the details: "
+                         "https://nacc.example.gov.ph", value(self.ics(), "DESCRIPTION"))
+
     @override_settings(CORS_ALLOWED_ORIGINS=[])
     def test_with_no_address_known_the_description_has_no_dead_link(self):
         self.assertEqual("Case C-0042. Sign in to NACC SYS for the details.",
@@ -217,8 +258,10 @@ class BuildIcsTest(TestCase):
     # -- the 75-octet limit ---------------------------------------------------
 
     def test_no_line_is_longer_than_75_octets_even_with_a_long_name_full_of_accents(self):
-        self.psy.first_name = ("María Concepción de los Ángeles Peñaflorida-Villanueva y "
-                               "Muñoz de la Santísima Trinidad ·· 日本語の名前 😀😀😀 ") * 3
+        # As long as a name is printed (accounts.display.NAME_LIMIT is 60): a
+        # longer one is cut before it gets here. These 45 characters are 71
+        # octets, with four-octet emoji, so the line still has to be folded.
+        self.psy.first_name = "María Concepción Peñaflorida 日本語の名前 😀😀😀"
         self.psy.last_name = "Ñandú"
         AgencyProfile.objects.create(
             office_address="2nd Floor, Provincial Capitol Annex, Quezon Avenue, "
@@ -232,6 +275,13 @@ class BuildIcsTest(TestCase):
         self.assertIn(f'CN="{" ".join(self.psy.fullname.split())}"', line(ics, "ATTENDEE"))
         self.assertIn("Ñandú", line(ics, "ATTENDEE"))
         self.assertIn("日本語の名前 😀😀😀", line(ics, "ATTENDEE"))
+
+    def test_a_name_longer_than_a_name_is_cut_in_the_attendee_line(self):
+        self.psy.first_name, self.psy.last_name = "Maria " * 50, "Santos"
+        attendee = line(self.ics(), "ATTENDEE")
+        name = attendee.split('CN="', 1)[1].split('"', 1)[0]
+        self.assertEqual(NAME_LIMIT, len(name))
+        self.assertTrue(name.endswith("\u2026"))
 
     def test_the_middle_dot_is_two_octets_and_counts_as_two(self):
         ics = self.ics()

@@ -202,6 +202,7 @@ reproduce a deployment problem.
 | `SMS_SENDER_NAME` | unset | An Active Semaphore sender name, e.g. NACC, spelt exactly. Unset, Semaphore can refuse every message with "No active sender name found". |
 | `SESSION_REMINDER_TOKEN` | unset | Lets a scheduler trigger the daily reminder. Unset = that endpoint 404s. See §9c. |
 | `BREVO_SENDER_NAME` | `NACC RACCO1` | |
+| `SITE_URL` | unset | The address people open NACC SYS at, e.g. `https://nacc.example.gov.ph`: every email's button and its plain "Or open NACC SYS at" line. Unset = the first non-localhost `CORS_ALLOWED_ORIGINS` entry. A bare `https://` site only (`http` is refused when `DJANGO_DEBUG` is False); a value that is not is ignored with a warning in the log. Never taken from a request. |
 
 An email about a case carries the **case reference only** — see
 [§6](#6-data-residency-and-ra-10173) before changing what any of them contains.
