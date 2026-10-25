@@ -62,13 +62,15 @@ services:
         value: "2"
 
       # ---- Uploaded files -----------------------------------------------
-      # The value is set in the dashboard, not here (`sync: false`).
+      # The value is set in the dashboard, not here (`sync: false`): a fixed
+      # `value:` in a blueprint is put back on every Blueprint sync, over
+      # whatever the dashboard says.
       #
-      # It used to be fixed here as "false", and every Blueprint sync put it
-      # back over the dashboard's "true". Uploads then went to the container's
-      # own disk and vanished on the next deploy or wake, while the rows stayed
-      # in the database and the downloads answered "File is missing from
-      # storage".
+      # It was fixed here as "false" until 25 Oct 2026, and the demo kept its
+      # uploads on the container's own disk. They vanished on the next deploy
+      # or wake while their rows stayed in the database, so every download
+      # answered "File is missing from storage". The demo now has its own R2
+      # bucket, nacc-v3-demo-media.
       #
       # With USE_S3=true, the AWS_* variables (AWS_STORAGE_BUCKET_NAME,
       # AWS_S3_ENDPOINT_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) are set
