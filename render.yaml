@@ -62,25 +62,23 @@ services:
         value: "2"
 
       # ---- Uploaded files -----------------------------------------------
-      # OFF, deliberately, and this is the demo's whole file story.
+      # The value is set in the dashboard, not here (`sync: false`).
       #
-      # The demo has no files. Its caseload comes from a fixture that carries
-      # no reports, no consent scans and no photographs, and no object is ever
-      # copied from the live bucket. So there is nothing to store, and setting
-      # up object storage would be configuring a bucket to hold nothing.
+      # It used to be fixed here as "false", and every Blueprint sync put it
+      # back over the dashboard's "true". Uploads then went to the container's
+      # own disk and vanished on the next deploy or wake, while the rows stayed
+      # in the database and the downloads answered "File is missing from
+      # storage".
       #
-      # With USE_S3=false, anything a visitor does upload lands on the
-      # container's own disk and disappears on the next deploy or wake. For a
-      # system holding real case files that would be unacceptable — it is
-      # exactly why the LIVE deployment sets this to true. For a demo whose
-      # records are fictional it is correct: nothing of value can be lost,
-      # because nothing of value is there.
+      # With USE_S3=true, the AWS_* variables (AWS_STORAGE_BUCKET_NAME,
+      # AWS_S3_ENDPOINT_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) are set
+      # in the dashboard too. They must name a SEPARATE demo bucket, never
+      # nacc-v3-media: a demo visitor's upload would land among real case files.
       #
-      # If this demo ever needs to keep an upload, create a SEPARATE bucket.
-      # Never point it at nacc-v3-media: a demo visitor's upload would land
-      # among real case files.
+      # Unset or false falls back to local disk, which a host wipes. The ISA
+      # console's "File storage" row says which is in use.
       - key: USE_S3
-        value: "false"
+        sync: false
 
       # ---- Google Sign-In (optional; staff and psychologists only) -------
       # Leave unset to deploy with the password form only. When set, the
