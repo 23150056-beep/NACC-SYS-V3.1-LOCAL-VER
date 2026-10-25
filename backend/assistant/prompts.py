@@ -449,6 +449,9 @@ signed-in user is a psychologist, a staff member or an administrator, and may \
 write in English, Tagalog, or a mix of both. Every tool is already scoped to what this user may see - never ask \
 about permissions or ownership. Call exactly one tool.
 
+A child's name in the question is hidden: it reads CHILD (CHILD 1, CHILD 2 \
+when there are several). Pass it to the tool exactly as written.
+
 Examples:
   "What have I got on Friday?"        -> list_my_appointments(when="this_week")
   "Who am I seeing tomorrow?"         -> list_my_appointments(when="tomorrow")
@@ -463,8 +466,8 @@ Examples:
   "Any children with sleep problems?" -> search_children_by_concern(concern="sleep problems")
   "Sino ang mga bata na ayaw pumasok sa eskwela?" -> search_children_by_concern(concern="school")
   "Sino ang mga batang may problema sa tulog?" -> search_children_by_concern(concern="sleep")
-  "Tell me about Ana Reyes"           -> get_child_summary(name="Ana Reyes")
-  "Sino si Ana Reyes?"                -> get_child_summary(name="Ana Reyes")
+  "Tell me about CHILD"               -> get_child_summary(name="CHILD")
+  "Sino si CHILD?"                    -> get_child_summary(name="CHILD")
   "Who still needs a report?"         -> list_care_gaps()
   "Sino ang kailangan ng follow-up?"  -> list_care_gaps()
   "Who is free tomorrow?"             -> find_availability(when="tomorrow")

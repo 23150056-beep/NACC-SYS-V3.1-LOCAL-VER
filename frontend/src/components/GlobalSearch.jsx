@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { screensFor } from '../config/nav';
+import { useAssistant } from '../context/AssistantContext';
 import { useAuth } from '../context/AuthContext';
 import { useCensus } from '../context/CensusContext';
 import { useLayout } from '../context/LayoutContext';
@@ -57,6 +58,13 @@ function actionsFor(role, pendingAccess) {
     { key: 'a-book', label: 'Book an appointment', icon: 'calendar-plus', to: '/schedule?book=1', keywords: 'session schedule new' },
     { key: 'a-upload', label: 'Upload a case referral', icon: 'upload', to: '/reports?upload=1', keywords: 'file document attach' },
   ];
+  // The assistant is one more thing to DO from here, not a place: choosing it
+  // opens the panel (go() below), it does not navigate.
+  list.push({
+    key: 'a-assistant', label: 'Ask the assistant', icon: 'sparkles', assistant: true,
+    keywords: 'chat question help bot ask assistant lookup',
+    meta: 'Ctrl+/',
+  });
   if (role === 'Administrator') {
     list.push({
       key: 'a-access', label: 'Review access requests', icon: 'user-check', to: '/users?tab=requests',
@@ -118,6 +126,7 @@ export default function GlobalSearch({ open, onOpenChange }) {
   const location = useLocation();
   const layout = useLayout();
   const toast = useToast();
+  const { openAssistant, enabled: assistantOn } = useAssistant();
   const { pendingAccess, pendingAssignments, refreshPendingAccess, refreshPendingAssignments } = useCensus();
   const role = user?.role_name;
   const isAdmin = role === 'Administrator';
@@ -209,7 +218,10 @@ export default function GlobalSearch({ open, onOpenChange }) {
   }, [open, close]);
 
   const term = q.trim();
-  const actions = useMemo(() => actionsFor(role, pendingAccess), [role, pendingAccess]);
+  const actions = useMemo(
+    () => actionsFor(role, pendingAccess).filter((a) => assistantOn || !a.assistant),
+    [role, pendingAccess, assistantOn],
+  );
   const screens = useMemo(() => screensFor(role).map((s) => ({
     kind: 'screen', key: `s-${s.id}`, label: s.label, icon: s.icon, to: s.to, keywords: 'go to open screen page',
   })), [role]);
@@ -278,7 +290,7 @@ export default function GlobalSearch({ open, onOpenChange }) {
       kind: 'staff', key: `u${u.id}`, name: u.fullname || u.email, initials: initialsOf(u.fullname || u.email),
       meta: [roleLabel(u.role_name), (u.status || '').toLowerCase()].filter(Boolean).join(' · '), to: '/users',
     })) : [];
-    return [
+    const found = [
       {
         label: 'Children', items: childItems,
         notes: hits.length > MAX_CHILDREN ? [`${hits.length - MAX_CHILDREN} more match. Type more to narrow it.`] : [],
@@ -287,8 +299,21 @@ export default function GlobalSearch({ open, onOpenChange }) {
       { label: 'Actions', items: actions.filter((a) => matchesCommand(a, term)) },
       { label: 'Go to', items: screens.filter((s) => matchesCommand(s, term)) },
     ];
+    // Nothing here matches, so the words may be a question. Offered as a row,
+    // never sent on its own: the text goes to the assistant only if this is
+    // chosen, and then through the same masking as any question typed there.
+    if (loaded && assistantOn && !found.some((g) => g.items.length)) {
+      found.push({
+        label: 'Ask', items: [{
+          kind: 'action', key: 'ask-text', icon: 'sparkles', assistant: true,
+          ask: term.slice(0, 150), label: `Ask the assistant: \u201c${term}\u201d`,
+          meta: 'Sent to the assistant only when you choose this',
+        }],
+      });
+    }
+    return found;
   }, [focus, term, children, staff, recent, role, user?.id, isAdmin, isPsych, actions, screens,
-    pendingAccess, pendingAssignments, childActions]);
+    pendingAccess, pendingAssignments, childActions, loaded, assistantOn]);
 
   const flat = useMemo(() => groups.flatMap((g) => g.items), [groups]);
 
@@ -308,7 +333,11 @@ export default function GlobalSearch({ open, onOpenChange }) {
     else list.querySelector(`[data-row="${cursor}"]`)?.scrollIntoView({ block: 'nearest' });
   }, [cursor, focus]);
 
-  const go = (hit) => { if (!hit?.to) return; close(); navigate(hit.to); };
+  const go = (hit) => {
+    if (hit?.assistant) { close(); openAssistant(hit.ask ? { ask: hit.ask } : undefined); return; }
+    if (!hit?.to) return;
+    close(); navigate(hit.to);
+  };
   const showActions = (item, index) => {
     if (item?.kind !== 'child') return;
     setFocus({ child: item.child, from: index });
@@ -401,7 +430,8 @@ export default function GlobalSearch({ open, onOpenChange }) {
 
   let index = 0;
   const shownGroups = groups.filter((g) => g.items.length || g.notes?.length);
-  const nothing = term && !focus && loaded && flat.length === 0;
+  // The "Ask" row is the answer to nothing matching, not a match.
+  const nothing = term && !focus && loaded && flat.every((i) => i.key === 'ask-text');
 
   return (
     <div ref={boxRef} style={{ position: 'relative', flex: 'none' }}>

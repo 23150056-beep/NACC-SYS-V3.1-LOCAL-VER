@@ -67,10 +67,22 @@ class OffersTest(SimpleTestCase):
 
     def test_several_matching_children_become_a_choice(self):
         result = {"kind": "summary", "match": "several",
-                  "items": [{"id": 1, "name": "Maria Santos"}, {"id": 2, "name": "Maria Cruz"}]}
+                  "items": [{"id": 1, "name": "Maria Santos", "ref": "C-0001"},
+                            {"id": 2, "name": "Maria Cruz", "ref": "C-0002"}]}
         offers = self._offers("get_child_summary", {"name": "Maria"}, result)
         self.assertEqual(["Maria Santos", "Maria Cruz"], labels(offers))
-        self.assertEqual({"name": "Maria Santos"}, offers[0]["args"])
+        # By number, not by name: a chip never has to put a name through a
+        # lookup, and two children with one name are both offered.
+        self.assertEqual({"child_id": 1}, offers[0]["args"])
+
+    def test_two_children_with_one_name_are_told_apart_by_case_number(self):
+        result = {"kind": "summary", "match": "several",
+                  "items": [{"id": 1, "name": "Maria Santos", "ref": "C-0001"},
+                            {"id": 2, "name": "Maria Santos", "ref": "C-0002"},
+                            {"id": 3, "name": "Maria Cruz", "ref": "C-0003"}]}
+        offers = self._offers("get_child_summary", {"name": "Maria"}, result)
+        self.assertEqual(["Maria Santos (C-0001)", "Maria Santos (C-0002)", "Maria Cruz"],
+                         labels(offers))
 
     def test_nothing_is_offered_after_a_greeting_or_a_refused_call(self):
         self.assertEqual([], self._offers("answer_directly", {}, {"kind": "message"}))

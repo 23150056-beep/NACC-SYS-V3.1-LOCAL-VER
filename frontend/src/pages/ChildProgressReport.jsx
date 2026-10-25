@@ -8,7 +8,7 @@ import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { useAssistant } from '../context/AssistantContext';
 import {
-  Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, Modal, Note, PAGE, Select, Tabs,
+  Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, LiveStatus, Modal, Note, PAGE, Select, Tabs,
 } from '../ui';
 import { PA_STATUS_TONES, SPECIAL_NEEDS, caseDate, reportTypeLabel } from '../config/caseData';
 import { loadAll } from '../utils/load';
@@ -41,6 +41,20 @@ const CASE_STATUS_META = {
   terminated: { label: 'Terminated', tone: 'neutral' },
 };
 
+// What the brief modal's status line says, from where the brief has got to. The
+// facts and the written part arrive separately, so one sentence covers both.
+function briefStatus(brief, regenerating) {
+  const facts = brief.factsFailed ? 'The facts could not be loaded.'
+    : brief.facts ? 'Facts loaded.' : 'Loading the facts…';
+  let written = '';
+  if (brief.prose === 'loading' || (brief.prose === 'ready' && regenerating)) written = 'Drafting the brief…';
+  else if (brief.prose === 'ready') written = 'Brief ready.';
+  else if (brief.prose === 'unavailable' || brief.prose === 'failed') {
+    written = `The brief could not be drafted: ${brief.reason || 'the assistant did not answer.'}`;
+  } else if (brief.prose === 'not_offered') written = 'A written brief is not available on this deployment.';
+  return written ? `${facts} ${written}` : facts;
+}
+
 const td = { padding: '10px 14px', fontSize: 13, color: 'var(--text-body)', whiteSpace: 'nowrap' };
 const textarea = { width: '100%', resize: 'vertical', padding: '11px 13px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', fontFamily: 'var(--font-sans)', fontSize: 14, lineHeight: 1.55 };
 
@@ -56,7 +70,7 @@ export default function ChildProgressReport() {
   // False on a hosted deployment, where the server refuses every drafting
   // feature (the chatbot is unaffected). Above the early returns below: a hook
   // under `if (!data) return` crashed this page once already.
-  const { drafting, brief: briefKind } = useAssistant();
+  const { drafting, brief: briefKind, enabled: assistantOn, openAssistant } = useAssistant();
   const isPsych = user?.role_name === 'Psychologist';
   // Which brief this person gets (owner, 8 Oct 2026): the psychologist's is the
   // facts and a written brief; everyone else's is the case facts alone - the
@@ -94,6 +108,16 @@ export default function ChildProgressReport() {
   const [confirmMove, setConfirmMove] = useState(null); // { next, childName }
   const [polishing, setPolishing] = useState(false);
   const [polishJob, setPolishJob] = useState(null); // { id, draft }
+  // What the screen says about the assistant, besides the toasts. `polishOff`
+  // is the server's own sentence when it answered 503 (switched off, runtime
+  // down): the button stays grey with that sentence as its reason, for the rest
+  // of the visit. `polishFailed` is any other refusal, kept beside the button
+  // until the next try. `aiNote` is the one polite announcement for all of the
+  // page's long waits (polish, summaries), so each wait is said once.
+  const remarkBox = useRef(null);
+  const [polishOff, setPolishOff] = useState('');
+  const [polishFailed, setPolishFailed] = useState('');
+  const [aiNote, setAiNote] = useState('');
   // The remark text as it stood before "Polish writing" overwrote it, so the
   // psychologist has a way back to their own words if the draft is worse.
   // Cleared once the remark is saved or the draft is reverted.
@@ -119,9 +143,23 @@ export default function ChildProgressReport() {
     briefFlight.current = null;
     setBrief(null);
     setBriefBusy(false);
+    // A summary still being drafted for the last child must not open on this one.
+    summaryAbort.current?.abort();
+    summaryAbort.current = null;
+    setSummaryRun(null);
+    setSummaryProblem(null);
+    setSummary(null);
   }, [id]);
-  const [summary, setSummary] = useState(null); // { kind, id, text, confirmed }
-  const [summaryBusy, setSummaryBusy] = useState(false);
+  useEffect(() => () => summaryAbort.current?.abort(), []);
+  // `original` is the draft as the model wrote it: the modal is "edited" once
+  // the text differs from it.
+  const [summary, setSummary] = useState(null); // { kind, id, filename, text, original, confirmed, coverage }
+  // The summary request that is out, and the controller that can end the wait.
+  const [summaryRun, setSummaryRun] = useState(null); // { kind, id, filename }
+  const summaryAbort = useRef(null);
+  const summaryBusy = !!summaryRun;
+  const [summaryProblem, setSummaryProblem] = useState(null); // { kind, id, text }
+  const [summaryOff, setSummaryOff] = useState(''); // the server's sentence on a 503
   // Re-summarising an already-confirmed document destroys the psychologist's
   // own clinical text with no undo, so that path is asked for, not clicked.
   const [confirmResummarize, setConfirmResummarize] = useState(null); // { kind, id, filename }
@@ -299,23 +337,53 @@ export default function ChildProgressReport() {
     } catch (err) { toast.error(JSON.stringify(err.response?.data || 'Could not create the survey link.')); }
   });
 
+  // Puts the cursor in the remark box once the draft is in it, unless the person
+  // has gone elsewhere: on another tab the box is not on screen, and under a
+  // dialog it is not theirs to take focus from.
+  const focusRemarkBox = () => {
+    const box = remarkBox.current;
+    if (!box || box.offsetParent === null || document.querySelector('[aria-modal="true"]')) return;
+    box.focus();
+    box.setSelectionRange(box.value.length, box.value.length);
+  };
+
   const polish = async () => {
     const raw = remarkText.trim();
-    if (!raw) return;
+    // A second press while the first is out would send the same words twice.
+    if (!raw || polishing) return;
     setPolishing(true);
+    setPolishFailed('');
+    setAiNote('Polishing your remark… this can take up to a minute.');
     try {
       const { draft, job_id } = await polishRemark(raw);
       setPreRemarkText(remarkText);
       setRemarkText(draft);
       setPolishJob({ id: job_id, draft });
+      setAiNote("Polished draft in place. 'Revert to my text' restores what you wrote.");
+      requestAnimationFrame(focusRemarkBox);
     } catch (err) {
       // 503 means the assistant is off or the runtime is down. That is a normal
-      // state, not an error the psychologist caused. A 422 means the draft came
-      // back in the wrong language and was rejected rather than shown — the
-      // server explains why, so surface its message instead of a generic one.
-      toast.error(err.response?.status === 503
-        ? 'The writing assistant is unavailable right now.'
-        : err.response?.data?.detail || 'Could not polish the remark.');
+      // state, not an error the psychologist caused: the server's sentence is
+      // kept beside the button, which stays grey, and no alert is raised. A 422
+      // means the draft came back in the wrong language and was rejected rather
+      // than shown - the server explains why, so its message is shown rather
+      // than a generic one, beside the button and in an alert.
+      const detail = err.response?.data?.detail;
+      if (err.response?.status === 503) {
+        const sentence = typeof detail === 'string' && detail ? detail : 'The writing assistant is unavailable right now.';
+        setPolishOff(sentence);
+        setAiNote(sentence);
+      } else {
+        const sentence = typeof detail === 'string' && detail ? detail : 'Could not polish the remark.';
+        setPolishFailed(sentence);
+        setAiNote('');
+        toast.error(sentence);
+      }
+      // The button was the last thing pressed; put the keyboard back on it.
+      requestAnimationFrame(() => {
+        const btn = document.getElementById('polish-remark-btn');
+        if (btn && (document.activeElement === document.body || document.activeElement === btn)) btn.focus();
+      });
     } finally {
       setPolishing(false);
     }
@@ -326,6 +394,29 @@ export default function ChildProgressReport() {
     if (polishJob) sendFeedback(polishJob.id, 'discarded').catch(() => {});
     setPolishJob(null);
     setPreRemarkText(null);
+    setAiNote('Your own text is back.');
+    // The button that was pressed leaves with the draft; the keyboard goes to the text.
+    requestAnimationFrame(focusRemarkBox);
+  };
+
+  // The facts are queries, and a failed one can be asked again from the modal.
+  const loadBriefFacts = (childId) => {
+    const mine = (b) => (b && b.childId === childId ? b : null);
+    return getBriefFacts(childId)
+      .then((facts) => setBrief((b) => (mine(b) ? { ...b, facts, factsFailed: false } : b)))
+      .catch(() => setBrief((b) => (mine(b) ? { ...b, factsFailed: !b.facts } : b)));
+  };
+  const retryBriefFacts = () => {
+    setBrief((b) => (b ? { ...b, factsFailed: false } : b));
+    loadBriefFacts(id);
+  };
+
+  // "Their words are on the Overview tab" is a button: it closes the brief and
+  // shows that tab, with the keyboard on the child's words.
+  const openOverviewWords = () => {
+    setBrief(null);
+    setTab('overview');
+    setTimeout(() => document.getElementById('child-own-words')?.focus(), 0);
   };
 
   const openBrief = async ({ regenerate = false } = {}) => {
@@ -347,9 +438,7 @@ export default function ChildProgressReport() {
         prose: caseBrief ? 'none' : drafting ? 'loading' : 'not_offered',
       }));
     }
-    getBriefFacts(childId)
-      .then((facts) => setBrief((b) => (mine(b) ? { ...b, facts, factsFailed: false } : b)))
-      .catch(() => setBrief((b) => (mine(b) ? { ...b, factsFailed: !b.facts } : b)));
+    loadBriefFacts(childId);
     // Where the deployment does not draft, or the reader is not the child's
     // psychologist, the facts are all there is: the prose is not requested at
     // all, so nothing is refused and nothing is audited as a failed job.
@@ -358,6 +447,8 @@ export default function ChildProgressReport() {
     const seq = briefSeq.current + 1;
     briefSeq.current = seq;
     briefFlight.current = { childId, seq };
+    // Whatever was said about the last attempt is not about this one.
+    if (regenerate) setBrief((b) => (mine(b) ? { ...b, regenReason: '', regenOff: false } : b));
     setBriefBusy(true);
     try {
       const data = regenerate
@@ -369,19 +460,25 @@ export default function ChildProgressReport() {
           });
       // `mine` throughout: closed while the prose was drafting stays closed,
       // and a draft for another child is never shown.
-      setBrief((b) => (mine(b) ? { ...b, prose: 'ready', draft: data.draft, generatedAt: data.generated_at, jobId: data.job_id } : b));
+      setBrief((b) => (mine(b) ? { ...b, prose: 'ready', draft: data.draft, generatedAt: data.generated_at, jobId: data.job_id, regenReason: '', regenOff: false } : b));
     } catch (err) {
       if (stale()) return;
       const unavailable = err.response?.status === 503;
+      // The server's own sentence, kept in the modal for as long as it is open.
+      const detail = err.response?.data?.detail;
+      const reason = typeof detail === 'string' ? detail : '';
       if (regenerate) {
-        // The draft already on screen stays, as it always did.
-        toast.error(unavailable ? 'The assistant is unavailable right now.' : 'Could not prepare the brief.');
+        // The draft already on screen stays, as it always did; why the new one
+        // did not come is said beside Regenerate. A 503 is a normal state and
+        // raises no alert - the sentence and the grey button are the answer.
+        if (!unavailable) toast.error(reason || 'Could not prepare the brief.');
         // Unless the modal was closed and reopened meanwhile: it is waiting on
         // this very request, and must not be left saying "drafting".
         setBrief((b) => (mine(b) && b.prose === 'loading'
-          ? { ...b, prose: unavailable ? 'unavailable' : 'failed' } : b));
+          ? { ...b, prose: unavailable ? 'unavailable' : 'failed', reason }
+          : mine(b) ? { ...b, regenReason: reason || 'Could not prepare the brief.', regenOff: unavailable } : b));
       } else {
-        setBrief((b) => (mine(b) ? { ...b, prose: unavailable ? 'unavailable' : 'failed' } : b));
+        setBrief((b) => (mine(b) ? { ...b, prose: unavailable ? 'unavailable' : 'failed', reason } : b));
       }
     } finally {
       // Only the latest request may clear these: an old one finishing must
@@ -393,18 +490,65 @@ export default function ChildProgressReport() {
     }
   };
 
-  const draftSummary = async (kind, docId) => {
-    setSummaryBusy(true);
+  const draftSummary = async (kind, docId, filename) => {
+    if (summaryAbort.current) return;
+    const name = filename || 'this document';
+    const controller = new AbortController();
+    summaryAbort.current = controller;
+    setSummaryRun({ kind, id: docId, filename: name });
+    setSummaryProblem(null);
+    setAiNote(`Summarising ${name}… this can take up to a minute.`);
     try {
-      const { draft, coverage } = await summarizeDocument(kind, docId);
-      setSummary({ kind, id: docId, text: draft, confirmed: false, coverage });
+      // Cancel ends the wait on this screen, nothing more: the server has the
+      // document and finishes the summary, and writes its job to the log, whether
+      // or not anybody is still listening. Nothing here can take a call back
+      // from the model once it has been sent.
+      const { draft, coverage } = await summarizeDocument(kind, docId, { signal: controller.signal });
+      setSummary({ kind, id: docId, filename: name, text: draft, original: draft, confirmed: false, coverage });
+      setAiNote(`Summary draft of ${name} is ready to review.`);
     } catch (err) {
-      toast.error(err.response?.status === 503
-        ? 'The assistant is unavailable right now.'
-        : err.response?.data?.detail || 'Could not summarise this document.');
+      if (controller.signal.aborted) {
+        // 'cancel' is the Cancel button; leaving the page aborts with no reason given.
+        if (controller.signal.reason === 'cancel') setAiNote(`Summary of ${name} cancelled.`);
+        return;
+      }
+      const detail = err.response?.data?.detail;
+      const sentence = typeof detail === 'string' && detail ? detail : '';
+      if (err.response?.status === 503) {
+        // A normal state: the sentence stays beside the buttons, which stay grey.
+        const off = sentence || 'The assistant is unavailable right now.';
+        setSummaryOff(off);
+        setAiNote(off);
+      } else {
+        const text = sentence || 'Could not summarise this document.';
+        setSummaryProblem({ kind, id: docId, text });
+        setAiNote('');
+        toast.error(text);
+      }
     } finally {
-      setSummaryBusy(false);
+      if (summaryAbort.current === controller) {
+        summaryAbort.current = null;
+        setSummaryRun(null);
+      }
     }
+  };
+
+  const cancelSummary = () => summaryAbort.current?.abort('cancel');
+  const summaryEdited = !!summary && summary.text !== summary.original;
+
+  // Closing the summary: an edited draft is not thrown away without asking. The
+  // modal sends Escape, the backdrop, its close button and Cancel here.
+  const closeSummary = async () => {
+    if (summary && summary.text !== summary.original) {
+      if (!(await confirm({
+        title: 'Discard your edits?',
+        description: `Your changes to the summary of "${summary.filename}" are not saved. Closing now throws them away.`,
+        confirmLabel: 'Yes, discard my edits',
+        cancelLabel: 'Keep editing',
+        tone: 'danger',
+      }))) return;
+    }
+    setSummary(null);
   };
 
   const saveSummary = async () => {
@@ -418,6 +562,57 @@ export default function ChildProgressReport() {
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Could not confirm the summary.');
     }
+  };
+
+  // One document's AI summary: its button, and the sentence under the file name
+  // that says what is happening or why it cannot. The button names its file, so
+  // a list of them is not a list of identical "AI summary"s. Only the one that
+  // is running changes (it says what it is summarising, and gets a Cancel);
+  // the others wait for it, because the model does one thing at a time, and
+  // the sentence on the running row says so.
+  const summaryRunning = (kind, f) => !!summaryRun && summaryRun.kind === kind && summaryRun.id === f.id;
+  const summaryControls = (kind, f) => {
+    const name = f.original_filename || 'this document';
+    const running = summaryRunning(kind, f);
+    return (
+      <>
+        <Button variant="ghost" size="sm" className="racco-no-print"
+                // The running button keeps the keyboard (aria-disabled, not disabled).
+                disabled={(summaryBusy && !running) || !!summaryOff}
+                aria-disabled={running || undefined}
+                aria-label={running ? `Summarising ${name}…` : f.ai_summary ? `Re-summarise ${name}` : `AI summary of ${name}`}
+                aria-describedby={summaryOff || running ? `summary-note-${kind}-${f.id}` : undefined}
+                style={running ? { maxWidth: 300, cursor: 'progress', opacity: 0.8 } : undefined}
+                onClick={() => {
+                  if (running) return;
+                  if (f.ai_summary_confirmed) setConfirmResummarize({ kind, id: f.id, filename: f.original_filename });
+                  else draftSummary(kind, f.id, f.original_filename);
+                }}>
+          {running
+            ? <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>Summarising {name}…</span>
+            : f.ai_summary ? 'Re-summarise' : 'AI summary'}
+        </Button>
+        {running && (
+          <Button variant="secondary" size="sm" className="racco-no-print" onClick={cancelSummary}
+                  aria-label={`Cancel the summary of ${name}`}>
+            Cancel
+          </Button>
+        )}
+      </>
+    );
+  };
+  const summaryNote = (kind, f) => {
+    const running = summaryRunning(kind, f);
+    const problem = summaryProblem && summaryProblem.kind === kind && summaryProblem.id === f.id;
+    if (!running && !problem && !summaryOff) return null;
+    return (
+      <div id={`summary-note-${kind}-${f.id}`} className="racco-no-print"
+           style={{ marginTop: 6, fontSize: 12.5, lineHeight: 1.45, fontWeight: 600, color: problem && !running ? 'var(--red-700)' : 'var(--text-muted)' }}>
+        {running ? 'This can take up to a minute. The other summary buttons wait for it.'
+          : problem ? summaryProblem.text
+            : `AI summary unavailable: ${summaryOff}`}
+      </div>
+    );
   };
 
   const addRemark = () => once(async () => {
@@ -493,6 +688,9 @@ export default function ChildProgressReport() {
 
   return (
     <div style={PAGE} className="racco-print-area racco-psych-print-root">
+      {/* The page's one polite announcement for the assistant's long waits:
+          polishing, summarising, and how each ended. Always mounted. */}
+      <LiveStatus text={aiNote} />
       {/* What Print puts on paper: the psychological report, not this screen
           (index.css hides the page's other children when printing). */}
       {printsCaseStudy
@@ -555,6 +753,19 @@ export default function ChildProgressReport() {
             <Button variant="secondary" onClick={() => openBrief()} iconLeft={<Icon name="sparkles" size={17} />}>
               {briefBusy ? 'Preparing…' : caseBrief ? 'Case brief' : 'Pre-session brief'}
             </Button>
+            {/* Opens the assistant with chips for THIS child and nothing
+                typed: the chips look the child up by number with no model, so
+                the child's name never leaves the system. */}
+            {assistantOn && (
+              <Button
+                variant="secondary"
+                onClick={() => openAssistant({ child: { id: child.id, name: child.fullname } })}
+                title="Ask the assistant about this child"
+                iconLeft={<Icon name="message-square" size={17} />}
+              >
+                Ask about this child
+              </Button>
+            )}
             <Button variant="secondary" onClick={printPage}
               disabled={printsCaseStudy && !printTarget.ready}
               title={!printsCaseStudy ? "Print this child's psychological report"
@@ -622,6 +833,8 @@ export default function ChildProgressReport() {
           behind an "Answers (3)" toggle, one click from anyone who thought to
           look. Nobody did. Folding them again would rebuild the failure. */}
       {(data.self_report_flags || []).filter((f) => !f.is_reviewed).length > 0 && (
+        // The id and tabIndex are where "Read their words" in the brief lands.
+        <div id="child-own-words" tabIndex={-1}>
         <Card
           eyebrow="Self-report"
           title={ownWordsTitle(data.child)}
@@ -655,6 +868,7 @@ export default function ChildProgressReport() {
             ))}
           </div>
         </Card>
+        </div>
       )}
 
       {/* Treatment plan + problems, side by side */}
@@ -833,9 +1047,9 @@ export default function ChildProgressReport() {
         ) : (
           <div style={{ padding: canWrite ? '0 16px 16px' : 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {data.reports.map((f) => (
-              <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', background: 'var(--ink-50)' }}>
+              <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: '8px 12px', flexWrap: 'wrap', padding: '10px 14px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', background: 'var(--ink-50)' }}>
                 <Icon name="file-text" size={18} style={{ color: 'var(--blue-600)' }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: '1 1 220px', minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.original_filename}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{reportTypeLabel(f.report_type)}{f.coverage ? ` · ${f.coverage}` : ''} · {f.author_name || '—'} · {(f.created_at || '').slice(0, 10)}</div>
                   {f.ai_summary && f.ai_summary_confirmed && (
@@ -850,15 +1064,9 @@ export default function ChildProgressReport() {
                     </div>
                   )}
                   <ReportCheckNote report={f} canReview={canAdvance} onReviewed={load} />
+                  {canSummariseReport && summaryNote('report', f)}
                 </div>
-                {canSummariseReport && (
-                  <Button variant="ghost" size="sm" disabled={summaryBusy} className="racco-no-print"
-                          onClick={() => f.ai_summary_confirmed
-                            ? setConfirmResummarize({ kind: 'report', id: f.id, filename: f.original_filename })
-                            : draftSummary('report', f.id)}>
-                    {f.ai_summary ? 'Re-summarise' : 'AI summary'}
-                  </Button>
-                )}
+                {canSummariseReport && summaryControls('report', f)}
                 {f.ai_summary && (
                   <Badge tone={f.ai_summary_confirmed ? 'success' : 'amber'} size="sm">
                     {f.ai_summary_confirmed ? 'Confirmed' : 'Draft (unconfirmed)'}
@@ -880,11 +1088,31 @@ export default function ChildProgressReport() {
       <Card eyebrow="Progress log" title="Psychological remark notes" padding="20px">
         {canWrite && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: data.remarks.length ? 18 : 0 }} className="racco-no-print">
-            <textarea value={remarkText} onChange={(e) => setRemarkText(e.target.value)} rows={3} placeholder="Add a dated remark for this child…" style={textarea} />
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            {/* Read-only, not disabled, while the assistant works: what is typed
+                stays where it is and is read out as the person's, and the draft
+                that arrives is the only thing that can replace it. */}
+            <FormField label="New remark">
+              <textarea ref={remarkBox} value={remarkText} onChange={(e) => setRemarkText(e.target.value)} rows={3}
+                        placeholder="Add a dated remark for this child…" style={textarea}
+                        readOnly={polishing} aria-busy={polishing || undefined}
+                        aria-describedby={polishOff || polishFailed ? 'polish-reason' : undefined} />
+            </FormField>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
+              {drafting && (polishOff || polishFailed) && (
+                // Why the button is grey, or why the last try did not work, in
+                // the server's words, where the button is and for as long as it holds.
+                <span id="polish-reason" style={{ flex: '1 1 220px', textAlign: 'right', fontSize: 12.5, lineHeight: 1.4, fontWeight: 600, color: polishOff ? 'var(--text-muted)' : 'var(--red-700)' }}>
+                  {polishOff ? `Polish unavailable: ${polishOff}` : polishFailed}
+                </span>
+              )}
               {drafting && (
-                <Button variant="ghost" onClick={polish}
-                        disabled={!remarkText.trim() || polishing}
+                <Button id="polish-remark-btn" variant="ghost" onClick={polish}
+                        disabled={!remarkText.trim() || !!polishOff}
+                        // Not `disabled` while it works: that would drop the keyboard
+                        // off the button that was just pressed.
+                        aria-disabled={polishing || undefined}
+                        aria-describedby={polishOff || polishFailed ? 'polish-reason' : undefined}
+                        style={polishing ? { opacity: 0.6, cursor: 'progress' } : undefined}
                         iconLeft={<Icon name="sparkles" size={16} />}>
                   {polishing ? 'Polishing…' : 'Polish writing'}
                 </Button>
@@ -991,9 +1219,9 @@ export default function ChildProgressReport() {
         ) : (
           <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {data.case_referrals.map((f) => (
-              <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', background: 'var(--ink-50)' }}>
+              <div key={f.id} style={{ display: 'flex', alignItems: 'center', gap: '8px 12px', flexWrap: 'wrap', padding: '10px 14px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border)', background: 'var(--ink-50)' }}>
                 <Icon name="folder-heart" size={18} style={{ color: 'var(--amber-500)' }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ flex: '1 1 220px', minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.original_filename}</div>
                   <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{f.description || 'Case referral'} · {f.uploaded_by_name || '—'} · {(f.created_at || '').slice(0, 10)}</div>
                   {f.ai_summary && f.ai_summary_confirmed && (
@@ -1007,15 +1235,9 @@ export default function ChildProgressReport() {
                       <p style={{ fontSize: 12.5, color: 'var(--text-body)', margin: 0, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{f.ai_summary}</p>
                     </div>
                   )}
+                  {canSummariseReferral && summaryNote('case-referral', f)}
                 </div>
-                {canSummariseReferral && (
-                  <Button variant="ghost" size="sm" disabled={summaryBusy} className="racco-no-print"
-                          onClick={() => f.ai_summary_confirmed
-                            ? setConfirmResummarize({ kind: 'case-referral', id: f.id, filename: f.original_filename })
-                            : draftSummary('case-referral', f.id)}>
-                    {f.ai_summary ? 'Re-summarise' : 'AI summary'}
-                  </Button>
-                )}
+                {canSummariseReferral && summaryControls('case-referral', f)}
                 {f.ai_summary && (
                   <Badge tone={f.ai_summary_confirmed ? 'success' : 'amber'} size="sm">
                     {f.ai_summary_confirmed ? 'Confirmed' : 'Draft (unconfirmed)'}
@@ -1166,9 +1388,9 @@ export default function ChildProgressReport() {
         <ConfirmDialog
           onClose={() => setConfirmResummarize(null)}
           onConfirm={() => {
-            const { kind, id } = confirmResummarize;
+            const { kind, id, filename } = confirmResummarize;
             setConfirmResummarize(null);
-            draftSummary(kind, id);
+            draftSummary(kind, id, filename);
           }}
           tone="danger" icon={<Icon name="alert-triangle" size={19} />}
           title="Replace the confirmed summary?"
@@ -1184,14 +1406,20 @@ export default function ChildProgressReport() {
         <Modal open onClose={() => setBrief(null)} title={caseBrief ? 'Case brief' : 'Pre-session brief'}
                subtitle={brief.prose === 'ready' ? `Drafted ${clock(brief.generatedAt)}` : null}
                width={560}>
+          {/* The modal's one status line. It stays in the tree from the moment the
+              modal opens and only its words change, so each stage is said once:
+              the facts arriving, the written brief being drafted, and how that
+              ended. (It used to be a status that unmounted as the result landed.) */}
+          <LiveStatus text={briefStatus(brief, briefBusy)} />
           <BriefFacts facts={brief.facts} failed={brief.factsFailed}
-                      onGo={(to) => { setBrief(null); navigate(to); }} />
+                      onGo={(to) => { setBrief(null); navigate(to); }}
+                      onRetry={retryBriefFacts} onOpenOverview={openOverviewWords} />
           <>
             {brief.prose !== 'none' && (
               <div style={{ borderTop: '1px solid var(--border)', margin: '16px 0 12px' }} />
             )}
             {brief.prose === 'loading' && (
-              <p role="status" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+              <p style={{ fontSize: 13, color: 'var(--text-muted)' }}>
                 Drafting the written brief… this can take up to a minute.
               </p>
             )}
@@ -1200,11 +1428,13 @@ export default function ChildProgressReport() {
             )}
             {brief.prose === 'unavailable' && (
               <Note icon="info">
-                The written brief is unavailable right now. The facts above come straight from the record.
+                {brief.reason ? `${brief.reason} ` : ''}The written brief is unavailable right now. The facts above come straight from the record.
               </Note>
             )}
             {brief.prose === 'failed' && (
-              <Note tone="warning" icon="alert-triangle">Could not prepare the written brief.</Note>
+              <Note tone="warning" icon="alert-triangle">
+                Could not prepare the written brief.{brief.reason ? ` ${brief.reason}` : ''}
+              </Note>
             )}
             {brief.prose === 'ready' && (
               <>
@@ -1215,13 +1445,21 @@ export default function ChildProgressReport() {
                 <div style={{ whiteSpace: 'pre-wrap', fontSize: 14, lineHeight: 1.6 }}>{brief.draft}</div>
               </>
             )}
-            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap', marginTop: 16 }}>
               {brief.prose === 'ready' ? (
                 <>
+                  {brief.regenReason && (
+                    // Why there is no new draft, where the button is; a 503 also greys it.
+                    <span id="brief-regen-reason" style={{ flex: '1 1 200px', textAlign: 'right', fontSize: 12.5, lineHeight: 1.4, fontWeight: 600, color: brief.regenOff ? 'var(--text-muted)' : 'var(--red-700)' }}>
+                      {brief.regenOff ? `Regenerate unavailable: ${brief.regenReason}` : brief.regenReason}
+                    </span>
+                  )}
                   <Button variant="ghost" onClick={() => { sendFeedback(brief.jobId, 'discarded').catch(() => {}); setBrief(null); }}>
                     Not useful
                   </Button>
-                  <Button variant="ghost" onClick={() => openBrief({ regenerate: true })} disabled={briefBusy}>
+                  <Button variant="ghost" onClick={() => openBrief({ regenerate: true })}
+                          disabled={briefBusy || !!brief.regenOff}
+                          aria-describedby={brief.regenReason ? 'brief-regen-reason' : undefined}>
                     {briefBusy ? 'Drafting…' : 'Regenerate (slow)'}
                   </Button>
                   <Button variant="primary" onClick={() => { sendFeedback(brief.jobId, 'accepted').catch(() => {}); setBrief(null); }}>
@@ -1246,9 +1484,12 @@ export default function ChildProgressReport() {
       )}
       {viewing && <ReportViewer report={viewing} onClose={() => setViewing(null)} onDownload={download} />}
 
-      {/* Document summary modal */}
+      {/* Document summary modal. Once the draft is edited it is not closed by the
+          backdrop or Escape on a stray press: every way of closing it asks
+          "Discard your edits?" first (closeSummary), and the buttons name the file. */}
       {summary && (
-        <Modal open onClose={() => setSummary(null)} title="Document summary" width={620}>
+        <Modal open onClose={closeSummary} onDismissBlocked={closeSummary} dismissible={!summaryEdited}
+               title="Document summary" subtitle={summary.filename} width={620}>
           <Alert tone="info" disclaimer style={{ marginBottom: 12 }}>
             AI-drafted decision support, not a diagnosis. Edit freely — confirming
             makes this your own clinical text.
@@ -1260,11 +1501,12 @@ export default function ChildProgressReport() {
               {summary.coverage}
             </Alert>
           )}
-          <textarea rows={14} style={textarea} value={summary.text} aria-label="Summary draft"
+          <textarea rows={14} style={textarea} value={summary.text} aria-label={`Summary draft of ${summary.filename}`}
                     onChange={(e) => setSummary({ ...summary, text: e.target.value })} />
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 14 }}>
-            <Button variant="ghost" onClick={() => setSummary(null)}>Cancel</Button>
-            <Button variant="primary" onClick={saveSummary} disabled={!summary.text.trim()}>
+            <Button variant="ghost" onClick={closeSummary} aria-label={`Cancel the summary of ${summary.filename}`}>Cancel</Button>
+            <Button variant="primary" onClick={saveSummary} disabled={!summary.text.trim()}
+                    aria-label={`Confirm summary of ${summary.filename}`}>
               Confirm summary
             </Button>
           </div>

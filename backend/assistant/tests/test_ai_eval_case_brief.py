@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import CommandError, call_command
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from accounts.models import Role
@@ -578,11 +578,14 @@ class TheRuntimeIsCheckedFirstTest(EvalFixture):
         hosted = services.OpenAICompatibleClient(
             "https://api.example.test/v1", "hosted-model", "token")
         out = StringIO()
-        with patch("assistant.management.commands.ai_eval.get_ai_client",
-                   return_value=hosted) as get_client, \
+        # Records go to a hosted model only on request, and only with DEBUG on.
+        with override_settings(DEBUG=True), \
+                patch("assistant.management.commands.ai_eval.get_ai_client",
+                      return_value=hosted) as get_client, \
                 patch.object(services.OpenAICompatibleClient, "generate",
                              side_effect=answers_the_check_and_writes_briefs):
-            call_command("ai_eval", "--feature", "case_brief", "--reps", "1", stdout=out)
+            call_command("ai_eval", "--feature", "case_brief", "--reps", "1",
+                         "--allow-hosted-records", stdout=out)
         get_client.assert_called_once_with(allow_hosted=True)
         self.assertIn("CASE BRIEF - 1 children x 1 reps", out.getvalue())
 
@@ -594,7 +597,7 @@ class TheRuntimeIsCheckedFirstTest(EvalFixture):
                 patch.object(services.OpenAICompatibleClient, "generate",
                              side_effect=services.AIUnavailable("Hosted model error: 401")):
             with self.assertRaises(CommandError) as ctx:
-                call_command("ai_eval", "--feature", "case_brief", stdout=StringIO())
+                call_command("ai_eval", "--feature", "chat", stdout=StringIO())
         text = str(ctx.exception)
         self.assertIn("https://api.example.test/v1", text)
         self.assertIn("hosted-model", text)

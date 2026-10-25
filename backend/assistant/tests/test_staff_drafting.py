@@ -18,6 +18,7 @@ Each exercise returns what it OBSERVED: "refused", "guarded", "tool_only", or
 "open" - model text reached Staff unchecked - which no entry can ever be.
 """
 import json
+import re
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -46,9 +47,16 @@ REFERRAL_TEXT = "Maria was found at the barangay hall with her aunt in San Juan.
 
 
 def leaked(body):
-    """The telltale pieces of INVENTED found anywhere in `body`."""
+    """The telltale pieces of INVENTED found anywhere in `body`.
+
+    Each is looked for as a piece of its own: "77" inside a timestamp's
+    microseconds ("...:52.477123+08:00", which a serialised flag carries) is
+    not the invented number, and read as one it failed this suite about one run
+    in fourteen.
+    """
     text = body if isinstance(body, str) else json.dumps(body, default=str)
-    return [t for t in TELLTALES if t in text]
+    return [t for t in TELLTALES
+            if re.search(rf"(?<![\w.]){re.escape(t)}(?![\w.])", text)]
 
 
 class StaffDraftingFixture(APITestCase):

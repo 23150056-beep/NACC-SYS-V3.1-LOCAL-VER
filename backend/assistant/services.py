@@ -17,7 +17,9 @@ import time
 import urllib.error
 import urllib.request
 
+from assistant import retention
 from assistant.models import AssistantJob, AssistantSetting
+from assistant.runtime import runtime_url_refusal
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +32,25 @@ DISCLAIMER = ("AI-drafted decision support, not a diagnosis. The licensed "
 _GENERATION_LOCK = threading.Lock()
 
 
+# Why the assistant could not answer, as a fixed code a screen can act on. The
+# 503 carries one of these beside its sentence (AssistantBaseView): the
+# sentence may hold the runtime's own error text, so nothing is ever worked out
+# from it, and the panel says "switched off" or "not running" from the code.
+SWITCHED_OFF_CODE = "switched_off"
+RUNTIME_UNREACHABLE_CODE = "runtime_unreachable"
+HOSTED_NOT_ALLOWED_CODE = "hosted_not_allowed"
+
+
 class AIUnavailable(Exception):
-    """Raised whenever a draft cannot be produced. Always surfaces as a 503."""
+    """Raised whenever a draft cannot be produced. Always surfaces as a 503.
+
+    `reason` is one of the three codes above. A raise that names none is the
+    runtime not answering, which is what most of them are.
+    """
+
+    def __init__(self, message="", reason=RUNTIME_UNREACHABLE_CODE):
+        super().__init__(message)
+        self.reason = reason
 
 
 SWITCHED_OFF = "The assistant is switched off."
@@ -48,14 +67,15 @@ class NullClient:
     available = False
     model = ""
 
-    def __init__(self, reason=SWITCHED_OFF):
+    def __init__(self, reason=SWITCHED_OFF, code=SWITCHED_OFF_CODE):
         self.reason = reason
+        self.code = code
 
     def generate(self, prompt, system=None):
-        raise AIUnavailable(self.reason)
+        raise AIUnavailable(self.reason, self.code)
 
     def choose_tool(self, question, tool_payload, system=None):
-        raise AIUnavailable(self.reason)
+        raise AIUnavailable(self.reason, self.code)
 
 
 class OllamaClient:
@@ -178,7 +198,7 @@ def get_ai_client(*, allow_hosted=False):
 
     if hosted_model_configured():
         if not allow_hosted:
-            return NullClient(HOSTED_DRAFTING_REFUSED)
+            return NullClient(HOSTED_DRAFTING_REFUSED, HOSTED_NOT_ALLOWED_CODE)
         # Said out loud, every time, so "which model answered this" is never a
         # guess. The token is never logged.
         logger.info("Assistant is using the HOSTED model %s at %s",
@@ -187,6 +207,13 @@ def get_ai_client(*, allow_hosted=False):
                                       settings.ASSISTANT_MODEL_NAME,
                                       settings.ASSISTANT_MODEL_TOKEN)
 
+    # The runtime is wherever the administrator saved it, which is checked when
+    # it is saved - but a value can arrive another way (the Django admin, a
+    # shell, a row saved before the rule), and this is the one place that sends
+    # anything. A remote address is not used unless the deployment allows one.
+    refusal = runtime_url_refusal(cfg.ollama_url)
+    if refusal:
+        return NullClient(refusal, RUNTIME_UNREACHABLE_CODE)
     return OllamaClient(cfg.ollama_url, cfg.model_name)
 
 
@@ -216,7 +243,7 @@ def gate():
     """
     cfg = AssistantSetting.load()
     if not cfg.enabled:
-        raise AIUnavailable("The assistant is switched off.")
+        raise AIUnavailable(SWITCHED_OFF, SWITCHED_OFF_CODE)
     return cfg
 
 
@@ -243,8 +270,10 @@ def run_job(job_type, prompt, *, system=None, input_ref="", user=None, child=Non
     working on Tuesday" is answerable from data rather than from memory.
 
     Pass `child` whenever the prompt is built from a child's record, or the
-    ISA's access log on that child's page will not show the read.
+    ISA's access log on that child's page will not show the read. A refusal
+    that sent nothing is not attributed to the child (see below).
     """
+    retention.prune_if_due()
     client = get_ai_client()
     creator = user if getattr(user, "is_authenticated", False) else None
     started = time.monotonic()
@@ -253,11 +282,18 @@ def run_job(job_type, prompt, *, system=None, input_ref="", user=None, child=Non
         with _GENERATION_LOCK:
             raw = client.generate(prompt, system=system)
     except AIUnavailable as exc:
+        # The row is kept for the usage figures, but it names the child only
+        # when a read was attempted. A client that is not available (the
+        # assistant switched off, a hosted deployment refusing to draft from
+        # records, a remote runtime address that is not used) never sent
+        # anything, and the child's access log must not list a read that never
+        # happened - the same rule the self-report check follows.
         AssistantJob.objects.create(
             job_type=job_type, input_ref=input_ref, ok=False,
             error=str(exc)[:255], model_used=getattr(client, "model", ""),
             latency_ms=int((time.monotonic() - started) * 1000),
-            created_by=creator, child=child)
+            created_by=creator,
+            child=child if getattr(client, "available", True) else None)
         raise
 
     text = _normalize_output(raw)

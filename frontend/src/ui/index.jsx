@@ -4,6 +4,7 @@ import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutE
 import { createPortal } from 'react-dom';
 import * as Lucide from 'lucide-react';
 import { initialsOf } from '../utils/child';
+import { useDialogBehaviour } from './useDialogBehaviour';
 import { finishTime, timeValue, typeTime } from '../utils/time';
 
 /* ----------------------------- Icon ----------------------------- */
@@ -636,69 +637,41 @@ export function Skeleton({ width = '100%', height = 12, radius = 'var(--radius-x
   return <span className="racco-skeleton" aria-hidden="true" style={{ display: 'block', width, height, borderRadius: radius, ...style }} />;
 }
 
-/* ------------------------ Dialog behaviour (a11y) ------------------------ *
- * Everything a modal/drawer owes the keyboard: focus moves in on open, Tab is
- * trapped inside, Escape closes (when the dialog allows it), and focus returns
- * to whatever opened it. Attach the returned ref to the dialog element. */
-const FOCUSABLE_SELECTOR = 'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
-
-/* Dialogs stack — a confirm can open on top of a drawer. Only the topmost one
- * may answer Escape or trap Tab, or the layer underneath drags focus back out
- * of the dialog the user is actually looking at. */
-const dialogStack = [];
-
-function useDialogBehaviour({ active = true, onClose, closeOnEscape = true } = {}) {
-  const ref = useRef(null);
-  // The handlers live in a ref so the effect's only dependency is `active`.
-  // Re-running it would pull focus back to the first control — and callers
-  // legitimately change these mid-dialog (a form flips `closeOnEscape` off the
-  // moment it becomes dirty, i.e. on the user's first keystroke).
-  const latest = useRef({ onClose, closeOnEscape });
-  latest.current = { onClose, closeOnEscape };
+/* ----------------------------- LiveStatus ----------------------------- *
+ * One polite live region that STAYS mounted while its text changes ("Loading
+ * the facts…" -> "Facts loaded"). A status that appears together with its
+ * words, or that is unmounted when the result lands, is often not announced at
+ * all - so the region renders empty first and takes its text a moment later,
+ * and callers keep it in the tree for the whole wait.
+ *
+ * Hidden from the eye by default (`visible` shows it): the words are for a
+ * screen reader, and the screen has its own, visible way of saying the same.
+ * Pass '' to say nothing; setting the same words again after they were cleared
+ * says them again. */
+export function LiveStatus({ text = '', visible = false, role = 'status', style, ...rest }) {
+  const [shown, setShown] = useState('');
   useEffect(() => {
-    if (!active) return undefined;
-    const token = {};
-    dialogStack.push(token);
-    const opener = document.activeElement;
-    const node = ref.current;
-    const visible = () => Array.from(node?.querySelectorAll(FOCUSABLE_SELECTOR) || [])
-      .filter((el) => el.offsetParent !== null || el === document.activeElement);
-    // Focus the first real control, else the dialog itself, so screen readers
-    // land inside the dialog instead of continuing behind it.
-    (visible()[0] || node)?.focus();
-    const onKey = (e) => {
-      if (dialogStack[dialogStack.length - 1] !== token) return;
-      const { onClose: close, closeOnEscape: escapeCloses } = latest.current;
-      if (e.key === 'Escape' && escapeCloses && close) {
-        e.preventDefault(); e.stopPropagation(); close(); return;
-      }
-      if (e.key !== 'Tab' || !node) return;
-      const items = visible();
-      if (!items.length) return;
-      const first = items[0];
-      const last = items[items.length - 1];
-      if (e.shiftKey && (document.activeElement === first || document.activeElement === node)) {
-        e.preventDefault(); last.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault(); first.focus();
-      }
-    };
-    document.addEventListener('keydown', onKey, true);
-    return () => {
-      document.removeEventListener('keydown', onKey, true);
-      const at = dialogStack.indexOf(token);
-      if (at !== -1) dialogStack.splice(at, 1);
-      if (opener instanceof HTMLElement && document.contains(opener)) opener.focus();
-    };
-  }, [active]);
-  return ref;
+    if (!text) { setShown(''); return undefined; }
+    const timer = setTimeout(() => setShown(text), 60);
+    return () => clearTimeout(timer);
+  }, [text]);
+  return (
+    <div role={role} className={visible ? undefined : 'racco-sr-only'} style={style} {...rest}>{shown}</div>
+  );
 }
 
 /* ----------------------------- Modal ----------------------------- *
  * `dismissible={false}` for anything the user cannot get back — a one-time
  * secret, an unsaved form: a stray backdrop click must not destroy it. */
-export function Modal({ open = true, onClose, title, subtitle = null, icon = null, tone = 'neutral', width = 460, dismissible = true, children, footer = null, style = {} }) {
-  const ref = useDialogBehaviour({ active: open, onClose, closeOnEscape: dismissible });
+export function Modal({ open = true, onClose, title, subtitle = null, icon = null, tone = 'neutral', width = 460, dismissible = true, onDismissBlocked = null, children, footer = null, style = {} }) {
+  // With `onDismissBlocked` the backdrop, Escape and the close button all still
+  // act - they ask instead of closing ("Discard your edits?"), as a Drawer's do.
+  // Without it a non-dismissible modal ignores all three, as before.
+  const close = useCallback(() => {
+    if (dismissible) onClose?.(); else onDismissBlocked?.();
+  }, [dismissible, onClose, onDismissBlocked]);
+  const closable = dismissible || !!onDismissBlocked;
+  const ref = useDialogBehaviour({ active: open, onClose: close, closeOnEscape: closable });
   const titleId = useId();
   if (!open) return null;
   const tones = {
@@ -711,7 +684,7 @@ export function Modal({ open = true, onClose, title, subtitle = null, icon = nul
   const [chipBg, chipFg] = tones[tone] || tones.neutral;
   return createPortal(
     <div
-      onMouseDown={(e) => { if (dismissible && e.target === e.currentTarget) onClose?.(); }}
+      onMouseDown={(e) => { if (closable && e.target === e.currentTarget) close(); }}
       style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.42)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 90, animation: 'racco-fade-in var(--dur-base) var(--ease-out)' }}
     >
       <div
@@ -724,8 +697,8 @@ export function Modal({ open = true, onClose, title, subtitle = null, icon = nul
             <h2 id={titleId} style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)', margin: 0 }}>{title}</h2>
             {subtitle && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>{subtitle}</div>}
           </div>
-          {dismissible && (
-            <button type="button" onClick={onClose} aria-label="Close" {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--text-muted)')}><Icon name="x" size={16} /></button>
+          {closable && (
+            <button type="button" onClick={close} aria-label="Close" {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--text-muted)')}><Icon name="x" size={16} /></button>
           )}
         </div>
         <div style={{ padding: '16px 22px', display: 'flex', flexDirection: 'column', gap: 14 }}>{children}</div>

@@ -531,3 +531,18 @@ ASSISTANT_MODEL_URL = os.getenv("ASSISTANT_MODEL_URL", "").strip()
 ASSISTANT_MODEL_TOKEN = os.getenv("ASSISTANT_MODEL_TOKEN", "").strip()
 ASSISTANT_MODEL_NAME = os.getenv("ASSISTANT_MODEL_NAME", "").strip()
 ASSISTANT_ALLOW_HOSTED_MODEL = env_bool("ASSISTANT_ALLOW_HOSTED_MODEL", False)
+
+# Where the LOCAL model runtime may be. Unset, the runtime address an
+# administrator saves in Settings must be this machine (localhost, 127.0.0.1 or
+# ::1): the drafting features send case notes, reports and children's own
+# answers there. Set it only on a deployment whose model server genuinely lives
+# on another machine of the agency's own - it is an environment variable, and
+# not a setting in the app, so it takes whoever runs the server rather than
+# whoever holds an administrator account.
+ASSISTANT_ALLOW_REMOTE_RUNTIME = env_bool("ASSISTANT_ALLOW_REMOTE_RUNTIME", False)
+
+# The assistant log keeps text (questions, drafts, summaries) that has no use
+# after a few days; assistant/retention.py blanks it, by itself, at most once an
+# hour, from the first assistant request after that. Off under the test runner,
+# where it would fire at an arbitrary point of an arbitrary test.
+ASSISTANT_PRUNE_ON_REQUEST = not _TESTING

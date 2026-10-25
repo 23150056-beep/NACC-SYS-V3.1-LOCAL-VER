@@ -10,17 +10,19 @@ from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from accounts.models import Role
+from accounts.models import Role, User
 from accounts.scoping import (role_of as _role, role_of_user as _role_of,
                               visible_children)
 from accounts.permissions import (IsAdministrator, IsAdminOrStaff, is_admin_or_assignee,
                                   writes_case_referrals)
-from assistant import evaluation, guards, prompts, tools
+from assistant import evaluation, guards, prompts, retention, tools
 from assistant.brief_facts import brief_facts, brief_kind
 from assistant.models import AssistantJob, AssistantSetting
+from assistant.redact import Masker
+from assistant.runtime import record_runtime_change
 from assistant.serializers import AssistantSettingSerializer
 from assistant.services import (AIUnavailable, DISCLAIMER,
-                                HOSTED_DRAFTING_REFUSED, OpenAICompatibleClient,
+                                HOSTED_DRAFTING_REFUSED, HOSTED_NOT_ALLOWED_CODE, OpenAICompatibleClient,
                                 drafting_available, gate, get_ai_client, run_job,
                                 services_lock)
 from children.models import Child
@@ -84,7 +86,9 @@ class AssistantBaseView(generics.GenericAPIView):
 
     def handle_exception(self, exc):
         if isinstance(exc, AIUnavailable):
-            return Response({"detail": str(exc)},
+            # `reason` is a fixed code (services.*_CODE), never worked out from
+            # the sentence, which can carry the runtime's own error text.
+            return Response({"detail": str(exc), "reason": exc.reason},
                             status=status.HTTP_503_SERVICE_UNAVAILABLE)
         return super().handle_exception(exc)
 
@@ -99,10 +103,14 @@ class AssistantSettingView(AssistantBaseView):
         return Response(AssistantSettingSerializer(AssistantSetting.load()).data)
 
     def put(self, request):
-        serializer = AssistantSettingSerializer(
-            AssistantSetting.load(), data=request.data, partial=True)
+        current = AssistantSetting.load()
+        before = (current.ollama_url, current.model_name)
+        serializer = AssistantSettingSerializer(current, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
-        serializer.save()
+        saved = serializer.save()
+        # Where case text goes, and which model reads it: moving either is a
+        # security event, kept with the ISA's name (see assistant/runtime.py).
+        record_runtime_change(request.user, *before, saved.ollama_url, saved.model_name)
         return Response(serializer.data)
 
 
@@ -355,7 +363,7 @@ class PrefetchBriefsView(AssistantBaseView):
             # audited as a failure - a row per child per schedule visit, in a
             # background thread, for nobody. prefetchBriefs() on the schedule
             # screen already swallows the 503.
-            raise AIUnavailable(HOSTED_DRAFTING_REFUSED)
+            raise AIUnavailable(HOSTED_DRAFTING_REFUSED, HOSTED_NOT_ALLOWED_CODE)
         today = timezone.localdate()
         visible = visible_children(request)
         appts = Appointment.objects.filter(
@@ -522,7 +530,10 @@ class ConfirmSummaryView(AssistantBaseView):
         job = AssistantJob.objects.filter(
             job_type="doc_intelligence", input_ref=f"{prefix}:{doc.id}",
             ok=True).first()
-        if job:
+        # A draft older than the retention window has had its text blanked
+        # (assistant/retention.py), and "kept verbatim" cannot be told any more:
+        # the outcome stays pending rather than being recorded as an edit.
+        if job and job.output_text:
             job.outcome = (AssistantJob.ACCEPTED
                            if job.output_text.strip() == text
                            else AssistantJob.EDITED)
@@ -635,19 +646,32 @@ class AssistantUnansweredView(AssistantBaseView):
     to change something and runtime failures are counted but not listed —
     none of them is a question the assistant should learn to answer.
 
-    Administrators only, like the usage table it sits beside. The questions are
-    already readable in the Django admin's job list, so this is a view of rows
-    that exist, not new exposure. It names the asker's ROLE and never the
-    person: the point is what the agency needs, not who asked.
+    Administrators only, like the usage table it sits beside. It shows what was
+    asked, and the words are other people's, so it is held to three rules:
+
+    - The question is the one the log kept, with every child's name, phone
+      number and email address already taken out (assistant/redact.py). Rows
+      written before that was done are masked again as they are read - the ISA
+      sees every child, so every name is known - and a question is shown with
+      "CHILD" in it, never a name.
+    - The asker is never named, and a role is named only when at least
+      MIN_ROLE_SIZE active accounts hold it. "A psychologist asked this" says
+      who it was when the agency has one psychologist.
+    - The date is the day, not the time.
 
     Not gated, for the metrics' reason: reading history has to keep working
     while the assistant is switched off.
     """
     permission_classes = [IsAdministrator]
     LIST_LIMIT = 25
+    MIN_ROLE_SIZE = 3
+    SOMEONE = "a colleague"
 
     def get(self, request):
         since = timezone.now() - timedelta(days=WINDOW_DAYS)
+        seats = dict(User.objects.filter(status=User.ACTIVE)
+                     .values_list("role__role_name").annotate(n=Count("id")))
+        masker = Masker(request)
         # Typed questions only: see FOLLOWUP_MODEL.
         chats = (AssistantJob.objects
                  .filter(job_type="chat", created_at__gte=since)
@@ -679,18 +703,21 @@ class AssistantUnansweredView(AssistantBaseView):
         groups = {}
         for job in misses:
             why = _why_unanswered(job)
+            question = masker.fork().mask_text(job.input_ref)
             # The same question asked twice is one row with a count. Case,
             # spacing and a trailing "?" are not a different question.
-            key = (" ".join(job.input_ref.lower().split()).rstrip("?!. "), why)
+            key = (" ".join(question.lower().split()).rstrip("?!. "), why)
             group = groups.get(key)
             if group is None:
                 # Newest first, so the wording kept is the most recent.
                 group = groups[key] = {
-                    "question": job.input_ref, "why": why, "times": 0,
+                    "question": question, "why": why, "times": 0,
                     "last_asked": timezone.localtime(job.created_at).date().isoformat(),
                     "roles": set()}
             group["times"] += 1
-            group["roles"].add(_role_of(job.created_by) or "Unknown")
+            role = _role_of(job.created_by)
+            group["roles"].add(role if seats.get(role, 0) >= self.MIN_ROLE_SIZE
+                               else self.SOMEONE)
 
         # Most-asked first; among equals, the most recent.
         ordered = sorted(groups.values(), key=lambda g: g["last_asked"], reverse=True)
@@ -841,6 +868,10 @@ class AssistantCapabilitiesView(AssistantBaseView):
     facts alone, and for the social worker what to do next). It follows the role, not the deployment, so the screen can
     choose the button before anything else has answered.
 
+    `examples` are {label, tool, args}: the panel runs each through
+    /assistant/followup/ without the model. `enabled` is the administrator's
+    switch.
+
     `drafting` is False where the model is hosted, because get_ai_client()
     refuses every caller without allow_hosted. A brief's prose, polish, summary
     or census narrative there can only answer 503, so the screens hide those
@@ -854,6 +885,10 @@ class AssistantCapabilitiesView(AssistantBaseView):
         return Response({"can_ask": tools.capability_text(role),
                          "examples": tools.capability_examples(role),
                          "drafting": drafting_available(),
+                         # The administrator's switch: a fact about the agency,
+                         # the same for everyone, so the panel can say "switched
+                         # off by the ISA" before anyone asks anything.
+                         "enabled": AssistantSetting.load().enabled,
                          "brief": brief_kind(role)})
 
 
@@ -879,18 +914,24 @@ def _answer_kind(call):
 FOLLOWUP_MODEL = "follow-up (no model)"
 
 
-def _answer(request, call, question, model_used, started):
+def _answer(request, call, question, model_used, started, masker):
     """Log the turn, run the lookup, record how it ended, and respond.
 
     One path for both ways a turn arrives — a typed question the model routed,
     and a follow-up chip that skipped the model — so the log, the failure
     handling and the response cannot differ between them.
+
+    `question` is what the log keeps, so it arrives already masked (see
+    assistant/redact.py). The tool call is masked here, with the same `masker`:
+    by now its arguments hold the real name the lookup needs, and the row must
+    not.
     """
+    retention.prune_if_due()
     creator = request.user if request.user.is_authenticated else None
     job = AssistantJob.objects.create(
         job_type="chat", input_ref=question[:150],
-        output_text=f"{call.tool}({call.args})"[:2000],
-        model_used=model_used, ok=call.ok, error=call.error[:255],
+        output_text=masker.mask_text(f"{call.tool}({call.args})")[:2000],
+        model_used=model_used, ok=call.ok, error=masker.mask_text(call.error)[:255],
         answer="" if call.ok else AssistantJob.NOT_UNDERSTOOD,
         latency_ms=int((time.monotonic() - started) * 1000),
         created_by=creator)
@@ -914,7 +955,9 @@ def _answer(request, call, question, model_used, started):
     try:
         result = tools.REGISTRY[call.tool]["resolve"](request, call.args)
     except Exception:                                        # noqa: BLE001
-        logger.exception("Chat resolver failed: %s(%s)", call.tool, call.args)
+        # The tool only: its arguments hold what was asked about, which is
+        # often a child's name, and a log line is read by whoever reads logs.
+        logger.exception("Chat resolver failed: %s", call.tool)
         job.ok = False
         job.error = f"resolver failed: {call.tool}"[:255]
         job.answer = AssistantJob.FAILED
@@ -963,17 +1006,22 @@ class AssistantAskView(AssistantBaseView):
                 status=status.HTTP_400_BAD_REQUEST)
 
         # The one feature whose prompt may leave the machine: it is the typed
-        # question, and records only ever come back from the database.
+        # question, and records only ever come back from the database. Even so,
+        # a name of a child the asker can see, a phone number and an email
+        # address are taken out first - always, local or hosted, so the prompt
+        # stays one constant - and the model's arguments get them back here.
+        masker = Masker(request)
+        masked = masker.mask_text(question)
         client = get_ai_client(allow_hosted=True)
         creator = request.user if request.user.is_authenticated else None
         started = time.monotonic()
         try:
             with services_lock():
                 name, raw_args = client.choose_tool(
-                    question, tools.ollama_payload(), system=prompts.CHAT_SYSTEM)
+                    masked, tools.ollama_payload(), system=prompts.CHAT_SYSTEM)
         except AIUnavailable as exc:
             AssistantJob.objects.create(
-                job_type="chat", input_ref=question[:150], ok=False,
+                job_type="chat", input_ref=masked[:150], ok=False,
                 answer=AssistantJob.FAILED,
                 error=str(exc)[:255], model_used=getattr(client, "model", ""),
                 latency_ms=int((time.monotonic() - started) * 1000),
@@ -985,7 +1033,10 @@ class AssistantAskView(AssistantBaseView):
         if not name:
             name, raw_args = "answer_directly", {"reason": "unsupported"}
 
-        call = tools.validate(name, raw_args)
+        call = tools.validate(name, masker.restore(raw_args))
+        # The three guards below read the question as typed: they run on this
+        # machine, and a masked "CHILD" would read as the word "child" to the
+        # first of them. Only the model and the log get the masked text.
         # Deterministic backstop for the one misroute seen in the wild: "how
         # many psychologists are in the system?" answered "40 active children".
         # It can only make the assistant decline, never assert.
@@ -996,11 +1047,13 @@ class AssistantAskView(AssistantBaseView):
         # And a greeting is a greeting even when the model forgets to say
         # so, which it does two times in three.
         call = tools.correct_greeting(question, call)
-        return _answer(request, call, question, client.model, started)
+        return _answer(request, call, masked, client.model, started, masker)
 
 
 class AssistantFollowupView(AssistantBaseView):
-    """A follow-up chip: a ready-made tool call, run without the model.
+    """A follow-up chip: a ready-made tool call, run without the model. The
+    starter questions in the empty panel (/assistant/capabilities/) and "Ask
+    about this child" arrive here too.
 
     The panel only sends calls it was offered by tools.followups, but nothing
     here relies on that. The tool must be one that chips come from, the
@@ -1027,10 +1080,15 @@ class AssistantFollowupView(AssistantBaseView):
         if not isinstance(label, str) or not label.strip() or len(label) > MAX_QUESTION:
             return Response({"detail": "A follow-up needs the label it was offered with."},
                             status=status.HTTP_400_BAD_REQUEST)
-        call = tools.validate(tool, args)
+        # The one door that may name a child by number: a chip is built by the
+        # server from an answer it gave, and the number is looked up in the
+        # asker's own scope like every other argument.
+        call = tools.validate(tool, args, allow_internal=True)
         if not call.ok:
             return Response({"detail": call.error}, status=status.HTTP_400_BAD_REQUEST)
-        return _answer(request, call, label.strip(), FOLLOWUP_MODEL, started)
+        masker = Masker(request)
+        return _answer(request, call, masker.mask_text(label.strip()),
+                       FOLLOWUP_MODEL, started, masker)
 
 
 class ModelHealthView(AssistantBaseView):

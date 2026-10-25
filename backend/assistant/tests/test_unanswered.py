@@ -41,6 +41,18 @@ class UnansweredBase(APITestCase):
                 created_at=timezone.now() - timedelta(days=days_ago))
         return job
 
+    def _more_people(self, role_name, count, status=None):
+        """Accounts of a role, so that role is shared by enough people to be
+        named. `status` makes them something other than active."""
+        role = Role.objects.get(role_name=role_name)
+        made = []
+        for n in range(count):
+            email = f"{role_name.lower()}{n}{status or ''}@racco1.gov.ph"
+            made.append(User.objects.create_user(
+                email=email, username=email, password="pass1234", role=role,
+                **({"status": status} if status else {})))
+        return made
+
     def _get(self):
         res = self.client.get(URL)
         self.assertEqual(200, res.status_code)
@@ -126,9 +138,12 @@ class GroupingTest(UnansweredBase):
 
 class PrivacyAndAccessTest(UnansweredBase):
     def test_roles_are_shown_never_people(self):
-        # What the agency needs, not who asked it.
+        # What the agency needs, not who asked it. A role is named once enough
+        # accounts share it (see ThreeOfAKindTest); here each has one or two.
         self._chat("How many no-shows?", AssistantJob.DECLINED, by=self.psy)
         self._chat("How many no-shows?", AssistantJob.DECLINED, by=self.admin)
+        self._more_people(Role.ADMINISTRATOR, 2)
+        self._more_people(Role.PSYCHOLOGIST, 2)
         res = self.client.get(URL)
         self.assertEqual([Role.ADMINISTRATOR, Role.PSYCHOLOGIST],
                          res.data["questions"][0]["roles"])
@@ -175,3 +190,110 @@ class EndToEndTest(UnansweredBase):
                          [(q["question"], q["why"]) for q in data["questions"]])
         self.assertEqual(1, data["breakdown"]["not_helpful"])
         self.assertEqual(1, data["breakdown"]["answered"])
+
+
+class ThreeOfAKindTest(UnansweredBase):
+    """"A psychologist asked this" says who it was when the agency has one
+    psychologist. A role is named only once at least three active accounts
+    hold it."""
+
+    def _roles(self):
+        return self._get()["questions"][0]["roles"]
+
+    def test_a_role_with_fewer_than_three_people_is_a_colleague(self):
+        self._chat("How many no-shows?", AssistantJob.DECLINED, by=self.psy)
+        self.assertEqual(["a colleague"], self._roles())
+        self._more_people(Role.PSYCHOLOGIST, 1)                  # two psychologists
+        self.assertEqual(["a colleague"], self._roles())
+
+    def test_a_role_with_three_is_named(self):
+        self._chat("How many no-shows?", AssistantJob.DECLINED, by=self.psy)
+        self._more_people(Role.PSYCHOLOGIST, 2)                  # three
+        self.assertEqual([Role.PSYCHOLOGIST], self._roles())
+
+    def test_only_active_accounts_count(self):
+        self._chat("How many no-shows?", AssistantJob.DECLINED, by=self.psy)
+        self._more_people(Role.PSYCHOLOGIST, 1)
+        self._more_people(Role.PSYCHOLOGIST, 3, status="archived")
+        self._more_people(Role.PSYCHOLOGIST, 3, status="pending")
+        self.assertEqual(["a colleague"], self._roles())
+
+    def test_each_role_is_judged_on_its_own_size(self):
+        self._chat("How many no-shows?", AssistantJob.DECLINED, by=self.psy)
+        self._chat("How many no-shows?", AssistantJob.DECLINED, by=self.admin)
+        self._more_people(Role.PSYCHOLOGIST, 2)                  # three psychologists
+        self.assertEqual(["Psychologist", "a colleague"], sorted(self._roles()))
+
+    def test_several_small_roles_are_still_one_colleague(self):
+        self._chat("How many no-shows?", AssistantJob.DECLINED, by=self.psy)
+        self._chat("How many no-shows?", AssistantJob.DECLINED, by=self.admin)
+        self.assertEqual(["a colleague"], self._roles())
+
+    def test_an_account_that_has_gone_is_a_colleague_too(self):
+        job = self._chat("How many no-shows?", AssistantJob.DECLINED)
+        AssistantJob.objects.filter(pk=job.pk).update(created_by=None)
+        self.assertEqual(["a colleague"], self._roles())
+
+    def test_the_threshold_is_three(self):
+        from assistant.views import AssistantUnansweredView
+        self.assertEqual(3, AssistantUnansweredView.MIN_ROLE_SIZE)
+
+
+class NoChildNameIsShownTest(UnansweredBase):
+    """A question that resolved a child lookup names the child, so the log
+    keeps it masked (assistant/redact.py) - and the list masks again what was
+    written before that, because the ISA sees every child."""
+
+    def setUp(self):
+        super().setUp()
+        Role.objects.get_or_create(role_name=Role.STAFF)
+        self.sw = self._more_people(Role.STAFF, 1)[0]
+        self.ana = Child.objects.create(first_name="Ana", last_name="Reyes",
+                                        social_worker=self.sw)
+        cfg = AssistantSetting.load()
+        cfg.enabled = True
+        cfg.save()
+
+    def _ask_as_sw(self, question):
+        self.client.force_authenticate(self.sw)
+        with patch.object(services.OllamaClient, "choose_tool",
+                          return_value=("get_child_summary", {"name": "CHILD"})):
+            res = self.client.post("/api/assistant/ask/", {"question": question},
+                                   format="json")
+        self.assertEqual(200, res.status_code)
+        self.client.force_authenticate(self.admin)
+
+    def test_a_lookup_that_found_nothing_does_not_name_the_child(self):
+        self._ask_as_sw("Tell me about Ana Reyes please")
+        AssistantJob.objects.update(answer=AssistantJob.DATA, result_count=0)
+        body = self.client.get(URL).content.decode()
+        self.assertIn("Tell me about CHILD please", body)
+        for name in ("Ana", "Reyes"):
+            self.assertNotIn(name, body)
+
+    def test_a_lookup_the_asker_marked_not_helpful_does_not_either(self):
+        self._ask_as_sw("Tell me about Ana Reyes please")
+        job = AssistantJob.objects.get()
+        job.outcome = AssistantJob.DISCARDED
+        job.save()
+        body = self.client.get(URL).content.decode()
+        self.assertIn("CHILD", body)
+        self.assertNotIn("Reyes", body)
+
+    def test_a_question_written_before_masking_is_masked_on_the_way_out(self):
+        self._chat("Tell me about Ana Reyes, 0917 123 4567", AssistantJob.DATA, count=0)
+        (row,) = self._get()["questions"]
+        self.assertEqual("Tell me about CHILD, PHONE", row["question"])
+
+    def test_the_same_child_asked_about_in_two_spellings_is_one_question(self):
+        self._chat("Tell me about Ana Reyes", AssistantJob.DATA, count=0)
+        self._chat("tell me about REYES, Ana?", AssistantJob.DATA, count=0)
+        (row,) = self._get()["questions"]
+        self.assertEqual(2, row["times"])
+        self.assertEqual("tell me about CHILD?", row["question"])
+
+    def test_two_different_questions_each_start_again_at_child(self):
+        self._chat("Tell me about Ana Reyes", AssistantJob.DATA, count=0)
+        self._chat("Is Ana Reyes ready for closure?", AssistantJob.DATA, count=0)
+        questions = sorted(q["question"] for q in self._get()["questions"])
+        self.assertEqual(["Is CHILD ready for closure?", "Tell me about CHILD"], questions)
