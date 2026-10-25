@@ -110,6 +110,10 @@ def send_session_reminders(*, today=False, dry_run=False):
         report["lines"].append(f"no scheduled sessions {word} ({target})")
     _remind_custodians(target, word, dry_run, report)
     _mail_overdue_acceptances(dry_run, report)
+    if not dry_run:
+        # The sweep that does this rides on the activity feed; a copy nobody has
+        # open still has this run, so the send records never pile up.
+        email_notifications.prune_send_records()
     return report
 
 

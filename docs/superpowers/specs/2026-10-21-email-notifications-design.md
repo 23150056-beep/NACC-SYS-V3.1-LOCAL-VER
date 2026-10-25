@@ -646,3 +646,179 @@ Left as it is, with the reason:
   route change unmounts the dialog without sending, on purpose (development's
   StrictMode would send it on open); the sweep sends it after ten minutes.
 
+
+## Round four: a limit on the emails one account can cause (25 Oct 2026)
+
+**Owner's request:** "add a limit on how many emails one account can trigger"
+
+### Why
+
+Every email in the catalogue is caused by somebody's action, and nothing
+bounded how many one account's actions could cause. Picking one psychologist
+and then another on a record, back and forth, mailed "asked" and "withdrawn"
+to both on every save; rescheduling a session over and over mailed an invite
+each time. A careless account annoys colleagues and gets the sender marked as
+spam; a stolen one can mail every colleague all day and use up the Brevo
+quota the temporary-password emails also depend on.
+
+### The limits
+
+Counted per **actor** (the `by` of the domain function: the person whose
+action caused the email), over rolling windows, for the notification
+catalogue only (`notify()` in `accounts/email_notifications.py`):
+
+| Limit | Default | Setting |
+|---|---|---|
+| One account to one colleague | 20 an hour | `EMAIL_LIMIT_PER_RECIPIENT_HOUR` |
+| One account to everyone | 60 an hour | `EMAIL_LIMIT_PER_HOUR` |
+| One account to everyone | 150 a day (24 hours) | `EMAIL_LIMIT_PER_DAY` |
+
+Ordinary work stays far under them: a social worker booking a whole week for
+fifteen children is fifteen emails, a psychologist accepting ten cases is ten.
+An email with no actor (none today) is not limited. A person's own "Calendar
+update" counts against their own budget.
+
+Not covered, on purpose: the temporary password (only the ISA can cause it,
+and the screen already shows the password when the email does not go), the
+sign-up code (it has its own limits per request and per address) and the
+Settings test email (it goes to the ISA's own address).
+
+### What happens at the limit
+
+- The email is **held**, not queued: nothing is sent, and nothing is counted
+  as sent (a calendar invite's SEQUENCE is not bumped, the attachment
+  callable is not called). With no `BREVO_API_KEY` the log line says
+  `EMAIL (held: limit) <kind> to <address>: <subject>` instead of
+  `EMAIL (console) ...`, so the limit can be seen working on the local copy.
+- **The recipient is told once**: the first held email from that actor to
+  that recipient in a rolling hour sends one notice instead, "More updates are
+  waiting for you in NACC SYS" - "<actor> has made more changes that affect you
+  lately than NACC SYS sends emails for. Sign in to see them: your Dashboard
+  and the notifications list show everything. Emails about their changes start
+  again once they have slowed down: within the hour, or within a day at the
+  longest." (As planned it said "in the last hour" and "within the hour"; see
+  "After review".) No case reference, no kind of change.
+  It goes only if the recipient has not switched off the held email's kind,
+  and it does not count toward the limits (it is bounded by itself: one per
+  actor and recipient per hour, three in 24 hours). This matters because a held email can be the
+  one that would have corrected an earlier one ("asked" after "withdrawn");
+  the notice says to look rather than letting the last email stand as the
+  truth.
+- **The ISA is told once**: the first time an account reaches any limit in a
+  rolling hour, one SECURITY line goes into the activity log (`ActivityLog`
+  kind `email_limit`, actor = that account, entity the account), and the
+  ISA console's security log shows it as "<name> reached the email limit;
+  further emails are held for up to a day" ("an hour" as planned; see "After
+  review"). An account doing this may be
+  careless or may be stolen. The line names no recipient and no case.
+- **The bell, the Dashboard and every screen are unaffected.** Emails are
+  nudges; what the system holds is the record. (The ISA's bell did show the
+  line as built; review took it out again, see "After review".)
+
+### The data
+
+`EmailSendRecord` (accounts, `tbl_email_send_record`): `actor` (FK user,
+SET_NULL, nullable), `recipient` (FK user, CASCADE), `kind` (the catalogue key,
+or `overflow` for the notice), `created_at` (indexed). One row per email
+QUEUED (or logged in console mode), written in `notify()` just before
+`_queue`. It holds who emailed whom and when, never a case or any text, and
+rows older than 25 hours are deleted by the existing once-a-minute sweep
+(`maybe_sweep`) and by `send_session_reminders`, so nothing older than a day
+plus an hour is kept. A database table and not the cache, for the reason the
+SMS limits are rows: each gunicorn worker has its own cache, and a limit kept
+there multiplies by the worker count.
+
+Counting is two COUNT queries per email. Two emails caused at the same instant
+can both pass the check, so the limit is soft by the number of requests in
+flight at once; that is accepted.
+
+### Tests and settings
+
+Under `manage.py test` the limits are off (`None`), as the export throttle
+is, because many existing tests send more than twenty emails from one account;
+the tests of this feature turn them on with `override_settings`. A value of
+`None` or `0` in a setting means no limit of that kind.
+
+### What was built (25 Oct 2026)
+
+As planned, with these choices made while building:
+
+- **One aggregate query, not two COUNTs.** The three windows are counted in a
+  single `Count(..., filter=...)` over the actor's rows of the last 24 hours.
+- **Windows are strictly "after now minus the window"**: an email exactly an
+  hour old is out of the hour, so "an hour later" flows again without a second
+  to spare.
+- **The ISA's line is a bulk kind in the console's security log**
+  (`_EMAIL_LIMIT` in `admin_overview.py`, newest five shown and "and N more
+  email limits not shown" under them). One account can write one a hour for as
+  long as it goes on, which is the flood the cap exists for. It is picked out
+  by `ActivityLog.kind` and its SECURITY category, and the sentence is built
+  from the line's actor, never read back out of its label.
+- **A hold lasts "up to an hour" for the two hourly limits only.** The daily
+  limit can hold longer. As built the notice and the console line said an
+  hour and a colleague still held an hour on was told again then; review
+  replaced that (see "After review"): the wording no longer promises the hour,
+  and the repeat is capped at three notices a day.
+- **Notices are not counted by the three limits.** As built they were bounded
+  only by one per actor and colleague an hour; review found that was not a
+  bound over a day (see "After review", the first item).
+- **Console sends are counted**, so the limit can be watched on the local copy,
+  and `EmailSendRecord` rows are written even when every limit is off, so one
+  switched on later counts from a true picture.
+- **The feed's bell showed the line** as built (`utils/activity.js`); review
+  took it out of the bell again, as the plan said (see "After review"). The
+  Users drawer reads it as "Updated · <name> reached the email limit" under
+  that account.
+
+
+### After review (25 Oct 2026)
+
+Changes made after the review of the build, to what the plan above says:
+
+- **The notice has a budget of its own: at most one an hour and
+  `OVERFLOW_PER_DAY` (3) in 24 hours per actor and colleague.** As built it
+  was once an hour only, and an account held by the DAILY limit stays held for
+  most of a day, so a stolen account reaching twelve colleagues cost 150 emails
+  plus a notice to each of them every hour: 428 in a day, measured. What one
+  account can now cause in 24 hours is the daily limit plus three notices a
+  colleague. The notice no longer says the emails "start again within the
+  hour" (false under a daily hold) or that the changes were "in the last
+  hour": it says they start again once the account has slowed down, within the
+  hour or within a day at the longest. The console's line says "held for up to
+  a day" for the same reason. The first hold's notice still comes at once; the
+  later ones are for a colleague who is mailed again after it and held again.
+- **The line is out of the ISA's bell** (`/api/activity/` leaves
+  `email_limit` out, as it does a move's per-record lines), which is what the
+  plan said and the build did not do: it is written as often as once an hour
+  for as long as the account goes on, and a few such accounts fill the feed's
+  50 lines. The console shows it (newest five and a count) and the account's own
+  drawer lists it. The rule in `utils/activity.js` that made the bell read it
+  was taken out with it.
+- **A held email is not tried again, an acceptance included, and the code now
+  says so.** The claim on an acceptance stands (`claim_answer_mail`), and
+  `POST /assignment-requests/<id>/mail-answer/` answers `mailed: true` as it
+  already did for a social worker who switched the email off: `mailed` is "dealt
+  with", not "an email left". A retry was left out on purpose: it changes the
+  plan (a held email is held, whatever it was), a decline has no claim to give
+  back, and a held acceptance retried by the sweep is held again every minute
+  and crowds the newer ones out of the ten it takes. The social worker has the
+  notice (when that hour's was not already sent, which is the usual case once
+  the psychologist has been held, they already have it). A held calendar invite
+  is lost the same way: the psychologist's external calendar is stale until the
+  next change that is not held.
+- **Soft, not exact, and said so.** The "once" of the notice and of the ISA's
+  line is a check followed by a write with no lock, like the limits, so a burst
+  of held emails in the same instant can each send a notice; the number is
+  bounded by the requests in flight. A lock on the actor's row would serialise
+  every email-causing request of one account, and inside a request's own
+  transaction it would hold the lock to the end of it, in an order other
+  locks (the transfer's record locks) do not share. Not worth it for a nudge.
+- **Three tests were added that the mutation run showed missing**: a row 23
+  hours old still counts toward the day, a second account held toward the same
+  colleague is told about too, and a notice that fails does not stop the ISA's
+  line (nor the line the notice).
+- **Left as built:** a psychologist held on their own "Calendar update" is
+  mailed a notice that names themselves. Skipping it would leave their
+  external calendar stale with nothing said, which is worse than an odd
+  sentence; wording it for the one person who is both can come with the owner's
+  revision of the email texts.

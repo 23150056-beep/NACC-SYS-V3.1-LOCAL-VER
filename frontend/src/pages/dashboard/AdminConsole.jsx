@@ -952,6 +952,7 @@ const EVENT_KIND = {
   google: ['badge-check', 'neutral'],
   request: ['inbox', 'brand'],
   export: ['file-down', 'neutral'],
+  email_limit: ['mail-warning', 'warn'],
   assistant_read: ['bot', 'neutral'],
   other: ['circle-dot', 'neutral'],
 };

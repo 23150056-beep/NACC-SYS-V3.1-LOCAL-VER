@@ -161,7 +161,7 @@ def _tell_psychologist(appointment, psychologist, event, *, by, was, reassigned_
                                  f"{entered_name(reassigned_to, 'another psychologist')}.")
     notify("my_calendar", psychologist, subject=subject, heading=subject,
            paragraphs=paragraphs, facts=_facts(appointment, was), button=SCHEDULE,
-           attachment=_invite(appointment, psychologist, method))
+           attachment=_invite(appointment, psychologist, method), by=by)
 
 
 def _tell_social_worker(appointment, event, *, by, was, was_psychologist=None):
@@ -188,7 +188,7 @@ def _tell_social_worker(appointment, event, *, by, was, was_psychologist=None):
     notify("child_sessions", worker, subject=subject, heading=subject,
            paragraphs=[f"{who} {event} a session for case {ref}, which is in "
                        "your records."],
-           facts=facts, button=SCHEDULE)
+           facts=facts, button=SCHEDULE, by=by)
 
 
 def _as_it_was(appointment, was_start, was_duration):

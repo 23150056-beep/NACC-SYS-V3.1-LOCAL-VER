@@ -1891,17 +1891,42 @@ the psychologist asked to take a child. Design and what was settled in review:
 - **Each person's switches** are `EmailOptOut` rows (a row means OFF, so a new
   kind starts on), at `GET/PUT /api/auth/me/email-notifications/`, shown on My
   Profile under the mobile number. Only the caller's role's keys are accepted.
+- **One account can cause only so many of them** (25 Oct 2026, design note
+  "Round four"): counted per ACTOR (the `by` of the domain function, passed to
+  `notify(..., by=)` by every caller - a test reads the source for a call that
+  leaves it out) in `EmailSendRecord` rows: 20 an hour to one colleague, 60 an
+  hour in all, 150 in 24 hours (`EMAIL_LIMIT_PER_RECIPIENT_HOUR`,
+  `EMAIL_LIMIT_PER_HOUR`, `EMAIL_LIMIT_PER_DAY`; 0 = off; all off under
+  `manage.py test`, the tests of the limit switch them on). A table and not the
+  cache: each gunicorn worker has its own cache. Past a limit the email is HELD
+  - not built, `attachment` not called, so no invite SEQUENCE moves, and never
+  tried again later, an acceptance included (`claim_answer_mail` stands; the
+  social worker has the notice) - and the colleague gets a "More updates are
+  waiting" notice (no case, no kind of change; not counted by the limits): at
+  most one an hour and `OVERFLOW_PER_DAY` (3) in 24 hours per actor and
+  colleague, because the daily limit can hold an account for most of a day and
+  a notice every hour was 428 emails a day from one account measured, not 150.
+  So what one account can cause in 24 hours is 150 plus three notices to each
+  colleague it reaches. The ISA's security log gets one `email_limit` line an
+  hour per account (a bulk kind there, newest five shown; picked out by
+  `ActivityLog.kind`, not by its words); the ISA's bell leaves it out
+  (`/api/activity/`), or a held account would fill its 50 lines. Hourly holds
+  lift within the hour, the daily one can take up to a day, and neither the
+  notice nor the line promises the hour. The "once" is checked, not locked: two
+  held emails in the same instant can each send a notice, as two can each pass
+  the limit. Rows are pruned at 25 hours by the once-a-minute sweep and
+  `send_session_reminders`.
 - **With no `BREVO_API_KEY`** (the local copy) each email is one WARNING line,
-  `EMAIL (console) <kind> to <address>: <subject>`, and nothing is recorded as
-  sent - so the Calendar update cannot happen locally.
+  `EMAIL (console) <kind> to <address>: <subject>` (`EMAIL (held: limit) ...`
+  when the limit holds it, so the limit can be watched working locally; console
+  lines are counted for it), and no CalendarInvite is recorded - so the
+  Calendar update cannot happen locally.
 - **A link in an email opens a signed-out tab** (tokens are per tab), so
   `ProtectedRoute` passes `state.from` and `Login` returns there after any
   sign-in (`returnPath`: a single leading `/`, never `/login`).
 - **Left open for the owner**: a session PATCHed onto another child (API only)
   sends nothing; the footer's "No case details are included" is stronger than
-  a session's date and time; nothing caps how many emails one account's
-  actions can send a colleague (re-asking back and forth); dark mode is
-  unchecked on a real phone. **The sender is the bigger risk**: gmail.com sent
+  a session's date and time; dark mode is unchecked on a real phone. **The sender is the bigger risk**: gmail.com sent
   through Brevo cannot pass DMARC, so it is spoofable and spam-prone - send
   from an agency-controlled domain with SPF/DKIM/DMARC. Brevo also rewrites
   links for click tracking (no API switch; support only).
@@ -2143,7 +2168,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 3,130 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 3,288 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.utils import timezone
 
 from accounts.managers import UserManager
 
@@ -318,3 +319,52 @@ class EmailOptOut(models.Model):
 
     def __str__(self):
         return f"{self.user_id} opted out of {self.kind}"
+
+
+class EmailSendRecord(models.Model):
+    """One notification email NACC SYS queued, and whose action caused it
+    (accounts/email_notifications.py; the limit in "Round four" of the design
+    note).
+
+    A row is the sum of what the limit needs and no more: WHO caused it
+    (`actor`), who it went to (`recipient`), which email of the catalogue it
+    was (`kind`, or "overflow" for the notice that says more are being held)
+    and when. It holds no case, no child, no subject and no text, so a copy of
+    this table says how often colleagues were emailed and nothing about why.
+
+    **Rows are kept 25 hours.** The widest window the limit looks at is the
+    last 24 hours, and the extra hour is slack for a clock that ran a little
+    behind. `email_notifications.prune_send_records` deletes older ones, from
+    the once-a-minute sweep and from the reminder run, so the table stays as
+    small as a day of mail.
+
+    In the database and not in the cache, for the reason the SMS limits are
+    rows (PhoneVerification): the cache is per process, so under gunicorn each
+    worker would count only the emails it queued, and a limit of 60 would
+    really be 60 times the number of workers.
+
+    `created_at` has a default and not `auto_now_add`, so a test can place a
+    row in the past; `actor` is SET_NULL so deleting an account never takes
+    its colleagues' accounting with it (the row ages out on its own).
+    """
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="emails_caused")
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="emails_received")
+    kind = models.CharField(max_length=40)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        db_table = "tbl_email_send_record"
+        indexes = [
+            models.Index(fields=["actor", "created_at"],
+                         name="email_send_actor_time"),
+            models.Index(fields=["actor", "recipient", "created_at"],
+                         name="email_send_pair_time"),
+        ]
+
+    def __str__(self):
+        return f"{self.kind} from {self.actor_id} to {self.recipient_id}"

@@ -175,7 +175,11 @@ class AssignmentRequestViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         sweep or this), so `mailed` is true for the call that sent it and false
         for any after - and for one that came after a booking had already carried
         the acceptance. True also when the social worker has switched the email
-        off: the answer was dealt with, which is what the claim records."""
+        off, and when the psychologist is at the limit on the emails their
+        actions cause (accounts/email_notifications.py: the email is held and the
+        social worker is told that more updates are waiting): the answer was
+        dealt with, which is what the claim records. `mailed` is not "an email
+        left"."""
         req = self.get_object()
         if req.psychologist_id != request.user.id:
             return Response({"detail": "Only the psychologist asked can send this."},

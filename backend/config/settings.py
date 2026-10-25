@@ -414,6 +414,46 @@ BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL", "racco1nacc@gmail.com")
 BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "NACC RACCO1")
 
+
+def _email_limit(name, default):
+    """How many notification emails one account's actions may cause in a
+    window (accounts/email_notifications.py, "Round four" of the design note).
+    A whole number; 0 means no limit of that kind, as None does.
+
+    Off under `manage.py test`, as the export throttle is: many tests send more
+    than twenty emails from one account, and the tests of the limit switch it
+    on with override_settings. A blank value is "not set". One that is not a
+    whole number, or is negative, keeps the default and says so: a typo that
+    quietly switched the limit off would be the worst way to be wrong, and one
+    that stopped the boot is not worth it for a nudge channel."""
+    if _TESTING:
+        return None
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = -1
+    if value < 0:
+        import logging as _logging
+        _logging.getLogger("config.settings").warning(
+            "%s is ignored: it must be a whole number, 0 or more (0 means no limit). "
+            "The default of %s stays.", name, default)
+        return default
+    return value
+
+
+# The most notification emails one account's ACTIONS may cause (not the ones it
+# receives): to one colleague in an hour, to everyone in an hour, and to
+# everyone in 24 hours. Past a limit an email is held, the colleague is told
+# once that more are waiting and the ISA is told once that the account reached
+# it. Ordinary work stays far under them. The temporary password, the sign-up
+# code and the Settings test email are not notifications and are not counted.
+EMAIL_LIMIT_PER_RECIPIENT_HOUR = _email_limit("EMAIL_LIMIT_PER_RECIPIENT_HOUR", 20)
+EMAIL_LIMIT_PER_HOUR = _email_limit("EMAIL_LIMIT_PER_HOUR", 60)
+EMAIL_LIMIT_PER_DAY = _email_limit("EMAIL_LIMIT_PER_DAY", 150)
+
 # The address people open NACC SYS at, used in every email's button
 # (children.notifications.sign_in_url). Read from here and never from a
 # request's Host header: a link built from the request is how a forged Host

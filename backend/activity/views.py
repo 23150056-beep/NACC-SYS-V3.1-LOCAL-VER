@@ -65,8 +65,13 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         else:
             # Administrator: the full audit stream, except the second copy of a
             # move's sentence, which is addressed to the worker who gave the
-            # records up (they already have the receiving worker's).
-            qs = qs.exclude(kind=ActivityLog.KIND_MOVE_COPY)
+            # records up (they already have the receiving worker's), and the
+            # line that an account reached the email limit. That one is written
+            # as often as once an hour for as long as the account goes on, which
+            # would fill the 50 lines below; the console's security log shows it
+            # (newest five and a count) and the account's own drawer lists it.
+            qs = qs.exclude(kind__in=[ActivityLog.KIND_MOVE_COPY,
+                                      ActivityLog.KIND_EMAIL_LIMIT])
         category = self.request.query_params.get("category")
         if category:
             qs = qs.filter(category=category)

@@ -233,6 +233,14 @@ SITE_URL=https://nacc.example.gov.ph
 - It only changes the links in emails. It does not make the copy reachable
   from other devices; that is the network's and the frontend's business.
 
+One account can cause only so many of these emails: 20 an hour to any one
+colleague, 60 an hour in all and 150 a day (`EMAIL_LIMIT_PER_RECIPIENT_HOUR`,
+`EMAIL_LIMIT_PER_HOUR` and `EMAIL_LIMIT_PER_DAY` in `backend/.env`; `0` turns
+one off). Past a limit the email is held, written to the API window as
+`EMAIL (held: limit)` instead of `EMAIL (console)`, and the colleague gets a
+notice that more updates are waiting (at most one an hour, three a day); the
+ISA's security log shows the account.
+
 ## Text messages (Semaphore)
 
 Off by default. Every text is written to the **API window** instead —

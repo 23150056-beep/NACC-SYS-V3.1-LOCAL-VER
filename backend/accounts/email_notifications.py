@@ -9,7 +9,7 @@ address point at (23 Oct 2026; children/notifications.py `sign_in_url`). The
 text messages are a separate channel and are untouched
 (accounts/sms_notifications.py).
 
-Seven rules every email here keeps:
+Eight rules every email here keeps:
 
 1. NO CHILD'S NAME, EVER. Not in the subject, the page, the plain-text part or
    a calendar invite - and not a birth date, case type, address, custodian,
@@ -26,6 +26,11 @@ Seven rules every email here keeps:
 6. NEVER RAISES. A failure is logged and the save stands.
 7. WITH NO `BREVO_API_KEY` (the local copy) nothing is sent: one line is
    logged, the way the sign-up code and the SMS console provider do it.
+8. BOUNDED PER ACTOR (25 Oct 2026). One account's actions can cause only so
+   many of these emails (`EMAIL_LIMIT_*` in settings). Past a limit the email
+   is held, the colleague is told that more updates are waiting (once an hour,
+   and at most `OVERFLOW_PER_DAY` times a day), and the ISA is told once an
+   hour that the account reached it (section 4, `notify`).
 
 The catalogue (section 1) is its own list, fired from the domain functions
 (section 5) and never from `log_activity`: the bell addresses most lines to the
@@ -44,10 +49,13 @@ from datetime import timedelta
 from django.conf import settings
 from django.core.cache import cache
 from django.db import transaction
+from django.db.models import Count, Q
 from django.utils import timezone
 
-from accounts.display import entered_name
-from accounts.models import EmailOptOut, Role
+from accounts.display import display_name, entered_name, one_line
+from accounts.models import EmailOptOut, EmailSendRecord, Role
+from activity.models import ActivityLog
+from activity.services import log_activity
 from children import notifications
 from config.clock import clock
 
@@ -448,8 +456,186 @@ def wait_for_queued(timeout=20):
             thread.join(max(0.0, deadline - time.monotonic()))
 
 
+# --------------------------------------------------------------------------
+# The limit on what one account can cause (design note, "Round four")
+# --------------------------------------------------------------------------
+#
+# Every email here is caused by somebody's action, and picking one psychologist
+# and then another on a record, back and forth, mailed "asked" and "withdrawn"
+# to both on every save. The budget belongs to the ACTOR (the `by` of the
+# domain function), not to the recipient: a colleague who is emailed a lot has
+# done nothing wrong, and the one who caused it is who should be slowed.
+
+# The notice that more updates are waiting. Its `EmailSendRecord.kind`; it is not
+# in the catalogue, has no switch of its own (it goes to someone who has the
+# held email's kind on) and is not counted against the limits, so it cannot
+# hold itself back.
+OVERFLOW = "overflow"
+
+_HOUR = timedelta(hours=1)
+_DAY = timedelta(hours=24)
+# The most notices one actor can cause one colleague in 24 hours. The notice is
+# not counted by the three limits, and an account held by the DAILY limit stays
+# held for most of a day, so with only "once an hour" a stolen account that
+# reached a dozen colleagues cost 150 emails plus a notice to each of them every
+# hour: 428 in a day, measured. A few reminders are worth sending, because a
+# colleague emailed again after the first hold has a held email behind it that
+# the notice is for; one an hour is just the account's volume again. So what an
+# actor can cause in 24 hours is the daily limit plus this many a colleague.
+OVERFLOW_PER_DAY = 3
+# How long a send record is kept: the widest window is 24 hours, and the extra
+# hour is slack for a clock that ran a little behind. See EmailSendRecord.
+SEND_RECORD_KEEP = timedelta(hours=25)
+
+
+def _limit(setting):
+    """The number in `setting`, or None when that kind of limit is off: 0 and
+    None both mean no limit."""
+    value = getattr(settings, setting, None)
+    return value if value and value > 0 else None
+
+
+def _over_limit(by, user, now):
+    """Whether `by` has used up any of its budgets for an email to `user`: the
+    last hour to this one colleague, the last hour to everyone, the last 24
+    hours to everyone. A count AT a limit is over it: the limit is how many may
+    be sent, and this email would be one more. Rolling windows, so a window
+    ends an hour after the emails in it, not at the top of the hour.
+
+    The notice (`OVERFLOW`) is not counted. One query for all three counts."""
+    per_colleague = _limit("EMAIL_LIMIT_PER_RECIPIENT_HOUR")
+    per_hour = _limit("EMAIL_LIMIT_PER_HOUR")
+    per_day = _limit("EMAIL_LIMIT_PER_DAY")
+    if not (per_colleague or per_hour or per_day):
+        return False
+    last_hour = Q(created_at__gt=now - _HOUR)
+    sent = (EmailSendRecord.objects
+            .filter(actor=by, created_at__gt=now - _DAY).exclude(kind=OVERFLOW)
+            .aggregate(day=Count("pk"),
+                       hour=Count("pk", filter=last_hour),
+                       colleague=Count("pk", filter=last_hour & Q(recipient=user))))
+    return any(limit and sent[window] >= limit
+               for window, limit in (("colleague", per_colleague),
+                                     ("hour", per_hour), ("day", per_day)))
+
+
+def _record(by, user, kind_key, now):
+    """Count one email against `by`. Written just before the email is queued (or
+    logged, on a copy with no mail service, so the limit can be watched working
+    there). No actor, no row: such an email is not limited. `created_at` is
+    given and not left to its default, which is the real clock whatever a test
+    has pinned."""
+    if by is not None:
+        EmailSendRecord.objects.create(
+            actor=by, recipient=user, kind=kind_key, created_at=now)
+
+
+def _payload(user, subject, html_body, text_body):
+    name = entered_name(user)
+    return {
+        "sender": {
+            "name": settings.BREVO_SENDER_NAME,
+            "email": settings.BREVO_SENDER_EMAIL,
+        },
+        "to": [{"email": user.email, **({"name": name} if name else {})}],
+        "subject": subject,
+        "htmlContent": html_body,
+        "textContent": text_body,
+    }
+
+
+def _send_overflow_notice(by, user, now):
+    """Tell `user`, at most once an hour and `OVERFLOW_PER_DAY` times in 24 hours
+    per actor, that `by` has caused more emails than are sent and the rest are
+    held. A held email can be the one that would have corrected an earlier one
+    (a request "asked" after "withdrawn"), and without this the earlier email
+    would stand as the truth; the notice sends the reader to the Dashboard and
+    the bell, which hold everything.
+
+    It names the actor and nothing else: no case reference and no kind of
+    change, so it is as safe to mail as any email here. It does not promise when
+    the emails start again: the two hourly limits lift within the hour and the
+    daily one can hold for most of a day, and which of them is holding is not
+    something the colleague needs to know.
+
+    The hour and the day are counted from the notices already recorded, so two
+    held emails caused in the same instant can both pass (the limits themselves
+    are soft in the same way, and the design note accepts it).
+
+    Not checked against `wants` here: a held email is one the recipient has
+    switched on, and `notify` checked that before it got this far."""
+    earlier = list(EmailSendRecord.objects.filter(
+        actor=by, recipient=user, kind=OVERFLOW, created_at__gt=now - _DAY
+    ).values_list("created_at", flat=True))
+    if len(earlier) >= OVERFLOW_PER_DAY or any(at > now - _HOUR for at in earlier):
+        return
+    subject = "More updates are waiting for you in NACC SYS"
+    who = entered_name(by, "A colleague")
+    if not sending():
+        _record(by, user, OVERFLOW, now)
+        logger.warning("EMAIL (console) %s to %s: %s", OVERFLOW, user.email, subject)
+        return
+    html_body, text_body = render(
+        subject,
+        [f"{who} has made more changes that affect you lately than NACC SYS "
+         "sends emails for. Sign in to see them: your Dashboard and the "
+         "notifications list show everything. Emails about their changes start "
+         "again once they have slowed down: within the hour, or within a day at "
+         "the longest."],
+        button=OPEN_NACC, subject=subject)
+    _record(by, user, OVERFLOW, now)
+    _queue(_payload(user, subject, html_body, text_body), f"{OVERFLOW} email")
+
+
+def _tell_the_isa(by, now):
+    """One SECURITY line in the activity log, the first time `by` reaches a limit
+    in a rolling hour: the ISA's console shows it in the security log. An
+    account that does this may be careless or may be somebody else's. The line
+    names the account and nothing else - no colleague, no case - and says what
+    it is by `ActivityLog.kind`, which the console reads instead of the words."""
+    if ActivityLog.objects.filter(
+            kind=ActivityLog.KIND_EMAIL_LIMIT, actor=by, created_at__gt=now - _HOUR).exists():
+        return
+    log_activity(
+        by, ActivityLog.UPDATED, ActivityLog.SECURITY,
+        entity_type="User", entity_id=by.pk, kind=ActivityLog.KIND_EMAIL_LIMIT,
+        entity_label=f"{one_line(display_name(by, 'An account'), 100)} "
+                     "reached the email limit")
+
+
+def _hold(kind_key, user, subject, by, now):
+    """What happens to an email the limit has stopped: nothing is sent and
+    nothing is counted, then the colleague and the ISA are told (each at most
+    once an hour; the colleague at most `OVERFLOW_PER_DAY` times a day). The two
+    are tried one after the other, so one that fails does not stop the other.
+
+    A held email is not tried again later, whatever it was: the notice is what
+    tells the colleague to look. That includes an acceptance, which the caller
+    has already claimed (`claim_answer_mail`), and a calendar invite."""
+    if not sending():
+        logger.warning("EMAIL (held: limit) %s to %s: %s", kind_key, user.email, subject)
+    for tell in (lambda: _send_overflow_notice(by, user, now), lambda: _tell_the_isa(by, now)):
+        try:
+            tell()
+        except Exception:                                        # noqa: BLE001
+            logger.exception("Could not report that an account reached the email limit")
+
+
+def prune_send_records(now=None):
+    """Delete the send records older than `SEND_RECORD_KEEP`. Called by the
+    once-a-minute sweep and by the reminder run, so the table never holds more
+    than a day and an hour of mail. Returns how many went. Never raises."""
+    try:
+        now = now or timezone.now()
+        return EmailSendRecord.objects.filter(
+            created_at__lt=now - SEND_RECORD_KEEP).delete()[0]
+    except Exception:                                            # noqa: BLE001
+        logger.exception("Could not prune the email send records")
+        return 0
+
+
 def notify(kind_key, user, *, subject, heading, paragraphs, facts=(), button=None,
-           attachment=None, preview=None, chip=None, greeting=None, steps=()):
+           attachment=None, preview=None, chip=None, greeting=None, steps=(), by=None):
     """Email `user` one message of `kind_key`. True when it was queued, False
     when there was nothing to send. Never raises.
 
@@ -457,38 +643,43 @@ def notify(kind_key, user, *, subject, heading, paragraphs, facts=(), button=Non
     says what each is for; an email that gives none looks as it always did,
     apart from what every email gets.
 
+    `by` is the person whose action caused the email, and the one the limit
+    counts it against. Every caller passes it; without one the email is not
+    counted and not limited. An email over the actor's limit is HELD (False
+    comes back, nothing is built, `attachment` is not called) and the colleague
+    and the ISA are told (`_hold`).
+
     `attachment` is None or a callable taking no arguments and returning
     (filename, text). It is called only once the email is certain to be
     queued, so a caller can count the attachment as sent inside it (the
     calendar invite's SEQUENCE) without counting one that was never mailed:
-    not for a person who switched the kind off, and not with no mail service.
+    not for a person who switched the kind off, not when the actor's limit
+    holds it, and not with no mail service.
     """
     try:
         if not wants(user, kind_key):
             return False
+        if getattr(by, "pk", None) is None:
+            by = None
+        now = timezone.now()
+        if by is not None and _over_limit(by, user, now):
+            _hold(kind_key, user, subject, by, now)
+            return False
         if not sending():
+            _record(by, user, kind_key, now)
             logger.warning("EMAIL (console) %s to %s: %s", kind_key, user.email, subject)
             return False
         html_body, text_body = render(
             heading, paragraphs, facts, button, preview=preview, chip=chip,
             greeting=greeting, steps=steps, subject=subject)
-        name = entered_name(user)
-        payload = {
-            "sender": {
-                "name": settings.BREVO_SENDER_NAME,
-                "email": settings.BREVO_SENDER_EMAIL,
-            },
-            "to": [{"email": user.email, **({"name": name} if name else {})}],
-            "subject": subject,
-            "htmlContent": html_body,
-            "textContent": text_body,
-        }
+        payload = _payload(user, subject, html_body, text_body)
         if attachment is not None:
             filename, content = attachment()
             payload["attachment"] = [{
                 "name": filename,
                 "content": base64.b64encode(content.encode("utf-8")).decode("ascii"),
             }]
+        _record(by, user, kind_key, now)
         _queue(payload, f"{kind_key} email")
         return True
     except Exception:                                            # noqa: BLE001
@@ -558,7 +749,7 @@ def case_request(child, psychologist, *, by):
                   f'Find {ref} under "Waiting for your answer" at the top of your '
                   "Dashboard.",
                   "Accept it, or decline it with a reason for the social worker."],
-           button=("Review the request", "/"))
+           button=("Review the request", "/"), by=by)
 
 
 @_never_raises
@@ -582,7 +773,7 @@ def request_withdrawn(psychologist, child_or_ref, *, by):
         said = (f"{entered_name(by, 'A colleague')} withdrew the request for you to "
                 f"take case {ref}. There is nothing for you to do.")
     notify("request_withdrawn", psychologist, subject=subject, heading=subject,
-           paragraphs=[said], button=OPEN_NACC)
+           paragraphs=[said], button=OPEN_NACC, by=by)
 
 
 # How long an acceptance may wait for its first session before the sweep mails
@@ -616,9 +807,12 @@ def claim_answer_mail(req):
     nothing, so however they race the social worker has one email.
 
     The claim stands even when the email is then not sent (the social worker
-    switched it off, no mail service, nobody to tell): the answer has been dealt
-    with, and a row left unstamped would be logged by the sweep every minute for
-    good."""
+    switched it off, no mail service, nobody to tell, or the psychologist is at
+    the limit on what their actions can cause: the social worker is then told
+    that more updates are waiting, and the answer is on the record): the answer
+    has been dealt with, and a row left unstamped would be tried again by the
+    sweep every minute - held again each time, and crowding the newer
+    acceptances out of the ten it takes."""
     from children.models import AssignmentRequest
     return bool(AssignmentRequest.objects
                 .filter(pk=req.pk, status=AssignmentRequest.ACCEPTED,
@@ -733,14 +927,18 @@ def _send_answer(req, *, by, first_session=None):
                 lead = f"{in_records}. No session is booked yet{promise}"
             facts, button = (), ("Open the record", f"/report/child/{req.child_id}")
     notify(kind_key, recipient, subject=subject, heading=subject,
-           paragraphs=[lead], facts=facts, button=button)
+           paragraphs=[lead], facts=facts, button=button, by=by)
 
 
 def accepted_with_first_session(appointment, *, by):
     """The psychologist who accepted a case has just booked a session for it
-    (scheduling/session_mail.py). True when the acceptance email has gone out
+    (scheduling/session_mail.py). True when the acceptance has been dealt with
     as ONE message with that booking, in which case the caller sends the social
-    worker nothing more for this booking.
+    worker nothing more for this booking. "Dealt with" is mailed, logged on a
+    copy with no mail service, or held because the psychologist is at the limit
+    on the emails their actions cause: the booking's own email would be held by
+    the same limit, and the social worker has been told that more updates are
+    waiting.
 
     Only the psychologist who accepted can make it combine. A booking by the
     social worker or the ISA is the ordinary "booked a session" email, and the
@@ -849,12 +1047,13 @@ def mail_overdue_answers(now=None, *, dry_run=False, limit=None):
 
 def maybe_sweep():
     """`mail_overdue_answers`, at most once a minute per process and at most
-    `FEED_SWEEP_BATCH` at a time. It is called from a request that every screen
-    makes (the activity feed), so otherwise it costs one cache call. Never
-    raises."""
+    `FEED_SWEEP_BATCH` at a time, and `prune_send_records` with it. It is called
+    from a request that every screen makes (the activity feed), so otherwise it
+    costs one cache call. Never raises."""
     try:
         if cache.add(_SWEEP_KEY, True, _SWEEP_EVERY):
             mail_overdue_answers(limit=FEED_SWEEP_BATCH)
+            prune_send_records()
     except Exception:                                            # noqa: BLE001
         logger.exception("Could not sweep for overdue acceptances")
 
@@ -870,7 +1069,7 @@ def records_transferred(target, source, count, *, by):
     subject = f"{n} moved to you"
     notify("records_transferred", target, subject=subject, heading=subject,
            paragraphs=[f"{who} moved {n} to you from {entered_name(source, 'a colleague')}."],
-           button=("Open Records", "/children"))
+           button=("Open Records", "/children"), by=by)
 
 
 @_never_raises
@@ -884,4 +1083,4 @@ def case_taken_over(child, previous, *, by):
     notify("case_taken_over", previous, subject=subject, heading=subject,
            paragraphs=[f"{who} reopened case {ref}, a closed case in your records, "
                        "at intake. It is now in their records."],
-           button=OPEN_NACC)
+           button=OPEN_NACC, by=by)
