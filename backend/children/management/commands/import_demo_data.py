@@ -24,6 +24,7 @@ import os
 import tempfile
 
 from django.apps import apps
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import BaseCommand, CommandError
@@ -35,6 +36,47 @@ from children import demo_custodians, demo_owners, demo_profiles
 from children.models import Child
 from clinical import demo_referrals, demo_reports
 from scheduling import demo_schedule
+
+
+# The live bucket of real case files. Demo files must never be written to it.
+LIVE_BUCKET = "nacc-v3-media"
+
+
+def storage_problem(databases, storages):
+    """Say why this import must not run with these settings, or return None.
+
+    The import writes FILES (referrals and reports) as well as rows, through
+    whatever the default storage is. Run from a PC against the hosted demo
+    database without the object-storage variables, those files land on the
+    PC's own disk: the demo then lists rows whose files it cannot find, and
+    every download fails. Run with the LIVE bucket's keys, it would put
+    invented files among real case files. Takes plain dicts so it can be
+    tested without touching the real settings.
+    """
+    engine = str(databases.get("default", {}).get("ENGINE", ""))
+    config = storages.get("default", {})
+    on_s3 = "s3" in str(config.get("BACKEND", "")).lower()
+    if not on_s3:
+        if engine.endswith("sqlite3"):
+            return None   # the local copy's normal case: files on this disk
+        return ("This is a hosted database, but file storage here is this "
+                "computer's disk. The referral and report files would be "
+                "written to this computer, where the hosted demo cannot read "
+                "them, and every download would fail. In the same window, set "
+                "USE_S3=true and the demo bucket's AWS_STORAGE_BUCKET_NAME, "
+                "AWS_S3_ENDPOINT_URL, AWS_ACCESS_KEY_ID and "
+                "AWS_SECRET_ACCESS_KEY, then run this again.")
+    bucket = (config.get("OPTIONS") or {}).get("bucket_name")
+    if not bucket:
+        return ("Object storage is switched on but no bucket is named. Set "
+                "AWS_STORAGE_BUCKET_NAME to the demo bucket in the same "
+                "window, then run this again.")
+    if bucket == LIVE_BUCKET:
+        return (f"The bucket {LIVE_BUCKET} is the live bucket of real case "
+                "files. Demo files must go to the demo bucket. Set "
+                "AWS_STORAGE_BUCKET_NAME and the demo bucket's keys in this "
+                "window, then run this again.")
+    return None
 
 
 # A fixture is a file somebody exported on a given day, and it keeps that
@@ -267,8 +309,18 @@ class Command(BaseCommand):
                             help="EMAIL:PASSWORD — give one account a known "
                                  "password, for demonstrating with.")
 
-    @transaction.atomic
     def handle(self, *args, **options):
+        # Checked before anything is deleted or loaded. Like seed_demo_data,
+        # handle() is not itself atomic: a decorated handle() would make
+        # Django connect to the database first, and the refusal would hang on
+        # the connection instead of arriving.
+        problem = storage_problem(settings.DATABASES, settings.STORAGES)
+        if problem:
+            raise CommandError(problem)
+        self._import(options)
+
+    @transaction.atomic
+    def _import(self, options):
         User = get_user_model()
         psychologists = list(
             User.objects.filter(role__role_name=Role.PSYCHOLOGIST).order_by("pk"))

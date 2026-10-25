@@ -10,14 +10,16 @@ import tempfile
 from datetime import timedelta
 from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 from accounts.models import Role
 from children.models import Child
+from children.management.commands.import_demo_data import LIVE_BUCKET, storage_problem
 from clinical.models import CaseReferral
 from scheduling.models import AvailabilityBlock
 
@@ -56,6 +58,61 @@ class ExportDemoDataTest(TestCase):
         path = Path(tempfile.mkdtemp()) / "demo.json"
         call_command("export_demo_data", output=str(path), stdout=out)
         self.assertIn("1 children", out.getvalue())
+
+
+SQLITE = {"default": {"ENGINE": "django.db.backends.sqlite3"}}
+POSTGRES = {"default": {"ENGINE": "django.db.backends.postgresql"}}
+DISK = {"default": {"BACKEND": "django.core.files.storage.FileSystemStorage"}}
+
+
+def s3(bucket):
+    return {"default": {"BACKEND": "storages.backends.s3.S3Storage",
+                        "OPTIONS": {"bucket_name": bucket}}}
+
+
+class StorageProblemTest(SimpleTestCase):
+    """The import writes files as well as rows, so where the files go is
+    checked before anything is deleted or loaded. Plain dicts, because
+    overriding DATABASES in a test is unsafe."""
+
+    def test_local_sqlite_with_disk_storage_is_allowed(self):
+        self.assertIsNone(storage_problem(SQLITE, DISK))
+
+    def test_a_hosted_database_with_disk_storage_is_refused(self):
+        problem = storage_problem(POSTGRES, DISK)
+        self.assertIn("USE_S3=true", problem)
+        self.assertIn("AWS_STORAGE_BUCKET_NAME", problem)
+
+    def test_a_hosted_database_with_the_demo_bucket_is_allowed(self):
+        self.assertIsNone(storage_problem(POSTGRES, s3("nacc-v3-demo-media")))
+
+    def test_the_live_bucket_is_refused_whatever_the_database(self):
+        self.assertEqual(LIVE_BUCKET, "nacc-v3-media")
+        for databases in (POSTGRES, SQLITE):
+            with self.subTest(engine=databases["default"]["ENGINE"]):
+                self.assertIn("live bucket", storage_problem(databases, s3(LIVE_BUCKET)))
+
+    def test_object_storage_with_no_bucket_is_refused(self):
+        for bucket in (None, ""):
+            with self.subTest(bucket=bucket):
+                self.assertIn("no bucket", storage_problem(POSTGRES, s3(bucket)))
+        self.assertIn("no bucket", storage_problem(
+            SQLITE, {"default": {"BACKEND": "storages.backends.s3.S3Storage"}}))
+
+
+class ImportRefusesBeforeTouchingAnythingTest(TestCase):
+    def test_a_storage_problem_stops_the_command_and_deletes_nothing(self):
+        role = Role.objects.create(role_name=Role.PSYCHOLOGIST)
+        User.objects.create_user(email="p@racco1.gov.ph", username="p",
+                                 password="pass1234", role=role)
+        Child.objects.create(fullname="Maria Santos")
+        fixture = Path(tempfile.mkdtemp()) / "demo.json"
+        fixture.write_text("[]", encoding="utf-8")
+        with patch("children.management.commands.import_demo_data.storage_problem",
+                   return_value="files would be lost"):
+            with self.assertRaisesMessage(CommandError, "files would be lost"):
+                call_command("import_demo_data", fixture=str(fixture), clear=True)
+        self.assertEqual(Child.objects.count(), 1)
 
 
 class ImportDemoDataTest(TestCase):

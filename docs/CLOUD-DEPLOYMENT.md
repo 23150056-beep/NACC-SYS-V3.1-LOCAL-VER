@@ -1010,7 +1010,7 @@ them.
 | Thing | New? |
 |---|---|
 | Neon **branch** | A branch of the project you already have. Free, copy-on-write, seconds. |
-| R2 bucket | **Nothing to do.** The demo has no files; `USE_S3=false`. |
+| R2 bucket | Its own: `nacc-v3-demo-media`, with its own API token scoped to that one bucket, set on `nacc-v3-demo-api` with `USE_S3=true` (`render.yaml` marks them `sync: false`, so you enter them in the dashboard). **Never `nacc-v3-media`** — that is the live bucket of real case files. |
 | Render services | Yes — two, named `nacc-v3-demo-*`. Unavoidable: it is a different app from a different repo. |
 | Accounts, tokens, OAuth | Nothing new. All reused. |
 
@@ -1086,7 +1086,26 @@ unquoted `&` cuts the `set` short there and runs the rest as a second command.
 
 The second line must print the host in the string you pasted — the branch's
 `ep-...` endpoint, not production's. **Stop if it does not**: the import below
-deletes every child on whatever it is connected to. Then:
+deletes every child on whatever it is connected to.
+
+The import also writes FILES — the invented referrals and psychological
+reports — so the same window needs the demo bucket's storage settings. Copy the
+values from `nacc-v3-demo-api` → **Environment** in Render, with the same
+quotes:
+
+```
+set "USE_S3=true"
+set "AWS_STORAGE_BUCKET_NAME=nacc-v3-demo-media"
+set "AWS_S3_ENDPOINT_URL=<the value from nacc-v3-demo-api>"
+set "AWS_ACCESS_KEY_ID=<the value from nacc-v3-demo-api>"
+set "AWS_SECRET_ACCESS_KEY=<the value from nacc-v3-demo-api>"
+```
+
+Without them the files land in `backend\media` on this computer, and the demo
+lists referrals and reports it cannot open ("File is missing from storage").
+So `import_demo_data` now refuses to run against a hosted database unless
+object storage is on, and refuses outright if the bucket is `nacc-v3-media`,
+the live one. Then:
 
 ```
 .venv\Scripts\python manage.py migrate
@@ -1113,6 +1132,8 @@ behind` — demo custodians never have one, so the demo cannot text anybody.
 
 **Close that terminal afterwards.** `set DATABASE_URL` persists for the life of
 the window, and a later `manage.py` command in it would run against the branch.
+The storage variables persist too, so a later upload from that window would go
+to the demo bucket.
 
 > `--clear` **deletes every child** on the target before loading, and
 > everything recorded against them — sessions booked on the demo included.
