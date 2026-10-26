@@ -11,6 +11,7 @@ never saved, which is also the point: it must not need the child's row, so it
 cannot reach for the child's name.
 """
 import hashlib
+import re
 from datetime import datetime, timezone as dt_timezone
 from unittest.mock import patch
 
@@ -203,18 +204,66 @@ class BuildIcsTest(TestCase):
     def test_the_summary_and_description_name_the_case_and_nobody_else(self):
         ics = self.ics()
         self.assertEqual("NACC session · C-0042", value(ics, "SUMMARY"))
-        self.assertEqual(f"Case C-0042. Sign in to NACC SYS for the details: {ORIGIN}",
-                         value(ics, "DESCRIPTION"))
+        self.assertEqual(f"Case C-0042. Sign in to NACC SYS for the details: "
+                         f"{ORIGIN}/?for={self.psy.pk}", value(ics, "DESCRIPTION"))
 
     @override_settings(SITE_URL="https://nacc.example.gov.ph")
     def test_the_description_follows_the_site_setting(self):
         self.assertEqual("Case C-0042. Sign in to NACC SYS for the details: "
-                         "https://nacc.example.gov.ph", value(self.ics(), "DESCRIPTION"))
+                         f"https://nacc.example.gov.ph/?for={self.psy.pk}",
+                         value(self.ics(), "DESCRIPTION"))
 
     @override_settings(CORS_ALLOWED_ORIGINS=[])
     def test_with_no_address_known_the_description_has_no_dead_link(self):
+        ics = self.ics()
         self.assertEqual("Case C-0042. Sign in to NACC SYS for the details.",
-                         value(self.ics(), "DESCRIPTION"))
+                         value(ics, "DESCRIPTION"))
+        # No site, so no `for` either: an id with nothing to open is just noise.
+        self.assertNotIn("for=", ics)
+        self.assertNotIn("http", ics)
+
+    # -- whose click it is ----------------------------------------------------
+
+    def test_the_link_names_the_attendee_and_no_other_id(self):
+        """`for` tells the page a click opens whose open session to borrow
+        (design note 2026-10-26-shared-tab-session-design.md), so it must be
+        the attendee's id: not the child's (42), not the appointment's (7),
+        not whoever booked. The ids are chosen to be told apart on sight."""
+        attendee = User(pk=9137, email="lea@t.ph", username="lea@t.ph",
+                        first_name="Lea", last_name="Dizon")
+        self.assertTrue({42, 7}.isdisjoint({attendee.pk, self.psy.pk}))
+        for method in ("REQUEST", "CANCEL"):
+            with self.subTest(method=method):
+                ics = build_ics(self.appt, attendee, method=method, sequence=1, uid=UID)
+                self.assertEqual(
+                    f"Case C-0042. Sign in to NACC SYS for the details: {ORIGIN}/?for=9137",
+                    value(ics, "DESCRIPTION"))
+                # The one and only `for` in the file: the attendee's, and no
+                # other id (the child's 42 and the appointment's 7 included).
+                self.assertEqual(["9137"], re.findall(r"\bfor=(\d+)", "\n".join(logical(ics))))
+        # The same appointment built for somebody else names that person.
+        self.assertEqual([str(self.psy.pk)],
+                         re.findall(r"\bfor=(\d+)", "\n".join(logical(self.ics()))))
+
+    def test_the_description_stays_correctly_escaped_and_folded_with_the_id_on(self):
+        """The link makes DESCRIPTION longer, so it is folded; undone, it is
+        whole, and `?` and `=` are not TEXT's special characters, so nothing
+        in it is escaped."""
+        attendee = User(pk=123456789, email="lea@t.ph", username="lea@t.ph",
+                        first_name="Lea", last_name="Dizon")
+        with override_settings(SITE_URL="https://nacc.region-one.example.gov.ph"):
+            ics = build_ics(self.appt, attendee, method="REQUEST", sequence=1, uid=UID)
+        expected = ("Case C-0042. Sign in to NACC SYS for the details: "
+                    "https://nacc.region-one.example.gov.ph/?for=123456789")
+        self.assertEqual(expected, value(ics, "DESCRIPTION"))
+        self.assertNotIn("\\", line(ics, "DESCRIPTION"))
+        physical = ics.split("\r\n")[:-1]
+        for p in physical:
+            self.assertLessEqual(len(p.encode("utf-8")), LINE_LIMIT, p)
+        # The description is a line that needed the fold.
+        first = next(i for i, p in enumerate(physical) if p.startswith("DESCRIPTION:"))
+        self.assertTrue(physical[first + 1].startswith(" "))
+        self.assertEqual(ics.count("\n"), ics.count("\r\n"))
 
     def test_the_location_is_the_first_line_of_the_agency_address_escaped(self):
         profile = AgencyProfile.load()

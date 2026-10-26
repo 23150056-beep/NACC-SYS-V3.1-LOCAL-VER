@@ -511,7 +511,46 @@ the only access control the system has.
   refused**, so everybody signs in once after that ships. Expected, not a fault.
 - **Tokens live in `sessionStorage`**, via `api/session.js` so the client and
   AuthContext cannot disagree about where they are. Closing the browser ends
-  the session, and it is per-TAB — a second tab signs in again.
+  the session. Each tab holds its own copy.
+- **A new tab borrows the sign-in from an open one** (owner, 26 Oct 2026; design
+  `docs/superpowers/specs/2026-10-26-shared-tab-session-design.md`): a
+  notification email's button opened the form beside a signed-in tab. A tab
+  with no token asks over the `nacc-session` BroadcastChannel (same origin,
+  same browser profile) and waits at most 400 ms.
+  - **Whose a session is comes from the token's own `user_id` claim**
+    (`heldUserId()`), never from screen state. A tab still loading knows it,
+    and a share cannot be mislabelled.
+  - **An email's button (and the calendar invite's link) carries
+    `for=<recipient id>`**, and such a tab borrows only that user's session.
+    `for` is stripped from the address at start-up, so bookmarks never carry
+    it. Without it, the tab borrows only if every answer names the same user.
+  - **`/login`, `/signup` and `/survey/` never borrow**, and neither does a
+    tab that has just dropped a signed-out session. `/login` must always
+    reach the form: a dead session is sent there and must not come up as
+    whoever else is signed in. The temporary-password email's button goes to
+    `/login` for that reason.
+  - **Signing out signs out every tab of that account in this browser**, a
+    password change included. Tabs are matched by the refresh token's last 24
+    characters or its `user_id`, so a tab still loading is caught.
+    `{tail, userId}` is also listed in `localStorage` for 24 hours, for a tab
+    that was discarded or navigated away at the time. Signing in again blanks
+    the user's id in those entries but keeps the tails, so an old tab stays
+    dead.
+  - **The start-up drop is decided once, at module load**, like `for`. React
+    StrictMode runs effects twice in dev (`run-local.bat`). A flag kept
+    inside the effect was forgotten by the second run, which then borrowed
+    somebody else's session.
+  - A tab told by ANOTHER tab clears only its tokens, its Recent list and its
+    user. It leaves the drafts alone, because a late message would delete
+    what the next person typed.
+  - Only a refused refresh (401) ends the session in every tab. A network
+    failure ends it in one tab, as before.
+  - Still `sessionStorage`, never `localStorage`.
+  - **It relies on refresh tokens NOT rotating**: turn on
+    `ROTATE_REFRESH_TOKENS` and one tab's refresh kills the token the others
+    hold.
+  - **Script on any page of the origin can now ask for every tab's tokens**,
+    which rests on nothing being able to run script here.
 - **A Google account has `set_unusable_password()`.** Never flag one
   `must_change_password`: the gate asks for the CURRENT password and
   `check_password()` is False for an unusable one, so it locks them out with no
@@ -1990,9 +2029,12 @@ the psychologist asked to take a child. Design and what was settled in review:
   when the limit holds it, so the limit can be watched working locally; console
   lines are counted for it), and no CalendarInvite is recorded - so the
   Calendar update cannot happen locally.
-- **A link in an email opens a signed-out tab** (tokens are per tab), so
+- **A link in an email opens a new tab**, which borrows the sign-in of a tab
+  already open (see "Signing in"). With none open it is signed out, so
   `ProtectedRoute` passes `state.from` and `Login` returns there after any
-  sign-in (`returnPath`: a single leading `/`, never `/login`).
+  sign-in (`returnPath`: a single leading `/`, never `/login`). The button's
+  `for=<recipient id>` says whose open session to borrow. It is not a secret
+  and signs nobody in.
 - **Left open for the owner**: a session PATCHed onto another child (API only)
   sends nothing; the footer's "No case details are included" is stronger than
   a session's date and time; dark mode is unchecked on a real phone. **The sender is the bigger risk**: gmail.com sent
@@ -2245,7 +2287,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 3,493 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 3,511 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

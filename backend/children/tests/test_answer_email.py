@@ -144,7 +144,7 @@ class BookingTheFirstSessionTest(AnswerMailBase):
                       "and the first session is booked.", text)
         self.assertIn(f"Case: {self.ref}", text)
         self.assertIn(f"First session: {FIRST_SESSION}", text)
-        self.assertIn(f"Open the schedule: {ORIGIN}/schedule", text)
+        self.assertIn(f"Open the schedule: {ORIGIN}/schedule?for={self.sw.pk}", text)
         self.assertNotIn("Next session", text)
         self.assertNotIn("No session is booked yet", text)
         self.assertEqual([{"email": "sw@t.ph", "name": "Editha Pascua"}], payload["to"])
@@ -158,7 +158,7 @@ class BookingTheFirstSessionTest(AnswerMailBase):
         with self.outbox() as sent:
             self.book(self.psy)
         html = self.one(sent, self.sw)["htmlContent"]
-        self.assertIn(f'href="{ORIGIN}/schedule"', html)
+        self.assertIn(f'href="{ORIGIN}/schedule?for={self.sw.pk}"', html)
         self.assertIn("Open the schedule", html)
         self.assertIn("First session", html)
         self.assertIn("9:30&nbsp;AM", html)
@@ -226,7 +226,8 @@ class BookingTheFirstSessionTest(AnswerMailBase):
         self.assertIn(f"Next session: {FIRST_SESSION}", payload["textContent"])
         self.assertIn("and a session is booked.", payload["textContent"])
         self.assertNotIn("First session", payload["textContent"])
-        self.assertIn(f"Open the schedule: {ORIGIN}/schedule", payload["textContent"])
+        self.assertIn(f"Open the schedule: {ORIGIN}/schedule?for={self.sw.pk}",
+                      payload["textContent"])
 
     def test_the_social_worker_booking_first_is_not_emailed_for_it_and_the_acceptance_stays_owed(self):
         req = self.accepted()
@@ -505,7 +506,8 @@ class MailAnswerTest(AnswerMailBase):
                       "No session is booked yet; you will get an email when one is.", text)
         self.assertNotIn("Next session", text)
         self.assertNotIn("First session", text)
-        self.assertIn(f"Open the record: {ORIGIN}/report/child/{self.child.pk}", text)
+        self.assertIn(f"Open the record: {ORIGIN}/report/child/{self.child.pk}"
+                      f"?for={self.sw.pk}", text)
         self.assertFalse(self.owed(req))
 
     def test_a_booking_after_it_is_the_ordinary_email(self):
@@ -1066,8 +1068,8 @@ class WordingTest(AnswerMailBase):
         self.assertEqual(f"Marivic Bulan accepted case {self.ref}", payload["subject"])
         self.assertIn("No session is booked yet; you will get an email when one is.",
                       payload["textContent"])
-        self.assertIn(f"Open the record: {ORIGIN}/report/child/{self.child.pk}",
-                      payload["textContent"])
+        self.assertIn(f"Open the record: {ORIGIN}/report/child/{self.child.pk}"
+                      f"?for={self.sw.pk}", payload["textContent"])
 
     def test_the_next_session_is_the_earliest_one_still_to_come_with_this_psychologist(self):
         self.session(start=NOW - timedelta(days=2))                    # over

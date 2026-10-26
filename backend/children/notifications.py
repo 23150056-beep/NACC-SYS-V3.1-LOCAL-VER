@@ -98,7 +98,8 @@ def _post(payload, description):
 
 
 def sign_in_url():
-    """The address every email's button points at: where people open NACC SYS.
+    """The address every email's button is built from: where people open NACC
+    SYS. The site and nothing more; each email adds its own path.
 
     `SITE_URL` when it is set, and it is the right answer wherever it is. It
     exists because the old rule (`origin_from_cors`) fails on a local copy: the
@@ -222,7 +223,17 @@ def build_temporary_password_payload(user, temporary_password):
     # nothing today. It is escaped anyway: the day that alphabet grows, this
     # should not become the thing that breaks the mail.
     password = html.escape(str(temporary_password))
-    url = sign_in_url()
+    site = sign_in_url()
+    # The sign-in page itself, never the bare site. This email follows a reset
+    # or an approval: a reset ends every session the person had (tokens carry
+    # the password's hash), and an approved account never had one. So any
+    # session this browser holds when they click is somebody else's, and the
+    # bare address would borrow it from an open tab and bring them up as that
+    # colleague, not at the form the password is for. `/login` never borrows
+    # (design note 2026-10-26-shared-tab-session-design.md, "Where it never
+    # borrows"). The text part prints the same address: it is this email's one
+    # link, so it must not differ from the button.
+    url = f"{site}/login" if site else ""
 
     button = (
         f'<tr><td align="center" style="padding:4px 32px 28px;">'

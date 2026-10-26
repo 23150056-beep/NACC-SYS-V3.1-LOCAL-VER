@@ -218,8 +218,11 @@ when it is. Hidden for an administrator, who has no kinds.
 
 ## Signing in from an email
 
-Tokens live in per-tab `sessionStorage`, so a link from an email always opens
-a tab that is signed out. `ProtectedRoute` sends people to `/login` and
+Tokens live in per-tab `sessionStorage`, so a link from an email opens a tab
+with no session of its own. Since 26 Oct 2026 that tab borrows the session of
+a tab already signed in as the email's recipient, whom the button names with
+`for=<user id>` (`2026-10-26-shared-tab-session-design.md`). With no such tab
+it is signed out. `ProtectedRoute` sends people to `/login` and
 `Login` goes to `/` afterwards, so every email button would land on the
 Dashboard. Now the sign-in screen gets the address it was sent from
 (`<Navigate to="/login" state={{ from }}>`) and goes back there after a

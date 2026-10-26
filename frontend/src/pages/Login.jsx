@@ -56,12 +56,16 @@ function SlowSignIn() {
 }
 
 // Where a successful sign-in goes. ProtectedRoute sends a signed-out visitor
-// here with the address they asked for (`state.from`), and a button in an email
-// opens a tab with no session - tokens are per tab - so without this every one
-// of them would land on the Dashboard. Only a path inside this app is followed:
-// a single leading "/", nothing a browser could read as another site ("//host",
-// and "/\host", which it treats the same way) and never the sign-in page
-// itself, which would sign them in and leave them looking at the form.
+// here with the address they asked for (`state.from`). A button in an email
+// opens a tab with no session; it borrows one from a signed-in tab of this
+// browser when there is one (AuthContext), and when there is not - or the one
+// open is somebody else's - the tab lands here, and without this every such
+// sign-in would end on the Dashboard. This page never borrows: it is where a
+// person signs in as themselves, so the form is always reachable. Only a path
+// inside this app is followed: a single leading "/", nothing a browser could
+// read as another site ("//host", and "/\host", which it treats the same way)
+// and never the sign-in page itself, which would sign them in and leave them
+// looking at the form.
 function returnPath(from) {
   if (typeof from !== 'string' || !from.startsWith('/')) return '/';
   if (from.startsWith('//') || from.startsWith('/\\') || from.startsWith('/login')) return '/';
@@ -69,7 +73,7 @@ function returnPath(from) {
 }
 
 export default function Login() {
-  const { login, loginWithGoogle } = useAuth();
+  const { user, login, loginWithGoogle } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
   // One answer for the password, Google and forced-password-change doors.
@@ -91,6 +95,13 @@ export default function Login() {
 
   // Wake the server while the person types, so their sign-in finds it up.
   useEffect(() => { wakeServer(); }, []);
+
+  // The temporary-password card is up because THIS tab signed in. If the
+  // session is signed out from another tab meanwhile, user goes null and there
+  // is nothing left to change the password of: back to the form.
+  useEffect(() => {
+    if (view === 'forced' && !user) setView('login');
+  }, [view, user]);
 
   const submit = async (e) => {
     e.preventDefault();

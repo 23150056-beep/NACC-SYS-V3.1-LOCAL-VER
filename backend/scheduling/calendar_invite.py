@@ -9,8 +9,10 @@ counted only for an invite that is really queued.
 
 What an invite may carry is what an email may carry (accounts/
 email_notifications.py, rule 1): the case reference, the times, the
-psychologist's name and the agency's own address. Never the child's name, the
-session's purpose or its notes - Google keeps a copy of an invite for good.
+psychologist's name and the agency's own address, which in the description's
+link is followed by the psychologist's account id (`for`, so a click borrows
+only their session). Never the child's name, the session's purpose or its
+notes - Google keeps a copy of an invite for good.
 
 Three details are where hand-made calendar files usually break, and each has a
 test:
@@ -151,7 +153,16 @@ def build_ics(appointment, attendee, *, method, sequence, uid):
     if method not in METHODS:
         raise ValueError(f"A calendar invite is a REQUEST or a CANCEL, not {method!r}.")
     ref = case_ref(appointment.child_id)
-    url = sign_in_url()
+    site = sign_in_url()
+    # The link names whom the invite is for (`for`), as the email buttons do:
+    # a click from Google Calendar then borrows the session of THAT person from
+    # a tab of this browser, and nobody else's. Without it a psychologist's
+    # click on a PC where a social worker is signed in would open the social
+    # worker's account. It is the attendee's id and no other - not the child's,
+    # not the booker's - it is not a secret, and it signs nobody in (design
+    # note 2026-10-26-shared-tab-session-design.md). `_text` below escapes the
+    # whole line, and `fold` wraps it at 75 octets.
+    url = f"{site}/?for={attendee.pk}" if site and attendee.pk is not None else site
     details = f"Case {ref}. Sign in to NACC SYS for the details" + (f": {url}" if url else ".")
     organizer = _cn(settings.BREVO_SENDER_NAME)
 

@@ -1,5 +1,6 @@
 import io
 import json
+import re
 import urllib.error
 from unittest import mock
 from unittest.mock import patch
@@ -314,6 +315,31 @@ class TemporaryPasswordEmailTest(TestCase):
         with override_settings(CORS_ALLOWED_ORIGINS=[]):
             payload = build_temporary_password_payload(self.user, "pw123456")
         self.assertNotIn("<a href", payload["htmlContent"])
+        # The text part has none either, and no half of one.
+        self.assertNotIn("http", payload["textContent"])
+        self.assertNotIn("/login", payload["htmlContent"] + payload["textContent"])
+
+    def test_the_button_opens_the_sign_in_page_not_the_bare_site(self):
+        """This email follows a reset or an approval, which ended every session
+        the person had: any session the browser holds when they click is
+        somebody else's. The bare address would borrow it from an open tab
+        (design note 2026-10-26-shared-tab-session-design.md); `/login` never
+        borrows, so they meet the form the password is for."""
+        site = "https://nacc-v3-demo-web.onrender.com"
+        payload = build_temporary_password_payload(self.user, "pw123456")
+        self.assertEqual([f"{site}/login"], re.findall(r'href="([^"]*)"', payload["htmlContent"]))
+        # The text part's one address is the same link.
+        self.assertEqual([f"{site}/login"], re.findall(r"https?://\S+", payload["textContent"]))
+        # It names nobody's session to look for: nothing to borrow here.
+        self.assertNotIn("for=", payload["htmlContent"] + payload["textContent"])
+
+    @override_settings(SITE_URL="https://nacc.example.gov.ph")
+    def test_the_button_ends_in_login_with_a_site_setting_too(self):
+        payload = build_temporary_password_payload(self.user, "pw123456")
+        self.assertEqual(["https://nacc.example.gov.ph/login"],
+                         re.findall(r'href="([^"]*)"', payload["htmlContent"]))
+        self.assertEqual(["https://nacc.example.gov.ph/login"],
+                         re.findall(r"https?://\S+", payload["textContent"]))
 
     def test_no_child_of_theirs_is_named_in_it(self):
         """Brevo is a processor outside the agency's agreements, which is why

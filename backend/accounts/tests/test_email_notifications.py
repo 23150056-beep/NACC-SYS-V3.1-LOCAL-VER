@@ -15,6 +15,7 @@ renamed key would silently switch everybody's opt-out back on.
 """
 import base64
 import json
+import re
 import unicodedata
 from contextlib import contextmanager
 from datetime import date, datetime, timezone as dt_timezone
@@ -523,6 +524,183 @@ class EveryEmailTest(SimpleTestCase):
         self.assertNotIn("border-radius:999px", page)         # the chip
 
 
+@override_settings(CORS_ALLOWED_ORIGINS=[ORIGIN])
+class WhoseLinkTest(SimpleTestCase):
+    """The button names its recipient (26 Oct 2026, design note
+    2026-10-26-shared-tab-session-design.md, "An email link names whose it
+    is"): `for=<their user id>` on the link, so a tab of the browser that is
+    signed in as THAT person lends its session and nobody else's. The id is
+    only a name. It signs nobody in, it is not on the address printed under
+    the button, and an email never carries anyone's but its own recipient's."""
+
+    PERSON = SimpleNamespace(pk=42)
+
+    def test_the_button_carries_the_recipient_in_the_page_and_in_the_text(self):
+        page, text = render("H", ["P"], button=("Open it", "/schedule"), recipient=self.PERSON)
+        self.assertIn(f'href="{ORIGIN}/schedule?for=42"', page)
+        self.assertIn(f"Open it: {ORIGIN}/schedule?for=42", text)
+        self.assertEqual(1, page.count("<a "))
+
+    def test_a_path_that_already_has_a_query_takes_it_after_an_ampersand(self):
+        page, text = render("H", ["P"], button=("Go", "/children?edit=7"), recipient=self.PERSON)
+        # The ampersand is escaped in the page, as every value in it is.
+        self.assertIn(f'href="{ORIGIN}/children?edit=7&amp;for=42"', page)
+        self.assertIn(f"Go: {ORIGIN}/children?edit=7&for=42", text)
+        for part in (page, text):
+            self.assertNotIn("?edit=7?for", part)
+
+    def test_the_plain_address_under_the_button_stays_the_bare_site(self):
+        page, text = render("H", ["P"], button=("Open it", "/schedule"), recipient=self.PERSON)
+        self.assertIn(f">{ORIGIN}</span>", page)
+        line = [t for t in text.split("\n") if t.startswith("Or open")][0]
+        self.assertEqual(f"Or open NACC SYS at {ORIGIN}", line)
+        # The footer's way to the switches names its recipient (below), so the
+        # two `for` in each part are the button's and the footer's, and no other
+        # address carries one.
+        self.assertEqual(2, page.count("for=42"))
+        self.assertEqual(2, text.count("for=42"))
+
+    def test_a_link_without_a_recipient_is_as_it_always_was(self):
+        for person in (None, SimpleNamespace()):
+            with self.subTest(person=person):
+                page, text = render("H", ["P"], button=("Open it", "/schedule"),
+                                    recipient=person)
+                self.assertIn(f'href="{ORIGIN}/schedule"', page)
+                self.assertIn(f"Open it: {ORIGIN}/schedule\n", text)
+                self.assertNotIn("for=", page + text)
+
+    def test_the_id_is_written_as_it_is_stored(self):
+        """A primary key is a whole number, and that is all `for` ever holds."""
+        page, _ = render("H", ["P"], button=("Open it", "/"),
+                         recipient=SimpleNamespace(pk=1234567))
+        self.assertIn(f'href="{ORIGIN}/?for=1234567"', page)
+
+    @override_settings(CORS_ALLOWED_ORIGINS=[])
+    def test_with_no_address_known_there_is_no_link_at_all_for_it_to_ride_on(self):
+        page, text = render("H", ["P"], button=("Open it", "/schedule"), recipient=self.PERSON)
+        self.assertNotIn("<a ", page)
+        for part in (page, text):
+            self.assertNotIn("for=", part)
+            self.assertNotIn("Open it", part)
+
+    def test_with_no_button_only_the_footer_names_the_recipient(self):
+        page, text = render("H", ["P"], recipient=self.PERSON)
+        self.assertNotIn("<a ", page)
+        self.assertEqual(1, page.count("for="))
+        self.assertEqual(1, text.count("for="))
+        self.assertTrue(text.endswith(f"{ORIGIN}/profile?for=42"))
+
+    def test_the_footers_profile_address_carries_the_recipient_in_both_parts(self):
+        """A mail client turns the printed address into a link, and clicked on a
+        PC where a colleague is signed in a bare one would borrow the
+        colleague's session. It is the recipient's id and nobody else's, and
+        the same with or without a button above it."""
+        for button in (None, ("Open it", "/schedule")):
+            with self.subTest(button=button):
+                page, text = render("H", ["P"], button=button, recipient=self.PERSON)
+                line = (f"Choose which emails you get: My Profile, Email notifications - "
+                        f"{ORIGIN}/profile?for=42")
+                self.assertIn(line, page)
+                self.assertTrue(text.endswith(f"{FOOTER}\n{line}"))
+                for part in (page, text):
+                    self.assertEqual(["42"] * (2 if button else 1),
+                                     re.findall(r"\bfor=(\d+)", part))
+                # Printed text, as before: the footer's address is not an <a>.
+                self.assertNotIn(f'href="{ORIGIN}/profile', page)
+
+    def test_the_footers_profile_address_is_the_bare_one_without_a_recipient(self):
+        for person in (None, SimpleNamespace()):
+            with self.subTest(person=person):
+                page, text = render("H", ["P"], button=("Open it", "/schedule"),
+                                    recipient=person)
+                line = (f"Choose which emails you get: My Profile, Email notifications - "
+                        f"{ORIGIN}/profile")
+                self.assertIn(line + "<", page)
+                self.assertTrue(text.endswith(f"{FOOTER}\n{line}"))
+                self.assertNotIn("for=", page + text)
+
+    def test_the_footers_profile_address_names_the_recipient_of_a_sent_email(self):
+        psy = Mock(is_active=True, email="p@t.ph", fullname="P",
+                   role=Mock(role_name=Role.PSYCHOLOGIST), pk=7)
+        with override_settings(BREVO_API_KEY="k"), \
+                patch("accounts.email_notifications._queue") as queue, \
+                patch("accounts.email_notifications.wants", return_value=True):
+            self.assertTrue(notify("case_request", psy, subject="S", heading="H",
+                                   paragraphs=["P"]))
+        payload = queue.call_args.args[0]
+        self.assertIn(f"Email notifications - {ORIGIN}/profile?for=7", payload["htmlContent"])
+        self.assertTrue(payload["textContent"].endswith(f"{ORIGIN}/profile?for=7"))
+
+    def test_notify_names_the_person_it_is_sent_to(self):
+        psy = Mock(is_active=True, email="p@t.ph", fullname="P",
+                   role=Mock(role_name=Role.PSYCHOLOGIST), pk=7)
+        with override_settings(BREVO_API_KEY="k"), \
+                patch("accounts.email_notifications._queue") as queue, \
+                patch("accounts.email_notifications.wants", return_value=True):
+            queued = notify("case_request", psy, subject="S", heading="H",
+                            paragraphs=["P"], button=("Go", "/schedule"))
+        self.assertTrue(queued)
+        payload = queue.call_args.args[0]
+        self.assertIn(f'href="{ORIGIN}/schedule?for=7"', payload["htmlContent"])
+        self.assertIn(f"Go: {ORIGIN}/schedule?for=7", payload["textContent"])
+
+
+class WhoseLinkSentTest(MailBase):
+    """The same, through the triggers that really send, with several people
+    who could be mixed up with one another."""
+
+    @staticmethod
+    def _named(payload):
+        """Every id a `for` in this email names, page and text separately: the
+        button's, then the footer's address of the email switches."""
+        return (re.findall(r"\bfor=(\d+)", payload["htmlContent"]),
+                re.findall(r"\bfor=(\d+)", payload["textContent"]))
+
+    def test_an_email_to_one_user_never_carries_another_users_id(self):
+        with self.outbox() as sent:
+            self._ask(self.psy)                                   # case_request to psy
+            self._ask(self.psy2)                                  # withdrawn to psy, request to psy2
+            req = AssignmentRequest.objects.get(
+                child=self.child, status=AssignmentRequest.PENDING)
+            self.assertEqual(200, self._answer(req, "accept", user=self.psy2).status_code)
+            self.assertEqual(200, self._answer(req, "mail-answer", user=self.psy2).status_code)
+            res = self._as(self.admin).post("/api/children/transfer/", {
+                "from_social_worker": self.sw.pk, "to_social_worker": self.other_sw.pk,
+                "children": [self.child.pk]}, format="json")
+            self.assertEqual(200, res.status_code, res.data)
+        self.assertEqual({"case_request", "request_withdrawn", "case_accepted",
+                          "records_transferred"}, {kind for kind, _ in sent})
+        pks = {user.email: user.pk for user in User.objects.all()}
+        for kind, payload in sent:
+            mine = str(pks[payload["to"][0]["email"]])
+            page, text = self._named(payload)
+            self.assertEqual([mine, mine], page, kind)
+            self.assertEqual([mine, mine], text, kind)
+
+    def test_two_emails_about_one_case_name_their_own_recipient_each(self):
+        with self.outbox() as sent:
+            self._ask(self.psy)
+            self._ask(self.psy2)
+        self.assertEqual(["case_request", "request_withdrawn"], self.kinds_to(sent, self.psy))
+        self.assertEqual(["case_request"], self.kinds_to(sent, self.psy2))
+        for user in (self.psy, self.psy2):
+            for _, payload in self.to(sent, user):
+                self.assertEqual(([str(user.pk)] * 2, [str(user.pk)] * 2), self._named(payload))
+
+    def test_the_overflow_notice_names_its_recipient_too(self):
+        with self.outbox() as sent:
+            email_notifications._send_overflow_notice(self.sw, self.psy, NOW)
+        ((kind, payload),) = self.to(sent, self.psy)
+        self.assertEqual("overflow", kind)
+        self.assertIn(f'href="{ORIGIN}/?for={self.psy.pk}"', payload["htmlContent"])
+        self.assertIn(f"Open NACC SYS: {ORIGIN}/?for={self.psy.pk}", payload["textContent"])
+        self.assertEqual(([str(self.psy.pk)] * 2, [str(self.psy.pk)] * 2),
+                         self._named(payload))
+        # The plain address under the button is still the bare site.
+        self.assertIn(f"Or open NACC SYS at {ORIGIN}\n", payload["textContent"])
+        self.assertIn(f">{ORIGIN}</span>", payload["htmlContent"])
+
+
 class AmberChipTest(SimpleTestCase):
     def test_the_chip_text_clears_wcag_aa_on_its_tint(self):
         """4.5:1 is what AA asks of text this size. Worked out here from the two
@@ -758,7 +936,7 @@ class WordingTest(MailBase):
         self.assertEqual("A case is waiting for your answer", payload["subject"])
         self.assertIn(f"Editha Pascua, a social worker, asked you to take case {ref}. It "
                       "joins your records only once you accept it.", payload["textContent"])
-        self.assertIn(f"Review the request: {ORIGIN}/", payload["textContent"])
+        self.assertIn(f"Review the request: {ORIGIN}/?for={self.psy.pk}", payload["textContent"])
 
     def test_request_withdrawn_for_a_child_and_for_a_reference_already_written(self):
         ref = self._ref(self.child)
@@ -767,7 +945,7 @@ class WordingTest(MailBase):
             self.assertEqual(f"Case {ref} is no longer waiting for you", payload["subject"])
             self.assertIn(f"Ada Admin withdrew the request for you to take case {ref}. "
                           "There is nothing for you to do.", payload["textContent"])
-            self.assertIn(f"Open NACC SYS: {ORIGIN}/", payload["textContent"])
+            self.assertIn(f"Open NACC SYS: {ORIGIN}/?for={self.psy.pk}", payload["textContent"])
 
     def test_request_withdrawn_by_closing_the_case_names_nobody_as_the_one_who_withdrew(self):
         self.child.status = Child.INACTIVE
@@ -800,8 +978,8 @@ class WordingTest(MailBase):
             self.assertEqual(f"{kind} email", description)
             self.assertEqual(f"Marivic Bulan {verb} case {ref}", payload["subject"])
             self.assertIn(f"Marivic Bulan {verb} case {ref}. {more}", payload["textContent"])
-            self.assertIn(f"Open the record: {ORIGIN}/report/child/{self.child.pk}",
-                          payload["textContent"])
+            self.assertIn(f"Open the record: {ORIGIN}/report/child/{self.child.pk}"
+                          f"?for={self.sw.pk}", payload["textContent"])
             self.assertEqual("sw@t.ph", payload["to"][0]["email"])
 
     def test_a_request_still_waiting_or_withdrawn_is_not_an_answer(self):
@@ -819,7 +997,8 @@ class WordingTest(MailBase):
             self.assertEqual(f"{noun} moved to you", payload["subject"])
             self.assertIn(f"Ada Admin moved {noun} to you from Rosa Santos.",
                           payload["textContent"])
-            self.assertIn(f"Open Records: {ORIGIN}/children", payload["textContent"])
+            self.assertIn(f"Open Records: {ORIGIN}/children?for={self.sw.pk}",
+                          payload["textContent"])
 
     def test_case_taken_over(self):
         payload = self._one(lambda: case_taken_over(self.child, self.other_sw, by=self.sw))
@@ -827,7 +1006,8 @@ class WordingTest(MailBase):
         self.assertEqual(f"Case {ref} was reopened by Editha Pascua", payload["subject"])
         self.assertIn(f"Editha Pascua reopened case {ref}, a closed case in your records, "
                       "at intake. It is now in their records.", payload["textContent"])
-        self.assertIn(f"Open NACC SYS: {ORIGIN}/", payload["textContent"])
+        self.assertIn(f"Open NACC SYS: {ORIGIN}/?for={self.other_sw.pk}",
+                      payload["textContent"])
 
 
 class ReferenceGuardTest(MailBase):
@@ -1021,9 +1201,9 @@ class CaseRequestEmailTest(MailBase):
 
     def test_the_button_is_review_the_request_and_opens_the_front_door(self):
         payload = self._sent()
-        self.assertIn(f'href="{ORIGIN}/"', payload["htmlContent"])
+        self.assertIn(f'href="{ORIGIN}/?for={self.psy.pk}"', payload["htmlContent"])
         self.assertIn(">Review the request</a>", payload["htmlContent"])
-        self.assertIn(f"Review the request: {ORIGIN}/", payload["textContent"])
+        self.assertIn(f"Review the request: {ORIGIN}/?for={self.psy.pk}", payload["textContent"])
 
     def test_the_plain_address_and_the_safety_line_are_there(self):
         payload = self._sent()
@@ -1055,7 +1235,8 @@ class CaseRequestEmailTest(MailBase):
     def test_it_is_sent_with_the_site_setting_when_there_is_one(self):
         with override_settings(SITE_URL="https://nacc.example.gov.ph"):
             payload = self._sent()
-        self.assertIn('href="https://nacc.example.gov.ph/"', payload["htmlContent"])
+        self.assertIn(f'href="https://nacc.example.gov.ph/?for={self.psy.pk}"',
+                      payload["htmlContent"])
         self.assertIn("Or open NACC SYS at https://nacc.example.gov.ph\n", payload["textContent"])
         self.assertNotIn(ORIGIN, payload["htmlContent"] + payload["textContent"])
 
@@ -1254,7 +1435,8 @@ class TriggersTest(MailBase):
         payload = sent[0][1]
         ref = self._ref(self.child)
         self.assertEqual(f"Marivic Bulan accepted case {ref}", payload["subject"])
-        self.assertIn(f"{ORIGIN}/report/child/{self.child.pk}", payload["htmlContent"])
+        self.assertIn(f"{ORIGIN}/report/child/{self.child.pk}?for={self.sw.pk}",
+                      payload["htmlContent"])
 
     def test_declining_tells_the_social_worker_and_never_says_why(self):
         req = self._ask(self.psy)

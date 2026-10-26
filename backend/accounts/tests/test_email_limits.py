@@ -157,7 +157,7 @@ class LimitTest(LimitBase):
                       "and the notifications list show everything. Emails about their "
                       "changes start again once they have slowed down: within the "
                       "hour, or within a day at the longest.", text)
-        self.assertIn("Open NACC SYS: https://nacc.example.test/", text)
+        self.assertIn(f"Open NACC SYS: https://nacc.example.test/?for={self.psy.pk}", text)
         self.assertNotIn("attachment", payload)
         self.assertNotIn(self._ref(self.child), json_of(payload))
 

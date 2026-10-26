@@ -151,9 +151,12 @@ FOOTER = ("You get this email because of your notification settings in NACC SYS 
 # NACC SYS from the bookmark or the address already known. The address printed
 # under the button is there for the person who has not got one yet.
 #
-# Nor does it say what the button opens. It goes to the sign-in page in a tab
-# that is signed out and straight to the screen in one that is not, and the
-# label above it ("Open the schedule") says where it is going.
+# Nor does it say what the button opens. It opens the screen in a tab of this
+# browser that is already signed in as the person the email is for, and the
+# sign-in page otherwise (the link names whose session to look for: `for` in
+# `render`), and the label above it ("Open the schedule") says where it is
+# going. "Nothing in this email signs you in" stays true all the same: `for`
+# signs nobody in, it only says whose open session to borrow.
 SAFETY = ("NACC SYS never asks for your password or a code by email, and nothing "
           "in this email signs you in. Not sure it is from us? Do not use the "
           "button: open NACC SYS from your bookmark or the address you already "
@@ -246,7 +249,7 @@ def _plural(n, noun):
 # --------------------------------------------------------------------------
 
 def render(heading, paragraphs, facts=(), button=None, *, preview=None, chip=None,
-           greeting=None, steps=(), subject=None):
+           greeting=None, steps=(), subject=None, recipient=None):
     """(html, text) for one email: the temporary password email's branded
     layout (children/notifications.py) - the same palette and header, a table
     layout with inline styles because Gmail strips <style> - and a plain-text
@@ -255,6 +258,17 @@ def render(heading, paragraphs, facts=(), button=None, *, preview=None, chip=Non
     `facts` is (label, value) rows. `button` is (label, path): it points at
     sign_in_url() plus the path, and is left out when no address is known
     rather than printing a dead link. Every value is escaped.
+
+    `recipient` is the user the email goes to. The button's link then ends in
+    `for=<their id>`, which tells the page that opens to borrow the session of
+    THAT person from a tab of this browser that is signed in, and nobody else's
+    (design note 2026-10-26-shared-tab-session-design.md). Two people signed in
+    in one browser each get their own session from their own email, and a
+    psychologist clicking theirs on a PC where a social worker is signed in
+    meets the sign-in page. The id is not a secret and signs nobody in: it can
+    only narrow what a tab borrows. It rides on the button and on the footer's
+    address of the email switches, which a mail client also turns into a link;
+    the plain address under the button stays the bare site.
 
     What every email gets, and why it is here:
 
@@ -287,6 +301,11 @@ def render(heading, paragraphs, facts=(), button=None, *, preview=None, chip=Non
         raise ValueError("A button's path begins with /.")
     site = n.sign_in_url()
     link = f"{site}{button[1]}" if button and site else ""
+    whose = getattr(recipient, "pk", None)
+    if link and whose is not None:
+        # A path that already has a query takes `for` after an "&", or the
+        # second "?" would turn the rest into part of the first value.
+        link += f"{'&' if '?' in button[1] else '?'}for={whose}"
     preview = (paragraphs[0] if paragraphs else "") if preview is None else preview
 
     preheader = (
@@ -353,8 +372,14 @@ def render(heading, paragraphs, facts=(), button=None, *, preview=None, chip=Non
         f'line-height:1.65;color:{n._MUTED};">{esc(SAFETY)}</div></td></tr>'
     ) if link else ""
 
+    # The footer's address names its recipient like the button does. A mail
+    # client turns printed text into a link, and opened on a PC where a
+    # colleague is signed in, a bare one would borrow the colleague's session
+    # (the same rule as the "Without `for`" case in the design note). It has no
+    # query of its own, so `for` always follows a "?".
+    profile_link = f"{site}/profile" + (f"?for={whose}" if whose is not None else "")
     profile = (f"Choose which emails you get: My Profile, Email notifications - "
-               f"{site}/profile") if site else ""
+               f"{profile_link}") if site else ""
     profile_row = (
         f'<div style="padding-top:6px;{_WRAP}">{esc(profile)}</div>'
     ) if profile else ""
@@ -582,7 +607,7 @@ def _send_overflow_notice(by, user, now):
          "notifications list show everything. Emails about their changes start "
          "again once they have slowed down: within the hour, or within a day at "
          "the longest."],
-        button=OPEN_NACC, subject=subject)
+        button=OPEN_NACC, subject=subject, recipient=user)
     _record(by, user, OVERFLOW, now)
     _queue(_payload(user, subject, html_body, text_body), f"{OVERFLOW} email")
 
@@ -671,7 +696,7 @@ def notify(kind_key, user, *, subject, heading, paragraphs, facts=(), button=Non
             return False
         html_body, text_body = render(
             heading, paragraphs, facts, button, preview=preview, chip=chip,
-            greeting=greeting, steps=steps, subject=subject)
+            greeting=greeting, steps=steps, subject=subject, recipient=user)
         payload = _payload(user, subject, html_body, text_body)
         if attachment is not None:
             filename, content = attachment()

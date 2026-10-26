@@ -558,7 +558,7 @@ export default function AppHeader() {
           onConfirm={() => { setLogoutOpen(false); logout(); navigate('/login'); }}
           tone="warning" icon={<Icon name="log-out" size={19} />}
           title="Log out?"
-          description="You'll need to sign in again to get back in. Anything already saved is kept."
+          description="This signs you out of every tab in this browser that is signed in to your account. What is saved is kept; typing not yet saved in those tabs is lost."
           confirmLabel="Log out" cancelLabel="Stay signed in"
         />
       )}

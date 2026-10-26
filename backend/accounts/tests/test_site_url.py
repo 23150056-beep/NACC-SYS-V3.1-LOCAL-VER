@@ -69,8 +69,10 @@ class SignInUrlTest(SimpleTestCase):
     def test_the_temporary_password_email_follows_the_setting_too(self):
         person = User(email="new@t.ph", username="new@t.ph", first_name="Ana", last_name="Lim")
         payload = build_temporary_password_payload(person, "TempPass9")
-        self.assertIn(f'href="{SITE}"', payload["htmlContent"])
-        self.assertIn(SITE, payload["textContent"])
+        # The setting's address, and the sign-in page on it (see
+        # children/tests/test_notifications.py for why it is /login).
+        self.assertIn(f'href="{SITE}/login"', payload["htmlContent"])
+        self.assertIn(f"{SITE}/login", payload["textContent"])
         self.assertNotIn(ORIGIN, payload["htmlContent"] + payload["textContent"])
 
 
@@ -93,8 +95,11 @@ class ForgedHostTest(MailBase):
             everything = json.dumps(payload, ensure_ascii=False)
             self.assertNotIn(EVIL, everything, f"{kind} carries the forged host")
             self.assertIn(f'href="{expected}', payload["htmlContent"], kind)
+            # And the button names the colleague it was sent to, not a host.
+            person = User.objects.get(email=payload["to"][0]["email"])
+            self.assertIn(f'for={person.pk}"', payload["htmlContent"], kind)
             self.assertIn(f"Or open NACC SYS at {expected}\n", payload["textContent"], kind)
-            self.assertIn(f"{expected}/profile", payload["textContent"], kind)
+            self.assertIn(f"{expected}/profile?for={person.pk}", payload["textContent"], kind)
 
     @override_settings(ALLOWED_HOSTS=["*"], SITE_URL=SITE)
     def test_a_case_request_sent_to_a_forged_host_links_to_the_configured_site(self):
@@ -104,7 +109,7 @@ class ForgedHostTest(MailBase):
         self.assertEqual(200, res.status_code, res.data)
         self.assertEqual(["case_request"], [k for k, _ in sent])
         self._assert_only_the_configured_address(sent, SITE)
-        self.assertIn(f'href="{SITE}/"', sent[0][1]["htmlContent"])
+        self.assertIn(f'href="{SITE}/?for={self.psy.pk}"', sent[0][1]["htmlContent"])
 
     @override_settings(ALLOWED_HOSTS=["*"], SITE_URL="")
     def test_with_no_setting_the_cors_list_is_still_the_only_source(self):
@@ -123,7 +128,8 @@ class ForgedHostTest(MailBase):
         self.assertEqual(200, res.status_code, res.data)
         self.assertEqual(["records_transferred"], [k for k, _ in sent])
         self._assert_only_the_configured_address(sent, SITE)
-        self.assertIn(f'href="{SITE}/children"', sent[0][1]["htmlContent"])
+        self.assertIn(f'href="{SITE}/children?for={self.other_sw.pk}"',
+                      sent[0][1]["htmlContent"])
 
     def test_a_host_that_is_not_allowed_is_refused_before_anything_is_mailed(self):
         """The first layer: with the host list as it is, the forgery never

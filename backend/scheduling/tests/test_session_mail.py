@@ -216,8 +216,8 @@ class BookedTest(SessionMailBase):
         self.assertIn(f"Case: {self.ref}", text)
         self.assertIn("When: Wed 21 Oct 2026, 9:30 AM to 10:30 AM", text)
         self.assertNotIn("Was:", text)
-        self.assertIn(f"Open the schedule: {ORIGIN}/schedule", text)
-        self.assertIn(f'href="{ORIGIN}/schedule"', payload["htmlContent"])
+        self.assertIn(f"Open the schedule: {ORIGIN}/schedule?for={self.psy.pk}", text)
+        self.assertIn(f'href="{ORIGIN}/schedule?for={self.psy.pk}"', payload["htmlContent"])
         self.assertEqual([{"email": "psy@t.ph", "name": "Marivic Bulan"}], payload["to"])
 
     def test_a_psychologist_booking_their_own_calendar_mails_the_social_worker_with_no_invite(self):
