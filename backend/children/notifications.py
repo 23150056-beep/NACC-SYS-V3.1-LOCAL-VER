@@ -1,19 +1,27 @@
-"""Transactional mail for case assignment.
+"""Transactional mail: the sender every email in this system goes through,
+and the messages that are not about a person's work.
 
-Restored from V2, with two deliberate changes.
+Restored from V2, with two deliberate changes that every email since keeps.
 
-**No name, no case details.** V2's email carried the child's full name and case
-number in the body. Brevo is a processor outside the agency's data-processing
-agreements (see the data-residency section of docs/CLOUD-DEPLOYMENT.md), and a
-child's name in a third party's mail logs is exactly the disclosure that section
-exists to prevent. The email now carries the case number and nothing else — the
-psychologist signs in to see who it is.
+**No name, no case details.** V2's assignment email carried the child's full
+name and case number in the body. Brevo is a processor outside the agency's
+data-processing agreements (see the data-residency section of
+docs/CLOUD-DEPLOYMENT.md), and a child's name in a third party's mail logs is
+exactly the disclosure that section exists to prevent. An email about a case
+carries its reference and nothing else - the person signs in to see who it is.
 
 **Off the request thread.** V2 called Brevo synchronously with a 20-second
 timeout, inside the request that saved the child record. A slow or unreachable
 Brevo would have held the save open and, on a small instance, tied up the
-worker. The send now happens after the transaction commits, on a daemon thread:
+worker. A send now happens after the transaction commits, on a daemon thread:
 the record is the source of truth and the mail must never be able to break it.
+
+What lives here: the Brevo request itself (`_post`, `_build_request`), the
+sign-in address and the palette every email shares, the configuration test,
+the temporary password and the sign-up verification code. The emails sent to
+psychologists and social workers about their work - a case waiting for an
+answer, an answer, a handover - are a catalogue of their own with a switch
+each: accounts/email_notifications.py.
 """
 import html
 import json
@@ -72,6 +80,14 @@ def _post(payload, description):
             detail = "(no response body)"
         logger.error("Brevo %s failed: HTTP %s — %s",
                      description, exc.code, detail)
+        if exc.code == 400 and payload.get("attachment"):
+            # A file Brevo will not take as written (an account that restricts
+            # attachments, a type it does not allow) must not cost the person
+            # the email itself: the calendar invite is the extra, the message
+            # is the point. Once, and without the file.
+            logger.warning("Brevo %s: sending again without the attachment", description)
+            return _post({k: v for k, v in payload.items() if k != "attachment"},
+                         description)
         return False
     except urllib.error.URLError:
         logger.exception("Brevo %s failed: could not reach Brevo", description)
@@ -81,66 +97,39 @@ def _post(payload, description):
         return False
 
 
-def build_payload(psychologist, case_number):
-    """The message itself. Split out so a test can assert what leaves the
-    building without standing up an HTTP server."""
-    recipient_name = html.escape(display_name(psychologist, "Psychologist"))
-    return {
-        "sender": {
-            "name": settings.BREVO_SENDER_NAME,
-            "email": settings.BREVO_SENDER_EMAIL,
-        },
-        "to": [{"email": psychologist.email, "name": recipient_name}],
-        # A question, not a fact, since 28 Sep 2026: the case is theirs only
-        # once they accept it (children/assignment.py).
-        "subject": "A case is waiting for your answer",
-        "htmlContent": (
-            "<h2>A case is waiting for your answer</h2>"
-            f"<p>Dear {recipient_name},</p>"
-            "<p>You have been asked to take a case. It joins your records once "
-            "you accept it.</p>"
-            f"<p><strong>Case number:</strong> {case_number}</p>"
-            "<p>Sign in to the RACCO I Child Care Management System to accept or "
-            "decline it. No case details are included in this email.</p>"
-            "<br><small>This is an automated notification.</small>"
-        ),
-    }
-
-
-def send_assignment_notification(child, psychologist=None):
-    """Queue one email to the psychologist asked to take the child - by
-    default the one assigned.
-
-    Returns True when a send was queued, False when there was nothing to send
-    (no assignee, no address, no API key). Never raises — the caller is in the
-    middle of saving a case record.
-    """
-    psychologist = psychologist or getattr(child, "assigned_psychologist", None)
-    if psychologist is None or not getattr(psychologist, "email", ""):
-        return False
-    if not settings.BREVO_API_KEY:
-        logger.warning(
-            "BREVO_API_KEY is not set; skipped assignment email for case %s", child.id)
-        return False
-
-    payload = build_payload(psychologist, child.id)
-    # on_commit so a rolled-back save cannot send mail about a case that does
-    # not exist; the thread so a slow Brevo cannot hold the response open.
-    transaction.on_commit(
-        lambda: threading.Thread(
-            target=_post, args=(payload, "assignment email"), daemon=True).start())
-    return True
-
-
 def sign_in_url():
-    """Where to send someone to use the password we just gave them.
+    """The address every email's button is built from: where people open NACC
+    SYS. The site and nothing more; each email adds its own path.
 
-    Taken from CORS_ALLOWED_ORIGINS, which already holds the frontend's own
-    origin on every deployment — a separate setting would be a second place to
-    get wrong, and one that only ever shows up as a dead link in an email
-    nobody reports. A localhost entry is skipped when a deployed one exists,
-    since the mail is read on someone else's machine.
+    `SITE_URL` when it is set, and it is the right answer wherever it is. It
+    exists because the old rule (`origin_from_cors`) fails on a local copy: the
+    CORS list there is localhost only, so the link opened nowhere but the PC
+    running the app, and a psychologist reading the email on a phone got a dead
+    button.
+
+    **Always from configuration, never from the request.** Building a link
+    from the `Host` header is the classic password-reset poisoning hole: send
+    the server a request with a forged Host and it mails a colleague a link to
+    your site, in a message that really does come from the agency. Nothing
+    here reads a request, and `SITE_URL` is checked when settings load
+    (config/guards.py `checked_site_url`).
+
+    Unset, the old rule stands, so a deployment that has not set it behaves
+    exactly as before.
     """
+    return settings.SITE_URL or origin_from_cors()
+
+
+def origin_from_cors():
+    """The site's address as it was worked out before `SITE_URL` existed: the
+    first entry of CORS_ALLOWED_ORIGINS, which already holds the frontend's own
+    origin on every hosted copy. A localhost entry is skipped when a deployed
+    one exists, since the mail is read on someone else's machine.
+
+    Kept as a function of its own for two reasons: it is `sign_in_url`'s answer
+    when `SITE_URL` is unset, and it is what the calendar UIDs sent before the
+    UID was stored were built from (scheduling/calendar_invite.py
+    `legacy_uid`), which must not change when `SITE_URL` is set."""
     origins = [o.strip().rstrip("/") for o in settings.CORS_ALLOWED_ORIGINS
                if o and o.strip()]
     deployed = [o for o in origins
@@ -234,7 +223,17 @@ def build_temporary_password_payload(user, temporary_password):
     # nothing today. It is escaped anyway: the day that alphabet grows, this
     # should not become the thing that breaks the mail.
     password = html.escape(str(temporary_password))
-    url = sign_in_url()
+    site = sign_in_url()
+    # The sign-in page itself, never the bare site. This email follows a reset
+    # or an approval: a reset ends every session the person had (tokens carry
+    # the password's hash), and an approved account never had one. So any
+    # session this browser holds when they click is somebody else's, and the
+    # bare address would borrow it from an open tab and bring them up as that
+    # colleague, not at the form the password is for. `/login` never borrows
+    # (design note 2026-10-26-shared-tab-session-design.md, "Where it never
+    # borrows"). The text part prints the same address: it is this email's one
+    # link, so it must not differ from the button.
+    url = f"{site}/login" if site else ""
 
     button = (
         f'<tr><td align="center" style="padding:4px 32px 28px;">'

@@ -1,3 +1,4 @@
+import { useRef } from 'react';
 import { Badge, Button, Icon, Note, Skeleton } from '../ui';
 import { exactDate, shortDate } from '../utils/time';
 
@@ -20,10 +21,14 @@ import { exactDate, shortDate } from '../utils/time';
 // psychologist are sent no list, so none is drawn for them. Nothing in it is
 // written by the assistant.
 
-const SEVERITY_COLOUR = {
-  danger: 'var(--red-600)',
-  warning: 'var(--amber-500)',
-  info: 'var(--text-muted)',
+// Severity is said in words as well as drawn: colour alone does not tell
+// everybody which gap is urgent. The icon colours are the darker tokens (the
+// amber-500 the icon used to be measures about 2.2:1 on white, short of the 3:1
+// a graphic needs), and the word beside the icon is what carries the meaning.
+const SEVERITY = {
+  danger: { label: 'Urgent', tone: 'danger', colour: 'var(--red-600)' },
+  warning: { label: 'Needs attention', tone: 'warning', colour: 'var(--warning-600)' },
+  info: { label: 'For information', tone: 'neutral', colour: 'var(--text-muted)' },
 };
 
 const ago = (n) => (n === 0 ? 'Today' : n === 1 ? '1 day ago' : `${n} days ago`);
@@ -82,7 +87,7 @@ function Row({ label, children }) {
   );
 }
 
-function FactRows({ f }) {
+function FactRows({ f, onOpenOverview, badgeSize }) {
   const next = f.next_session;
   const last = f.last_session;
   const plan = f.treatment_plan;
@@ -102,7 +107,7 @@ function FactRows({ f }) {
             {f.open_problems.map((p, i) => (
               <li key={`${p.identified_on}-${i}`}>
                 {p.description}
-                {p.category && <> <Badge tone="neutral" size="sm">{p.category}</Badge></>}
+                {p.category && <> <Badge tone="neutral" size={badgeSize}>{p.category}</Badge></>}
               </li>
             ))}
           </ul>
@@ -121,22 +126,29 @@ function FactRows({ f }) {
       <Row label="Self-reports to read">
         {waiting > 0 ? (
           <>
-            <Badge tone="danger" size="sm">{waiting} answer{waiting === 1 ? '' : 's'} awaiting review</Badge>
+            <Badge tone="danger" size={badgeSize}>{waiting} answer{waiting === 1 ? '' : 's'} awaiting review</Badge>
             {' '}
-            <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>Their words are on the Overview tab.</span>
+            {/* A button, not a pointer to one: it closes this and opens the tab. */}
+            <Button size="sm" variant="secondary" onClick={onOpenOverview}>
+              Read their words on the Overview tab
+            </Button>
           </>
         ) : 'None waiting'}
       </Row>
       <Row label="Care gaps">
         {f.care_gaps.length > 0 ? (
           <ul style={{ margin: 0, paddingLeft: 0, listStyle: 'none' }}>
-            {f.care_gaps.map((g) => (
-              <li key={g.type} style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-                <Icon name="alert-triangle" size={13}
-                      style={{ color: SEVERITY_COLOUR[g.severity] || SEVERITY_COLOUR.info, flex: 'none', marginTop: 2 }} />
-                <span>{g.message}</span>
-              </li>
-            ))}
+            {f.care_gaps.map((g) => {
+              const sev = SEVERITY[g.severity] || SEVERITY.info;
+              return (
+                <li key={g.type} style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 6px', alignItems: 'flex-start', padding: '2px 0' }}>
+                  <Icon name="alert-triangle" size={13} aria-hidden="true"
+                        style={{ color: sev.colour, flex: 'none', marginTop: 3 }} />
+                  <Badge tone={sev.tone} size={badgeSize}>{sev.label}</Badge>
+                  <span style={{ flex: '1 1 160px', minWidth: 0 }}>{g.message}</span>
+                </li>
+              );
+            })}
           </ul>
         ) : 'None'}
       </Row>
@@ -181,25 +193,41 @@ function NextSteps({ steps, onGo }) {
   );
 }
 
-export default function BriefFacts({ facts, failed, onGo }) {
+// `onRetry` asks for the facts again after a failure; `onOpenOverview` closes the
+// modal and shows the Overview tab, where the child's own words are.
+// `badgeSize` is 'sm' in the brief's modal; the assistant panel, which allows no
+// text under 12px, passes 'md'.
+export default function BriefFacts({ facts, failed, onGo, onRetry, onOpenOverview, badgeSize = 'sm' }) {
+  // The Retry button leaves the screen the moment it is pressed, and focus goes
+  // with it. The section takes the focus first, so the keyboard stays in the
+  // dialog instead of dropping to the page behind it.
+  const section = useRef(null);
+  const retry = () => { section.current?.focus(); onRetry?.(); };
   return (
     <>
-      <section aria-label="Facts from the record">
+      <section ref={section} tabIndex={-1} aria-label="Facts from the record" style={{ outline: 'none' }}>
         <div className="racco-eyebrow">From the record</div>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 8px' }}>
           Counted from the case file just now - not drafted by the assistant.
         </p>
         {failed ? (
-          <Note tone="warning" icon="alert-triangle">
-            The facts could not be loaded. Close this and try again.
-          </Note>
+          <>
+            <Note tone="warning" icon="alert-triangle">The facts could not be loaded.</Note>
+            {onRetry && (
+              <div style={{ marginTop: 8 }}>
+                <Button size="sm" variant="secondary" onClick={retry}>Retry</Button>
+              </div>
+            )}
+          </>
         ) : !facts ? (
-          <div role="status" aria-label="Loading the facts">
+          // The skeleton is a picture of waiting; the modal's own status line
+          // is what says so out loud, once, and goes on to say the result.
+          <div aria-hidden="true">
             {[0, 1, 2, 3, 4, 5].map((i) => (
               <div key={i} style={{ padding: '7px 0' }}><Skeleton height={12} /></div>
             ))}
           </div>
-        ) : <FactRows f={facts} />}
+        ) : <FactRows f={facts} onOpenOverview={onOpenOverview} badgeSize={badgeSize} />}
       </section>
       {Array.isArray(facts?.next_steps) && <NextSteps steps={facts.next_steps} onGo={onGo} />}
     </>

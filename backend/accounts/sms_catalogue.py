@@ -174,7 +174,13 @@ ENTRIES = {e.key: e for e in [
         no_rule_reason=_REMINDED_ONCE),
     Entry(
         "phone_code",
-        "NACC SYS: your verification code is {otp}. It expires in 10 minutes.",
+        # Measured on the owner's handset on 28 Oct 2026: the old wording
+        # ("NACC SYS: ... It expires in 10 minutes.") was accepted and marked
+        # Sent by Semaphore three times and never arrived - the network drops
+        # that exact combination. "NACC SYS: your verification code is
+        # 111111." and this wording both arrived. Do not put "NACC SYS" back
+        # next to "expires in".
+        "NACC RACCO I: your verification code is {otp}. It expires in 10 minutes.",
         OTP, STAFF,
         samples={"otp": "482913"},
         rules=_CODE_RULES),

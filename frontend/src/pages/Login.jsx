@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { wakeServer } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -55,10 +55,29 @@ function SlowSignIn() {
   );
 }
 
+// Where a successful sign-in goes. ProtectedRoute sends a signed-out visitor
+// here with the address they asked for (`state.from`). A button in an email
+// opens a tab with no session; it borrows one from a signed-in tab of this
+// browser when there is one (AuthContext), and when there is not - or the one
+// open is somebody else's - the tab lands here, and without this every such
+// sign-in would end on the Dashboard. This page never borrows: it is where a
+// person signs in as themselves, so the form is always reachable. Only a path
+// inside this app is followed: a single leading "/", nothing a browser could
+// read as another site ("//host", and "/\host", which it treats the same way)
+// and never the sign-in page itself, which would sign them in and leave them
+// looking at the form.
+function returnPath(from) {
+  if (typeof from !== 'string' || !from.startsWith('/')) return '/';
+  if (from.startsWith('//') || from.startsWith('/\\') || from.startsWith('/login')) return '/';
+  return from;
+}
+
 export default function Login() {
-  const { login, loginWithGoogle } = useAuth();
+  const { user, login, loginWithGoogle } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
+  // One answer for the password, Google and forced-password-change doors.
+  const after = returnPath(useLocation().state?.from);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [capsLock, setCapsLock] = useState(false);
@@ -77,6 +96,13 @@ export default function Login() {
   // Wake the server while the person types, so their sign-in finds it up.
   useEffect(() => { wakeServer(); }, []);
 
+  // The temporary-password card is up because THIS tab signed in. If the
+  // session is signed out from another tab meanwhile, user goes null and there
+  // is nothing left to change the password of: back to the form.
+  useEffect(() => {
+    if (view === 'forced' && !user) setView('login');
+  }, [view, user]);
+
   const submit = async (e) => {
     e.preventDefault();
     setError('');
@@ -90,7 +116,7 @@ export default function Login() {
         return;
       }
       toast.success(`Welcome back, ${u?.first_name || u?.fullname || 'there'}`);
-      navigate('/');
+      navigate(after);
     } catch (err) {
       if (err.response?.status === 429) {
         const message = err.response.data?.detail || 'Too many failed login attempts. Try again later.';
@@ -111,7 +137,7 @@ export default function Login() {
     try {
       const u = await loginWithGoogle(cred, requestedRole);
       toast.success(`Welcome back, ${u?.first_name || u?.fullname || 'there'}`);
-      navigate('/');
+      navigate(after);
     } catch (err) {
       const data = err.response?.data;
       // 403 + pending_approval is not a failure: Google verified them, this
@@ -140,7 +166,7 @@ export default function Login() {
         prefillCurrent={password}
         title="Set a new password"
         subtitle="This account has a temporary password issued by an administrator. Choose a new password to continue."
-        onDone={() => { toast.success('Password updated. Welcome!'); navigate('/'); }}
+        onDone={() => { toast.success('Password updated. Welcome!'); navigate(after); }}
         // The change ends the session, so the way on is the sign-in form -
         // not this card, which stayed up after the change went through. The
         // email stays filled in; the temporary password no longer works.

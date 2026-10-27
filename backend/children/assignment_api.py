@@ -4,6 +4,11 @@ Read, accept, decline, withdraw - no create, update or delete here. A request
 is made by picking a psychologist on the record (ChildViewSet), so there is one
 door for asking, and it is the one that already checks the record.
 
+`mail-answer` is the odd one out: it changes nothing about the request. An
+acceptance is not emailed to the social worker when it is made, because the
+psychologist usually books the first session next and the social worker should
+get one email for both; this is how the screen says "no booking is coming".
+
 Design: docs/superpowers/specs/2026-09-28-assignment-acceptance-design.md
 """
 from django.utils import timezone
@@ -12,6 +17,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts import email_notifications
 from accounts.display import display_name
 from accounts.models import Role
 from accounts.scoping import role_of
@@ -155,3 +161,33 @@ class AssignmentRequestViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         except assignment.AssignmentError as err:
             return self._refused(err)
         return Response(self.get_serializer(self.get_queryset().get(pk=req.pk)).data)
+
+    @action(detail=True, methods=["post"], url_path="mail-answer")
+    def mail_answer(self, request, pk=None):
+        """The "When will you see them first?" dialog ended with no session
+        booked (Book later, Finish, the close button, Escape, or the tab closed):
+        email the social worker the acceptance on its own.
+
+        Only the psychologist who was asked and who accepted. `get_object`
+        already hides another psychologist's request (404); a social worker or
+        the ISA who can see it is told no, as for accept and decline. Idempotent:
+        the email is sent by whoever first sets `answer_mailed_at` (a booking, the
+        sweep or this), so `mailed` is true for the call that sent it and false
+        for any after - and for one that came after a booking had already carried
+        the acceptance. True also when the social worker has switched the email
+        off, and when the psychologist is at the limit on the emails their
+        actions cause (accounts/email_notifications.py: the email is held and the
+        social worker is told that more updates are waiting): the answer was
+        dealt with, which is what the claim records. `mailed` is not "an email
+        left"."""
+        req = self.get_object()
+        if req.psychologist_id != request.user.id:
+            return Response({"detail": "Only the psychologist asked can send this."},
+                            status=status.HTTP_403_FORBIDDEN)
+        if req.status != AssignmentRequest.ACCEPTED:
+            return Response({"detail": "Only an accepted request has an answer to email."},
+                            status=status.HTTP_409_CONFLICT)
+        mailed = email_notifications.claim_answer_mail(req)
+        if mailed:
+            email_notifications.case_answered(req, by=request.user)
+        return Response({"mailed": mailed})

@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { useActivity } from '../context/ActivityContext';
 import { useLayout } from '../context/LayoutContext';
+import { useAssistant } from '../context/AssistantContext';
 import { useCensus } from '../context/CensusContext';
 import api from '../api/client';
 import {
@@ -73,10 +74,10 @@ function Popover({ open, onClose, width, children, label }) {
   );
 }
 
-function UtilityButton({ icon, label, on, badge = 0, onClick }) {
+function UtilityButton({ icon, label, on, badge = 0, onClick, ...rest }) {
   return (
     <button
-      type="button" onClick={onClick} title={label} aria-label={label} aria-expanded={on}
+      type="button" onClick={onClick} title={label} aria-label={label} aria-expanded={on} {...rest}
       style={{
         position: 'relative', width: 38, height: 38, borderRadius: '50%', border: 'none',
         background: on ? 'rgba(255,255,255,0.22)' : 'var(--chrome-fill)', color: 'var(--chrome-ink)',
@@ -93,6 +94,79 @@ function UtilityButton({ icon, label, on, badge = 0, onClick }) {
         </span>
       )}
     </button>
+  );
+}
+
+/* The assistant's header door (owner's brief, Oct 2026): a button beside the
+ * bell and the shortcut Ctrl+/, both toggling the same panel the floating
+ * launcher does. The shortcut is the plain chord only (Ctrl+Shift+/ and
+ * Ctrl+Alt+/ belong to the browser and to AltGr keyboards) and is ignored while
+ * a modal drawer or dialog owns the keyboard - the same rule as Ctrl K - except
+ * the assistant's own panel, which is modal below 640px and must be able to
+ * close itself. A one-time hint points at the button; it is remembered per
+ * person in localStorage as a flag and nothing else, and a browser that will
+ * not store it simply never shows the hint. */
+const hintKey = (userId) => `nacc-hint:assistant:${userId}`;
+
+function AssistantDoor({ showButton, onOpen }) {
+  const { user } = useAuth();
+  const { open, toggleAssistant, caps, enabled } = useAssistant();
+  const [hint, setHint] = useState(false);
+  const userId = user?.id;
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.shiftKey || e.altKey || e.key !== '/') return;
+      e.preventDefault();
+      if (document.querySelector('[aria-modal="true"]:not(#assistant-panel)')) return;
+      if (!open) onOpen();
+      toggleAssistant();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onOpen, toggleAssistant]);
+
+  const dismiss = useCallback(() => {
+    setHint(false);
+    try { localStorage.setItem(hintKey(userId), '1'); } catch { /* not remembered: shown again */ }
+  }, [userId]);
+
+  // Shown once the answer is in and the assistant is on - a hint pointing at a
+  // switched-off assistant is noise - and never after it has been used.
+  useEffect(() => {
+    if (!userId || !showButton || !caps || !enabled) { setHint(false); return; }
+    try { setHint(!localStorage.getItem(hintKey(userId))); } catch { setHint(false); }
+  }, [userId, showButton, caps, enabled]);
+  useEffect(() => { if (open && hint) dismiss(); }, [open, hint, dismiss]);
+
+  if (!showButton) return null;
+  return (
+    <div style={{ position: 'relative', flex: 'none' }}>
+      <UtilityButton
+        icon="sparkles" label="Assistant" on={open}
+        aria-controls="assistant-panel" aria-keyshortcuts="Control+/ Meta+/"
+        title="Assistant (Ctrl+/)"
+        onClick={() => { if (!open) onOpen(); toggleAssistant(); }}
+      />
+      {hint && (
+        <div
+          role="note" aria-label="Tip: the assistant"
+          onKeyDown={(e) => { if (e.key === 'Escape') dismiss(); }}
+          style={{
+            position: 'absolute', top: 46, right: 0, width: 262, zIndex: 62, padding: '12px 14px',
+            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)',
+            boxShadow: 'var(--shadow-xl)', animation: 'racco-pop-in var(--dur-base) var(--ease-out)',
+          }}
+        >
+          <div style={{ fontWeight: 800, fontSize: 13, color: 'var(--text-strong)' }}>Ask the assistant</div>
+          <p style={{ margin: '4px 0 10px', fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-body)' }}>
+            Look up your caseload in a sentence. Press <span className="racco-mono" style={{ fontWeight: 600, border: '1px solid var(--border)', borderRadius: 'var(--radius-xs)', padding: '0 5px' }}>Ctrl /</span> or
+            this button, from any screen.
+          </p>
+          <Button size="sm" variant="secondary" onClick={dismiss}>Got it</Button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -368,6 +442,10 @@ export default function AppHeader() {
             </>
             </Popover>
 
+        {/* A second door to the panel the floating launcher opens. Where the
+            help button is hidden for room, so is this: the launcher stays. */}
+        <AssistantDoor showButton={layout.utilityIconsOn} onOpen={() => openOnly(null)} />
+
         {layout.utilityIconsOn && (
           <Popover open={helpOpen} onClose={() => setHelpOpen(false)} width={318} label="Help">
               <UtilityButton icon="help-circle" label="Help" on={helpOpen} onClick={() => openOnly(helpOpen ? null : 'help')} />
@@ -377,6 +455,10 @@ export default function AppHeader() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 9, fontSize: 12.5, color: 'var(--text-body)' }}>
                     <span className="racco-mono" style={{ fontSize: 11, fontWeight: 600, border: '1px solid var(--border)', borderRadius: 'var(--radius-xs)', padding: '1px 6px' }}>Ctrl K</span>
                     Search, or type an action: &ldquo;book&rdquo;, &ldquo;upload&rdquo;
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 6, fontSize: 12.5, color: 'var(--text-body)' }}>
+                    <span className="racco-mono" style={{ fontSize: 11, fontWeight: 600, border: '1px solid var(--border)', borderRadius: 'var(--radius-xs)', padding: '1px 6px' }}>Ctrl /</span>
+                    Open or close the assistant
                   </div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginTop: 6, fontSize: 12.5, color: 'var(--text-body)' }}>
                     <span className="racco-mono" style={{ fontSize: 11, fontWeight: 600, border: '1px solid var(--border)', borderRadius: 'var(--radius-xs)', padding: '1px 6px' }}>&rarr;</span>
@@ -476,7 +558,7 @@ export default function AppHeader() {
           onConfirm={() => { setLogoutOpen(false); logout(); navigate('/login'); }}
           tone="warning" icon={<Icon name="log-out" size={19} />}
           title="Log out?"
-          description="You'll need to sign in again to get back in. Anything already saved is kept."
+          description="This signs you out of every tab in this browser that is signed in to your account. What is saved is kept; typing not yet saved in those tabs is lost."
           confirmLabel="Log out" cancelLabel="Stay signed in"
         />
       )}

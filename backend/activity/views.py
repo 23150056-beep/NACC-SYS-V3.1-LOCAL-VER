@@ -1,5 +1,6 @@
 from django.db.models import Q
 from rest_framework import mixins, viewsets, permissions
+from accounts import email_notifications
 from accounts.models import Role
 from activity.models import ActivityLog
 from activity.serializers import ActivityLogSerializer
@@ -11,6 +12,16 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = None
     serializer_class = ActivityLogSerializer
+
+    def list(self, request, *args, **kwargs):
+        # Every screen reads this feed, after every save and at sign-in, which
+        # makes it the one request that is certain to come while the app is in
+        # use and there is no scheduler (Render's free plan runs none). So it
+        # also mails the acceptances that nothing else has: a psychologist who
+        # accepted and then closed the browser before the email went. At most
+        # once a minute per process, and one cache call the rest of the time.
+        email_notifications.maybe_sweep()
+        return super().list(request, *args, **kwargs)
 
     def get_queryset(self):
         # What a move of records writes for each record is its audit trail, not
@@ -54,8 +65,13 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         else:
             # Administrator: the full audit stream, except the second copy of a
             # move's sentence, which is addressed to the worker who gave the
-            # records up (they already have the receiving worker's).
-            qs = qs.exclude(kind=ActivityLog.KIND_MOVE_COPY)
+            # records up (they already have the receiving worker's), and the
+            # line that an account reached the email limit. That one is written
+            # as often as once an hour for as long as the account goes on, which
+            # would fill the 50 lines below; the console's security log shows it
+            # (newest five and a count) and the account's own drawer lists it.
+            qs = qs.exclude(kind__in=[ActivityLog.KIND_MOVE_COPY,
+                                      ActivityLog.KIND_EMAIL_LIMIT])
         category = self.request.query_params.get("category")
         if category:
             qs = qs.filter(category=category)

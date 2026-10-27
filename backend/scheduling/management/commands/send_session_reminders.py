@@ -12,6 +12,7 @@ Safe to run twice: whoever has already been told about a given day is skipped.
 """
 from django.core.management.base import BaseCommand, CommandError
 
+from accounts import email_notifications
 from scheduling.reminders import send_session_reminders
 
 
@@ -28,6 +29,9 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         report = send_session_reminders(today=options["today"],
                                         dry_run=options["dry_run"])
+        # Emails are handed to Brevo on daemon threads, which die with this
+        # process: wait for the ones just queued before it exits.
+        email_notifications.wait_for_queued()
         for line in report["lines"]:
             self.stdout.write("  " + line)
 

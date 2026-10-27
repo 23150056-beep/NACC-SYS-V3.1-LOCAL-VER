@@ -98,6 +98,18 @@ class TheWordingTest(SimpleTestCase):
                 self.assertFalse(filled.lstrip().upper().startswith("TEST"),
                                  "Semaphore discards a message opening with TEST")
 
+    def test_no_message_combines_nacc_sys_with_expires_in(self):
+        """Measured on the owner's handset, 28 Oct 2026: "NACC SYS: your
+        verification code is {otp}. It expires in 10 minutes." was accepted and
+        marked Sent by Semaphore three times and never arrived. The same text
+        with "NACC RACCO I" instead, and "NACC SYS: your verification code is
+        111111." without the expiry sentence, both arrived. The network drops
+        that exact combination, and Semaphore still says Sent."""
+        for key, entry in sms_catalogue.ENTRIES.items():
+            with self.subTest(kind=key):
+                text = entry.template
+                self.assertFalse("NACC SYS" in text and "expires in" in text, text)
+
     def test_the_samples_are_the_longest_a_value_can_be(self):
         # A pleasant sample would make the length test prove nothing.
         self.assertEqual("C-99999", sms_catalogue.ENTRIES["assignment"].samples["case_ref"])

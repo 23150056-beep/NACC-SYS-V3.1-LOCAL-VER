@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
 import {
   Card, Button, Badge, Input, FormField, Avatar, RoleBadge, Icon,
-  RoleAccessPanel, Skeleton, EmptyState, PAGE, hoverLift,
+  RoleAccessPanel, Skeleton, EmptyState, Note, Switch, PAGE, hoverLift,
 } from '../ui';
 import { eventText, eventDestination } from '../utils/activity';
 import { dayHasPassed, exactDate, shortDate, timeAgo } from '../utils/time';
@@ -13,6 +13,7 @@ import api from '../api/client';
 import {
   getMyPhone, requestPhoneCode, confirmPhoneCode, removeMyPhone,
 } from '../api/sms';
+import { getMyEmailNotifications, saveMyEmailNotifications } from '../api/email';
 
 /* Your own account, on one page.
  *
@@ -436,6 +437,11 @@ export default function MyProfile() {
             </div>
           </Card>
 
+          {/* Email notifications. The ISA is offered none (the server lists no
+              kinds for an administrator), so the card is not even mounted:
+              it would ask for nothing and leave a gap where it was. */}
+          {!isAdmin && <EmailNotificationsCard />}
+
           {/* Printed in the signature block of the Social Case Study Report.
               Not offered to the ISA: IT support holds no PRC license. */}
           {holdsLicense && (
@@ -610,6 +616,155 @@ export default function MyProfile() {
         )}
       </div>
     </div>
+  );
+}
+
+/* Which emails NACC SYS may send you, one switch each.
+ *
+ * The list, the wording and the on/off state all come from the server
+ * (GET /auth/me/email-notifications/): the kinds depend on the role, and a key
+ * is stored against the account, so nothing here names one. Nothing is saved
+ * until Save, and Save sends only the switches that moved - a kind added later
+ * therefore starts on for everyone without this page having to know it.
+ *
+ * It renders nothing when there is nothing to switch: an administrator's list
+ * is empty, and so is the answer of a server that has no such endpoint yet (an
+ * older release is still serving during a deploy), where a card that could
+ * only fail would be worse than no card.
+ */
+const NO_EMAIL_KINDS = { address: '', sending: true, kinds: [] };
+// Switch draws its track 44px wide and puts 10px between it and the label, so
+// a description indented by both lines up under the label's first letter.
+const SWITCH_INDENT = 44 + 10;
+
+function EmailNotificationsCard() {
+  const toast = useToast();
+  const confirm = useConfirm();
+  const [mail, setMail] = useState(null);           // null until the server answers
+  const [loadFailed, setLoadFailed] = useState(false);
+  // key -> on/off, only for the switches that differ from what is saved. Back
+  // to the saved value drops the key, so "changed" never means "touched".
+  const [edits, setEdits] = useState({});
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(() => {
+    setLoadFailed(false);
+    getMyEmailNotifications()
+      .then(setMail)
+      .catch((err) => {
+        if (err.response?.status === 404) setMail(NO_EMAIL_KINDS);
+        else setLoadFailed(true);
+      });
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const kinds = mail?.kinds;
+  if (mail && !kinds?.length) return null;
+
+  const dirty = Object.keys(edits).length > 0;
+  const shown = (kind) => (kind.key in edits ? edits[kind.key] : kind.enabled);
+
+  const flip = (kind, on) => {
+    setError('');
+    setEdits((e) => {
+      const next = { ...e };
+      if (on === kind.enabled) delete next[kind.key]; else next[kind.key] = on;
+      return next;
+    });
+  };
+
+  const save = async () => {
+    if (!(await confirm({
+      description: `This changes which emails are sent to ${mail.address || 'you'}.`,
+      details: kinds.filter((k) => k.key in edits).map((k) => [k.label, edits[k.key] ? 'On' : 'Off']),
+      confirmLabel: 'Yes, save my choices',
+    }))) return;
+    setBusy(true); setError('');
+    try {
+      // The answer is the whole list as the server now holds it, so the card
+      // shows what was stored rather than what was sent.
+      setMail(await saveMyEmailNotifications(edits));
+      setEdits({});
+      toast.success('Email choices saved.');
+    } catch (err) {
+      // The edits stay, so a refusal costs the person nothing to retry.
+      const body = err.response?.data;
+      setError(body?.enabled || body?.detail || 'Could not save. Please try again.');
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <Card padding="20px" eyebrow="Notifications" title="Email notifications">
+      {loadFailed ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginTop: 8 }}>
+          <span role="alert" style={{ fontSize: 13, color: 'var(--text-muted)' }}>
+            Could not load your email choices.
+          </span>
+          <Button type="button" variant="secondary" size="sm" onClick={load}
+                  iconLeft={<Icon name="rotate-ccw" size={15} />}>Try again</Button>
+        </div>
+      ) : mail === null ? (
+        <div style={{ marginTop: 10 }}><Skeleton height={58} radius="var(--radius-md)" /></div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 8 }}>
+          {mail.address && (
+            <div style={{ fontSize: 13.5, color: 'var(--text-body)', overflowWrap: 'anywhere' }}>
+              Sent to{' '}
+              <span className="racco-mono" style={{ fontWeight: 700, color: 'var(--text-strong)' }}>
+                {mail.address}
+              </span>
+            </div>
+          )}
+          {!mail.sending && (
+            <Note icon="info" style={{ borderRadius: 'var(--radius-md)' }}>
+              This copy of the system has no mail service set up, so no email is
+              sent yet. Your choices are kept for when it is.
+            </Note>
+          )}
+          {/* Each description is tied to its switch with aria-describedby, so
+              tabbing through the switches reads it out: the one on the calendar
+              switch says that turning it off also stops updates. */}
+          <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+            {kinds.map((kind, i) => (
+              <li key={kind.key}
+                  style={{ padding: '11px 0', borderTop: i ? '1px solid var(--divider-row)' : 'none' }}>
+                <Switch checked={shown(kind)} disabled={busy} label={kind.label}
+                        describedBy={`email-note-${kind.key}`}
+                        onChange={(on) => flip(kind, on)} />
+                <div id={`email-note-${kind.key}`}
+                     style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text-faint)',
+                              marginTop: 3, paddingLeft: SWITCH_INDENT }}>
+                  {kind.description}
+                </div>
+              </li>
+            ))}
+          </ul>
+          {error && (
+            <div role="alert" style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--red-700)' }}>
+              {error}
+            </div>
+          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
+            <Button type="button" variant="primary" size="sm" disabled={!dirty || busy} onClick={save}
+                    iconLeft={<Icon name="save" size={15} />}>
+              {busy ? 'Saving…' : dirty ? 'Save' : 'Saved'}
+            </Button>
+            {dirty && (
+              <Button type="button" variant="ghost" size="sm" disabled={busy}
+                      onClick={() => { setEdits({}); setError(''); }}>
+                Discard
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+      <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text-faint)', marginTop: 13 }}>
+        Emails never contain a child&rsquo;s name or case details &mdash; they
+        tell you to sign in.
+      </div>
+    </Card>
   );
 }
 

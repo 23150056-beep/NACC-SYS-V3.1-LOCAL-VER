@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("scheduling", "0005_custodian_reminder"),
+        ("scheduling", "0007_calendar_invite_uid"),
     ]
 
     operations = [

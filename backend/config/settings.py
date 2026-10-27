@@ -404,14 +404,76 @@ LOGGING = {
 
 # --- Transactional mail (Brevo) -------------------------------------------
 #
-# One message only: "a case has been assigned to you", carrying the case
-# number and nothing else. Brevo is a processor outside the agency's DPAs, so
-# no child name or case detail is put in an email body — see the
-# data-residency section of docs/CLOUD-DEPLOYMENT.md. Leave BREVO_API_KEY
-# unset and the notification is skipped; nothing else changes.
+# Temporary passwords, sign-up codes and the notifications to psychologists
+# and social workers (accounts/email_notifications.py). Brevo is a processor
+# outside the agency's DPAs, so no child name or case detail is put in an
+# email — a case is named by its reference alone; see the data-residency
+# section of docs/CLOUD-DEPLOYMENT.md. Leave BREVO_API_KEY unset and the
+# notification is logged instead of sent; nothing else changes.
 BREVO_API_KEY = os.getenv("BREVO_API_KEY", "")
 BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL", "racco1nacc@gmail.com")
 BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "NACC RACCO1")
+
+
+def _email_limit(name, default):
+    """How many notification emails one account's actions may cause in a
+    window (accounts/email_notifications.py, "Round four" of the design note).
+    A whole number; 0 means no limit of that kind, as None does.
+
+    Off under `manage.py test`, as the export throttle is: many tests send more
+    than twenty emails from one account, and the tests of the limit switch it
+    on with override_settings. A blank value is "not set". One that is not a
+    whole number, or is negative, keeps the default and says so: a typo that
+    quietly switched the limit off would be the worst way to be wrong, and one
+    that stopped the boot is not worth it for a nudge channel."""
+    if _TESTING:
+        return None
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        value = -1
+    if value < 0:
+        import logging as _logging
+        _logging.getLogger("config.settings").warning(
+            "%s is ignored: it must be a whole number, 0 or more (0 means no limit). "
+            "The default of %s stays.", name, default)
+        return default
+    return value
+
+
+# The most notification emails one account's ACTIONS may cause (not the ones it
+# receives): to one colleague in an hour, to everyone in an hour, and to
+# everyone in 24 hours. Past a limit an email is held, the colleague is told
+# once that more are waiting and the ISA is told once that the account reached
+# it. Ordinary work stays far under them. The temporary password, the sign-up
+# code and the Settings test email are not notifications and are not counted.
+EMAIL_LIMIT_PER_RECIPIENT_HOUR = _email_limit("EMAIL_LIMIT_PER_RECIPIENT_HOUR", 20)
+EMAIL_LIMIT_PER_HOUR = _email_limit("EMAIL_LIMIT_PER_HOUR", 60)
+EMAIL_LIMIT_PER_DAY = _email_limit("EMAIL_LIMIT_PER_DAY", 150)
+
+# The address people open NACC SYS at, used in every email's button
+# (children.notifications.sign_in_url). Read from here and never from a
+# request's Host header: a link built from the request is how a forged Host
+# turns the system into a sender of links to somebody else's site. Checked
+# when settings load; a value that fails the guard is ignored with a warning
+# and the old rule (the first deployed CORS origin) stands, because an email
+# link is not worth a failed boot. The reason never repeats the value, so a
+# password typed into it is not written to the log.
+SITE_URL, _site_url_problem = guards.checked_site_url(
+    os.getenv("SITE_URL", ""), debug=DEBUG)
+if _site_url_problem:
+    import logging as _logging
+    _logging.getLogger("config.guards").warning(
+        "SITE_URL is ignored: %s Email links use the first deployed "
+        "CORS_ALLOWED_ORIGINS entry instead.", _site_url_problem)
+if _TESTING:
+    # The suite pins its own addresses (override_settings on CORS_ALLOWED_ORIGINS
+    # and SITE_URL). One a developer set in backend/.env for a copy others reach
+    # would otherwise win over the CORS list every email test relies on.
+    SITE_URL = ""
 
 # --- SMS (temporary passwords, assignments, session reminders) -------------
 #
@@ -479,3 +541,18 @@ ASSISTANT_MODEL_URL = os.getenv("ASSISTANT_MODEL_URL", "").strip()
 ASSISTANT_MODEL_TOKEN = os.getenv("ASSISTANT_MODEL_TOKEN", "").strip()
 ASSISTANT_MODEL_NAME = os.getenv("ASSISTANT_MODEL_NAME", "").strip()
 ASSISTANT_ALLOW_HOSTED_MODEL = env_bool("ASSISTANT_ALLOW_HOSTED_MODEL", False)
+
+# Where the LOCAL model runtime may be. Unset, the runtime address an
+# administrator saves in Settings must be this machine (localhost, 127.0.0.1 or
+# ::1): the drafting features send case notes, reports and children's own
+# answers there. Set it only on a deployment whose model server genuinely lives
+# on another machine of the agency's own - it is an environment variable, and
+# not a setting in the app, so it takes whoever runs the server rather than
+# whoever holds an administrator account.
+ASSISTANT_ALLOW_REMOTE_RUNTIME = env_bool("ASSISTANT_ALLOW_REMOTE_RUNTIME", False)
+
+# The assistant log keeps text (questions, drafts, summaries) that has no use
+# after a few days; assistant/retention.py blanks it, by itself, at most once an
+# hour, from the first assistant request after that. Off under the test runner,
+# where it would fire at an arbitrary point of an arbitrary test.
+ASSISTANT_PRUNE_ON_REQUEST = not _TESTING

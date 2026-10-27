@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { Button, Icon } from '../ui';
 import PasswordChangeGate from './PasswordChangeGate';
@@ -48,8 +48,12 @@ function WaitingForServer() {
 
 export default function ProtectedRoute({ children, roles }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) return <WaitingForServer />;
-  if (!user) return <Navigate to="/login" replace />;
+  // Say where they were going, so signing in takes them there (Login.jsx). A
+  // link from an email can open a tab with no session: when no other tab of
+  // this browser is signed in as the person it was sent to, nothing is borrowed.
+  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />;
   // Covers the page-refresh case: /auth/me/ still reports an outstanding
   // admin-issued temporary password, so every route renders the change gate
   // instead of its normal content until it's cleared.

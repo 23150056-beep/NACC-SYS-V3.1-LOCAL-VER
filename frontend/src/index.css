@@ -620,6 +620,41 @@ tr:focus-visible {
   animation: racco-chat-rise var(--dur-base) var(--ease-out) both;
 }
 
+/* The assistant panel sits above its launcher, which stays on the page as the
+   toggle. Below 640px it covers the screen and is a modal dialog (the shared
+   dialog behaviour traps the keyboard in it), so the launcher it covers steps
+   aside. dvh, not vh: a phone's address bar makes 100vh taller than the screen
+   and pushed the composer under the keyboard's edge. The vh line is the
+   fallback for a browser that does not know dvh. */
+.racco-assistant-panel {
+  position: fixed;
+  right: 20px;
+  bottom: 92px;
+  width: min(386px, calc(100vw - 32px));
+  height: min(600px, calc(100vh - 112px));
+  height: min(600px, calc(100dvh - 112px));
+  border-radius: 16px;
+  box-shadow: 0 26px 60px rgba(20, 34, 94, 0.3);
+}
+@media (max-width: 639px) {
+  .racco-assistant-panel {
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: auto;
+    width: auto;
+    height: 100vh;
+    height: 100dvh;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
+  /* !important: the launcher's own display is an inline style. */
+  .racco-assistant-launcher[data-open="true"] {
+    display: none !important;
+  }
+}
+
 /* The two pages every user meets before they have any reason to trust the
    system: sign in, and request access. Inline styles can express neither a
    media query nor a viewport clamp, so all of their sizing lives here.

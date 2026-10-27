@@ -34,7 +34,7 @@ from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
-from accounts import admin_overview
+from accounts import admin_overview, email_notifications
 from accounts.lockout import ADDRESS_LOCK_LABEL, NOT_AN_EMAIL, readable_sign_in_name
 from accounts.models import Role, SmsSend, User
 from activity.models import ActivityLog
@@ -1649,6 +1649,98 @@ class BulkLinesTest(ConsoleCase):
             self.client.post(f"/api/users/{user.pk}/reset-password/")
         kinds = Counter(e["kind"] for e in self.overview()["security_log"])
         self.assertEqual(kinds["reset"], 12)
+
+
+class EmailLimitInTheLogTest(ConsoleCase):
+    """An account that reaches the limit on the emails its actions cause
+    (accounts/email_notifications.py) writes one SECURITY line, and the log says
+    so in words of its own. Like every line a signed-in account can cause, it is
+    picked out by the `kind` its writer set, never by what its label says, and
+    it is capped so a stolen account cannot fill the log."""
+
+    SENTENCE = "Editha Pascua reached the email limit; further emails are held for up to a day"
+
+    def reach_the_limit(self, by=None, times=2):
+        """The real thing: `by` withdraws requests to one psychologist until the
+        second email is over the limit of one."""
+        child = self.child()
+        with override_settings(BREVO_API_KEY="test-key", EMAIL_LIMIT_PER_RECIPIENT_HOUR=1,
+                               EMAIL_LIMIT_PER_HOUR=0, EMAIL_LIMIT_PER_DAY=0), \
+                patch("accounts.email_notifications._queue"):
+            for _ in range(times):
+                email_notifications.request_withdrawn(self.bulan, child, by=by or self.editha)
+
+    def lines(self):
+        return [e for e in self.overview()["security_log"] if e["kind"] == "email_limit"]
+
+    def test_the_line_an_account_writes_is_in_the_log_with_its_own_words(self):
+        self.reach_the_limit()
+        (line,) = self.lines()
+        self.assertEqual(self.SENTENCE, line["text"])
+        self.assertEqual("Editha Pascua", line["actor"])
+        self.assertEqual(admin_overview._iso(NOW), line["at"])
+        self.assertEqual([], self.overview()["security_log_more"])
+
+    def test_it_names_the_account_and_nobody_else(self):
+        self.reach_the_limit()
+        (line,) = self.lines()
+        for leak in ("Marivic", "Bulan", "bulan@", "C-0", "withdr"):
+            self.assertNotIn(leak, line["text"])
+        self.assertNotIn("Marivic", str(self.overview()["security_log"]))
+
+    def test_one_line_an_hour_however_long_it_goes_on(self):
+        self.reach_the_limit(times=6)
+        self.assertEqual(1, len(self.lines()))
+
+    def test_the_words_are_not_read_out_of_the_label(self):
+        """Without the kind it is an ordinary security line, whatever it says."""
+        ActivityLog.objects.create(
+            actor=self.rosa, actor_label="Rosa Santos", action=ActivityLog.UPDATED,
+            category=ActivityLog.SECURITY, entity_type="User", entity_id=self.rosa.pk,
+            entity_label="Rosa Santos reached the email limit")
+        (line,) = self.overview()["security_log"]
+        self.assertEqual("other", line["kind"])
+        self.assertNotIn("held for up to a day", line["text"])
+
+    def test_a_flood_shows_the_newest_five_and_says_how_many_are_left(self):
+        for _ in range(8):
+            log_activity(self.editha, ActivityLog.UPDATED, ActivityLog.SECURITY,
+                         entity_type="User", entity_id=self.editha.pk,
+                         entity_label="Editha Pascua reached the email limit",
+                         kind=ActivityLog.KIND_EMAIL_LIMIT)
+        for n, pk in enumerate(ActivityLog.objects.order_by("pk").values_list("pk", flat=True)):
+            restamp(ActivityLog, pk, created_at=at(hours=8 - n))
+        self.client.post(f"/api/users/{self.rosa.pk}/reset-password/")
+        data = self.overview()
+        kinds = Counter(e["kind"] for e in data["security_log"])
+        self.assertEqual((kinds["email_limit"], kinds["reset"]), (5, 1))
+        self.assertEqual(
+            [{"kind": "email_limit", "count": 3, "text": "and 3 more email limits not shown"}],
+            data["security_log_more"])
+        # The five shown are the newest five.
+        self.assertEqual(
+            [at(hours=h).isoformat() for h in (1, 2, 3, 4, 5)],
+            [e["at"] for e in data["security_log"] if e["kind"] == "email_limit"])
+
+    def test_one_left_out_is_singular(self):
+        for _ in range(6):
+            log_activity(self.editha, ActivityLog.UPDATED, ActivityLog.SECURITY,
+                         entity_type="User", entity_id=self.editha.pk,
+                         entity_label="Editha Pascua reached the email limit",
+                         kind=ActivityLog.KIND_EMAIL_LIMIT)
+        self.assertEqual("and 1 more email limit not shown",
+                         self.overview()["security_log_more"][0]["text"])
+
+    def test_the_line_stays_readable_when_the_account_is_gone(self):
+        self.reach_the_limit()
+        self.editha.delete()
+        (line,) = self.lines()
+        self.assertEqual(self.SENTENCE, line["text"])
+
+    def test_only_an_administrator_reads_it(self):
+        self.reach_the_limit()
+        for who in (self.rosa, self.bulan):
+            self.assertEqual(403, self.as_user(who).get(URL).status_code)
 
 
 class AssistantReadsInTheLogTest(ConsoleCase):

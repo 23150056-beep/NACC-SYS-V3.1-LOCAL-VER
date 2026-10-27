@@ -38,6 +38,7 @@ from django.contrib.auth import get_user_model
 from django.db import OperationalError, transaction
 from django.utils import timezone
 
+from accounts import email_notifications
 from accounts.display import display_name
 from accounts.models import Role
 from activity.models import ActivityLog
@@ -253,6 +254,10 @@ def move(by, from_id, to_id, ids):
             raise
         raise Refused({"detail": CHANGED_UNDERFOOT}, status=409) from exc
 
+    # Only a move that was made gets here. The email waits for the commit as
+    # well (accounts/email_notifications.py), so a request wrapped in a larger
+    # transaction that fails later mails nothing.
+    email_notifications.records_transferred(target, source, len(ids), by=by)
     return {"moved": len(ids),
             "to": {"id": target.pk, "name": display_name(target)},
             "children": [{"id": pk, "ref": case_ref(pk)} for pk in sorted(ids)]}

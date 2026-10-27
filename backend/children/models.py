@@ -347,6 +347,14 @@ class AssignmentRequest(models.Model):
     decided_by = models.ForeignKey(
         "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="+")
+    # The answer has been dealt with by email: sent, or deliberately not (the
+    # social worker switched it off, no mail service is set up, nobody to tell).
+    # A decline is stamped when it is made. An ACCEPTANCE is not: its email
+    # waits for the first session the psychologist books, or for the dialog to
+    # end, or for the sweep (accounts/email_notifications.py), so NULL on an
+    # accepted request means that email is still owed. Whoever sets it first
+    # sends, by one conditional UPDATE (`claim_answer_mail`).
+    answer_mailed_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "tbl_assignment_request"

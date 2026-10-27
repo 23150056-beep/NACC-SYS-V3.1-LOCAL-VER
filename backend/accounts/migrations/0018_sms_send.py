@@ -8,7 +8,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("accounts", "0015_backfill_last_login"),
+        ("accounts", "0017_email_send_record"),
     ]
 
     operations = [

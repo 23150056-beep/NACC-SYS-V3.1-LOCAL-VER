@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { ConfirmDialog, Icon } from '../ui';
+import { useAuth } from './AuthContext';
 
 /* "Are you sure you want to proceed?" before anything is saved, sent or
  * changed — asked the owner's way, on every screen, from one place.
@@ -14,6 +15,10 @@ import { ConfirmDialog, Icon } from '../ui';
  * It resolves false on Cancel, Escape or a click outside, so the caller's
  * only job is to stop. Destructive actions keep their own dialogs — those
  * ask for a reason or a typed name, which is more than a yes.
+ *
+ * It also closes, answering as a dismissal, when the signed-in user signs out -
+ * here, or from another tab (the session is shared between tabs). A "Yes" over
+ * the sign-in page would send a save with no session behind it.
  */
 const ConfirmContext = createContext(null);
 
@@ -23,20 +28,38 @@ export function ConfirmProvider({ children }) {
   const [request, setRequest] = useState(null);
   // Held in a ref as well, so a second confirm() arriving before the first is
   // answered settles the first as "no" instead of leaving its caller waiting.
+  // `notice` is what dismissing it answers: an end dialog is read by closing it.
   const pending = useRef(null);
 
   const confirm = useCallback((options = {}) => new Promise((resolve) => {
-    pending.current?.(false);
-    pending.current = resolve;
+    pending.current?.resolve(false);
+    pending.current = { resolve, notice: !!options.notice };
     setRequest(options);
   }), []);
 
   const settle = (answer) => {
-    const resolve = pending.current;
+    const waiting = pending.current;
     pending.current = null;
     setRequest(null);
-    resolve?.(answer);
+    waiting?.resolve(answer);
   };
+
+  // Close whatever is open, with the answer a dismissal gives, when the user
+  // who was signed in is not any more. It is the CHANGE that counts: the
+  // sign-in and sign-up pages ask for confirmations with nobody signed in, and
+  // must keep them. A tab that is still loading its user has not been signed in
+  // yet, so it is not a change either.
+  const signedIn = Boolean(useAuth()?.user);
+  const wasSignedIn = useRef(false);
+  useEffect(() => {
+    if (wasSignedIn.current && !signedIn) {
+      const waiting = pending.current;
+      pending.current = null;
+      setRequest(null);
+      waiting?.resolve(waiting.notice);
+    }
+    wasSignedIn.current = signedIn;
+  }, [signedIn]);
 
   const tone = request?.tone || 'brand';
   const notice = !!request?.notice;

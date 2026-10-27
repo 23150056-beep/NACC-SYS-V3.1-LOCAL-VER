@@ -16,13 +16,13 @@ Design: docs/superpowers/specs/2026-09-28-assignment-acceptance-design.md
 from django.db import transaction
 from django.utils import timezone
 
+from accounts import email_notifications
 from accounts.display import display_name
 from accounts.models import Role
 from accounts.sms_notifications import notify_new_assignment
 from activity.models import ActivityLog
 from activity.services import log_activity
 from children.models import AssignmentRequest, Child
-from children.notifications import send_assignment_notification
 
 PENDING = AssignmentRequest.PENDING
 
@@ -88,9 +88,9 @@ def request_assignment(child, psychologist, *, by, carry_history=None):
         previous_psychologist=child.assigned_psychologist,
         carry_history=True if carry_history is None else carry_history)
     _log(by, ActivityLog.REQUESTED, req, psychologist)
-    # Same two messages an assignment used to send, now saying there is a
-    # question to answer. Neither carries the child's name.
-    send_assignment_notification(child, psychologist)
+    # An email and a text, each saying there is a question to answer. Neither
+    # carries the child's name.
+    email_notifications.case_request(child, psychologist, by=by)
     notify_new_assignment(child, psychologist)
     return req
 
@@ -137,6 +137,13 @@ def accept(req, *, by):
     moved_from = (req.previous_psychologist
                   if req.previous_psychologist_id not in (None, req.psychologist_id) else None)
     _log(by, ActivityLog.ACCEPTED, req, moved_from or _record_holder(req))
+    # No email yet, on purpose (24 Oct 2026): the next thing the psychologist
+    # does is usually book the first session, and the social worker should get
+    # one email for both. `answer_mailed_at` stays NULL, which means the
+    # acceptance is still owed, and the first of three things sends it:
+    #   1. the psychologist books (scheduling/session_mail.py),
+    #   2. the dialog ends without a booking (POST .../mail-answer/),
+    #   3. ten minutes pass (email_notifications.mail_overdue_answers).
     return req
 
 
@@ -152,6 +159,13 @@ def decline(req, *, by, reason):
         raise _already(req)
     req.refresh_from_db()
     _log(by, ActivityLog.DECLINED, req, _record_holder(req))
+    # A decline is mailed at once - nothing follows it that could be combined
+    # with - and stamped, so the column means the same for every answer: dealt
+    # with. The conditional update is the claim an acceptance makes.
+    AssignmentRequest.objects.filter(
+        pk=req.pk, status=AssignmentRequest.DECLINED, answer_mailed_at__isnull=True,
+    ).update(answer_mailed_at=timezone.now())
+    email_notifications.case_answered(req, by=by)
     return req
 
 
@@ -162,6 +176,7 @@ def withdraw(req, *, by):
     # To the psychologist, so the request does not vanish from their panel
     # with nothing to say why.
     _log(by, ActivityLog.WITHDRAWN, req, req.psychologist)
+    email_notifications.request_withdrawn(req.psychologist, req.child, by=by)
     return req
 
 

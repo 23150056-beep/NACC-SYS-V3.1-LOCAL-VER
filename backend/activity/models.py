@@ -63,6 +63,11 @@ class ActivityLog(models.Model):
     # inserting rows during a deploy.
     KIND_APPROVAL, KIND_DECLINE, KIND_ROLE = "approval", "decline", "role"
     KIND_RESET, KIND_REACTIVATE = "reset", "reactivate"
+    # An account reached the limit on the emails its actions can cause
+    # (accounts/email_notifications.py). A SECURITY line the account itself
+    # caused, so its words are not trusted for what it is: the ISA's console
+    # reads this kind (accounts/admin_overview.py). No choices, no migration.
+    KIND_EMAIL_LIMIT = "email_limit"
     # The two kinds of a RECORD line the feeds leave out (activity/views.py).
     # A move of records writes a line for each record, as its audit trail, and
     # a sentence for each worker told: the feeds hold the newest 50 lines, so
