@@ -23,7 +23,7 @@ import urllib.error
 import urllib.parse
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 
 from accounts.sms import PROVIDERS, check_gateway, send_sms
 from accounts.tests.test_sms_philsms import FakeResponse
@@ -41,11 +41,11 @@ def _form(request):
 
 @override_settings(SMS_PROVIDER="semaphore", SMS_API_KEY="sem-key",
                    SMS_ENDPOINT="", SMS_SENDER_NAME="NACC")
-class SemaphoreRequestShapeTest(SimpleTestCase):
+class SemaphoreRequestShapeTest(TestCase):
     def _send(self, body=QUEUED, text="NACC SYS: probe", **kwargs):
         with patch("accounts.sms.urllib.request.urlopen") as opened:
             opened.return_value = FakeResponse(body)
-            result = send_sms("0917 123 4567", text, "probe", **kwargs)
+            result = send_sms("0917 123 4567", text, "session_reminder", **kwargs)
             request = opened.call_args[0][0] if opened.call_args else None
         return result, request
 
@@ -85,7 +85,7 @@ class SemaphoreRequestShapeTest(SimpleTestCase):
 
 @override_settings(SMS_PROVIDER="semaphore", SMS_API_KEY="sem-key",
                    SMS_ENDPOINT="", SMS_SENDER_NAME="NACC")
-class SemaphoreCodeRouteTest(SimpleTestCase):
+class SemaphoreCodeRouteTest(TestCase):
     TEMPLATE = "NACC SYS: your verification code is {otp}. It expires in 10 minutes."
 
     def _send(self, body=None, **overrides):
@@ -94,7 +94,7 @@ class SemaphoreCodeRouteTest(SimpleTestCase):
         with override_settings(**overrides), \
                 patch("accounts.sms.urllib.request.urlopen") as opened:
             opened.return_value = FakeResponse(body)
-            result = send_sms("09171234567", self.TEMPLATE, "phone verification",
+            result = send_sms("09171234567", self.TEMPLATE, "phone_code",
                               otp_code="123456")
             request = opened.call_args[0][0]
         return result, request
@@ -119,7 +119,7 @@ class SemaphoreCodeRouteTest(SimpleTestCase):
         with patch("accounts.sms.urllib.request.urlopen") as opened:
             opened.return_value = FakeResponse(json.dumps(
                 [{"message_id": 1, "status": "Pending", "code": 12345}]))
-            result = send_sms("09171234567", self.TEMPLATE, "probe", otp_code="012345")
+            result = send_sms("09171234567", self.TEMPLATE, "session_reminder", otp_code="012345")
         self.assertEqual("012345", result.code)
 
     def test_a_code_the_gateway_chose_itself_is_the_one_handed_back(self):
@@ -142,11 +142,11 @@ class SemaphoreCodeRouteTest(SimpleTestCase):
 
 @override_settings(SMS_PROVIDER="semaphore", SMS_API_KEY="sem-key",
                    SMS_ENDPOINT="", SMS_SENDER_NAME="NACC")
-class SemaphoreRefusalTest(SimpleTestCase):
+class SemaphoreRefusalTest(TestCase):
     def _send(self, body, text="NACC SYS: probe"):
         with patch("accounts.sms.urllib.request.urlopen") as opened:
             opened.return_value = FakeResponse(body)
-            return send_sms("09171234567", text, "probe")
+            return send_sms("09171234567", text, "session_reminder")
 
     def test_a_validation_error_inside_a_200_is_a_failure(self):
         result = self._send(json.dumps({"number": ["The number format is invalid."]}))
@@ -182,7 +182,7 @@ class SemaphoreRefusalTest(SimpleTestCase):
         for text in ("TEST message", "  test: hello", "Test"):
             with self.subTest(text=text), \
                     patch("accounts.sms.urllib.request.urlopen") as opened:
-                result = send_sms("09171234567", text, "probe")
+                result = send_sms("09171234567", text, "session_reminder")
                 opened.assert_not_called()
             self.assertFalse(result.ok)
             self.assertIn("TEST", result.detail)
@@ -193,16 +193,16 @@ class SemaphoreRefusalTest(SimpleTestCase):
     def test_no_key_is_refused_before_the_network(self):
         with override_settings(SMS_API_KEY=""), \
                 patch("accounts.sms.urllib.request.urlopen") as opened:
-            result = send_sms("09171234567", "probe", "probe")
+            result = send_sms("09171234567", "session_reminder", "session_reminder")
             opened.assert_not_called()
         self.assertFalse(result.ok)
 
     def _http_error(self, code, body):
         error = urllib.error.HTTPError(
             "https://api.semaphore.co/api/v4/messages", code, "err", {}, None)
-        error.read = lambda: body.encode()
+        error.read = lambda size=-1: body.encode()
         with patch("accounts.sms.urllib.request.urlopen", side_effect=error):
-            return send_sms("09171234567", "NACC SYS: probe", "probe")
+            return send_sms("09171234567", "NACC SYS: probe", "session_reminder")
 
     def test_a_422_sender_refusal_names_the_sender(self):
         result = self._http_error(422, json.dumps(
@@ -236,12 +236,12 @@ class SemaphoreRefusalTest(SimpleTestCase):
         # The old copy printed SMS_ENDPOINT, which is blank unless overridden.
         with patch("accounts.sms.urllib.request.urlopen",
                    side_effect=urllib.error.URLError("timed out")):
-            result = send_sms("09171234567", "NACC SYS: probe", "probe")
+            result = send_sms("09171234567", "NACC SYS: probe", "session_reminder")
         self.assertIn("api.semaphore.co", result.detail)
 
 
 @override_settings(SMS_PROVIDER="semaphore", SMS_API_KEY="sem-key", SMS_ENDPOINT="")
-class SemaphoreCheckTest(SimpleTestCase):
+class SemaphoreCheckTest(TestCase):
     def _check(self, body):
         with patch("accounts.sms.urllib.request.urlopen") as opened:
             opened.return_value = FakeResponse(body)
@@ -308,7 +308,7 @@ class SemaphoreCheckTest(SimpleTestCase):
 
 @override_settings(SMS_PROVIDER="semaphore", SMS_API_KEY="sem-key", SMS_ENDPOINT="",
                    SMS_SENDER_NAME="NACC")
-class SemaphoreSenderNameCheckTest(SimpleTestCase):
+class SemaphoreSenderNameCheckTest(TestCase):
     """The key check also lists the account's sender names. "No active sender
     name found" reads as "you have none", which an owner with an approved name
     knows is false; what it means is that the name SENT is not an active one
@@ -368,7 +368,7 @@ class SemaphoreSenderNameCheckTest(SimpleTestCase):
         error = urllib.error.HTTPError(
             "https://api.semaphore.co/api/v4/account/sendernames", 429,
             "slow down", {}, None)
-        error.read = lambda: b"Too Many Attempts."
+        error.read = lambda size=-1: b"Too Many Attempts."
         result, _ = self._check(None, error=error)
         self.assertTrue(result.ok, result.detail)
         self.assertIn("could not be checked", result.detail)

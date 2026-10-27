@@ -284,3 +284,42 @@ class EmailVerification(models.Model):
 
     def __str__(self):
         return f"Email verification for {self.user.email}"
+
+
+class SmsSend(models.Model):
+    """One line for every text the system tried to send (accounts/sms.py).
+
+    The limits are counted from this table rather than from the cache: the
+    cache is per process, so under gunicorn each worker would keep its own
+    count and the allowance would multiply by the worker count, and a restart
+    would forget it. It is also the spend record the console reads.
+
+    The number is kept as a keyed hash plus its last four digits - enough to
+    count sends per number without a second table of custodians' phone numbers
+    - and the text is not kept at all. `credits` is an estimate (what the
+    gateway bills for the route and length), not a statement from the gateway.
+    """
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    # A key of accounts/sms_catalogue.
+    kind = models.CharField(max_length=40)
+    # "normal" or "otp": which gateway route carried it.
+    route = models.CharField(max_length=10)
+    credits = models.PositiveSmallIntegerField(default=0)
+    # "sent", "refused", "unknown" or "limited" - see accounts/sms.SmsResult.
+    outcome = models.CharField(max_length=10)
+    message_id = models.CharField(max_length=40, blank=True, default="")
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+")
+    # What the text was about, as a reference: "child:42", "appointment:7",
+    # "user:5". Never a name.
+    subject = models.CharField(max_length=40, blank=True, default="")
+    number_hash = models.CharField(max_length=64, db_index=True)
+    number_tail = models.CharField(max_length=4)
+
+    class Meta:
+        db_table = "tbl_sms_send"
+
+    def __str__(self):
+        return f"{self.kind} ...{self.number_tail} {self.outcome}"

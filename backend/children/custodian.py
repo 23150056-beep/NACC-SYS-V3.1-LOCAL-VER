@@ -36,9 +36,6 @@ CODE_MAX_PER_HOUR = 5
 # the rest of the intake, a sibling's record with the same custodian.
 CONFIRMED_FOR = timedelta(hours=1)
 
-CODE_TEXT = ("NACC RACCO I: your code is {otp}. Give it to the social worker "
-             "to confirm this number for appointment reminders.")
-
 FIELDS = ("custodian_name", "custodian_contact", "custodian_sms_consent")
 
 
@@ -167,6 +164,7 @@ def send_code(user, number):
     """Text a code to `number`. Returns the gateway's SmsResult; raises
     TooManyCodes when this person has asked too recently or too often. A
     refused send does not count against either limit."""
+    from accounts import sms_catalogue
     from accounts.sms import send_sms
     from children.models import CustodianContactCheck
 
@@ -196,7 +194,8 @@ def send_code(user, number):
 
     # After the claim commits: a gateway can take twenty seconds, and SQLite
     # locks the whole database for a write.
-    result = send_sms(number, CODE_TEXT, "custodian number check", otp_code=code)
+    result = send_sms(number, sms_catalogue.render("custodian_code"),
+                      "custodian_code", otp_code=code, requested_by=user)
     mine = CustodianContactCheck.objects.filter(pk=row.pk, code=code)
     if not result.ok:
         mine.update(code="", **before)

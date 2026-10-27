@@ -20,7 +20,7 @@ ARRAY, so a string here sends nothing and reports nothing wrong.
 import json
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 
 from accounts.sms import PROVIDERS, check_gateway, send_sms
 from accounts.tests.test_sms_philsms import FakeResponse
@@ -29,11 +29,11 @@ SENT_OK = json.dumps({"data": {"success": True, "recipientCount": 1}})
 
 
 @override_settings(SMS_PROVIDER="textbee", SMS_API_KEY="tb-key", SMS_ENDPOINT="")
-class TextbeeRequestShapeTest(SimpleTestCase):
+class TextbeeRequestShapeTest(TestCase):
     def _send(self, body=SENT_OK):
         with patch("accounts.sms.urllib.request.urlopen") as opened:
             opened.return_value = FakeResponse(body)
-            result = send_sms("09171234567", "NACC SYS: probe", "probe")
+            result = send_sms("09171234567", "NACC SYS: probe", "session_reminder")
             request = opened.call_args[0][0]
         return result, request
 
@@ -77,13 +77,13 @@ class TextbeeRequestShapeTest(SimpleTestCase):
     def test_no_key_is_refused_before_the_network(self):
         with override_settings(SMS_API_KEY=""):
             with patch("accounts.sms.urllib.request.urlopen") as opened:
-                result = send_sms("09171234567", "probe", "probe")
+                result = send_sms("09171234567", "session_reminder", "session_reminder")
                 opened.assert_not_called()
         self.assertFalse(result.ok)
 
 
 @override_settings(SMS_PROVIDER="textbee", SMS_API_KEY="tb-key", SMS_ENDPOINT="")
-class TextbeeCheckCountsPhonesTest(SimpleTestCase):
+class TextbeeCheckCountsPhonesTest(TestCase):
     """Credits are not the thing that runs out here. A phone is."""
 
     def _check(self, body):
@@ -136,14 +136,14 @@ def _http_error(code, body):
 
 
 @override_settings(SMS_API_KEY="k", SMS_ENDPOINT="")
-class EachGatewayKeepsItsOwnWireFormatTest(SimpleTestCase):
+class EachGatewayKeepsItsOwnWireFormatTest(TestCase):
     """Three providers now, and none of them agree about anything."""
 
     def _request_for(self, provider):
         with override_settings(SMS_PROVIDER=provider):
             with patch("accounts.sms.urllib.request.urlopen") as opened:
                 opened.return_value = FakeResponse(SENT_OK)
-                send_sms("09171234567", "probe", "probe")
+                send_sms("09171234567", "session_reminder", "session_reminder")
                 return opened.call_args[0][0]
 
     def test_they_do_not_bleed_into_each_other(self):

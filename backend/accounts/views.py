@@ -36,6 +36,7 @@ from children.notifications import send_temporary_password_notification
 from accounts.sms_notifications import (
     TooManyCodes, notify_temporary_password, start_phone_verification,
     confirm_phone_verification)
+from accounts import sms_catalogue
 from accounts.sms import check_gateway, send_sms
 from accounts.phone import (normalise_ph_mobile, InvalidPhilippineMobile,
                             as_typed as phone_as_typed)
@@ -548,9 +549,9 @@ class SmsConfigTestView(generics.GenericAPIView):
         reference = f"{secrets.randbelow(1_000_000):06d}"
         result = send_sms(
             user.phone,
-            f"NACC SYS: test message {reference}. If you can read this, text "
-            f"notifications are working.",
-            "configuration test")
+            sms_catalogue.render("config_test", reference=reference),
+            "config_test",
+            requested_by=user)
         return Response({
             "ok": result.ok,
             "detail": result.detail,

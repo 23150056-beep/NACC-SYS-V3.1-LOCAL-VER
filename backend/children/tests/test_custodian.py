@@ -30,7 +30,7 @@ NUMBER = "+639171234567"
 
 
 def fake_send(sent):
-    def _send(number, text, description="message", otp_code=None):
+    def _send(number, text, kind="message", otp_code=None, **extra):
         sent.append((number, text.replace("{otp}", otp_code) if otp_code else text))
         return SmsResult(True, "captured", code=otp_code)
     return _send
@@ -274,7 +274,7 @@ class AppointmentTextsTest(CustodianBase):
     def _queued(self, action):
         sent = []
         with patch.object(sms_notifications, "queue_sms",
-                          side_effect=lambda n, t, d: sent.append((n, t)) or True):
+                          side_effect=lambda n, t, k, **kw: sent.append((n, t)) or True):
             action()
         return sent
 

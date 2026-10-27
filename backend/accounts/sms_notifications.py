@@ -20,6 +20,7 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
+from accounts import sms_catalogue
 from accounts.models import PhoneVerification
 from accounts.sms import SmsResult, queue_sms, send_sms
 from config.clock import clock
@@ -71,9 +72,9 @@ def notify_temporary_password(user):
         return False
     return queue_sms(
         number,
-        "NACC SYS: an administrator has issued you a temporary password. "
-        "Check your email to sign in. Do not share it.",
-        "temporary password notice",
+        sms_catalogue.render("temporary_password"),
+        "temporary_password",
+        subject=f"user:{user.pk}",
     )
 
 
@@ -101,9 +102,9 @@ def notify_new_assignment(child, psychologist=None):
     # A question since 28 Sep 2026: the case is theirs once they accept it.
     return queue_sms(
         number,
-        f"NACC SYS: a case is waiting for you to accept or decline (case "
-        f"{case_ref(child)}). Sign in to answer.",
-        "assignment notice",
+        sms_catalogue.render("assignment", case_ref=case_ref(child)),
+        "assignment",
+        subject=f"child:{child.pk}",
     )
 
 
@@ -134,9 +135,10 @@ def notify_session_reminder(psychologist, count, when="tomorrow"):
     sessions = "session" if count == 1 else "sessions"
     return send_sms(
         number,
-        f"NACC SYS: you have {count} {sessions} scheduled {when}. "
-        f"Sign in to see the schedule.",
-        "session reminder",
+        sms_catalogue.render("session_reminder", count=count,
+                             sessions=sessions, when=when),
+        "session_reminder",
+        subject=f"user:{psychologist.pk}",
     )
 
 
@@ -150,23 +152,17 @@ def notify_session_reminder(psychologist, count, when="tomorrow"):
 # about; the custodian knows. Only when children/custodian.texts_allowed()
 # says so: consent recorded, number confirmed with a code, case open.
 #
-# The wording lives in this one table so it can be changed in one place (the
-# owner means to revise it). Every entry must stay ONE plain GSM-7 segment -
-# test_custodian_texts.py measures each with fits_one_segment - and must not
-# begin with TEST, which Semaphore silently discards.
+# The wording lives in accounts/sms_catalogue.py, one entry per text, so it can
+# be changed in one place (the owner means to revise it). Every entry must stay
+# ONE plain GSM-7 segment - test_sms_catalogue.py measures each at its longest -
+# and must not begin with TEST, which Semaphore silently discards.
 
-CUSTODIAN_OFFICE = "the RACCO I office"
+CUSTODIAN_OFFICE = sms_catalogue.CUSTODIAN_OFFICE
+# The wording by event, as a view onto the catalogue ("reminder" is the
+# day-before text; the others are the appointment's events).
 CUSTODIAN_TEXTS = {
-    "booked": ("NACC RACCO I: An appointment is set for the child in your care on "
-               "{when} at {office}. Please arrive 10 minutes early."),
-    "reminder": ("NACC RACCO I reminder: the child in your care has an appointment "
-                 "{day}, {when} at {office}."),
-    "moved": ("NACC RACCO I: The appointment of the child in your care is moved to "
-              "{when} at {office}."),
-    "cancelled": ("NACC RACCO I: The appointment of the child in your care on {when} "
-                  "is cancelled. The office will contact you to rebook."),
-    "missed": ("NACC RACCO I: We missed you at today's appointment. Please contact "
-               "the office to rebook."),
+    event: sms_catalogue.template(f"custodian_{event}")
+    for event in (*sms_catalogue.CUSTODIAN_EVENTS, "reminder")
 }
 
 
@@ -178,8 +174,11 @@ def custodian_when(start):
 
 
 def custodian_text(event, appointment, day="tomorrow"):
-    return CUSTODIAN_TEXTS[event].format(
-        when=custodian_when(appointment.start), day=day, office=CUSTODIAN_OFFICE)
+    kind = ("custodian_reminder" if event == "reminder"
+            else sms_catalogue.custodian_event_kind(event))
+    return sms_catalogue.render(
+        kind, when=custodian_when(appointment.start), day=day,
+        office=CUSTODIAN_OFFICE)
 
 
 def _custodian_number(child):
@@ -194,7 +193,8 @@ def notify_custodian(appointment, event):
     if not number:
         return False
     return queue_sms(number, custodian_text(event, appointment),
-                     f"custodian {event} notice")
+                     sms_catalogue.custodian_event_kind(event),
+                     subject=f"appointment:{appointment.pk}")
 
 
 def remind_custodian(appointment, day="tomorrow"):
@@ -204,7 +204,8 @@ def remind_custodian(appointment, day="tomorrow"):
     if not number:
         return SmsResult(False, "Texts to this custodian are off.")
     return send_sms(number, custodian_text("reminder", appointment, day=day),
-                    "custodian reminder")
+                    "custodian_reminder",
+                    subject=f"appointment:{appointment.pk}")
 
 
 # --------------------------------------------------------------------------
@@ -254,9 +255,11 @@ def start_phone_verification(user, number):
     # database for a write, and a gateway can take twenty seconds to answer.
     result = send_sms(
         number,
-        "NACC SYS: your verification code is {otp}. It expires in 10 minutes.",
-        "phone verification",
+        sms_catalogue.render("phone_code"),
+        "phone_code",
         otp_code=code,
+        requested_by=user,
+        subject=f"user:{user.pk}",
     )
     mine = PhoneVerification.objects.filter(pk=row.pk, code=code)
     if not result.ok:

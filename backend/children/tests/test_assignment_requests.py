@@ -474,7 +474,7 @@ class NoticesTest(AssignmentBase):
         self.psy.save()
         sent = []
         with patch.object(sms_notifications, "queue_sms",
-                          side_effect=lambda n, text, d: sent.append(text) or True):
+                          side_effect=lambda n, text, k, **kw: sent.append(text) or True):
             sms_notifications.notify_new_assignment(self.child, self.psy)
         self.assertEqual(1, len(sent))
         self.assertIn("accept or decline", sent[0])

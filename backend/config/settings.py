@@ -428,7 +428,10 @@ BREVO_SENDER_NAME = os.getenv("BREVO_SENDER_NAME", "NACC RACCO1")
 #
 # The same data rule as the mail applies, and harder: no child names, no case
 # details, no passwords. A text sits unencrypted on a lock screen.
-SMS_PROVIDER = os.getenv("SMS_PROVIDER", "console")
+# Normalised once, here: "Semaphore" or " semaphore" used to match no gateway
+# and fall through to the console one, so every text went to the log, said
+# "sent", and nobody was texted.
+SMS_PROVIDER = (os.getenv("SMS_PROVIDER") or "console").strip().lower()
 SMS_API_KEY = os.getenv("SMS_API_KEY", "")
 # Unset means "whatever the chosen provider's own URL is" - see
 # accounts/sms.py DEFAULT_ENDPOINTS. It used to default to Semaphore's URL
@@ -442,6 +445,13 @@ SMS_SENDER_NAME = os.getenv("SMS_SENDER_NAME", "")
 # handset is paired. Unset sends from whichever phone was most recently
 # active, which is the right answer when there is exactly one.
 SMS_DEVICE_ID = os.getenv("SMS_DEVICE_ID", "")
+# What the agency's credit may be spent on in a rolling 24 hours, and how many
+# texts one number may be sent in the same time. Both are counted from the
+# SmsSend table by accounts/sms.send_sms before the network is touched, so
+# they hold across workers and restarts. Settings, not code: the owner chose
+# the figures and may change them.
+SMS_DAILY_CREDIT_LIMIT = int(os.getenv("SMS_DAILY_CREDIT_LIMIT", "300"))
+SMS_PER_NUMBER_DAILY = int(os.getenv("SMS_PER_NUMBER_DAILY", "10"))
 
 # The shared token that lets a scheduler trigger the daily session reminder.
 # Render's free plan has no cron, so the job is exposed as an endpoint and
