@@ -558,7 +558,8 @@ class ChildSerializer(serializers.ModelSerializer):
                 {"legal_status_date": "The date issued cannot be in the future."})
         if born and value < born:
             raise serializers.ValidationError(
-                {"legal_status_date": "The date issued cannot be before the date of birth."})
+                {"legal_status_date": "The date issued cannot be before the date of birth."
+                 " If the date of birth is a given one, check it first."})
 
     def _check_dates(self, attrs):
         """None of the case dates is in the future or before the child was
@@ -586,5 +587,6 @@ class ChildSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({f: f"{label} cannot be in the future."})
             if born and value < born:
                 raise serializers.ValidationError(
-                    {f: f"{label} cannot be before the date of birth."})
+                    {f: f"{label} cannot be before the date of birth."
+                         " If the date of birth is a given one, check it first."})
 

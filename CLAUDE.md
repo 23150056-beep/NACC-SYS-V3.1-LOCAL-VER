@@ -975,6 +975,11 @@ middle name, a date found, and every question that applies made mandatory.
   can edit. A server refusal stays beside its field only while that answer,
   and what it was checked against, is unchanged (`CHECKED_AGAINST`); one for a
   field that is not on screen is listed in the alert at the top.
+  Date found, admission, placement and the legal status Date Issued stay refused
+  when before the birth date - kept, not dropped, on purpose (owner, 27 Oct 2026):
+  no NACC or Philippine rule lets any of them precede a real birth, so the
+  refusal names a given (estimated) birth date, the likely cause, as the thing
+  to check.
 - **Status is read-only on add and edit** (27 Oct 2026): a record is closed
   and reopened only through terminate and reopen. **The age is judged on what
   the save sends** (`caseData.js ageProblem`), so a type of adoption left hidden

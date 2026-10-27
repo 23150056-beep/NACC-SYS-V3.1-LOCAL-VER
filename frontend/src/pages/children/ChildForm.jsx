@@ -390,7 +390,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
     && (changed('legal_status_date') || (isEdit && changed('birth_date')))) {
     if (form.legal_status_date > todayIso) problems.legal_status_date = 'The date issued cannot be in the future.';
     else if (wholeDate(form.birth_date) && form.legal_status_date < form.birth_date) {
-      problems.legal_status_date = 'The date issued cannot be before the date of birth.';
+      problems.legal_status_date = 'The date issued cannot be before the date of birth. If the date of birth is a given one, check it first.';
     }
   }
   const bornMoved = isEdit && changed('birth_date');
@@ -404,7 +404,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
     // record can hold the other one, which no screen shows or edits.
     if (!wholeDate(v) || (!setting && !(bornMoved && (f === 'date_found' || f === dateField)))) continue;
     if (setting && v > todayIso) problems[f] = `${label} cannot be in the future.`;
-    else if (wholeDate(form.birth_date) && v < form.birth_date) problems[f] = `${label} cannot be before the date of birth.`;
+    else if (wholeDate(form.birth_date) && v < form.birth_date) problems[f] = `${label} cannot be before the date of birth. If the date of birth is a given one, check it first.`;
   }
   if ((changed('case_type') || changed('case_category')) && CASE_CATEGORIES.includes(form.case_category)
     && CASE_CATEGORY_OPTIONS[form.case_type] && !CASE_CATEGORY_OPTIONS[form.case_type].includes(form.case_category)) {
