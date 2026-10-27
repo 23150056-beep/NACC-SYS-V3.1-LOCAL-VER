@@ -101,7 +101,7 @@ guard test and the live check (phase 5) without anything else.
 | Feature | Change | Saves |
 |---|---|---|
 | Own phone code | Already-verified same number: "already verified", nothing sent. Per number: 2 codes an hour, 4 a day, across all accounts; per account 10 a day. Limits kept on an `unknown` outcome. | blocks the 20-credits-an-hour loop to any number |
-| Custodian number code | Same limits; a number this SW confirmed within the hour is "already confirmed". **Route: see decision 1.** "Send code" asks first, naming the number. | up to half of every code |
+| Custodian number code | Same limits; a number this SW confirmed within the hour is "already confirmed". Stays on the OTP route (decision 1). "Send code" asks first, naming the number. | typo and repeat codes |
 | Custodian booked / moved / cancelled / missed | "Moved" only when the date or time actually differs from what the custodian was last told; at most 4 event texts per appointment per day (after that the SW is told on screen to phone them). | drag-and-drop and book/cancel loops |
 | Custodian reminder | Skipped when the custodian was texted about this appointment (booked/moved) in the last 12 hours. A moved appointment gets a fresh reminder for its new day (today it never does). Claim deleted only on refused. | the short-notice duplicate; fixes a missed reminder |
 | Custodian reminder, siblings | **See decision 2.** | N-1 credits per family per day |
@@ -143,12 +143,13 @@ Never part of `manage.py test`. Costs about 13 credits for the current eleven.
 
 ## Decisions for the owner
 
-1. **Custodian code route.** OTP route = 2 credits, kept apart from bulk
-   traffic. Normal route = 1 credit. Proposed: **normal route for the
-   custodian code** (the SW is standing with the custodian and can resend
-   after a minute), OTP route kept for staff's own number. Needs the normal
-   route confirmed on the handset first - did the nine non-code texts of 27
-   Oct (temporary password, case waiting, reminders, booked...) arrive?
+1. **Custodian code route - settled 27 Oct 2026: both codes stay on the OTP
+   route.** The handset showed the normal route delivers, but late: the
+   18:08 normal-route check arrived after texts sent at 18:15, while the
+   OTP code sent a second after it arrived at once. A code is read back by
+   somebody waiting for it, so 1 credit saved once per custodian number is
+   not worth a seven-minute wait. The per-number limits and "already
+   verified" checks above are what stop codes being wasted.
 2. **One reminder per custodian per day for siblings** ("the children in your
    care have appointments tomorrow: 9:00 AM, 10:30 AM at the RACCO I office")
    instead of one per child. New wording - yes or no.
