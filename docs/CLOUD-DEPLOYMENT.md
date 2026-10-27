@@ -928,7 +928,9 @@ never touches the database.
 ### Recommended: GitHub Actions (free, and you already have it)
 
 `.github/workflows/session-reminders.yml` is committed and ready. It runs at
-09:00 UTC, which is 17:00 in Manila.
+03:00 UTC, which is 11:00 in Manila. GitHub's free schedules run late -
+4 to 7 hours when it was set for 17:00 - so the morning keeps the texts out
+of the night.
 
 1. Make a token: `openssl rand -hex 32` — or any long random string.
 2. **Render** → the API service → **Environment** → add
