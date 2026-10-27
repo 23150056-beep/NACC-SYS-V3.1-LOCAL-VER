@@ -163,7 +163,8 @@ def confirmed_at(user, number):
 def send_code(user, number):
     """Text a code to `number`. Returns the gateway's SmsResult; raises
     TooManyCodes when this person has asked too recently or too often. A
-    refused send does not count against either limit."""
+    refused send does not count against either limit; one whose outcome is
+    unknown does, because the code may have arrived."""
     from accounts import sms_catalogue
     from accounts.sms import send_sms
     from children.models import CustodianContactCheck
@@ -197,8 +198,12 @@ def send_code(user, number):
     result = send_sms(number, sms_catalogue.render("custodian_code"),
                       "custodian_code", otp_code=code, requested_by=user)
     mine = CustodianContactCheck.objects.filter(pk=row.pk, code=code)
-    if not result.ok:
+    if result.refused:
         mine.update(code="", **before)
+        return result
+    if not result.ok:
+        # "unknown": it may be on the handset, so the code and the counters
+        # stay (see start_phone_verification).
         return result
     if result.code and result.code != code:
         mine.update(code=result.code)

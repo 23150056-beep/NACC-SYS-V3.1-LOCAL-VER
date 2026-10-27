@@ -11,6 +11,7 @@ import {
   Alert, Avatar, Button, Drawer, FormField, Icon, Input, Modal, Select, Skeleton, roleLabel,
 } from '../../ui';
 import { assistantSwitchConfirm } from '../../utils/assistantSwitch';
+import { smsTestConfirm } from '../../utils/smsTestConfirm';
 import { caseRef } from '../../utils/child';
 import { firstError } from '../../utils/errors';
 import { useSingleFlight } from '../../utils/singleFlight';
@@ -472,11 +473,7 @@ export default function ConsoleActions({ accessCount, narrow, assistant, onChang
   const sendTestText = () => onceText(async () => {
     // One real text through the gateway, so it asks first. The key check beside
     // Text messages spends nothing.
-    const yes = await confirm({
-      title: 'Send a test text to your own verified number?',
-      description: 'This sends one real text message to your own confirmed number, through the SMS provider, and costs one credit. The Test button on the Text messages row only checks the key and spends nothing.',
-      confirmLabel: 'Yes, send it',
-    });
+    const yes = await confirm(smsTestConfirm());
     if (!yes) return;
     try {
       const answer = await testSmsDelivery();

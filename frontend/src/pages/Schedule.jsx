@@ -199,6 +199,14 @@ export default function Schedule() {
   const { user } = useAuth();
   const toast = useToast();
   const confirm = useConfirm();
+  /* The server queues the custodian's text after answering, so "limit" in the
+     answer is the only way to learn it was held back (4 event texts about one
+     appointment in a day): the SW is told to phone instead. */
+  const tellIfNoText = (answer) => {
+    if (answer?.custodian_text === 'limit') {
+      toast.warning('The custodian has already had 4 texts about this appointment today, so no text was sent. Phone them instead.');
+    }
+  };
   // Booking, availability and leave are written one at a time: the drawer stays
   // open behind the confirmation and the request, and a second press added the
   // row again (9 Oct 2026).
@@ -466,13 +474,15 @@ export default function Schedule() {
       // Moving one is the same form and the same rules, so it is the same
       // handler — only the verb differs. Cancel-and-rebook was the previous
       // answer, and it threw away who booked it and when.
+      let answer;
       if (booking.id) {
-        await api.patch(`/appointments/${booking.id}/`, payload);
+        answer = await api.patch(`/appointments/${booking.id}/`, payload);
         toast.success('Appointment moved');
       } else {
-        await api.post('/appointments/', payload);
+        answer = await api.post('/appointments/', payload);
         toast.success('Appointment booked');
       }
+      tellIfNoText(answer.data);
       setBooking(null); setSel(null); load();
     } catch (err) {
       setError(firstError(err.response?.data));
@@ -691,7 +701,8 @@ export default function Schedule() {
     const { appointment: a, action: actionName } = confirmStatus;
     setStatusBusy(true);
     try {
-      await api.post(`/appointments/${a.id}/${actionName}/`);
+      const answer = await api.post(`/appointments/${a.id}/${actionName}/`);
+      tellIfNoText(answer.data);
       toast.success(`Appointment ${{ complete: 'completed', cancel: 'cancelled', no_show: 'marked no-show' }[actionName]}`);
       setConfirmStatus(null); setSel(null); load();
     } catch (err) {

@@ -37,7 +37,7 @@ from accounts.sms_notifications import (
     TooManyCodes, notify_temporary_password, start_phone_verification,
     confirm_phone_verification)
 from accounts import sms_catalogue
-from accounts.sms import check_gateway, send_sms
+from accounts.sms import UNKNOWN, check_gateway, send_sms
 from accounts.phone import (normalise_ph_mobile, InvalidPhilippineMobile,
                             as_typed as phone_as_typed)
 
@@ -457,11 +457,25 @@ class MyPhoneView(generics.GenericAPIView):
             return Response({"phone": "Enter your mobile number."},
                             status=status.HTTP_400_BAD_REQUEST)
 
+        if request.user.phone_verified and request.user.phone == number:
+            # Nothing to prove: a code here is two paid credits to confirm
+            # what is already confirmed.
+            return Response({"detail": "This number is already verified.",
+                             "already_verified": True},
+                            status=status.HTTP_200_OK)
         try:
             result = start_phone_verification(request.user, number)
         except TooManyCodes as exc:
             return Response({"detail": str(exc)},
                             status=status.HTTP_429_TOO_MANY_REQUESTS)
+        if result.outcome == UNKNOWN:
+            # The gateway's answer was lost: the code may be on the handset
+            # and it is kept, so the person types it if it comes.
+            return Response({"detail": "We could not confirm that the code was "
+                                       "sent. It may still arrive; if it does "
+                                       "not within a minute or two, ask again.",
+                             "unconfirmed": True},
+                            status=status.HTTP_200_OK)
         if not result.ok:
             # The gateway's own words. A code that never arrives with no
             # explanation is how the mail integration cost a day.

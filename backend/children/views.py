@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from accounts.display import display_name
 from accounts.phone import as_typed as phone_as_typed
+from accounts.sms import UNKNOWN
 from accounts.models import Role
 from accounts.permissions import (ChildRecordAccess,
                                   is_admin_or_assignee)
@@ -556,10 +557,21 @@ class CustodianContactCodeView(APIView):
         number, bad = self._number(request)
         if bad:
             return bad
+        if custodian.confirmed_at(request.user, number) is not None:
+            # Already confirmed by this person within the hour: another code
+            # would be two paid credits to prove it again.
+            return Response({"detail": "This number is already confirmed. "
+                                       "Save the record to keep it.",
+                             "number": number, "verified": True})
         try:
             result = custodian.send_code(request.user, number)
         except custodian.TooManyCodes as exc:
             return Response({"detail": str(exc)}, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        if result.outcome == UNKNOWN:
+            return Response({"detail": "We could not confirm that the code was sent. "
+                                       "It may still arrive; if it does not within a "
+                                       "minute or two, ask again.",
+                             "number": number, "unconfirmed": True})
         if not result.ok:
             # The gateway's own words: a code that never arrives with no
             # explanation is the failure that costs an afternoon.

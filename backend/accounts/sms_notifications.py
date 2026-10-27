@@ -22,7 +22,7 @@ from django.utils import timezone
 
 from accounts import sms_catalogue
 from accounts.models import PhoneVerification
-from accounts.sms import SmsResult, queue_sms, send_sms
+from accounts.sms import SmsResult, limit_reason, queue_sms, send_sms
 from config.clock import clock
 
 logger = logging.getLogger(__name__)
@@ -188,24 +188,93 @@ def _custodian_number(child):
 
 def notify_custodian(appointment, event):
     """Booked, moved, cancelled or missed: queued for after the save commits.
-    Returns whether a text was queued."""
+
+    Returns what became of the text, for the screen to act on:
+    "queued", "off" (texts to this custodian are not allowed, or no number),
+    "unchanged" (a move to the start the custodian was last told) or "limit"
+    (this appointment has had as many event texts today as are allowed, so
+    the SW is told to phone instead).
+
+    "Moved" is sent only when the start differs from what the custodian was
+    last told (`custodian_told_start`; none counts as different). After a
+    booked or moved text is queued both "told" fields are set by a queryset
+    update - bookkeeping, not an edit, so updated_at is left alone and no
+    signal fires. The day-before reminder reads them.
+    """
     number = _custodian_number(appointment.child)
     if not number:
-        return False
-    return queue_sms(number, custodian_text(event, appointment),
-                     sms_catalogue.custodian_event_kind(event),
-                     subject=f"appointment:{appointment.pk}")
+        return "off"
+    if event == "moved" and appointment.start == appointment.custodian_told_start:
+        return "unchanged"
+    subject = f"appointment:{appointment.pk}"
+    # queue_sms answers nothing about the limits, and the request is over by
+    # the time they bite; ask now so the screen can say so.
+    if limit_reason(number, sms_catalogue.custodian_event_kind(event),
+                    subject=subject):
+        return "limit"
+    queue_sms(number, custodian_text(event, appointment),
+              sms_catalogue.custodian_event_kind(event), subject=subject)
+    if event in ("booked", "moved"):
+        told_at = timezone.now()
+        type(appointment).objects.filter(pk=appointment.pk).update(
+            custodian_told_start=appointment.start, custodian_told_at=told_at)
+        appointment.custodian_told_start = appointment.start
+        appointment.custodian_told_at = told_at
+    return "queued"
 
 
 def remind_custodian(appointment, day="tomorrow"):
     """The day-before reminder, sent now and the SmsResult returned - it runs
     from the reminder job, which records who was told (scheduling/reminders)."""
-    number = _custodian_number(appointment.child)
+    return remind_custodian_group([appointment], day=day)
+
+
+# Up to this many times are listed in a sibling reminder; past it the text
+# gives the count and the first time (the catalogue's longest sample).
+GROUP_TIMES_LISTED = 4
+
+
+def _times_in_words(times):
+    """"9:00 AM", "9:00 AM and 10:30 AM", "9:00 AM, 10:30 AM and 1:00 PM"."""
+    if len(times) == 1:
+        return times[0]
+    return ", ".join(times[:-1]) + " and " + times[-1]
+
+
+def remind_custodian_group(appointments, day="tomorrow"):
+    """One day-before text for every appointment of one custodian's children
+    on the same day, in time order: the single-child wording for one, the
+    sibling wording for two to four, and a count and the first time beyond.
+
+    Sent now and the SmsResult returned, like remind_custodian. The kinds are
+    written out in three calls rather than computed, because the catalogue
+    guard test reads them from the source.
+    """
+    appointments = sorted(appointments, key=lambda a: (a.start, a.pk))
+    first = appointments[0]
+    number = _custodian_number(first.child)
     if not number:
         return SmsResult(False, "Texts to this custodian are off.")
-    return send_sms(number, custodian_text("reminder", appointment, day=day),
-                    "custodian_reminder",
-                    subject=f"appointment:{appointment.pk}")
+    subject = f"appointment:{first.pk}"
+    local = timezone.localtime(first.start)
+    date = f"{local:%a} {local.day} {local:%b}"
+    if len(appointments) == 1:
+        return send_sms(number, custodian_text("reminder", first, day=day),
+                        "custodian_reminder", subject=subject)
+    if len(appointments) <= GROUP_TIMES_LISTED:
+        times = _times_in_words(
+            [clock(timezone.localtime(a.start)) for a in appointments])
+        return send_sms(
+            number,
+            sms_catalogue.render("custodian_reminder_group", day=day, date=date,
+                                 times=times, office=CUSTODIAN_OFFICE),
+            "custodian_reminder_group", subject=subject)
+    return send_sms(
+        number,
+        sms_catalogue.render("custodian_reminder_group_many", count=len(appointments),
+                             day=day, date=date, time=clock(local),
+                             office=CUSTODIAN_OFFICE),
+        "custodian_reminder_group_many", subject=subject)
 
 
 # --------------------------------------------------------------------------
@@ -262,8 +331,14 @@ def start_phone_verification(user, number):
         subject=f"user:{user.pk}",
     )
     mine = PhoneVerification.objects.filter(pk=row.pk, code=code)
-    if not result.ok:
+    if result.refused:
         mine.update(code="", **before)
+        return result
+    if not result.ok:
+        # "unknown": the request may have reached the gateway and the code may
+        # be on the handset. Keep the code, the counters and last_sent_at, so
+        # a retry is held by the one-minute limit instead of being a free
+        # second paid text; the caller tells the person it may have gone.
         return result
     if result.code and result.code != code:
         # The gateway put a different code on the handset. That one is what

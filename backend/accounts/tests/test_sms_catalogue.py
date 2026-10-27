@@ -18,10 +18,6 @@ from django.test import SimpleTestCase
 from accounts import sms_catalogue
 from accounts.sms import _GSM7, _GSM7_ESCAPED, fits_one_segment, segments
 
-# Kinds written for a later phase: declared and measured now, called from
-# nowhere yet. Anything else with no call site is a dead entry.
-NOT_CALLED_YET = ("custodian_reminder_group",)
-
 SENDERS = ("send_sms", "queue_sms")
 # The one function allowed to compute a kind instead of writing it out.
 KIND_BUILDERS = ("custodian_event_kind",)
@@ -177,6 +173,5 @@ class TheCallSitesTest(SimpleTestCase):
 
         # The other direction: an entry nothing sends is a message somebody
         # declared and never wired up, or wired up and then removed.
-        unused = [k for k in sms_catalogue.ENTRIES
-                  if k not in referenced and not k.startswith(NOT_CALLED_YET)]
+        unused = [k for k in sms_catalogue.ENTRIES if k not in referenced]
         self.assertEqual([], unused)

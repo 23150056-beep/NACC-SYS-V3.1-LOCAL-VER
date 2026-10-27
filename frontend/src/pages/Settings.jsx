@@ -12,6 +12,7 @@ import { getAgencyProfile, saveAgencyProfile } from '../api/agency';
 import { testEmailDelivery } from '../api/email';
 import { checkSmsGateway, testSmsDelivery } from '../api/sms';
 import { assistantSwitchConfirm } from '../utils/assistantSwitch';
+import { smsTestConfirm } from '../utils/smsTestConfirm';
 import { useOpenFromLink } from '../utils/links';
 
 const FEATURE_LABELS = {
@@ -300,10 +301,7 @@ export default function Settings() {
               <Button variant="secondary" disabled={smsTesting || smsChecking}
                       iconLeft={<Icon name="message-square" size={16} />}
                       onClick={async () => {
-                        if (!(await confirm({
-                          description: 'This sends a real text message to your own confirmed number, through the SMS provider.',
-                          confirmLabel: 'Yes, send it',
-                        }))) return;
+                        if (!(await confirm(smsTestConfirm()))) return;
                         setSmsTesting(true);
                         setSmsResult(null);
                         try {

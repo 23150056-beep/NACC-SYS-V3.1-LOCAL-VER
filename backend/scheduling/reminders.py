@@ -10,7 +10,8 @@ from datetime import timedelta
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from accounts.sms_notifications import notify_session_reminder, remind_custodian
+from accounts.phone import InvalidPhilippineMobile, normalise_ph_mobile
+from accounts.sms_notifications import notify_session_reminder, remind_custodian_group
 from children.custodian import texts_allowed
 from scheduling.models import Appointment, CustodianReminder, SessionReminder
 from scheduling.visibility import case_ref
@@ -48,9 +49,12 @@ def send_session_reminders(*, today=False, dry_run=False):
 
     Who was told is a SessionReminder row, claimed before the send so two
     overlapping runs cannot both text, stamped once the gateway accepts, and
-    deleted if it refuses so the next run tries again. Each message is sent
-    before this returns, so "sent" in the report means the gateway accepted
-    it.
+    deleted only when the gateway definitely refused, so the next run tries
+    again. An answer that was lost (outcome "unknown") may have been
+    delivered and billed, so it is stamped like a sent one and reported as
+    UNCONFIRMED: texting it again automatically would be paying twice for
+    what may already be on the handset. Each message is sent before this
+    returns, so "sent" in the report means the gateway accepted it.
     """
     target = timezone.localdate() + timedelta(days=0 if today else 1)
     word = "today" if today else "tomorrow"
@@ -64,7 +68,8 @@ def send_session_reminders(*, today=False, dry_run=False):
             counts[psychologist] = counts.get(psychologist, 0) + 1
 
     report = {"date": target.isoformat(), "when": word, "dry_run": dry_run,
-              "sent": 0, "skipped": 0, "failed": 0, "lines": []}
+              "sent": 0, "skipped": 0, "failed": 0, "unconfirmed": 0,
+              "lines": []}
 
     for psychologist, count in sorted(counts.items(), key=lambda kv: kv[0].pk):
         label = psychologist.fullname or psychologist.email
@@ -95,15 +100,19 @@ def send_session_reminders(*, today=False, dry_run=False):
             continue
 
         result = notify_session_reminder(psychologist, count, when=word)
-        if result.ok:
-            claim.sent_at = timezone.now()
-            claim.save(update_fields=["sent_at"])
-            report["lines"].append(f"sent  {label}: {count} session(s) {word}")
-            report["sent"] += 1
-        else:
+        if result.refused:
             claim.delete()
             report["lines"].append(f"FAIL  {label}: {result.detail}")
             report["failed"] += 1
+            continue
+        claim.sent_at = timezone.now()
+        claim.save(update_fields=["sent_at"])
+        if result.ok:
+            report["lines"].append(f"sent  {label}: {count} session(s) {word}")
+            report["sent"] += 1
+        else:
+            report["lines"].append(f"UNCONFIRMED {label}: {result.detail}")
+            report["unconfirmed"] += 1
 
     if not counts:
         report["lines"].append(f"no scheduled sessions {word} ({target})")
@@ -128,37 +137,92 @@ def _claim_custodian(appointment):
     return rows.get()
 
 
+# A custodian told about an appointment this recently (by the booked or moved
+# text) does not also get the day-before reminder: the same news twice, a
+# credit each, within hours of each other.
+TOLD_RECENTLY = timedelta(hours=12)
+
+
+def _custodian_key(appointment):
+    """The number an appointment's custodian is texted on, the grouping key
+    for siblings. Normalised, so the same handset typed two ways is one."""
+    number = appointment.child.custodian_contact
+    try:
+        return normalise_ph_mobile(number) or number
+    except InvalidPhilippineMobile:
+        return number
+
+
 def _remind_custodians(target, word, dry_run, report):
-    """Text each custodian who agreed about their child's appointment on
-    `target` (children/custodian.py). Lines name the case reference, never
-    the child: this report is printed to a terminal and a log."""
+    """Text each custodian who agreed about their children's appointments on
+    `target` (children/custodian.py). Lines name the case references, never
+    the children: this report is printed to a terminal and a log.
+
+    One text per custodian number and day: a custodian with several children
+    coming in gets the sibling wording once rather than a text per child. Every
+    appointment's row is claimed before the one send; the send's outcome
+    decides them all together - sent or unknown stamps them (an unknown one is
+    never resent), refused deletes them so the next run tries again.
+    """
     appointments = (Appointment.objects
                     .filter(start__date=target, status=Appointment.SCHEDULED)
                     .select_related("child").order_by("start", "pk"))
+    now = timezone.now()
+    groups = {}
     for appointment in appointments:
         if not texts_allowed(appointment.child):
             continue
-        ref = f"custodian of {case_ref(appointment.child_id)}"
-        rows = CustodianReminder.objects.filter(appointment=appointment)
+        told = appointment.custodian_told_at
+        if told is not None and now - told < TOLD_RECENTLY:
+            ref = f"custodian of {case_ref(appointment.child_id)}"
+            report["lines"].append(f"skip  {ref}: told when booked")
+            report["skipped"] += 1
+            continue
+        groups.setdefault(_custodian_key(appointment), []).append(appointment)
+
+    for members in groups.values():
+        refs = ", ".join(case_ref(a.child_id) for a in members)
+        ref = f"custodian of {refs}"
         if dry_run:
-            if rows.filter(sent_at__isnull=False).exists():
+            # Looks without claiming, as above.
+            pending = [a for a in members
+                       if not CustodianReminder.objects.filter(
+                           appointment=a, sent_at__isnull=False).exists()]
+            if not pending:
                 report["lines"].append(f"skip  {ref}: already told")
                 report["skipped"] += 1
             else:
-                report["lines"].append(f"would text {ref}: appointment {word}")
+                report["lines"].append(
+                    f"would text {ref}: {len(pending)} appointment(s) {word}")
             continue
-        claim = _claim_custodian(appointment)
-        if claim is None:
+
+        claims = []
+        for appointment in members:
+            claim = _claim_custodian(appointment)
+            if claim is not None:
+                claims.append((appointment, claim))
+        if not claims:
             report["lines"].append(f"skip  {ref}: already told")
             report["skipped"] += 1
             continue
-        result = remind_custodian(appointment, day=word)
-        if result.ok:
-            claim.sent_at = timezone.now()
-            claim.save(update_fields=["sent_at"])
-            report["lines"].append(f"sent  {ref}: appointment {word}")
-            report["sent"] += 1
-        else:
-            claim.delete()
+        claimed = [a for a, _ in claims]
+        ref = "custodian of " + ", ".join(case_ref(a.child_id) for a in claimed)
+
+        result = remind_custodian_group(claimed, day=word)
+        if result.refused:
+            for _, claim in claims:
+                claim.delete()
             report["lines"].append(f"FAIL  {ref}: {result.detail}")
             report["failed"] += 1
+            continue
+        stamped = timezone.now()
+        for _, claim in claims:
+            claim.sent_at = stamped
+            claim.save(update_fields=["sent_at"])
+        if result.ok:
+            report["lines"].append(
+                f"sent  {ref}: {len(claimed)} appointment(s) {word}")
+            report["sent"] += 1
+        else:
+            report["lines"].append(f"UNCONFIRMED {ref}: {result.detail}")
+            report["unconfirmed"] += 1

@@ -73,6 +73,14 @@ class Appointment(models.Model):
     booked_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="appointments_booked")
+    # What the child's custodian was last TOLD by a booked or moved text (the
+    # start that text named, and when it was queued). "Moved" is sent only
+    # when the start now differs from this, so a drag that lands back where it
+    # began costs nothing, and the day-before reminder skips an appointment
+    # the custodian heard about in the last few hours. Written with a queryset
+    # update, never save(): they are bookkeeping, not an edit of the booking.
+    custodian_told_start = models.DateTimeField(null=True, blank=True)
+    custodian_told_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

@@ -869,6 +869,41 @@ def _limit_reached(entry, fingerprint, credits, requested_by, subject):
     return ""
 
 
+def limit_reason(number, kind, *, requested_by=None, subject=""):
+    """The sentence send_sms would refuse this text with, or "" if it would go.
+
+    queue_sms is fire and forget - the answer arrives on a thread after the
+    request has been served - so this is the only way a screen can be told
+    that a text will not be sent. It runs the SAME check send_sms does
+    (_limit_reached, with the same credit estimate), so the two cannot
+    disagree. Every catalogue message fits one segment, so a normal-route text
+    is estimated at one credit and a code at two; the console bills nothing.
+    A number that cannot be read, or an unknown kind, is not a limit: send_sms
+    refuses those on its own terms.
+    """
+    entry = sms_catalogue.get(kind)
+    if entry is None:
+        return ""
+    try:
+        number = normalise_ph_mobile(number)
+    except InvalidPhilippineMobile:
+        return ""
+    if not number:
+        return ""
+    if PROVIDERS.get(settings.SMS_PROVIDER, _send_console) is _send_console:
+        credits = 0
+    else:
+        credits = 2 if entry.route == sms_catalogue.OTP else 1
+    requested_by = requested_by if getattr(requested_by, "pk", None) else None
+    try:
+        return _limit_reached(entry, number_fingerprint(number), credits,
+                              requested_by, subject)
+    except Exception:                                            # noqa: BLE001
+        # As in send_sms: unreadable limits do not stop a text.
+        logger.exception("SMS %s: the limits could not be checked", kind)
+        return ""
+
+
 def _rule_sentence(rule):
     window = ("a minute" if rule.seconds == 60 else
               "an hour" if rule.seconds == 3600 else

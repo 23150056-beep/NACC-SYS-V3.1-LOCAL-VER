@@ -17,7 +17,9 @@ from activity.services import log_activity
 from children.models import Child
 from scheduling import booking
 from scheduling.availability import free_windows
-from scheduling.models import AvailabilityBlock, Appointment, Unavailability
+from scheduling.models import (
+    AvailabilityBlock, Appointment, CustodianReminder, Unavailability,
+)
 from scheduling.serializers import (
     AvailabilityBlockSerializer, AppointmentSerializer, UnavailabilitySerializer,
 )
@@ -306,6 +308,21 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     # the wrong verb should be told the verb is wrong.
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
+    # What became of the custodian's text for this request ("queued", "off",
+    # "unchanged", "limit"), or None where none was considered. queue_sms runs
+    # after the response, so this is the only way the screen learns that a text
+    # was held back by a limit. Set by the perform_* methods and the status
+    # actions, added to the answer by finalize_response.
+    custodian_text = None
+
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        if (request.method in ("POST", "PUT", "PATCH")
+                and 200 <= response.status_code < 300
+                and isinstance(response.data, dict)):
+            response.data["custodian_text"] = self.custodian_text
+        return response
+
     def get_queryset(self):
         qs = Appointment.objects.select_related(
             "child", "child__social_worker", "psychologist", "booked_by")
@@ -373,7 +390,7 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         # they agreed to texts and the number was confirmed
         # (children/custodian.py). Queued for after the save commits.
         if obj.status == Appointment.SCHEDULED and obj.start > timezone.now():
-            notify_custodian(obj, "booked")
+            self.custodian_text = notify_custodian(obj, "booked")
 
     def perform_update(self, serializer):
         """Moving an appointment is booking it again, and checked as such.
@@ -402,12 +419,17 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         )
         was_at = instance.start
         obj = serializer.save(psychologist=psychologist)
+        if timezone.localtime(obj.start).date() != timezone.localtime(was_at).date():
+            # The day-before reminder is one row per appointment. One already
+            # sent was for the OLD day; left in place it would stop the new
+            # day ever getting its own.
+            CustodianReminder.objects.filter(appointment=obj).delete()
         log_activity(self.request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type="Appointment", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.psychologist)
         if (obj.start != was_at and obj.status == Appointment.SCHEDULED
                 and obj.start > timezone.now()):
-            notify_custodian(obj, "moved")
+            self.custodian_text = notify_custodian(obj, "moved")
 
     def _set_status(self, request, pk, new_status):
         obj = self.get_object()
@@ -443,10 +465,10 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         # up a week late would be wrong, so a late one sends nothing.
         if was == Appointment.SCHEDULED:
             if new_status == Appointment.CANCELLED and obj.start > timezone.now():
-                notify_custodian(obj, "cancelled")
+                self.custodian_text = notify_custodian(obj, "cancelled")
             elif (new_status == Appointment.NO_SHOW
                   and timezone.localtime(obj.start).date() == timezone.localdate()):
-                notify_custodian(obj, "missed")
+                self.custodian_text = notify_custodian(obj, "missed")
         return Response(AppointmentSerializer(obj, context={"request": request}).data)
 
     @action(detail=True, methods=["post"])

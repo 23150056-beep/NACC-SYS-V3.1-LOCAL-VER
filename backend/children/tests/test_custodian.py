@@ -67,6 +67,10 @@ class CustodianBase(TestCase):
             res = self._as(user or self.sw).post("/api/custodian-contact/code/",
                                                  {"number": number}, format="json")
         self.assertEqual(200, res.status_code, res.data)
+        if res.data.get("verified"):
+            # Confirmed within the hour already: nothing is sent to prove it
+            # again (test_a_number_confirmed_within_the_hour_sends_nothing).
+            return sent
         code = sent[-1][1].split("code is ")[1][:6]
         res = self._as(user or self.sw).put("/api/custodian-contact/code/",
                                             {"number": number, "code": code}, format="json")

@@ -199,9 +199,18 @@ export default function MyProfile() {
     }))) return;
     setPhoneBusy(true); setPhoneError('');
     try {
-      const { detail } = await requestPhoneCode(phoneInput);
+      const answer = await requestPhoneCode(phoneInput);
+      if (answer.already_verified) {
+        // Nothing was sent: this number is the one already confirmed.
+        setPhoneStage('idle'); setPhoneInput('');
+        toast.info(answer.detail);
+        return;
+      }
       setPhoneStage('code');
-      toast.success(detail);
+      // "unconfirmed": the gateway's answer was lost, so the code may still
+      // arrive - the box for it opens either way.
+      if (answer.unconfirmed) toast.info(answer.detail);
+      else toast.success(answer.detail);
     } catch (err) {
       const body = err.response?.data;
       // The server's wording: it knows the difference between a landline and

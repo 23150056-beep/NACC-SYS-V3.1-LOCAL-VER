@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import api from '../../api/client';
 import { Badge, Button, FormField, Icon, Input } from '../../ui';
+import { useConfirm } from '../../context/ConfirmContext';
 import { firstError } from '../../utils/errors';
 import { shortDate } from '../../utils/time';
 import { consentKey } from './recordForm';
@@ -30,6 +31,7 @@ function asE164(raw) {
 }
 
 export default function CustodianFields({ form, setForm, fieldError, readOnly = false }) {
+  const confirm = useConfirm();
   const [sentTo, setSentTo] = useState('');
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -56,11 +58,23 @@ export default function CustodianFields({ form, setForm, fieldError, readOnly = 
   };
 
   const sendCode = async () => {
+    // A code is a paid text to a number somebody typed, and it must reach the
+    // custodian and nobody else, so it is asked about first.
+    if (!(await confirm({
+      description: `A code will be texted to ${form.custodian_contact}. Only the custodian should receive it.`,
+      confirmLabel: 'Yes, send the code',
+    }))) return;
     setError(''); setNote(''); setBusy(true);
     try {
       const { data } = await api.post('/custodian-contact/code/', { number: form.custodian_contact });
-      setSentTo(data.number);
-      setCode('');
+      if (data.verified) {
+        // Already confirmed by this person within the hour: nothing was sent.
+        setForm({ ...form, _confirmedNumber: data.number });
+        setSentTo('');
+      } else {
+        setSentTo(data.number);
+        setCode('');
+      }
       setNote(data.detail);
     } catch (err) {
       setError(firstError(err.response?.data, 'The code could not be sent. Try again.'));
