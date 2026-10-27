@@ -12,7 +12,7 @@ from datetime import datetime, time, timedelta
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.db import connection
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient, APIRequestFactory
@@ -21,14 +21,14 @@ from accounts.models import Role
 from assistant import tools
 from children.models import Child
 from clinical.models import CaseReferral
+from config.test_media import IsolatedMediaMixin
 from scheduling import booking, visibility
 from scheduling.models import Appointment, AvailabilityBlock
 
 User = get_user_model()
 
 
-@override_settings(MEDIA_ROOT="/tmp/visibility-test-media")
-class ScheduleNamesTest(TestCase):
+class ScheduleNamesTest(IsolatedMediaMixin, TestCase):
     def setUp(self):
         roles = {r: Role.objects.create(role_name=r)
                  for r in (Role.STAFF, Role.PSYCHOLOGIST, Role.ADMINISTRATOR)}

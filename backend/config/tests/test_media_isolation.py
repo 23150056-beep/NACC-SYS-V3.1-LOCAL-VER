@@ -15,6 +15,7 @@ modules that write the most files — the referral seeders — were never among
 them. A guard applied per file is a guard somebody forgets, so this is done
 once for the whole run in `config.test_runner`.
 """
+import os
 from pathlib import Path
 
 from django.conf import settings
@@ -61,3 +62,60 @@ class TheReferralSeederWritesOutsideTheWorkingCopyTest(TestCase):
         self.assertFalse(
             written.is_relative_to(REPO_MEDIA.resolve()),
             f"the seeder wrote into the repository: {written}")
+
+
+class EachTestGetsAMediaFolderOfItsOwnTest(SimpleTestCase):
+    """`IsolatedMediaMixin`: a fresh folder per test, outside the working copy,
+    gone afterwards. Shared fixed folders removed in tearDown raced across the
+    parallel runner's workers."""
+
+    def run_inner(self):
+        import unittest
+
+        from config.test_media import IsolatedMediaMixin
+
+        seen = []
+
+        class Inner(IsolatedMediaMixin, SimpleTestCase):
+            def test_a(self):
+                seen.append(self.media_root)
+                assert Path(settings.MEDIA_ROOT) == Path(self.media_root)
+                default_storage.save("x.txt", ContentFile(b"x"))
+
+            test_b = test_a
+
+        with open(os.devnull, "w") as quiet:
+            result = unittest.TextTestRunner(stream=quiet).run(
+                unittest.defaultTestLoader.loadTestsFromTestCase(Inner))
+        self.assertTrue(result.wasSuccessful(), result.failures + result.errors)
+        return seen
+
+    def test_folders_are_distinct_outside_the_working_copy_and_removed(self):
+        seen = self.run_inner()
+        self.assertEqual(2, len(set(seen)))
+        for folder in seen:
+            self.assertFalse(Path(folder).resolve().is_relative_to(
+                Path(settings.BASE_DIR).resolve()))
+            self.assertFalse(Path(folder).exists(), "left behind")
+
+    def test_the_run_wide_setting_is_back_afterwards(self):
+        before = settings.MEDIA_ROOT
+        self.run_inner()
+        self.assertEqual(before, settings.MEDIA_ROOT)
+
+
+class NoTestFixesItsOwnMediaFolderTest(SimpleTestCase):
+    """A fixed MEDIA_ROOT in a test is the shared folder again."""
+
+    def test_no_tests_module_sets_one(self):
+        this = Path(__file__).resolve()
+        skip = {this, Path(settings.BASE_DIR, "config", "test_media.py").resolve(),
+                Path(settings.BASE_DIR, "config", "test_runner.py").resolve()}
+        offenders = []
+        for path in Path(settings.BASE_DIR).rglob("*.py"):
+            if ".venv" in path.parts or "tests" not in path.parts or path.resolve() in skip:
+                continue
+            text = path.read_text(encoding="utf-8")
+            if "MEDIA_ROOT=" in text or "test-media-" in text:
+                offenders.append(str(path.relative_to(settings.BASE_DIR)))
+        self.assertEqual([], offenders, "use IsolatedMediaMixin instead")

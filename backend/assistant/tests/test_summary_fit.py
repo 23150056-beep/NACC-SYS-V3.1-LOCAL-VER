@@ -4,20 +4,18 @@ The whole extracted text - up to 200,000 characters - used to follow the
 summary instructions, into a model whose window is a few thousand tokens.
 What the runtime drops to make room was never this code's choice.
 """
-import shutil
 from io import StringIO
-from pathlib import Path
 from unittest.mock import patch
 
-from django.conf import settings
 from django.core.files.base import ContentFile
 from django.core.management import call_command
-from django.test import SimpleTestCase, override_settings
+from django.test import SimpleTestCase
 
 from assistant import prompts, services
 from assistant.tests.test_summaries import SummaryTestBase
 from clinical.demo_docx import build_docx
 from clinical.models import PsychologicalReport
+from config.test_media import IsolatedMediaMixin
 
 BUDGET = prompts.SUMMARY_BUDGET_CHARS
 
@@ -74,14 +72,7 @@ class FitTest(SimpleTestCase):
         self.assertLess(len(prompt), BUDGET + len(prompts.SUMMARY_INSTRUCTIONS) + 40)
 
 
-MEDIA = Path(settings.BASE_DIR) / "test-media-fit"
-
-
-@override_settings(MEDIA_ROOT=str(MEDIA))
-class SummaryViewTest(SummaryTestBase):
-    def tearDown(self):
-        shutil.rmtree(MEDIA, ignore_errors=True)
-
+class SummaryViewTest(IsolatedMediaMixin, SummaryTestBase):
     def summarise(self, doc):
         self.client.force_authenticate(self.psy)
         with patch.object(services.OllamaClient, "generate", return_value="Draft.") as gen:

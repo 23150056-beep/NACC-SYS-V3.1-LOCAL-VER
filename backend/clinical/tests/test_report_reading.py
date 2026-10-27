@@ -4,26 +4,22 @@ Staff asked to see the psychologists' reports without downloading them. The
 text endpoint answers exactly who the download answers - it is the same object
 through the same queryset - so reading on screen widens nobody's access.
 """
-import shutil
-import tempfile
-from pathlib import Path
 
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from rest_framework.test import APIClient
 
 from accounts.models import Role
 from children.models import Child
 from clinical.demo_docx import build_docx
 from clinical.models import PsychologicalReport
+from config.test_media import IsolatedMediaMixin
 
 User = get_user_model()
-MEDIA = Path(tempfile.gettempdir()) / "report-reading-media"
 
 
-@override_settings(MEDIA_ROOT=str(MEDIA))
-class ReadingAReportTest(TestCase):
+class ReadingAReportTest(IsolatedMediaMixin, TestCase):
     def setUp(self):
         roles = {r: Role.objects.create(role_name=r)
                  for r in (Role.STAFF, Role.PSYCHOLOGIST, Role.ADMINISTRATOR)}
@@ -38,9 +34,6 @@ class ReadingAReportTest(TestCase):
         self.report.file.save("progress.docx", ContentFile(build_docx([
             ("title", "Psychological Report"), ("heading", "Findings"),
             ("para", "Ana settled well into the routine of the house.")])), save=True)
-
-    def tearDown(self):
-        shutil.rmtree(MEDIA, ignore_errors=True)
 
     def _read(self, user, report=None):
         client = APIClient()

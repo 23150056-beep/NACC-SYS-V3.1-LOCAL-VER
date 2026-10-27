@@ -4,18 +4,15 @@ What it looks for is what survives writing the next report over the last one:
 another child's name, their case number, age, birthday or sex. Every finding
 points at text that is really in the document; nothing here uses a model.
 """
-import shutil
 from datetime import date
 from io import StringIO
-from pathlib import Path
 from types import SimpleNamespace
 
-from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.management import call_command
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
 from accounts.models import Role
@@ -24,6 +21,7 @@ from clinical import report_check
 from clinical.demo_docx import build_docx
 from clinical.models import PsychologicalReport
 from clinical.report_check import check_for, check_report
+from config.test_media import IsolatedMediaMixin
 
 TODAY = date(2026, 9, 23)
 FILLER = " The child was cooperative and engaged throughout the session." * 8
@@ -113,11 +111,7 @@ def user(email, role):
         role=Role.objects.get_or_create(role_name=role)[0])
 
 
-MEDIA = Path(settings.BASE_DIR) / "test-media-check"
-
-
-@override_settings(MEDIA_ROOT=str(MEDIA))
-class ScopeAndEndpointTest(TestCase):
+class ScopeAndEndpointTest(IsolatedMediaMixin, TestCase):
     def setUp(self):
         self.pia = user("p@racco1.gov.ph", Role.PSYCHOLOGIST)
         self.oscar = user("o@racco1.gov.ph", Role.PSYCHOLOGIST)
@@ -130,9 +124,6 @@ class ScopeAndEndpointTest(TestCase):
         self.juan = Child.objects.create(fullname="Juan Cruz", first_name="Juan",
                                          last_name="Cruz", assigned_psychologist=self.oscar)
         self.text = "Maria Santos attended. Ana Reyes and Juan Cruz were mentioned." + FILLER
-
-    def tearDown(self):
-        shutil.rmtree(MEDIA, ignore_errors=True)
 
     def named(self, who):
         return sorted(f["message"].split(",")[0] for f in
@@ -209,8 +200,7 @@ class ScopeAndEndpointTest(TestCase):
         self.assertEqual(1, len(done.data["check_findings"]))
 
 
-@override_settings(MEDIA_ROOT=str(MEDIA))
-class LaterReaderTest(TestCase):
+class LaterReaderTest(IsolatedMediaMixin, TestCase):
     """The check named children the UPLOADER could see. Whoever reads the
     report later sees only the names of children THEY can see."""
 
@@ -233,9 +223,6 @@ class LaterReaderTest(TestCase):
                          [f["kind"] for f in res.data["check_findings"]])
         # Maria moves to Oscar. Ana stays with Pia, out of Oscar's sight.
         Child.objects.filter(pk=self.maria.pk).update(assigned_psychologist=self.oscar)
-
-    def tearDown(self):
-        shutil.rmtree(MEDIA, ignore_errors=True)
 
     def kinds_for(self, who, url):
         client = APIClient()
@@ -261,8 +248,7 @@ class LaterReaderTest(TestCase):
         self.assertEqual(["case_reference"], [f["kind"] for f in data["check_findings"]])
 
 
-@override_settings(MEDIA_ROOT=str(MEDIA))
-class BackfillCommandTest(TestCase):
+class BackfillCommandTest(IsolatedMediaMixin, TestCase):
     def setUp(self):
         self.pia = user("p@racco1.gov.ph", Role.PSYCHOLOGIST)
         self.maria = Child.objects.create(fullname="Maria Santos", first_name="Maria",
@@ -273,9 +259,6 @@ class BackfillCommandTest(TestCase):
                                           original_filename="old.docx")
         self.report.file.save("old.docx", ContentFile(build_docx(
             [("para", "Maria Santos attended with Ana Reyes." + FILLER)])), save=True)
-
-    def tearDown(self):
-        shutil.rmtree(MEDIA, ignore_errors=True)
 
     def run_command(self):
         out = StringIO()

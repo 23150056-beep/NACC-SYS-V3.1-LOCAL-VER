@@ -10,7 +10,6 @@ blank.
 """
 import json
 import re
-import shutil
 import tempfile
 from datetime import date, timedelta
 from io import StringIO
@@ -26,6 +25,7 @@ from children import intake
 from children.models import Child, middle_initial_of
 from children.tests.payloads import complete
 from children.tests.test_child_collab import make_user
+from config.test_media import IsolatedMediaMixin
 from locations.models import Barangay, Municipality, Province
 
 CASE_DATA_JS = (Path(__file__).resolve().parents[3]
@@ -684,15 +684,9 @@ class AnOlderDemoFixtureStillLoadsTest(TestCase):
         self.assertTrue(child.current_placement.strip())
 
 
-MEDIA = Path(tempfile.gettempdir()) / "intake-seeder-media"
-
-
-@override_settings(DEBUG=True, MEDIA_ROOT=str(MEDIA))
-class TheSeederFillsTheFormTest(TestCase):
+@override_settings(DEBUG=True)
+class TheSeederFillsTheFormTest(IsolatedMediaMixin, TestCase):
     """Seeded data must satisfy the rules the endpoint enforces (CLAUDE.md)."""
-
-    def tearDown(self):
-        shutil.rmtree(MEDIA, ignore_errors=True)
 
     def test_every_seeded_child_is_a_record_the_form_would_save(self):
         province = Province.objects.create(psgc_code="013300000", name="La Union")

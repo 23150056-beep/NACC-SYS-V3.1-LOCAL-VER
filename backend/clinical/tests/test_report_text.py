@@ -13,7 +13,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import SimpleTestCase, TestCase
 from rest_framework.test import APIClient
 
 from accounts.models import Role
@@ -24,6 +24,7 @@ from clinical.demo_reports import build_pdf
 from clinical.models import CaseReferral, PsychologicalReport
 from clinical.services import (extract_docx_text, extract_pdf_text, extract_text,
                                ensure_text, looks_like_heading)
+from config.test_media import IsolatedMediaMixin
 
 FORMS = Path(settings.BASE_DIR).parent / "docs" / "agency-forms"
 BLOCKS = [
@@ -169,8 +170,7 @@ class HeadingRuleTest(SimpleTestCase):
             self.assertEqual(expected, looks_like_heading(text, bold), text)
 
 
-@override_settings(MEDIA_ROOT=str(Path(settings.BASE_DIR) / "test-media-reports"))
-class UploadTest(TestCase):
+class UploadTest(IsolatedMediaMixin, TestCase):
     def setUp(self):
         self.psy = get_user_model().objects.create_user(
             email="p@racco1.gov.ph", username="p", password="pass1234",
@@ -180,10 +180,6 @@ class UploadTest(TestCase):
             role=Role.objects.create(role_name=Role.STAFF))
         self.child = Child.objects.create(social_worker=self.staff, fullname="Maria Santos", first_name="Maria",
                                           last_name="Santos", assigned_psychologist=self.psy)
-
-    def tearDown(self):
-        import shutil
-        shutil.rmtree(Path(settings.BASE_DIR) / "test-media-reports", ignore_errors=True)
 
     def post(self, user, url, data):
         client = APIClient()

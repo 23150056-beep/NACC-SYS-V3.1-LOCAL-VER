@@ -15,7 +15,7 @@ from importlib import import_module
 from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.core.files.base import ContentFile
-from django.test import TestCase, override_settings
+from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -25,14 +25,13 @@ from activity.services import log_activity
 from children.models import Child
 from children.tests.payloads import complete
 from clinical.models import CaseReferral, PsychologicalReport
+from config.test_media import IsolatedMediaMixin
 from scheduling.models import Appointment, AvailabilityBlock
 
 User = get_user_model()
-MEDIA = "/tmp/own-records-test-media"
 
 
-@override_settings(MEDIA_ROOT=MEDIA)
-class OwnRecordsTest(TestCase):
+class OwnRecordsTest(IsolatedMediaMixin, TestCase):
     def setUp(self):
         roles = {r: Role.objects.create(role_name=r)
                  for r in (Role.STAFF, Role.PSYCHOLOGIST, Role.ADMINISTRATOR)}
@@ -245,7 +244,7 @@ class OwnRecordsTest(TestCase):
         self.assertNotIn("Old guardian row", labels)
 
 
-class BackfillTest(TestCase):
+class BackfillTest(IsolatedMediaMixin, TestCase):
     """children 0025: existing records get the owner's best guess."""
 
     def setUp(self):
@@ -257,7 +256,6 @@ class BackfillTest(TestCase):
         self.admin = make("admin@t.ph", Role.ADMINISTRATOR)
         self.backfill = import_module("children.migrations.0025_backfill_social_worker").backfill
 
-    @override_settings(MEDIA_ROOT=MEDIA)
     def test_referral_first_then_the_creator_and_never_an_administrator(self):
         referred = Child.objects.create(fullname="Referred Child")
         created = Child.objects.create(fullname="Created Child")
