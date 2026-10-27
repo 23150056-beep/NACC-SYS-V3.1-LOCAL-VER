@@ -975,6 +975,14 @@ middle name, a date found, and every question that applies made mandatory.
   can edit. A server refusal stays beside its field only while that answer,
   and what it was checked against, is unchanged (`CHECKED_AGAINST`); one for a
   field that is not on screen is listed in the alert at the top.
+- **Status is read-only on add and edit** (27 Oct 2026): a record is closed
+  and reopened only through terminate and reopen. **The age is judged on what
+  the save sends** (`caseData.js ageProblem`), so a type of adoption left hidden
+  changes nothing. **Autosave waits while "Unsaved draft found" is unanswered**
+  (Restore or Discard resumes it): typing a new record must not overwrite the
+  draft the banner is offering. **An edit that changes the case type lists in
+  its confirm what will be removed** (`caseChangeSummary`); nothing is
+  removed silently.
 - **Deliberately optional**: middle name (a foundling or a non-marital child
   may have none), legal status (none issued yet), landmark, date found. Asking
   for something that does not exist gets "N/A" typed into it.
@@ -1081,6 +1089,19 @@ covers a hole the others leave:
   ASCII only and would call PEÑA and Peña two children. First and last name
   alone are NOT enough: two children share common names. The refusals follow
   the duplicate check's disclosure rules (no id for another SW's record).
+- **The warning is the save refusal's own rule** (27 Oct 2026,
+  `GET /children/check-duplicate/`): first AND last name by `duplicates.py`'s
+  normalisation (NFC, casefold, spaces collapsed, in Python), the rows the save
+  would refuse first, each carrying `blocks_new_record` (same birth date and
+  still active; a closed one is `reopenable` instead). The form holds Next and Save while one is true and offers
+  "Discard this draft"; the warning shows on EVERY step; a refusal at Save
+  returns to step 1, scrolled to the top (`scrollRef`) with the warning in view.
+  Another worker's ACTIVE record with `blocks_new_record` false is worded as a
+  possibility ("A record with this name is held by X. If it is the same
+  child..."), never as the same child. The check is throttled per account
+  (`duplicate_check`, `DUPLICATE_CHECK_RATE`, 300/hour): `blocks_new_record` on
+  another SW's active record confirms a guessed birth date, and the throttle
+  bounds that, it does not remove it.
 - **The ISA can remove a duplicate made by mistake**
   (`POST /children/<id>/remove-duplicate/`, "Remove duplicate record…" in the
   record drawer): both must match, the removed record's case number is typed
@@ -1141,10 +1162,16 @@ are unchanged (their assigned children).
   Record offers "Reopen it — it becomes yours" for another SW's (or nobody's)
   terminated case; `reopen` moves `social_worker` to the one reopening and
   tells the previous holder (an activity event addressed to them). Only by the
-  name typed at intake - the request carries it and `_intake_match()`, the
-  duplicate check's own rule, must match - so by id alone it is still a 404
+  name typed at intake - the request carries it and `_is_same_child()`, the
+  save refusal's own rule, must match - so by id alone it is still a 404
   and nobody can walk the ids collecting closed cases. The ISA's reopen moves
-  nobody. `children/tests/test_reopen_at_intake.py`.
+  nobody. `children/tests/test_reopen_at_intake.py`. **Since 27 Oct 2026 the
+  takeover needs first name, last name AND birth date** (the save refusal's own
+  rule): the reopen body carries all three, and a closed match on the name
+  alone warns "A record with this name exists - ask the ISA" with no button.
+  The end dialog says what became of the typing: kept as a draft (flushed
+  before the request), or "the earlier draft stays" while "Unsaved draft
+  found" is unanswered, when nothing is overwritten.
 - **Dashboard is their own; Agency Summary stays agency-wide** (the owner's
   choice): the Summary holds counts with no names and mirrors the agency's own
   report form. The assistant answers a SW about their own records.
@@ -1290,7 +1317,13 @@ Rules in `children/assignment.py`; design in
   Both go through `POST /appointments/` unchanged, referral gate included.
 - **Every step ends with an end dialog** (`useNotice()` in
   `context/ConfirmContext.jsx`, the confirm dialog without the way back) —
-  the owner's "add end dialogue always". Confirm first, notice after.
+  the owner's "add end dialogue always". Confirm first, notice after. Since
+  27 Oct 2026 every Add Record outcome (added, request sent, withdrawn,
+  cleared, updated, "Already saved") ends in the SAME dialog (`endDialog` in
+  `Children.jsx`): child and case number, the psychologist (asked / assigned /
+  not asked, read from the server for "Already saved"), the referral, and
+  "Open record" / "Upload referral" where none is on file. "Already saved"
+  uploads the chosen referral unless one is already filed.
 - Email and SMS now say a case is *waiting for an answer*; still no name.
   Terminating a case withdraws its open request. Existing assignments were
   not migrated: children already assigned stay assigned.
@@ -1357,7 +1390,12 @@ address logic is unchanged) and asks who the child lives with now - the
   reads back (`/api/custodian-contact/code/`, SW and ISA only, same limits as
   a user's own number). A different custodian or number clears both unless
   given again in the same save; a confirmation counts only for whoever made
-  it, within the hour. **Consent follows the person and number it was given
+  it, within the hour. **Confirmations are kept per number**
+  (`CustodianNumberConfirmation`, children 0032), so a second code no longer
+  voids the first; the form keeps an expiry per number mirroring `CONFIRMED_FOR`
+  (pinned in test_intake). The field is "Mobile Number (for texts)", mobiles
+  only (owner, 27 Oct 2026), checked on step 2; a bad number is told once, by
+  the field, and the status line speaks only of texting. **Consent follows the person and number it was given
   for** (`_consentFor`): change either and it is off, put both back and it is
   on again - it used to go off for good on one stray keystroke, and the save
   withdrew it. A psychologist cannot change any of it, except that
@@ -2044,7 +2082,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,828 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 2,848 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 
