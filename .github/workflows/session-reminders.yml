@@ -17,13 +17,15 @@ name: Daily session reminders
 
 on:
   schedule:
-    # 09:00 UTC = 17:00 Asia/Manila. GitHub runs schedules in UTC and does not
-    # observe the repository's timezone. Free-tier schedules are best effort
-    # and can be delayed by tens of minutes at busy times — fine for "your
-    # sessions tomorrow", not fine for anything time-critical.
-    - cron: "0 9 * * *"
+    # 03:00 UTC = 11:00 Asia/Manila. GitHub runs schedules in UTC and does not
+    # observe the repository's timezone. Free-tier schedules are best effort:
+    # set for 17:00, the runs of 22-27 Oct 2026 started between 21:08 and
+    # 23:53, four to seven hours late. A text about tomorrow's session at
+    # 11 PM reaches a custodian's handset at night, so it is set for the
+    # morning (owner, 28 Oct 2026) and still lands in the afternoon when late.
+    - cron: "0 3 * * *"
   # So it can be run by hand from the Actions tab, which is also how you test
-  # it without waiting until 5pm.
+  # it without waiting until 11 AM.
   workflow_dispatch:
     inputs:
       dry_run:
