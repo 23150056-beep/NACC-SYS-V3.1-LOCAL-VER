@@ -150,6 +150,8 @@ Never part of `manage.py test`. Costs about 13 credits for the current eleven.
    somebody waiting for it, so 1 credit saved once per custodian number is
    not worth a seven-minute wait. The per-number limits and "already
    verified" checks above are what stop codes being wasted.
+Decisions 2 and 3 were accepted as proposed on 27 Oct 2026.
+
 2. **One reminder per custodian per day for siblings** ("the children in your
    care have appointments tomorrow: 9:00 AM, 10:30 AM at the RACCO I office")
    instead of one per child. New wording - yes or no.
