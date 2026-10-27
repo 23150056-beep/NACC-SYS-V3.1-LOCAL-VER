@@ -1852,6 +1852,54 @@ is not a system user; see "The custodian and their texts".
   and the button could never work. The ISA sees the personal column only:
   the right-hand column reads `/children/`, `/appointments/` and
   `/activity/`, which for an administrator are the whole agency's.
+- **The reply is read whole** (27 Oct 2026). `_post` kept its first 400
+  characters, and Semaphore echoes the message, the account email and the
+  sender name: real replies run 400-460, so nine of eleven texts sent live
+  that day were recorded as failed although every one was delivered and
+  charged. Custodian numbers could never be confirmed (the code was wiped
+  on "failure"). The tests' fake replies were short - write a gateway
+  fixture from a REAL reply, at its real length. Design:
+  `docs/superpowers/specs/2026-10-27-sms-credit-safety-design.md`.
+- **A new SMS feature is a catalogue entry and a `send_sms(kind=)` call,
+  nothing else.** `accounts/sms_catalogue.py` holds every message: wording,
+  route, recipient, worst-case sample values and its own limits.
+  `test_sms_catalogue.py` fails on a message over one segment, outside
+  GSM-7, opening with TEST, with no limits decided, or sent under a kind
+  not in the catalogue (it reads the call sites). The limits, the spend
+  record and the live check then cover it with nothing more written.
+- **Four outcomes** (`SmsResult.outcome`): sent, refused, unknown (a timeout
+  or lost answer - it may have gone), limited. Give a limit back, wipe a
+  code or delete a reminder claim ONLY on `result.refused`; an unknown one
+  is kept and never resent automatically ("UNCONFIRMED" in the reminder
+  report).
+- **Every send is a `SmsSend` row** (accounts 0016): kind, route, credits,
+  outcome, Semaphore's message id, and the number as a keyed hash plus its
+  last four digits - never the number or the text. The limits are counted
+  from it, in `send_sms`, before the network: 10 texts a day to one number
+  (`SMS_PER_NUMBER_DAILY`), 300 credits a day for the agency
+  (`SMS_DAILY_CREDIT_LIMIT`), then each message's own rules (codes 2 an
+  hour and 4 a day per number across both code kinds, 10 a day per
+  account; the password notice once per 10 minutes; "case waiting" once an
+  hour per child; the test text 1 a minute and 5 an hour; 4 custodian
+  event texts per appointment a day). The console's Text messages row shows
+  the last 24 hours from it and turns amber at 80%, red at 100%.
+- **Codes stay on the OTP route** (2 credits), the custodian's too. Measured
+  27 Oct 2026: the normal route delivered, but a text sent at 18:08 reached
+  the handset after ones sent at 18:15, while the OTP code arrived at once.
+  A code is read back by somebody waiting for it.
+- **Custodian texts**: "moved" only when the start differs from what they
+  were last told (`Appointment.custodian_told_start`); no day-before
+  reminder within 12 hours of the booked text; children sharing one
+  custodian number get ONE reminder (`custodian_reminder_group`, or
+  `_many` from five). An already-verified number gets no code.
+- **`manage.py sms_live_check --to 09...`** sends every catalogue message
+  once (asks for the number to be typed back first; `--dry-run` sends
+  nothing; refuses a hosted database), then asks Semaphore for each one's
+  status and marks MISMATCH where the system and Semaphore disagree - the
+  check that found the 400-character bug. About 15 credits. Never part of
+  `manage.py test`. Semaphore's "Sent" means the network took it; look at
+  the handset too. Live-check rows count toward the agency's credits but
+  not toward any per-number limit, so the tester's own number still works.
 
 ## Role names on screen
 
@@ -2044,7 +2092,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,828 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 2,946 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

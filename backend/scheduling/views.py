@@ -321,6 +321,9 @@ class AppointmentViewSet(viewsets.ModelViewSet):
                 and 200 <= response.status_code < 300
                 and isinstance(response.data, dict)):
             response.data["custodian_text"] = self.custodian_text
+            if self.custodian_text == "limit":
+                response.data["custodian_text_detail"] = getattr(
+                    self.custodian_text, "detail", "")
         return response
 
     def get_queryset(self):

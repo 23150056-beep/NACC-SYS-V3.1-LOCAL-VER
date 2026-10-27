@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from io import StringIO
 from unittest.mock import patch
 
+from django.conf import settings
 from django.core.management import call_command
 from django.utils import timezone
 
@@ -137,6 +138,20 @@ class EventTextsTest(CustodianBase):
             res = self._as(self.psy).post(f"/api/appointments/{appt.id}/cancel/")
         self.assertEqual(200, res.status_code, res.data)
         self.assertEqual("limit", res.data["custodian_text"])
+        self.assertIn("allowed", res.data["custodian_text_detail"])
+        queue.assert_not_called()
+
+    def test_the_numbers_daily_limit_carries_its_own_sentence(self):
+        self._texts_on()
+        appt = Appointment.objects.create(child=self.child, psychologist=self.psy,
+                                          start=self.start, purpose="session")
+        for n in range(settings.SMS_PER_NUMBER_DAILY):
+            send_sms(NUMBER, "NACC RACCO I: an event", "custodian_booked",
+                     subject=f"appointment:{1000 + n}")
+        with self._queue() as queue:
+            res = self._as(self.psy).post(f"/api/appointments/{appt.id}/cancel/")
+        self.assertEqual("limit", res.data["custodian_text"])
+        self.assertIn("This number has already been sent", res.data["custodian_text_detail"])
         queue.assert_not_called()
 
     def test_the_fourth_is_still_sent(self):

@@ -28,17 +28,17 @@ from urllib.parse import quote
 
 from django.conf import settings
 from django.db import DatabaseError, connection
-from django.db.models import Count, Exists, F, Max, Min, OuterRef, Q, Subquery
+from django.db.models import Count, Exists, F, Max, Min, OuterRef, Q, Subquery, Sum
 from django.db.models.functions import Lower
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from accounts.lockout import ADDRESS_LOCK_LABEL, NOT_AN_EMAIL, readable_sign_in_name
-from accounts.models import Role, User
+from accounts.models import Role, SmsSend, User
 from accounts.names import REPLACEMENT
 from accounts.permissions import IsAdministrator
-from accounts.sms import PROVIDERS
+from accounts.sms import LIMITED, PROVIDERS, SENT, UNKNOWN
 from activity.models import ActivityLog
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.services import hosted_model_configured
@@ -585,18 +585,37 @@ def _sms_health(now):
                             f"{name} is chosen but SMS_API_KEY is not set, so every text is refused",
                             "sms")
     since = now - timedelta(hours=24)
-    sent = unconfirmed = 0
+    stalled = 0
     for model in (SessionReminder, CustodianReminder):
         seen = model.objects.aggregate(
-            sent=Count("id", filter=Q(sent_at__gte=since)),
             stalled=Count("id", filter=Q(sent_at__isnull=True, claimed_at__gte=since,
                                          claimed_at__lt=now - UNCONFIRMED_AFTER)))
-        sent += seen["sent"]
-        unconfirmed += seen["stalled"]
-    detail = f"{name} · last 24 h: {sent} sent"
-    if unconfirmed:
-        detail += f", {unconfirmed} unconfirmed"
-    return _health_item("sms", "warn" if unconfirmed else "ok", "Text messages", detail, "sms")
+        stalled += seen["stalled"]
+    # The spend record (accounts.SmsSend). Counts and credits only: never the
+    # text, the number, its last digits or who it went to.
+    spend = SmsSend.objects.filter(created_at__gte=since).aggregate(
+        texts=Count("id", filter=Q(outcome__in=(SENT, UNKNOWN))),
+        credits=Sum("credits", filter=Q(outcome__in=(SENT, UNKNOWN))),
+        unknown=Count("id", filter=Q(outcome=UNKNOWN)),
+        limited=Count("id", filter=Q(outcome=LIMITED)))
+    texts, credits = spend["texts"], spend["credits"] or 0
+    limit = settings.SMS_DAILY_CREDIT_LIMIT
+    plural = "text" if texts == 1 else "texts"
+    detail = (f"{name} · {texts} {plural}, about {credits} credits in the last "
+              f"24 hours (limit {limit} a day)")
+    if spend["unknown"]:
+        detail += f"; {spend['unknown']} unconfirmed"
+    if spend["limited"]:
+        detail += f"; {spend['limited']} stopped by a limit"
+    if stalled:
+        detail += f"; {stalled} reminder{'s' if stalled != 1 else ''} not confirmed sent"
+    status = "ok"
+    if limit > 0 and credits >= limit:
+        status = "bad"
+        detail += " - the daily limit is reached, so no more texts go until it clears"
+    elif stalled or (limit > 0 and credits * 100 >= limit * 80):
+        status = "warn"
+    return _health_item("sms", status, "Text messages", detail, "sms")
 
 
 def _email_health():

@@ -633,6 +633,41 @@ def _check_semaphore_sender_names(api_key):
                    f"key from the account that holds the name?")
 
 
+# One sent message's status, from Semaphore. Used by manage.py sms_live_check
+# to compare what Semaphore says with what the system recorded; never by the
+# sender. The key travels in the query string, as in the checks above, and
+# _post keeps the query string out of every sentence and log line.
+SEMAPHORE_MESSAGES_ENDPOINT = "https://api.semaphore.co/api/v4/messages"
+
+
+def semaphore_message_status(message_id):
+    """(status, sentence) for one message: Semaphore's status word ("Pending",
+    "Queued", "Sent", "Failed", "Refunded") and "" on success, or ("", why it
+    could not be had). Never raises, and the key is in neither value."""
+    message_id = str(message_id or "").strip()
+    if not message_id.isdigit():
+        return "", "There is no usable message id to look up."
+    if not settings.SMS_API_KEY:
+        return "", "SMS_API_KEY is not set."
+    url = (f"{SEMAPHORE_MESSAGES_ENDPOINT}/{message_id}?"
+           f"{urllib.parse.urlencode({'apikey': settings.SMS_API_KEY})}")
+    body, failure = _post(urllib.request.Request(
+        url, headers={"accept": "application/json"}, method="GET"),
+        "message status")
+    if failure is not None:
+        return "", failure.detail
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        return "", "The status answer could not be read."
+    records = parsed if isinstance(parsed, list) else [parsed]
+    record = next((r for r in records if isinstance(r, dict)
+                   and r.get("status") is not None), None)
+    if record is None:
+        return "", f"No status came back: {_short(_gateway_words(parsed) or body)}"
+    return str(record["status"]), ""
+
+
 # Where each gateway will confirm the key and the balance for free. Not
 # derived from SMS_ENDPOINT: that setting exists to point the SENDER somewhere
 # else, and quietly rewriting a URL to guess a second one is how you end up
@@ -821,6 +856,11 @@ def number_fingerprint(number):
 # kind's own rules carry their own window.
 _DAY = 86400
 
+# The subject sms_live_check records its sends under. Real spend, so they count
+# toward the agency's daily credits, but they are the operator's own test of
+# every kind to one number and must not block that number afterwards.
+LIVE_CHECK_SUBJECT = "live-check"
+
 
 def _sent_since(seconds):
     """Rows that spent, or may have spent, credit in the last `seconds`. A
@@ -843,8 +883,10 @@ def _limit_reached(entry, fingerprint, credits, requested_by, subject):
 
     number_hash = fingerprint[0]
     day = _sent_since(_DAY)
+    # Live-check rows count toward the agency's credits (below) only.
+    counted = day.exclude(subject=LIVE_CHECK_SUBJECT)
 
-    if day.filter(number_hash=number_hash).count() >= settings.SMS_PER_NUMBER_DAILY:
+    if counted.filter(number_hash=number_hash).count() >= settings.SMS_PER_NUMBER_DAILY:
         return ("This number has already been sent as many texts as are allowed "
                 "in a day. Try again tomorrow.")
 
@@ -854,7 +896,7 @@ def _limit_reached(entry, fingerprint, credits, requested_by, subject):
                 "more texts are sent until it clears. Try again later.")
 
     for rule in entry.rules:
-        pool = _sent_since(rule.seconds).filter(
+        pool = _sent_since(rule.seconds).exclude(subject=LIVE_CHECK_SUBJECT).filter(
             kind__in=sms_catalogue.kinds_in_group(rule.group))
         if rule.by == sms_catalogue.BY_REQUESTER:
             if requested_by is None:

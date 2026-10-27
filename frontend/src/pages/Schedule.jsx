@@ -200,11 +200,12 @@ export default function Schedule() {
   const toast = useToast();
   const confirm = useConfirm();
   /* The server queues the custodian's text after answering, so "limit" in the
-     answer is the only way to learn it was held back (4 event texts about one
-     appointment in a day): the SW is told to phone instead. */
+     answer is the only way to learn it was held back (a limit on texts: the
+     detail is the server's sentence saying which): the SW is told to phone
+     instead. */
   const tellIfNoText = (answer) => {
     if (answer?.custodian_text === 'limit') {
-      toast.warning('The custodian has already had 4 texts about this appointment today, so no text was sent. Phone them instead.');
+      toast.warning(`No text was sent to the custodian: ${answer.custodian_text_detail || 'a limit on texts was reached.'} Phone them instead.`);
     }
   };
   // Booking, availability and leave are written one at a time: the drawer stays

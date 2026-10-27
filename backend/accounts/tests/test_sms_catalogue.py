@@ -75,6 +75,11 @@ def backend_sources():
         # send_sms); it is where the check is made, not a caller of it.
         if path == root / "accounts" / "sms.py":
             continue
+        # The live check sends EVERY catalogue entry by iterating it, so its
+        # kind is the entry's own key by construction; it cannot name one that
+        # is not declared.
+        if path == root / "accounts" / "management" / "commands" / "sms_live_check.py":
+            continue
         yield path
 
 

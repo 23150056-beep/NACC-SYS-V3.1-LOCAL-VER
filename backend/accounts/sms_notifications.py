@@ -186,14 +186,26 @@ def _custodian_number(child):
     return child.custodian_contact if texts_allowed(child) else ""
 
 
+class TextOutcome(str):
+    """What became of a custodian's text: the plain word, plus the server's
+    own sentence where there is one (`detail`, set for "limit")."""
+    detail = ""
+
+    def __new__(cls, word, detail=""):
+        obj = super().__new__(cls, word)
+        obj.detail = detail
+        return obj
+
+
 def notify_custodian(appointment, event):
     """Booked, moved, cancelled or missed: queued for after the save commits.
 
     Returns what became of the text, for the screen to act on:
     "queued", "off" (texts to this custodian are not allowed, or no number),
     "unchanged" (a move to the start the custodian was last told) or "limit"
-    (this appointment has had as many event texts today as are allowed, so
-    the SW is told to phone instead).
+    (one of the limits - per appointment, per number or the agency's day - has
+    been reached, so the SW is told to phone instead; `.detail` is the
+    server's sentence saying which).
 
     "Moved" is sent only when the start differs from what the custodian was
     last told (`custodian_told_start`; none counts as different). After a
@@ -209,9 +221,10 @@ def notify_custodian(appointment, event):
     subject = f"appointment:{appointment.pk}"
     # queue_sms answers nothing about the limits, and the request is over by
     # the time they bite; ask now so the screen can say so.
-    if limit_reason(number, sms_catalogue.custodian_event_kind(event),
-                    subject=subject):
-        return "limit"
+    held = limit_reason(number, sms_catalogue.custodian_event_kind(event),
+                        subject=subject)
+    if held:
+        return TextOutcome("limit", held)
     queue_sms(number, custodian_text(event, appointment),
               sms_catalogue.custodian_event_kind(event), subject=subject)
     if event in ("booked", "moved"):
