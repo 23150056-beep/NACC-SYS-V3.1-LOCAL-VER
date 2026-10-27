@@ -212,10 +212,13 @@ class DuplicateCheckTests(APITestCase):
         self.assertEqual(len(r.data["matches"]), 1)
         self.assertEqual(r.data["matches"][0]["status"], "inactive")
 
-    def test_birth_date_plus_last_name_matches(self):
+    def test_last_name_and_birth_date_alone_match_nothing(self):
+        # The save refusal needs the first name too (children/duplicates.py),
+        # so the warning does not offer a record the save would not call the
+        # same child.
         self.client.force_authenticate(self.staff)
         r = self.client.get("/api/children/check-duplicate/?last_name=santos&birth_date=2016-01-10")
-        self.assertEqual(len(r.data["matches"]), 1)
+        self.assertEqual(r.data["matches"], [])
 
     def test_psychologist_forbidden(self):
         self.client.force_authenticate(self.psych)

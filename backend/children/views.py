@@ -1,4 +1,5 @@
 ﻿import time
+from datetime import date
 from django.core.cache import cache
 from django.db import IntegrityError
 from django.db.models import Prefetch, Q
@@ -317,8 +318,8 @@ class ChildViewSet(viewsets.ModelViewSet):
         Since 30 Sep 2026 a social worker may also reopen a terminated case
         held by another worker, or by nobody, and it becomes theirs - but only
         one found at intake: the request carries the name typed into Add
-        Record (first_name, last_name, or last_name and birth_date), matched by
-        the duplicate check's own rule. By id alone it stays a 404, so no
+        Record (first_name, last_name AND birth_date), matched by the rule the
+        save refusal uses (children/duplicates.py same_child). By id alone it stays a 404, so no
         worker can walk the ids and collect other workers' closed cases. An
         ACTIVE case held by someone else still goes to the ISA."""
         role = role_of(request)
@@ -326,12 +327,11 @@ class ChildViewSet(viewsets.ModelViewSet):
         try:
             child = self.get_object()
         except Http404:
-            q = (_intake_match(request.data.get("first_name"), request.data.get("last_name"),
-                               request.data.get("birth_date"))
-                 if role == Role.STAFF else None)
-            child = (Child.objects.filter(q, pk=pk, status=Child.INACTIVE)
-                     .select_related("social_worker").first() if q is not None else None)
-            if child is None:
+            child = (Child.objects.filter(pk=pk, status=Child.INACTIVE)
+                     .select_related("social_worker").first() if role == Role.STAFF else None)
+            if child is None or not _is_same_child(
+                    child, request.data.get("first_name"), request.data.get("last_name"),
+                    request.data.get("birth_date")):
                 raise
             taking_over, previous = True, child.social_worker
         if role not in (Role.ADMINISTRATOR, Role.STAFF):
@@ -468,11 +468,16 @@ class ChildViewSet(viewsets.ModelViewSet):
         if role not in (Role.ADMINISTRATOR, Role.STAFF):
             return Response({"detail": "Staff or administrators only."},
                             status=status.HTTP_403_FORBIDDEN)
-        q = _intake_match(request.query_params.get("first_name"),
-                          request.query_params.get("last_name"),
-                          request.query_params.get("birth_date"))
-        if q is None:
-            return Response({"matches": []})  # last name alone is too broad
+        first = request.query_params.get("first_name")
+        last = request.query_params.get("last_name")
+        birth = request.query_params.get("birth_date")
+        # Names are compared as the save refusal compares them (NFC, case
+        # folded, spaces collapsed). First AND last name are needed: a last
+        # name alone is too broad.
+        ids = duplicates.ids_with_name(first, last)
+        if not ids:
+            return Response({"matches": []})
+        q = Q(pk__in=ids)
         # select_related: every row below renders the psychologist's name, and
         # without the join that is an extra query per match - on an endpoint the
         # intake form calls while somebody is still typing a name.
@@ -481,43 +486,58 @@ class ChildViewSet(viewsets.ModelViewSet):
                    .order_by("-updated_at")[:5])
         mine = set(scope_to_visible(Child.objects.filter(pk__in=[c.pk for c in matches]),
                                     request, path=None).values_list("pk", flat=True))
+        # The records the save would refuse a second one for: same names AND
+        # the birth date typed, and still active. Said on every row so the form
+        # can stop the intake at once; it tells the typer nothing they did not
+        # type themselves, so another worker's row discloses no more than before.
+        born = _typed_birth(birth)
+        same = ({c.pk for c in duplicates.same_child(first, last, born)}
+                if born is not None else set())
 
         def row(c):
+            blocks = c.pk in same and c.status == Child.ACTIVE
             if c.pk in mine:
                 return {"id": c.id, "fullname": c.fullname, "status": c.status,
                         "birth_date": c.birth_date,
                         "psychologist_name": display_name(c.assigned_psychologist) or None,
                         "social_worker_name": display_name(c.social_worker) or None,
-                        "yours": True}
-            held = {"yours": False, "held_by": display_name(c.social_worker) or None}
+                        "yours": True, "blocks_new_record": blocks}
+            held = {"yours": False, "held_by": display_name(c.social_worker) or None,
+                    "blocks_new_record": blocks}
             # A TERMINATED case a social worker finds here they may reopen and
             # take over (owner, 30 Sep 2026): a returning child arrives at
             # whoever runs intake that day, not at the worker who closed it.
-            # The id is only good together with the name typed (see reopen);
-            # still no birth date and no psychologist.
+            # The id is only good together with the name AND birth date typed
+            # (see reopen); still no birth date and no psychologist. A closed
+            # case matched by name alone is shown as held, not reopenable, and
+            # carries no id.
             if c.status == Child.INACTIVE and role == Role.STAFF:
-                held.update({"id": c.id, "fullname": c.fullname, "status": c.status,
-                             "reopenable": True})
+                if c.pk in same:
+                    held.update({"id": c.id, "fullname": c.fullname, "status": c.status,
+                                 "reopenable": True})
+                else:
+                    held["reopenable"] = False
             return held
         return Response({"matches": [row(c) for c in matches]})
 
 
-def _intake_match(first, last, birth):
-    """The duplicate check's rule for "this is the same child", as a filter:
-    last name and first name, or last name and birth date. None when what was
-    typed is too little to say - a last name alone matches half a barangay.
-
-    Shared with `reopen`, which lets a social worker take over another
-    worker's TERMINATED case only by the name they typed at intake - so the
-    case has to be found the way the duplicate check found it, not by id."""
-    first, last, birth = (str(v or "").strip() for v in (first, last, birth))
-    if not last:
+def _typed_birth(raw):
+    """The birth date typed at intake as a date, or None when blank or not a
+    date (a half-typed one must not raise)."""
+    try:
+        return date.fromisoformat(str(raw or "").strip())
+    except ValueError:
         return None
-    if first:
-        return Q(last_name__iexact=last, first_name__iexact=first)
-    if birth:
-        return Q(last_name__iexact=last, birth_date=birth)
-    return None
+
+
+def _is_same_child(child, first, last, birth):
+    """Whether `child` is the child typed at intake by the save refusal's
+    rule (children/duplicates.py): first name, last name AND birth date.
+    `reopen` authorises a takeover with this, and `check_duplicate` offers the
+    button by it, so the offer and the acceptance cannot differ."""
+    born = _typed_birth(birth)
+    return born is not None and child.pk in {
+        c.pk for c in duplicates.same_child(first, last, born)}
 
 
 class CustodianContactCodeView(APIView):
@@ -578,4 +598,29 @@ class CustodianContactCodeView(APIView):
         ok, message = custodian.confirm_code(request.user, number, request.data.get("code"))
         if not ok:
             return Response({"code": message}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({"detail": message, "number": number, "verified": True})
+        return Response({"detail": message, "number": number, "verified": True,
+                         **self._standing(request.user, number)})
+
+    @staticmethod
+    def _standing(user, number):
+        """Whether `user` has a confirmation for `number` that can still go on
+        a record, and until when. The form shows "Confirmed" from this, so it
+        can drop the claim when the hour is up instead of keeping it in a
+        draft."""
+        at = custodian.confirmed_at(user, number)
+        return {"verified": at is not None,
+                "confirmed_until": (at + custodian.CONFIRMED_FOR) if at else None}
+
+    def get(self, request):
+        """Is this number still confirmed for the caller? ?number=..."""
+        refused = self._refuse(request)
+        if refused:
+            return refused
+        try:
+            number = custodian.normalise(request.query_params.get("number"))
+        except ValueError as exc:
+            return Response({"number": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        if not number:
+            return Response({"number": "Enter the custodian's mobile number."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        return Response({"number": number, **self._standing(request.user, number)})

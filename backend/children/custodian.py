@@ -152,13 +152,12 @@ def _leaves_custodian_behind(attrs, instance):
 def confirmed_at(user, number):
     """When `user` confirmed `number` with a code, if recently enough to put
     it on a record now; else None."""
-    from children.models import CustodianContactCheck
-    row = (CustodianContactCheck.objects
-           .filter(requested_by=user, number=number, verified_at__isnull=False)
-           .first())
-    if row is None or timezone.now() - row.verified_at > CONFIRMED_FOR:
+    from children.models import CustodianNumberConfirmation
+    row = (CustodianNumberConfirmation.objects
+           .filter(requested_by=user, number=number).first())
+    if row is None or timezone.now() - row.confirmed_at > CONFIRMED_FOR:
         return None
-    return row.verified_at
+    return row.confirmed_at
 
 
 # --- The one-time code -------------------------------------------------------
@@ -208,7 +207,7 @@ def send_code(user, number):
 
 def confirm_code(user, number, submitted):
     """Check the code read back for `number`. Returns (ok, message)."""
-    from children.models import CustodianContactCheck
+    from children.models import CustodianContactCheck, CustodianNumberConfirmation
 
     with transaction.atomic():
         row = (CustodianContactCheck.objects.select_for_update()
@@ -229,4 +228,8 @@ def confirm_code(user, number, submitted):
         row.code = ""
         row.verified_at = timezone.now()
         row.save(update_fields=["code", "tries", "verified_at"])
+        # Kept per number, so the next code sent to a different number does
+        # not take this confirmation with it.
+        CustodianNumberConfirmation.objects.update_or_create(
+            requested_by=user, number=number, defaults={"confirmed_at": row.verified_at})
     return True, "Number confirmed. Save the record to keep it."

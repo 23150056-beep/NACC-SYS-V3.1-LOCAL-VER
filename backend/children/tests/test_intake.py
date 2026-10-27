@@ -103,6 +103,23 @@ class TheFormAndTheServerAgreeTest(SimpleTestCase):
         self.assertIn("special_needs", re.search(
             r"export const requiredFields = .*?\n\};?\n", self.js, re.S).group(0))
 
+    def test_a_custodians_number_stays_confirmed_as_long_as_the_server_says(self):
+        from children import custodian
+        minutes = re.search(r"CONFIRMED_FOR_MINUTES = (\d+);", self.js)
+        self.assertIsNotNone(minutes, "CONFIRMED_FOR_MINUTES moved; update this test")
+        self.assertEqual(custodian.CONFIRMED_FOR, timedelta(minutes=int(minutes.group(1))))
+
+    def test_the_form_gives_a_number_the_servers_sentences(self):
+        # The form refuses an incomplete or non-mobile number as the server
+        # does (accounts/phone.py), in the server's own words.
+        from accounts.phone import InvalidPhilippineMobile, normalise_ph_mobile
+        for typed, key in (("0917123456", "incomplete"), ("(02) 8123 4567", "landline"),
+                           ("+44 7911 123456", "notPh"), ("0917 12A 4567", "characters")):
+            with self.assertRaises(InvalidPhilippineMobile) as raised:
+                normalise_ph_mobile(typed)
+            literal = re.search(r"\b" + key + r": '(.*?)',?\n", self.js).group(1)
+            self.assertEqual(str(raised.exception), literal, typed)
+
     def test_what_is_always_required(self):
         self.assertEqual(intake.ALWAYS_REQUIRED, _js_array(self.js, "ALWAYS_REQUIRED"))
 

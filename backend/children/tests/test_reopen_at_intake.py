@@ -6,6 +6,12 @@ is TERMINATED the worker may reopen it and it becomes theirs, without asking
 the ISA. Only by the name typed at intake, though - by id alone it is still
 out of reach, so nobody can collect other workers' closed cases - and an
 ACTIVE case held by someone else still goes to the ISA.
+
+"The same child" is the save refusal's rule (children/duplicates.py): first
+name, last name AND birth date, compared folded and with spaces collapsed. The
+offer and the takeover used to match on the name alone, so a different child
+with the same name could be handed over, and a save could be refused with a
+pointer to a warning that never appeared.
 """
 from datetime import timedelta
 
@@ -17,6 +23,7 @@ from rest_framework.test import APIClient
 from accounts.models import Role
 from activity.models import ActivityLog
 from children.models import Child, TerminationRecord
+from children.tests.payloads import complete
 
 User = get_user_model()
 
@@ -56,23 +63,44 @@ class ReopenAtIntakeTest(TestCase):
 
     def test_the_duplicate_check_offers_another_workers_closed_case(self):
         r = self._as(self.editha).get("/api/children/check-duplicate/",
-                                      {"first_name": "ben", "last_name": "LIM"})
+                                      {"first_name": "ben", "last_name": "LIM",
+                                       "birth_date": str(self.born)})
         (match,) = r.data["matches"]
         self.assertEqual({"yours": False, "held_by": "Rosa Santos", "id": self.ben.id,
                           "fullname": self.ben.fullname, "status": Child.INACTIVE,
-                          "reopenable": True}, match)
+                          "blocks_new_record": False, "reopenable": True}, match)
         self.assertNotIn(str(self.born), str(r.data))
 
     def test_an_active_case_is_still_only_who_holds_it(self):
         Child.objects.filter(pk=self.ben.pk).update(status=Child.ACTIVE)
         r = self._as(self.editha).get("/api/children/check-duplicate/",
                                       {"first_name": "Ben", "last_name": "Lim"})
-        self.assertEqual([{"yours": False, "held_by": "Rosa Santos"}], r.data["matches"])
+        self.assertEqual([{"yours": False, "held_by": "Rosa Santos",
+                           "blocks_new_record": False}], r.data["matches"])
+
+    def test_an_active_case_with_the_same_birth_date_is_marked_as_refusing_a_new_record(self):
+        # The save refuses a second record on names AND birth date, so the form
+        # is told which rows will do that and can stop the intake at once.
+        Child.objects.filter(pk=self.ben.pk).update(status=Child.ACTIVE)
+        typed = {"first_name": "Ben", "last_name": "Lim"}
+        r = self._as(self.editha).get("/api/children/check-duplicate/",
+                                      {**typed, "birth_date": str(self.born)})
+        self.assertEqual([{"yours": False, "held_by": "Rosa Santos",
+                           "blocks_new_record": True}], r.data["matches"])
+        for birth in (str(self.born - timedelta(days=1)), ""):
+            r = self._as(self.editha).get("/api/children/check-duplicate/",
+                                          {**typed, "birth_date": birth})
+            self.assertFalse(r.data["matches"][0]["blocks_new_record"])
+        # The ISA sees the row in full and the same flag.
+        r = self._as(self.admin).get("/api/children/check-duplicate/",
+                                     {**typed, "birth_date": str(self.born)})
+        self.assertTrue(r.data["matches"][0]["blocks_new_record"])
 
     # --- Reopening it -------------------------------------------------------------
 
     def test_reopened_by_the_typed_name_it_becomes_theirs(self):
-        r = self._reopen(self.editha, self.ben, first_name="Ben", last_name="Lim")
+        r = self._reopen(self.editha, self.ben, first_name="Ben", last_name="Lim",
+                          birth_date=str(self.born))
         self.assertEqual(200, r.status_code, r.data)
         self.ben.refresh_from_db()
         self.assertEqual(Child.ACTIVE, self.ben.status)
@@ -87,11 +115,71 @@ class ReopenAtIntakeTest(TestCase):
         self.assertEqual(1, told.count())
         self.assertEqual(self.editha, told.get().actor)
 
-    def test_the_last_name_and_birth_date_will_do(self):
+    def test_the_last_name_and_birth_date_are_not_enough(self):
         r = self._reopen(self.editha, self.ben, last_name="Lim", birth_date=str(self.born))
-        self.assertEqual(200, r.status_code, r.data)
+        self.assertEqual(404, r.status_code)
+
+    def test_the_name_alone_is_not_enough(self):
+        r = self._reopen(self.editha, self.ben, first_name="Ben", last_name="Lim")
+        self.assertEqual(404, r.status_code)
         self.ben.refresh_from_db()
-        self.assertEqual(self.editha, self.ben.social_worker)
+        self.assertEqual((Child.INACTIVE, self.rosa), (self.ben.status, self.ben.social_worker))
+
+    def test_a_different_birth_date_is_a_warning_but_not_reopenable(self):
+        other = str(self.born - timedelta(days=1))
+        r = self._as(self.editha).get("/api/children/check-duplicate/",
+                                      {"first_name": "Ben", "last_name": "Lim",
+                                       "birth_date": other})
+        self.assertEqual([{"yours": False, "held_by": "Rosa Santos", "blocks_new_record": False, "reopenable": False}],
+                         r.data["matches"])
+        self.assertNotIn(str(self.born), str(r.data))
+        r = self._reopen(self.editha, self.ben, first_name="Ben", last_name="Lim",
+                         birth_date=other)
+        self.assertEqual(404, r.status_code)
+        self.ben.refresh_from_db()
+        self.assertEqual((Child.INACTIVE, self.rosa), (self.ben.status, self.ben.social_worker))
+
+    def test_no_birth_date_typed_yet_is_a_warning_but_not_reopenable(self):
+        r = self._as(self.editha).get("/api/children/check-duplicate/",
+                                      {"first_name": "Ben", "last_name": "Lim"})
+        self.assertEqual([{"yours": False, "held_by": "Rosa Santos", "blocks_new_record": False, "reopenable": False}],
+                         r.data["matches"])
+
+    def test_a_half_typed_birth_date_does_not_raise(self):
+        r = self._as(self.editha).get("/api/children/check-duplicate/",
+                                      {"first_name": "Ben", "last_name": "Lim",
+                                       "birth_date": "2015-0"})
+        self.assertEqual(200, r.status_code)
+        self.assertFalse(r.data["matches"][0]["reopenable"])
+        r = self._reopen(self.editha, self.ben, first_name="Ben", last_name="Lim",
+                         birth_date="2015-0")
+        self.assertEqual(404, r.status_code)
+
+    def test_accents_and_case_are_folded_like_the_save_refusal(self):
+        nino = self._closed("NIÑO", "PEÑA", self.rosa)
+        typed = {"first_name": "Niño", "last_name": "Peña", "birth_date": str(self.born)}
+        (match,) = self._as(self.editha).get("/api/children/check-duplicate/", typed).data["matches"]
+        self.assertEqual((nino.id, True), (match["id"], match["reopenable"]))
+        self.assertEqual(200, self._reopen(self.editha, nino, **typed).status_code)
+        nino.refresh_from_db()
+        self.assertEqual(self.editha, nino.social_worker)
+
+    def test_a_doubled_space_is_the_same_name(self):
+        ana = self._closed("Ana Marie", "Cruz", self.rosa)
+        typed = {"first_name": "Ana  Marie ", "last_name": "cruz", "birth_date": str(self.born)}
+        (match,) = self._as(self.editha).get("/api/children/check-duplicate/", typed).data["matches"]
+        self.assertTrue(match["reopenable"])
+        self.assertEqual(200, self._reopen(self.editha, ana, **typed).status_code)
+
+    def test_the_refusal_pointing_at_the_warning_is_matched_by_an_offer(self):
+        # Whenever the save is refused with "Reopen it from the warning above",
+        # the check offers exactly that.
+        typed = {"first_name": "Ben", "last_name": "Lim", "birth_date": str(self.born)}
+        offer = self._as(self.editha).get("/api/children/check-duplicate/", typed).data["matches"]
+        self.assertTrue(offer[0]["reopenable"])
+        r = self._as(self.editha).post("/api/children/", complete(**typed), format="json")
+        self.assertEqual(400, r.status_code, r.data)
+        self.assertIn("Reopen it from the warning above", str(r.data))
 
     def test_by_id_alone_it_is_out_of_reach(self):
         for typed in ({}, {"last_name": "Lim"}, {"first_name": "Bea", "last_name": "Lim"},
@@ -110,7 +198,8 @@ class ReopenAtIntakeTest(TestCase):
 
     def test_a_closed_case_held_by_nobody_becomes_theirs(self):
         cara = self._closed("Cara", "Diaz", None)
-        r = self._reopen(self.editha, cara, first_name="Cara", last_name="Diaz")
+        r = self._reopen(self.editha, cara, first_name="Cara", last_name="Diaz",
+                         birth_date=str(self.born))
         self.assertEqual(200, r.status_code, r.data)
         cara.refresh_from_db()
         self.assertEqual((Child.ACTIVE, self.editha), (cara.status, cara.social_worker))

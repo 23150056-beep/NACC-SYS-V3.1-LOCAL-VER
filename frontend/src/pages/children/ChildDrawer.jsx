@@ -176,7 +176,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
     // (backend children/custodian.py).
     ...(asked('custodian_name') || child.custodian_name ? [['Custodian', child.custodian_name || '—']] : []),
     ...(child.custodian_contact_display || asked('custodian_name')
-      ? [['Contact Number', child.custodian_contact_display
+      ? [['Mobile Number', child.custodian_contact_display
         ? `${child.custodian_contact_display} · ${child.custodian_texts?.status || ''}`
         : '—']] : []),
     ['Address', location],

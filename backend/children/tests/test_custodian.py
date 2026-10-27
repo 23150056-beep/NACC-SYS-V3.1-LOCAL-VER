@@ -19,7 +19,7 @@ from accounts import sms_notifications
 from accounts.models import Role
 from accounts.sms import SmsResult, fits_one_segment
 from children import custodian, demo_custodians, intake
-from children.models import Child, CustodianContactCheck
+from children.models import Child, CustodianContactCheck, CustodianNumberConfirmation
 from children.tests.payloads import complete
 from scheduling.models import Appointment, CustodianReminder
 from scheduling.reminders import send_session_reminders
@@ -238,10 +238,68 @@ class OneTimeCodeTest(CustodianBase):
 
     def test_a_confirmation_goes_stale(self):
         self._confirm()
-        CustodianContactCheck.objects.update(
-            verified_at=timezone.now() - custodian.CONFIRMED_FOR - timedelta(minutes=1))
+        CustodianNumberConfirmation.objects.update(
+            confirmed_at=timezone.now() - custodian.CONFIRMED_FOR - timedelta(minutes=1))
         res = self._patch(custodian_contact="0917 123 4567")
         self.assertFalse(res.data["custodian_contact_verified"])
+
+    def test_a_confirmation_holds_for_the_hour_and_not_beyond(self):
+        start = timezone.now()
+        self._confirm()
+        with patch("django.utils.timezone.now",
+                   return_value=start + custodian.CONFIRMED_FOR - timedelta(minutes=1)):
+            self.assertIsNotNone(custodian.confirmed_at(self.sw, NUMBER))
+        with patch("django.utils.timezone.now",
+                   return_value=start + custodian.CONFIRMED_FOR + timedelta(minutes=1)):
+            self.assertIsNone(custodian.confirmed_at(self.sw, NUMBER))
+
+    def test_sending_a_code_to_another_number_keeps_the_first_confirmation(self):
+        other = "+639181234567"
+        self._confirm()
+        # The form confirmed A, then the worker asked for a code for B.
+        CustodianContactCheck.objects.update(last_sent_at=None)
+        with patch("accounts.sms.send_sms", side_effect=fake_send([])):
+            res = self._as(self.sw).post("/api/custodian-contact/code/",
+                                         {"number": other}, format="json")
+        self.assertEqual(200, res.status_code)
+        res = self._patch(custodian_contact="0917 123 4567", custodian_sms_consent=True)
+        self.assertTrue(res.data["custodian_contact_verified"])
+        self.assertEqual({"on": True, "status": "Texts on"}, res.data["custodian_texts"])
+
+    def test_two_confirmed_numbers_are_both_kept(self):
+        self._confirm(number=NUMBER)
+        self._confirm(number="+639181234567")
+        self.assertEqual(2, CustodianNumberConfirmation.objects.filter(requested_by=self.sw).count())
+        self._confirm(number=NUMBER)          # confirmed again: updated, not doubled
+        self.assertEqual(2, CustodianNumberConfirmation.objects.filter(requested_by=self.sw).count())
+        for number in ("0917 123 4567", "0918 123 4567"):
+            child = Child.objects.create(first_name="X", last_name="Y", case_type="Foster Care",
+                                         social_worker=self.sw)
+            res = self._as(self.sw).patch(f"/api/children/{child.id}/",
+                                          {"custodian_contact": number,
+                                           "custodian_sms_consent": True}, format="json")
+            self.assertTrue(res.data["custodian_contact_verified"], number)
+
+    def test_confirming_says_until_when_and_a_get_says_it_again(self):
+        sent = []
+        with patch("accounts.sms.send_sms", side_effect=fake_send(sent)):
+            self._as(self.sw).post("/api/custodian-contact/code/", {"number": NUMBER}, format="json")
+        code = sent[-1][1].split("code is ")[1][:6]
+        res = self._as(self.sw).put("/api/custodian-contact/code/",
+                                    {"number": NUMBER, "code": code}, format="json")
+        self.assertTrue(res.data["verified"])
+        row = CustodianNumberConfirmation.objects.get(requested_by=self.sw, number=NUMBER)
+        self.assertEqual(row.confirmed_at + custodian.CONFIRMED_FOR, res.data["confirmed_until"])
+        got = self._as(self.sw).get("/api/custodian-contact/code/", {"number": "0917 123 4567"})
+        self.assertEqual((NUMBER, True), (got.data["number"], got.data["verified"]))
+        elsewhere = self._as(self.sw).get("/api/custodian-contact/code/", {"number": "0918 123 4567"})
+        self.assertEqual((False, None), (elsewhere.data["verified"], elsewhere.data["confirmed_until"]))
+        CustodianNumberConfirmation.objects.update(
+            confirmed_at=timezone.now() - custodian.CONFIRMED_FOR - timedelta(minutes=1))
+        self.assertFalse(self._as(self.sw).get("/api/custodian-contact/code/",
+                                               {"number": NUMBER}).data["verified"])
+        self.assertEqual(403, self._as(self.psy).get("/api/custodian-contact/code/",
+                                                     {"number": NUMBER}).status_code)
 
     def test_codes_are_rate_limited(self):
         with patch("accounts.sms.send_sms", side_effect=fake_send([])):

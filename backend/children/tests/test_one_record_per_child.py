@@ -5,6 +5,8 @@ or closed - with the same first name, last name AND birth date. A name alone
 is not enough, because two children share a common one. The sentence says what
 the duplicate check already tells this requester, and no more.
 """
+import re
+
 from django.contrib.auth import get_user_model
 from django.test import TestCase
 from rest_framework.test import APIClient
@@ -13,6 +15,7 @@ from accounts.models import Role
 from children import duplicates
 from children.models import Child
 from children.tests.payloads import complete
+from children.tests.test_intake import CASE_DATA_JS
 
 User = get_user_model()
 BORN = "2016-01-10"
@@ -47,6 +50,10 @@ class OneRecordPerChildTest(TestCase):
     def _refused(self, res, sentence):
         self.assertEqual(400, res.status_code, res.data)
         self.assertEqual({"detail": sentence}, res.data)
+        # The form goes back to the first step, where the warning is, when a
+        # save is refused with one of these (caseData.js DUPLICATE_REFUSAL).
+        pattern = re.search(r"DUPLICATE_REFUSAL = /(.*)/;", CASE_DATA_JS.read_text(encoding="utf-8")).group(1)
+        self.assertTrue(re.match(pattern, sentence), sentence)
         self.assertEqual(1, Child.objects.count())
 
     def _ref(self, child=None):

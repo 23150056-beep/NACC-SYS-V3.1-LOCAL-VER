@@ -395,3 +395,30 @@ class CustodianContactCheck(models.Model):
 
     class Meta:
         db_table = "tbl_custodian_contact_check"
+
+
+class CustodianNumberConfirmation(models.Model):
+    """A number a staff member has confirmed with a code, kept apart from the
+    pending code (children/custodian.py).
+
+    CustodianContactCheck is one row per person and holds only the code being
+    waited on. When it also held the confirmation, sending a code to a second
+    number (a typo, a sibling's custodian) wiped the first number's
+    confirmation while the form still showed it as confirmed. One row per
+    person AND number means a new code cannot undo an earlier confirmation;
+    it stays usable for CONFIRMED_FOR from `confirmed_at`, and only by the
+    person who confirmed it.
+    """
+    requested_by = models.ForeignKey(
+        "accounts.User", on_delete=models.CASCADE,
+        related_name="custodian_number_confirmations")
+    number = models.CharField(max_length=16)
+    confirmed_at = models.DateTimeField()
+
+    class Meta:
+        db_table = "tbl_custodian_number_confirmation"
+        constraints = [
+            models.UniqueConstraint(fields=["requested_by", "number"],
+                                    name="one_confirmation_per_person_and_number"),
+        ]
+

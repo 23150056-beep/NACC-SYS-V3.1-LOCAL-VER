@@ -190,6 +190,77 @@ export const unaskedAnswers = (form, record) => {
   return Object.fromEntries(Object.keys(blanked).map((k) => [k, record[k] ?? blanked[k]]));
 };
 
+/* Whether the age rule is broken, judged on what the save will SEND (`sent`:
+ * the form with unaskedAnswers laid over it) against the record as opened, as
+ * the server judges it (ChildSerializer._check_age). Judged where the birth
+ * date is set, and again where the case type or type of adoption changes,
+ * since that changes the rule; an unchanged birth date on an unrelated edit
+ * is never judged. Judging the form instead of what is sent kept a type of
+ * adoption picked and then abandoned (Adoption -> Foster Care) blocking an
+ * edit the server would accept. Returns the refusal sentence, or ''. */
+export const ageOn = (born, today = new Date()) => today.getFullYear() - born.getFullYear()
+  - ((today.getMonth() < born.getMonth()
+    || (today.getMonth() === born.getMonth() && today.getDate() < born.getDate())) ? 1 : 0);
+export const ageProblem = (sent, record, today = new Date()) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(sent.birth_date || '') || Number(sent.birth_date.slice(0, 4)) < 1900) return '';
+  if (record) {
+    const moved = ['birth_date', 'case_type', 'type_of_adoption']
+      .some((f) => String(sent[f] ?? '') !== String(record[f] ?? ''));
+    if (!moved) return '';
+  }
+  const [y, m, d] = sent.birth_date.split('-').map(Number);
+  const age = ageOn(new Date(y, m - 1, d), today);
+  const [low, high] = ageRange(sent.case_type, sent.type_of_adoption);
+  return age < low || (high != null && age > high) ? ageRefusal(sent.case_type, sent.type_of_adoption) : '';
+};
+
+/* How long a custodian's number stays confirmed once the code is read back:
+ * the server's CONFIRMED_FOR (backend children/custodian.py; test_intake pins
+ * the two). The form keeps each confirmed number with the time it runs out,
+ * so a draft restored later does not claim a confirmation the server has let
+ * go of. */
+export const CONFIRMED_FOR_MINUTES = 60;
+export const confirmedUntil = (serverUntil, now = Date.now()) => (
+  serverUntil && Number.isFinite(Date.parse(serverUntil))
+    ? serverUntil : new Date(now + CONFIRMED_FOR_MINUTES * 60000).toISOString());
+export const confirmationLive = (until, now = Date.now()) => {
+  const t = Date.parse(until || '');
+  return Number.isFinite(t) && now < t;
+};
+
+/* The server's reading of a custodian's number (accounts/phone.py
+ * normalise_ph_mobile; the agency records mobiles only, owner 26 Oct 2026):
+ * '' when it is blank or a Philippine mobile, else the server's own
+ * sentence. test_intake checks every sentence is still the server's. */
+export const MOBILE_MESSAGES = {
+  notPh: 'Only Philippine mobile numbers can receive messages from this system. Enter a number starting 09 or +63.',
+  characters: 'That contains characters a phone number cannot have. Enter digits only, for example 0917 123 4567.',
+  landline: 'That looks like a landline. Text messages need a mobile number, which starts 09.',
+  incomplete: 'That is not a complete Philippine mobile number. It should be eleven digits starting 09, for example 0917 123 4567.',
+};
+export const mobileProblem = (raw) => {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+  let digits = text.replace(/[\s\-().]/g, '');
+  let national;
+  if (digits.startsWith('+')) {
+    digits = digits.slice(1);
+    if (!digits.startsWith('63')) return MOBILE_MESSAGES.notPh;
+    national = digits.slice(2);
+  } else if (digits.startsWith('63')) national = digits.slice(2);
+  else if (digits.startsWith('0')) national = digits.slice(1);
+  else national = digits;
+  if (!/^\d+$/.test(national)) return MOBILE_MESSAGES.characters;
+  if (/^9\d{9}$/.test(national)) return '';
+  return /^[2-8]/.test(national) ? MOBILE_MESSAGES.landline : MOBILE_MESSAGES.incomplete;
+};
+
+/* The sentences the server refuses a second record with
+ * (backend children/duplicates.py refusal_for_second_record; pinned by
+ * test_one_record_per_child). The form returns to the first step, where the
+ * warning is, when a save is refused with one. */
+export const DUPLICATE_REFUSAL = /^(This child (already has a record|has a closed record)|A record for this child )/;
+
 // New fields from the same official intake form, which the SCSR repeats as its
 // Part I. "N/A" became "Unknown" on 24 Sep 2026; "Child" was retired that day
 // and offered again on 7 Oct 2026 (owner).

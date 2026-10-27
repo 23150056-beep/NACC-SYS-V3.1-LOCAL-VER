@@ -110,6 +110,18 @@ def same_child(first, last, birth, exclude=None):
             if (_key(c.first_name), _key(c.last_name)) == wanted]
 
 
+def ids_with_name(first, last):
+    """Ids of every record with this first and last name, whatever the birth
+    date. Check-duplicate uses it for the warning, which should show a name
+    match even when the birth date is not typed yet or differs. Same `_key`,
+    so the warning and the refusal call the same names the same."""
+    wanted = (_key(first), _key(last))
+    if not all(wanted):
+        return []
+    return [pk for pk, f, l in Child.objects.values_list("pk", "first_name", "last_name")
+            if (_key(f), _key(l)) == wanted]
+
+
 def duplicate_groups():
     """Every set of two or more records for what `same_child` calls one child,
     whoever holds them and whether they are active or closed.

@@ -95,8 +95,12 @@ class ChildSerializer(serializers.ModelSerializer):
             "intake_token", "updated_at",
         ]
         # The tracker moves only through the advance-status / terminate actions.
+        # status moves only through terminate and reopen, which set it on the
+        # model: closing a case writes a closing record and reopening clears
+        # the psychologist, so a plain edit must not do either by itself.
         # fullname is derived (Child.save() composes it from the name parts).
-        read_only_fields = ["case_status", "updated_at", "fullname", "custodian_sms_consent_at"]
+        read_only_fields = ["case_status", "status", "updated_at", "fullname",
+                            "custodian_sms_consent_at"]
 
     def get_social_worker_name(self, obj):
         return display_name(obj.social_worker) or None

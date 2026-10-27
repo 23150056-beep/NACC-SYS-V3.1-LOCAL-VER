@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import api from '../../api/client';
 import { Badge, Button, FormField, Icon, Input } from '../../ui';
+import { confirmationLive, confirmedUntil, mobileProblem } from '../../config/caseData';
 import { firstError } from '../../utils/errors';
 import { shortDate } from '../../utils/time';
 import { consentKey } from './recordForm';
@@ -17,7 +18,13 @@ import { consentKey } from './recordForm';
  *   custodian. A typed number may be a typo, and a typo is a stranger.
  *
  * Confirming does not save anything: the record's own save puts the
- * confirmed number on the child, and only for whoever confirmed it. */
+ * confirmed number on the child, and only for whoever confirmed it.
+ *
+ * The server keeps every number confirmed in the last hour, each on its own
+ * (children/custodian.py CustodianNumberConfirmation), so the form does too:
+ * `_confirmedNumbers` maps a number to when its confirmation runs out. Sending
+ * a code to another number does not undo the first, and a number is shown
+ * "Confirmed" only until that moment - a draft restored after the hour is not. */
 
 // The server's reading of a typed number (accounts/phone.py), used here only
 // to tell whether the number on screen is the one already confirmed.
@@ -37,9 +44,18 @@ export default function CustodianFields({ form, setForm, fieldError, readOnly = 
   const [error, setError] = useState('');
 
   const number = asE164(form.custodian_contact);
+  const until = number ? form._confirmedNumbers?.[number] : null;
   const confirmed = !!number && (
     (form.custodian_contact_verified && number === form._origContact)
-    || number === form._confirmedNumber);
+    || confirmationLive(until));
+  // The confirmation runs out while the form is open: draw it again then.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const ms = Date.parse(until || '') - Date.now();
+    if (!(ms > 0) || ms > 2 ** 31 - 1) return undefined;
+    const t = setTimeout(() => tick((n) => n + 1), ms + 50);
+    return () => clearTimeout(t);
+  }, [until]);
   const unchangedPerson = number === (form._origContact || '')
     && (form.custodian_name || '').trim() === (form._origCustodian || '').trim();
   const consentOnFile = form.custodian_sms_consent && form._origConsent && unchangedPerson;
@@ -73,7 +89,9 @@ export default function CustodianFields({ form, setForm, fieldError, readOnly = 
     setError(''); setBusy(true);
     try {
       const { data } = await api.put('/custodian-contact/code/', { number: sentTo, code });
-      setForm({ ...form, _confirmedNumber: data.number });
+      setForm((f) => ({
+        ...f, _confirmedNumbers: { ...f._confirmedNumbers, [data.number]: confirmedUntil(data.confirmed_until) },
+      }));
       setSentTo('');
       setNote(data.detail);
     } catch (err) {
@@ -84,8 +102,8 @@ export default function CustodianFields({ form, setForm, fieldError, readOnly = 
   };
 
   let status;
-  if (!form.custodian_contact) status = 'No contact number - the custodian gets no appointment texts.';
-  else if (!number) status = 'Enter a Philippine mobile number, starting 09.';
+  if (!form.custodian_contact) status = 'No mobile number - the custodian gets no appointment texts.';
+  else if (!number) status = mobileProblem(form.custodian_contact) || 'Enter a Philippine mobile number, starting 09.';
   else if (!form.custodian_sms_consent) status = 'Texts off until the custodian agrees to them.';
   else if (!confirmed) status = 'Texts off until the number is confirmed with a code.';
   else status = 'Appointment texts on: booked, a reminder the day before, moved, cancelled, missed.';
@@ -97,7 +115,7 @@ export default function CustodianFields({ form, setForm, fieldError, readOnly = 
         <FormField label="Custodian" hint="Recorded by the social worker or the ISA.">
           <Input value={form.custodian_name || '—'} disabled onChange={() => {}} />
         </FormField>
-        <FormField label="Contact Number" hint={form.custodian_texts?.status}>
+        <FormField label="Mobile Number (for texts)" hint={form.custodian_texts?.status}>
           <Input value={form.custodian_contact || '—'} disabled onChange={() => {}} />
         </FormField>
       </div>
@@ -113,7 +131,7 @@ export default function CustodianFields({ form, setForm, fieldError, readOnly = 
             placeholder="e.g. Rosa Dela Cruz (foster parent)"
             onChange={(e) => change({ custodian_name: e.target.value })} />
         </FormField>
-        <FormField label="Contact Number" error={fieldError('custodian_contact')}
+        <FormField label="Mobile Number (for texts)" error={fieldError('custodian_contact')}
           hint="The custodian's mobile, for appointment texts. Optional.">
           <Input value={form.custodian_contact || ''} maxLength={20} inputMode="tel"
             placeholder="0917 123 4567"

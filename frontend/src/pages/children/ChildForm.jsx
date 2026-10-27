@@ -6,8 +6,8 @@ import {
 import { PROCEED, useConfirm } from '../../context/ConfirmContext';
 import {
   ADMISSION, ALIAS_CATEGORY, BIRTH_STATUSES, CASE_CATEGORIES, CASE_CATEGORY_OPTIONS, CASE_TYPES, CASE_TYPE_FIELDS,
-  DYNAMIC, HEALTH_CONDITIONS, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, SPECIAL_NEEDS, TYPES_OF_ADOPTION, ageRange, ageRefusal, caseChanged, caseTypesFor,
-  dateFieldFor, requiredFields, unaskedAnswers,
+  DUPLICATE_REFUSAL, DYNAMIC, HEALTH_CONDITIONS, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, SPECIAL_NEEDS, TYPES_OF_ADOPTION, ageRange, caseChanged, caseTypesFor,
+  ageOn, ageProblem, dateFieldFor, mobileProblem, requiredFields, unaskedAnswers,
 } from '../../config/caseData';
 import { shortDate, timeAgo } from '../../utils/time';
 import CustodianFields from './CustodianFields';
@@ -49,7 +49,7 @@ const FIELD_INFO = {
   legal_status: [1, 'legal status'], legal_status_date: [1, 'date legal status issued'],
   health_condition: [1, 'health condition'], special_needs: [1, 'special needs'],
   current_placement: [1, 'current whereabouts'], alias: [1, 'alias'],
-  custodian_name: [2, 'custodian'], custodian_contact: [2, 'contact number'],
+  custodian_name: [2, 'custodian'], custodian_contact: [2, 'mobile number'],
   custodian_sms_consent: [2, 'consent to texts'],
   type_of_adoption: [1, 'type of adoption'],
   [ADMISSION]: [1, 'date of admission'], [PLACEMENT]: [1, 'date of placement'],
@@ -135,7 +135,9 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
         confirmLabel: 'Discard changes', cancelLabel: 'Keep editing', tone: 'warning',
       } : {
         title: 'Close without saving?',
-        description: `This record has not been added yet. What you typed stays as a draft on this device, and Add Record offers to restore it. ${PROCEED}`,
+        description: form._draft
+          ? `This record has not been added yet. What you typed is not kept: the earlier draft you were offered stays on this device, and Add Record offers it again. ${PROCEED}`
+          : `This record has not been added yet. What you typed stays as a draft on this device, and Add Record offers to restore it. ${PROCEED}`,
         confirmLabel: 'Close the form', cancelLabel: 'Keep editing', tone: 'warning',
       });
       if (!ok) return;
@@ -156,6 +158,10 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   // accidental modal close (or crash) never loses a half-typed intake record.
   const saveDraft = (current) => {
     if (current.id) return; // edits are server-backed; drafts are create-only
+    // While "Unsaved draft found" is unanswered the stored draft is the
+    // earlier one; typing a new record must not overwrite what the banner is
+    // still offering. Restore or Discard answers it and autosave resumes.
+    if (current._draft) return;
     const data = { ...current };
     delete data._draft; delete data._conflict;
     // A File does not survive JSON.stringify — it serialises to {}, which is
@@ -181,14 +187,34 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   // while typing so intake staff can reopen an archived record instead of
   // accidentally creating a second one.
   const [dupes, setDupes] = useState([]);
+  // Bumped when the server refuses a save as a second record, so the warning
+  // is fetched again even where the typing never produced it.
+  const [recheck, setRecheck] = useState(0);
   useEffect(() => {
-    if (form.id || !form.last_name?.trim() || !(form.first_name?.trim() || form.birth_date)) { setDupes([]); return; }
+    // The server needs both names; a last name alone is too broad.
+    if (form.id || !form.last_name?.trim() || !form.first_name?.trim()) { setDupes([]); return undefined; }
     const t = setTimeout(() => {
       const p = new URLSearchParams({ first_name: form.first_name || '', last_name: form.last_name, birth_date: form.birth_date || '' });
       api.get(`/children/check-duplicate/?${p}`).then((r) => setDupes(r.data.matches || [])).catch(() => setDupes([]));
-    }, 600);
+    }, recheck ? 0 : 600);
     return () => clearTimeout(t);
-  }, [form.first_name, form.last_name, form.birth_date, form.id]);
+  }, [form.first_name, form.last_name, form.birth_date, form.id, recheck]);
+  /* A match the server WILL refuse (same names and birth date, an active
+   * record): nothing typed after it can be saved, so Next and Save stop and
+   * the draft can be discarded. The closed-case Reopen path stays usable. */
+  const blockingDupe = !form.id && dupes.some((m) => m.blocks_new_record);
+  const discardDraft = async () => {
+    const ok = await confirm({
+      title: 'Discard this draft?',
+      description: `This record cannot be added because the child already has one, so nothing typed here can be saved. The draft is deleted from this device. ${PROCEED}`,
+      confirmLabel: 'Discard this draft', cancelLabel: 'Keep it', tone: 'warning',
+    });
+    if (!ok) return;
+    try { localStorage.removeItem(draftKey); } catch { /* private browsing */ }
+    // Closed without the close question or the draft flush: the point is that
+    // no draft is left to be offered.
+    onClose();
+  };
   // Cascading location pickers; clear children when a parent changes.
   /* Addresses come from the PSGC tables now, not a hand-kept list. Each level
    * is fetched when its parent is chosen, so the browser never holds more than
@@ -267,17 +293,15 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   // with the same age arithmetic from local dates (not toISOString, which in
   // Manila is the day before).
   const today = new Date();
-  const ageOn = (born) => today.getFullYear() - born.getFullYear()
-    - ((today.getMonth() < born.getMonth()
-      || (today.getMonth() === born.getMonth() && today.getDate() < born.getDate())) ? 1 : 0);
+  const ageOnToday = (born) => ageOn(born, today);
   const [youngestAge, oldestAge] = ageRange(form.case_type, form.type_of_adoption);
   // Stepped rather than computed so 29 February lands where the server's rule
   // puts it; neither loop runs more than twice.
   const earliestBirth = oldestAge == null ? null
     : new Date(today.getFullYear() - oldestAge - 1, today.getMonth(), today.getDate());
-  while (earliestBirth && ageOn(earliestBirth) > oldestAge) earliestBirth.setDate(earliestBirth.getDate() + 1);
+  while (earliestBirth && ageOnToday(earliestBirth) > oldestAge) earliestBirth.setDate(earliestBirth.getDate() + 1);
   const latestBirth = new Date(today.getFullYear() - youngestAge, today.getMonth(), today.getDate());
-  while (ageOn(latestBirth) < youngestAge) latestBirth.setDate(latestBirth.getDate() - 1);
+  while (ageOnToday(latestBirth) < youngestAge) latestBirth.setDate(latestBirth.getDate() - 1);
   const minBirthDate = earliestBirth ? localIsoDay(earliestBirth) : undefined;
   const maxBirthDate = localIsoDay(latestBirth);
   /* The profile asks different questions per track — a Type of Adoption on a
@@ -352,15 +376,15 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   const sent = { ...form, ...unaskedAnswers(form, original) };
   const wholeDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v || '') && Number(String(v).slice(0, 4)) >= 1900;
   const problems = {};
-  // Judged again when the case type or the type of adoption changes: that
-  // changes the rule (the server does the same).
-  if (wholeDate(form.birth_date) && (changed('birth_date') || changed('case_type') || changed('type_of_adoption'))) {
-    const [y, m, d] = form.birth_date.split('-').map(Number);
-    const age = ageOn(new Date(y, m - 1, d));
-    if (age < youngestAge || (oldestAge != null && age > oldestAge)) {
-      problems.birth_date = ageRefusal(form.case_type, form.type_of_adoption);
-    }
-  }
+  // Judged on what the save will send, as the server judges it: a type of
+  // adoption picked and then left hidden changes nothing (caseData.js ageProblem).
+  const ageIssue = ageProblem(sent, original, today);
+  if (ageIssue) problems.birth_date = ageIssue;
+  // The custodian's number, as the server reads it (accounts/phone.py): a
+  // mobile only. Judged on what is sent, so a number the case no longer asks
+  // for, or an older record's stored one, is never what holds the save.
+  const mobileIssue = mobileProblem(sent.custodian_contact);
+  if (mobileIssue) problems.custodian_contact = mobileIssue;
   if (form.legal_status && wholeDate(form.legal_status_date)
     && (changed('legal_status_date') || (isEdit && changed('birth_date')))) {
     if (form.legal_status_date > todayIso) problems.legal_status_date = 'The date issued cannot be in the future.';
@@ -412,6 +436,12 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   useEffect(() => {
     const first = Object.keys(fieldErrors || {}).find((k) => FIELD_INFO[k] && displays(k));
     if (first) setStep(FIELD_INFO[first][0]);
+    // Refused as a second record: the warning it points to is on the first
+    // step, and is fetched again in case the typing never produced it.
+    else if (!isEdit && DUPLICATE_REFUSAL.test(String(fieldErrors?.detail || ''))) {
+      setStep(1);
+      setRecheck((n) => n + 1);
+    }
     // Once per refusal, not on every keystroke after it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fieldErrors]);
@@ -421,7 +451,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   const firstBlockerStep = blockers.length ? FIELD_INFO[blockers[0]]?.[0] : null;
   return (
     <div onClick={requestClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 70, animation: 'racco-fade-in var(--dur-base) var(--ease-out)' }}>
-      <form onSubmit={onSubmit} onClick={(e) => e.stopPropagation()}
+      <form onSubmit={(e) => { if (blockingDupe) { e.preventDefault(); return; } onSubmit(e); }} onClick={(e) => e.stopPropagation()}
         style={{ width: 'min(980px, 96vw)', height: 'min(86vh, 820px)', background: 'var(--surface)', borderRadius: 'var(--radius-xl)', boxShadow: 'var(--shadow-xl)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--ink-50)' }}>
           <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>{isEdit ? 'Edit Record' : 'Add Record'}</div>
@@ -447,6 +477,56 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   setForm({ ...EMPTY, ...draft, middle_name: draft.middle_name || mi || '', intake_token: draft.intake_token || newIntakeToken(), _draft: null });
                 }} iconLeft={<Icon name="rotate-ccw" size={14} />}>Restore draft</Button>
                 <Button variant="ghost" size="sm" onClick={() => { try { localStorage.removeItem(draftKey); } catch { /* private browsing */ } setForm((f) => ({ ...f, _draft: null })); }}>Discard</Button>
+              </div>
+            </Alert>
+          )}
+          {/* On every step: the warning is the reason Next and Save are held. */}
+          {!isEdit && dupes.length > 0 && (
+            <Alert tone="warning" icon={<Icon name="alert-triangle" size={18} />} title={blockingDupe ? 'This record cannot be added' : 'A similar record already exists'}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
+                {blockingDupe && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 13 }}>
+                    <span>The child already has an active record, so Next and Save are held. Nothing typed here can be saved.</span>
+                    <Button variant="secondary" onClick={discardDraft} iconLeft={<Icon name="trash-2" size={14} />}>Discard this draft</Button>
+                  </div>
+                )}
+                {dupes.map((m, i) => (m.yours === false ? (m.reopenable && canReopen ? (
+                  /* Another worker's CLOSED case: reopen it here and it
+                     becomes yours (owner, 30 Sep 2026). Still nothing
+                     from the record but the name you typed and who held it. */
+                  <div key={`held-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 13 }}>
+                    <strong>{m.fullname}</strong>
+                    <Badge tone="neutral" size="sm" dot>Archived (Terminated)</Badge>
+                    <span style={{ color: 'var(--text-muted)' }}>
+                      held by {m.held_by || 'no social worker'}
+                    </span>
+                    <Button variant="secondary" onClick={() => onReopen(m)} iconLeft={<Icon name="rotate-ccw" size={14} />}>
+                      Reopen it — it becomes yours
+                    </Button>
+                  </div>
+                ) : (
+                  /* Another social worker's ACTIVE record: that it exists
+                     and who holds it, nothing from the record (owner's
+                     decision, 24 Sep 2026 - children/views.py check_duplicate). */
+                  <div key={`held-${i}`} style={{ fontSize: 13 }}>
+                    A record for this child is already held by{' '}
+                    <strong>{m.held_by || 'no social worker yet'}</strong>.
+                    Ask the ISA (Administrator) to transfer it to you instead of adding a second record.
+                  </div>
+                )) : (
+                  <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    <strong style={{ fontSize: 13 }}>{m.fullname}</strong>
+                    <Badge tone={m.status === 'inactive' ? 'neutral' : 'success'} size="sm" dot>
+                      {m.status === 'inactive' ? 'Archived (Terminated)' : 'Active'}
+                    </Badge>
+                    {m.birth_date && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>b. {m.birth_date}</span>}
+                    {m.status === 'inactive'
+                      ? (canReopen
+                          ? <Button variant="secondary" onClick={() => onReopen(m)} iconLeft={<Icon name="rotate-ccw" size={14} />}>Reopen this record instead</Button>
+                          : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Ask staff or an administrator to reopen this archived record instead of creating a new one.</span>)
+                      : <Button variant="secondary" onClick={() => onOpenExisting(m)} iconLeft={<Icon name="eye" size={14} />}>Open existing record</Button>}
+                  </div>
+                )))}
               </div>
             </Alert>
           )}
@@ -561,49 +641,6 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                 <FormField label="Alias" hint="Optional — if the child is known by another name." error={fieldError('alias')}>
                   <Input value={form.alias || ''} maxLength={150} onChange={(e) => setForm({ ...form, alias: e.target.value })} />
                 </FormField>
-              )}
-              {!isEdit && dupes.length > 0 && (
-                <Alert tone="warning" icon={<Icon name="alert-triangle" size={18} />} title="A similar record already exists" style={{ gridColumn: '1 / -1' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 6 }}>
-                    {dupes.map((m, i) => (m.yours === false ? (m.reopenable && canReopen ? (
-                      /* Another worker's CLOSED case: reopen it here and it
-                         becomes yours (owner, 30 Sep 2026). Still nothing
-                         from the record but the name you typed and who held it. */
-                      <div key={`held-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', fontSize: 13 }}>
-                        <strong>{m.fullname}</strong>
-                        <Badge tone="neutral" size="sm" dot>Archived (Terminated)</Badge>
-                        <span style={{ color: 'var(--text-muted)' }}>
-                          held by {m.held_by || 'no social worker'}
-                        </span>
-                        <Button variant="secondary" onClick={() => onReopen(m)} iconLeft={<Icon name="rotate-ccw" size={14} />}>
-                          Reopen it — it becomes yours
-                        </Button>
-                      </div>
-                    ) : (
-                      /* Another social worker's ACTIVE record: that it exists
-                         and who holds it, nothing from the record (owner's
-                         decision, 24 Sep 2026 - children/views.py check_duplicate). */
-                      <div key={`held-${i}`} style={{ fontSize: 13 }}>
-                        A record for this child is already held by{' '}
-                        <strong>{m.held_by || 'no social worker yet'}</strong>.
-                        Ask the ISA (Administrator) to transfer it to you instead of adding a second record.
-                      </div>
-                    )) : (
-                      <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                        <strong style={{ fontSize: 13 }}>{m.fullname}</strong>
-                        <Badge tone={m.status === 'inactive' ? 'neutral' : 'success'} size="sm" dot>
-                          {m.status === 'inactive' ? 'Archived (Terminated)' : 'Active'}
-                        </Badge>
-                        {m.birth_date && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>b. {m.birth_date}</span>}
-                        {m.status === 'inactive'
-                          ? (canReopen
-                              ? <Button variant="secondary" onClick={() => onReopen(m)} iconLeft={<Icon name="rotate-ccw" size={14} />}>Reopen this record instead</Button>
-                              : <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>Ask staff or an administrator to reopen this archived record instead of creating a new one.</span>)
-                          : <Button variant="secondary" onClick={() => onOpenExisting(m)} iconLeft={<Icon name="eye" size={14} />}>Open existing record</Button>}
-                      </div>
-                    )))}
-                  </div>
-                </Alert>
               )}
               <FormField label="Date of Birth or Given Date of Birth" required error={fieldError('birth_date')}
                 hint={!isEdit
@@ -976,10 +1013,10 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             <Button type="button" variant="ghost" onClick={() => setStep((n) => n - 1)} iconLeft={<Icon name="arrow-left" size={15} />}>Back</Button>
           )}
           {step < FORM_STEPS.length && (
-            <Button type="button" variant={isEdit ? 'secondary' : 'primary'} onClick={() => setStep((n) => n + 1)}>Next</Button>
+            <Button type="button" variant={isEdit ? 'secondary' : 'primary'} disabled={blockingDupe} onClick={() => setStep((n) => n + 1)}>Next</Button>
           )}
           {(isEdit || step === FORM_STEPS.length) && (
-            <Button type="submit" variant="primary" disabled={blockers.length > 0 || saving} aria-busy={saving || undefined} iconLeft={<Icon name="save" size={16} />}>{saving ? 'Saving…' : 'Save Record'}</Button>
+            <Button type="submit" variant="primary" disabled={blockers.length > 0 || saving || blockingDupe} aria-busy={saving || undefined} iconLeft={<Icon name="save" size={16} />}>{saving ? 'Saving…' : 'Save Record'}</Button>
           )}
         </div>
       </form>

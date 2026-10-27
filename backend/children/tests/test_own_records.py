@@ -134,7 +134,8 @@ class OwnRecordsTest(TestCase):
     def test_a_duplicate_held_by_another_worker_says_who_and_nothing_else(self):
         r = self._as(self.editha).get("/api/children/check-duplicate/",
                                       {"first_name": "Ben", "last_name": "Lim"})
-        self.assertEqual([{"yours": False, "held_by": "Rosa Santos"}], r.data["matches"])
+        self.assertEqual([{"yours": False, "held_by": "Rosa Santos", "blocks_new_record": False}],
+                         r.data["matches"])
         self.assertNotIn(str(self.ben.id), str(r.data))
         self.assertNotIn(str(self.ben.birth_date), str(r.data))
 
