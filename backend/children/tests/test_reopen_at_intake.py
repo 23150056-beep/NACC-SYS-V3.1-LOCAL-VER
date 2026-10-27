@@ -15,10 +15,14 @@ pointer to a warning that never appeared.
 """
 from datetime import timedelta
 
+from unittest.mock import patch
+
 from django.contrib.auth import get_user_model
+from django.core.cache import cache
 from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
+from rest_framework.throttling import SimpleRateThrottle
 
 from accounts.models import Role
 from activity.models import ActivityLog
@@ -95,6 +99,34 @@ class ReopenAtIntakeTest(TestCase):
         r = self._as(self.admin).get("/api/children/check-duplicate/",
                                      {**typed, "birth_date": str(self.born)})
         self.assertTrue(r.data["matches"][0]["blocks_new_record"])
+
+    def test_a_common_name_cannot_push_out_the_record_the_save_refuses(self):
+        # Six active records share the name and are newer than the closed one
+        # that matches the typed birth date. Cut by date alone, the closed one
+        # fell off the five rows and the save's "reopen it from the warning"
+        # pointed at a warning that never showed it.
+        for _ in range(6):
+            Child.objects.create(
+                first_name="Ben", last_name="Lim", social_worker=self.rosa,
+                birth_date=self.born - timedelta(days=400), status=Child.ACTIVE)
+        r = self._as(self.editha).get("/api/children/check-duplicate/",
+                                      {"first_name": "Ben", "last_name": "Lim",
+                                       "birth_date": str(self.born)})
+        self.assertEqual(5, len(r.data["matches"]))
+        self.assertEqual([self.ben.id], [m["id"] for m in r.data["matches"] if m.get("reopenable")])
+
+    def test_the_check_is_throttled_so_birth_dates_cannot_be_stepped_through(self):
+        cache.clear()
+        self.addCleanup(cache.clear)
+        rates = {**SimpleRateThrottle.THROTTLE_RATES, "duplicate_check": "3/hour"}
+        typed = {"first_name": "Ben", "last_name": "Lim", "birth_date": str(self.born)}
+        with patch.object(SimpleRateThrottle, "THROTTLE_RATES", rates):
+            codes = [self._as(self.editha).get("/api/children/check-duplicate/", typed).status_code
+                     for _ in range(4)]
+            # Per account: a colleague is not held up by it.
+            other = self._as(self.rosa).get("/api/children/check-duplicate/", typed).status_code
+        self.assertEqual([200, 200, 200, 429], codes)
+        self.assertEqual(200, other)
 
     # --- Reopening it -------------------------------------------------------------
 

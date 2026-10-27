@@ -78,6 +78,15 @@ export function shortDate(iso) {
   return d.toLocaleDateString(undefined, DATE);
 }
 
+/** "Mar 2, 2024" - a day in words, the same in every browser, for a
+ *  confirmation that lists what a save will take away. */
+export function dayInWords(iso) {
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+  if (!day) return iso ? String(iso) : '';
+  return new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]))
+    .toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
 /** True once a date with no time ("2027-03-14") is behind us. The day itself
  *  still counts: a license valid until the 14th is valid on the 14th. */
 export function dayHasPassed(iso) {

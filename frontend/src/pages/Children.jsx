@@ -10,7 +10,7 @@ import {
 import { useToast } from '../context/ToastContext';
 import { useConfirm, useNotice } from '../context/ConfirmContext';
 import { useLayout } from '../context/LayoutContext';
-import { ALL_CLOSURE_REASONS, unaskedAnswers } from '../config/caseData';
+import { ALL_CLOSURE_REASONS, CASE_TYPE_FIELDS, caseChanged, unaskedAnswers, unaskedBlanked } from '../config/caseData';
 import { loadAll } from '../utils/load';
 import { firstError } from '../utils/errors';
 import ChildForm from './children/ChildForm';
@@ -20,7 +20,7 @@ import CaseloadCard from './children/CaseloadCard';
 import RemoveDuplicateDialog from './children/RemoveDuplicateDialog';
 import { fmtDay, fmtTime, localDate } from './children/shared';
 import { ageFrom, ageGroup, caseRef } from '../utils/child';
-import { shortDate } from '../utils/time';
+import { dayInWords, shortDate } from '../utils/time';
 import AssignmentRequests from '../components/AssignmentRequests';
 
 // Live "who else has this record open" chip — polls the presence heartbeat endpoint.
@@ -52,6 +52,36 @@ const PA_DOT = {
   Answered: 'var(--blue-500)',
   Completed: 'var(--success-500)',
 };
+
+/* What an edit that changes the case type (or the type of adoption) will take
+ * off the record, read back before it is saved: the form hides those answers
+ * and the save sends them blank (caseData.js unaskedAnswers). Null when the
+ * case is not changing, so an ordinary edit is asked as it always was. The
+ * labels are the form's own, and a number is never printed - only that one is
+ * recorded. */
+function caseChangeSummary(form) {
+  const rec = form.id ? form._record : null;
+  if (!rec || !caseChanged(form, rec)) return null;
+  const blanked = unaskedBlanked(form.case_type, form.type_of_adoption);
+  const removed = [];
+  if ('custodian_name' in blanked) {
+    if (rec.custodian_name) removed.push(`Custodian: ${rec.custodian_name}`);
+    if (rec.custodian_contact || rec.custodian_sms_consent) removed.push('Mobile number and texting consent');
+  }
+  if ('type_of_adoption' in blanked && rec.type_of_adoption) removed.push(`Type of adoption: ${rec.type_of_adoption}`);
+  if ('date_of_admission' in blanked && rec.date_of_admission) removed.push(`Date of admission: ${dayInWords(rec.date_of_admission)}`);
+  if ('date_of_placement_to_custodian' in blanked && rec.date_of_placement_to_custodian) {
+    removed.push(`Date of placement: ${dayInWords(rec.date_of_placement_to_custodian)}`);
+  }
+  const asksAdoption = [rec.case_type, form.case_type].some((t) => (CASE_TYPE_FIELDS[t] || []).includes('type_of_adoption'));
+  return {
+    removed,
+    caseLine: `${rec.case_type || 'No case type'} → ${form.case_type || 'No case type'}`,
+    adoptionLine: asksAdoption && (rec.type_of_adoption || '') !== (form.type_of_adoption || '')
+      ? `${rec.type_of_adoption || 'None'} → ${form.type_of_adoption || 'None'}` : null,
+    whereabouts: form.current_placement || rec.current_placement || '',
+  };
+}
 
 function csvCell(v) {
   const s = v == null ? '' : String(v);
@@ -389,6 +419,55 @@ export default function Children() {
     }
   };
 
+  /* The referral goes up against the id the child has just been given.
+   * Separately on purpose: a CaseReferral belongs to a child, so there is no id
+   * to attach it to until the record exists. Returns whether it is on file.
+   * `skipIfFiled` is for a retry that may follow an attempt which got that far:
+   * a second copy of the file is worse than none. */
+  const uploadReferral = async (childId, file, { skipIfFiled = false } = {}) => {
+    if (skipIfFiled) {
+      try {
+        const have = await api.get(`/case-referrals/?child=${childId}`);
+        if (Array.isArray(have.data) && have.data.length > 0) return true;
+      } catch { /* cannot tell - fall through and upload */ }
+    }
+    const fd = new FormData();
+    fd.append('child', childId);
+    fd.append('file', file);
+    fd.append('description', 'Case referral');
+    try {
+      await api.post('/case-referrals/', fd);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  /* The one end dialog of Add Record and the edit that follows it. Always the
+   * child and the case number; the referral when this save is the one that
+   * could have filed it; and, when no referral is on file, the two ways on -
+   * a failed upload must be loud, because the child IS saved and a quiet
+   * failure leaves a record nobody can book against and no idea why. */
+  const endDialog = ({ title, description, child, details = [], referral }) => {
+    const filed = referral === 'on_file';
+    const missing = referral === 'failed' || referral === 'none';
+    return notice({
+      title: referral === 'failed' ? 'Saved, but the case referral did not upload' : title,
+      ...(referral === 'failed' && { tone: 'warning', icon: 'alert-triangle' }),
+      description: missing
+        ? `${description} Sessions cannot be booked until a case referral is on file.` : description,
+      details: [
+        ['Child', `${child.name} (${caseRef(child.id)})`],
+        ...details,
+        ['Case referral', filed ? 'On file' : referral === 'failed' ? 'Not on file - the upload failed' : referral === 'none' ? 'Not on file - sessions cannot be booked' : null],
+      ],
+      actions: [
+        { label: 'Open record', icon: 'eye', onClick: () => navigate(`/report/child/${child.id}`) },
+        ...(missing ? [{ label: 'Upload referral', icon: 'upload', onClick: () => navigate(`/reports?upload=1&child=${child.id}`) }] : []),
+      ],
+    });
+  };
+
   const saveRecord = async () => {
     const name = form.id ? form.fullname
       : [form.first_name, form.middle_name, form.last_name].filter(Boolean).join(' ');
@@ -412,17 +491,28 @@ export default function Children() {
     const askLine = asking
       ? ` ${assignee} is asked to take the case, and ${name} joins their records once they accept.`
       : withdrawing ? ` The request to ${wasAsked} is withdrawn, and ${name} stays with ${holderName}.` : '';
+    const changing_case = caseChangeSummary(form);
     const ok = await confirm({
       description: form.id
-        ? `This saves your changes to ${name}'s record.${askLine}`
+        ? `This saves your changes to ${name}'s record.${askLine}${changing_case ? ' It also changes what the case asks, so some recorded answers are removed (below).' : ''}`
         : `This adds ${name} to Records. The child's name cannot be changed once the record is saved, so check the spelling.${askLine}`,
       confirmLabel: form.id ? 'Yes, save changes' : 'Yes, add the record',
       details: form.id
-        ? [['Asks to take the case', asking ? assignee : null], ['Withdraws the request to', withdrawing ? wasAsked : null],
+        ? [['Case type', changing_case?.caseLine], ['Type of adoption', changing_case?.adoptionLine],
+           ['Asks to take the case', asking ? assignee : null], ['Withdraws the request to', withdrawing ? wasAsked : null],
            ['Stays with', withdrawing ? holderName : null], ['Psychologist', clearing ? 'Unassigned' : null]]
         : [['Category', form.case_category], ['Case type', form.case_type],
            ['Date of birth or given date of birth', form.birth_date], ['Psychologist', asking ? `${assignee} (asked to accept)` : 'Unassigned'],
            ['Case referral', form.referralFile?.name]],
+      // In the warning style, one line per recorded value that goes. They are
+      // hidden, not erased, by the form (a detour changes nothing), but a SAVE
+      // sends them blank - and until this was listed, one slip of the Case Type
+      // dropdown removed a custodian under "This saves your changes".
+      warning: changing_case ? {
+        title: changing_case.removed.length ? 'Saving removes these from the record' : 'Nothing recorded is removed',
+        items: changing_case.removed,
+        note: `Check Current Whereabouts${changing_case.whereabouts ? ` (now “${changing_case.whereabouts}”)` : ''} still fits the new case type - it is not changed for you.`,
+      } : undefined,
     });
     if (!ok) return;
     setSaving(true);
@@ -479,61 +569,66 @@ export default function Children() {
          quiet failure leaves somebody with a record they cannot book against
          and no idea why — which is exactly the dead end this field was added
          to remove. */
-      let referralFailed = false;
-      if (referralFile && saved?.id) {
-        const fd = new FormData();
-        fd.append('child', saved.id);
-        fd.append('file', referralFile);
-        fd.append('description', 'Case referral');
-        try {
-          await api.post('/case-referrals/', fd);
-        } catch {
-          referralFailed = true;
-        }
-      }
+      let referral; // 'on_file' | 'failed' | 'none'; undefined when an edit has nothing to say
+      if (referralFile && saved?.id) referral = (await uploadReferral(saved.id, referralFile)) ? 'on_file' : 'failed';
+      else if (!form.id) referral = 'none';
 
-      if (referralFailed) {
-        toast.error('Record saved, but the case referral did not upload. '
-          + 'Open the record and try again — sessions cannot be booked without it.');
-      } else if (!asking && !clearing && !withdrawing) {
-        toast.success(form.id ? 'Record updated' : 'Record added');
-      }
       const was = form;
       setForm(null);
       load();
       refreshActivity();
-      // The end dialog. "Joins their records once they accept" is the
+      // The end dialog, one for every outcome (owner: "add end dialogue
+      // always" - a toast was gone before anyone read the case number or that
+      // no referral is on file). "Joins their records once they accept" is the
       // sentence that explains why the row does not show them yet.
+      const child = { id: saved?.id ?? was.id, name: saved?.fullname || name };
       if (asking) {
-        await notice({
-          title: 'Request sent',
+        await endDialog({
+          title: 'Request sent', child, referral,
           description: `${assignee} is asked to take ${name}'s case. ${name} joins their records once they `
             + 'accept. Their answer comes to your notifications and shows on this record.',
-          details: [['Record', was.id ? 'Changes saved' : 'Added to Records'], ['Asked', assignee],
-            ['Currently with', was.id ? (was.psychologist_name || 'Nobody yet') : null],
-            ['Case referral', referralFile ? (referralFailed ? 'Did not upload — add it from the record' : 'On file') : null]],
+          details: [['Record', was.id ? 'Changes saved' : 'Added to Records'], ['Psychologist', `Asked: ${assignee}`],
+            ['Currently with', was.id ? (was.psychologist_name || 'Nobody yet') : null]],
         });
       } else if (withdrawing) {
-        await notice({
-          title: 'Request withdrawn',
+        await endDialog({
+          title: 'Request withdrawn', child, referral,
           description: `${wasAsked} is no longer asked to take ${name}'s case. ${name} stays with ${holderName}.`,
           details: [['Record', 'Changes saved'], ['Withdrawn', wasAsked], ['Stays with', holderName]],
         });
       } else if (clearing) {
-        await notice({
-          title: 'Assignment cleared',
+        await endDialog({
+          title: 'Assignment cleared', child, referral,
           description: [
             was.pending_assignment ? `The request to ${was.pending_assignment.psychologist_name} is withdrawn.` : '',
             was._origPsychologist ? `${was.psychologist_name || 'The psychologist'} no longer holds ${name}'s case.` : '',
             'Pick a psychologist whenever you are ready.',
           ].filter(Boolean).join(' '),
+          details: [['Record', 'Changes saved'], ['Psychologist', 'Unassigned']],
+        });
+      } else if (was.id) {
+        await endDialog({
+          title: 'Record updated', child, referral,
+          description: `Your changes to ${name}'s record are saved.`,
+          details: [['Psychologist', was.pending_assignment?.psychologist_name
+            ? `Asked: ${was.pending_assignment.psychologist_name} (no answer yet), unchanged by this edit`
+            : was.psychologist_name ? `Assigned: ${was.psychologist_name}, unchanged by this edit`
+              : 'Not asked yet, unchanged by this edit']],
+        });
+      } else {
+        await endDialog({
+          title: 'Record added', child, referral,
+          description: `${name} is added to Records. No psychologist has been asked yet - pick one from the record when you are ready.`,
+          details: [['Psychologist', 'Not asked yet']],
         });
       }
     } catch (err) {
       /* A new record the server already holds - this very submission, by its
          token. The first attempt got through (a response that never arrived,
-         then a retry), so there is nothing to add and nothing to upload: the
-         referral went, or failed, with that attempt. */
+         then a retry), so there is nothing to add. Its REFERRAL is another
+         matter: the file chosen is still here, and the first attempt may have
+         died before sending it. So it is put on the record now unless one is
+         already there, and the end dialog says which it is. */
       if (err.response?.status === 409 && !form.id) {
         const body = err.response.data || {};
         if (body.id) {
@@ -541,9 +636,22 @@ export default function Children() {
           setForm(null);
           load();
           refreshActivity();
-          toast.success(referralFile
-            ? 'Already saved. Open the record and check its case referral is on file.'
-            : 'Already saved');
+          let referral;
+          if (referralFile) referral = (await uploadReferral(body.id, referralFile, { skipIfFiled: true })) ? 'on_file' : 'failed';
+          // Who was asked is whatever the first attempt left on the server.
+          let psych = 'Could not be read - open the record';
+          try {
+            const have = (await api.get(`/children/${body.id}/`)).data;
+            psych = have.pending_assignment?.psychologist_name ? `Asked: ${have.pending_assignment.psychologist_name}`
+              : have.psychologist_name ? `Assigned: ${have.psychologist_name}` : 'Not asked yet';
+          } catch { /* the dialog still says the rest */ }
+          await endDialog({
+            title: 'Already saved', child: { id: body.id, name },
+            details: [['Psychologist', psych]],
+            description: `${name} was saved by your first attempt, so nothing is added twice.`
+              + (referralFile ? '' : ' Open the record to check its case referral is on file.'),
+            referral,
+          });
           return;
         }
         const said = body.detail || 'This record was already saved.';
@@ -658,20 +766,44 @@ export default function Children() {
     try {
       // A case taken over at intake is found again by the name typed there;
       // the server will not hand over another worker's case by id alone.
+      // What the dialog may claim about the typing is what happened to it.
+      // Flushed BEFORE the request, so the last half second of keystrokes is
+      // in it. While "Unsaved draft found" is unanswered the stored draft is
+      // the older one, which the form's autosave also leaves alone, so it is
+      // not overwritten here and the dialog says so.
+      let typed = 'none'; // 'kept' | 'earlier' | 'none'
+      if (c.fromForm && form && !form.id) {
+        const data = { ...form };
+        delete data._draft; delete data._conflict; delete data.referralFile;
+        const meaningful = Object.entries(data).some(([k, v]) => !NOT_AN_ANSWER.includes(k) && v);
+        if (form._draft) typed = 'earlier';
+        else if (meaningful) {
+          try { localStorage.setItem(draftKey, JSON.stringify(data)); typed = 'kept'; } catch { /* storage full */ }
+        }
+      }
       await api.post(`/children/${c.id}/reopen/`, c.typed || {});
-      toast.success(c.takeover
-        ? `${c.fullname}'s case is active again and now in your records — previous records retained`
-        : `${c.fullname}'s case is active again — previous records retained`);
       setReopening(null);
       setSel(null);
       // Reopened from the Add Record duplicate warning: the old record is the
-      // one being kept, so the half-typed new one and its draft go.
-      if (c.fromForm) {
-        setForm(null);
-        try { localStorage.removeItem(draftKey); } catch { /* private browsing */ }
-      }
+      // one being kept and the form closes, but the typed draft is KEPT - the
+      // match could be a different child, and a reopen is not a reason to throw
+      // away half an intake. Add Record offers it back; Discard drops it.
+      if (c.fromForm) setForm(null);
       load();
       refreshActivity();
+      await notice({
+        title: 'Case reopened',
+        icon: 'rotate-ccw',
+        description: (c.takeover
+          ? `${c.fullname}'s case is active again and now in your records. `
+          : `${c.fullname}'s case is active again. `)
+          + 'Previous records are retained, and the psychologist assignment is cleared - assign one fresh from the record.'
+          + (typed === 'kept' ? ' What you typed in Add Record is kept as a draft on this device.'
+            : typed === 'earlier' ? ' What you typed since is not kept: the earlier draft you were offered stays on this device.' : ''),
+        details: [['Child', `${c.fullname} (${caseRef(c.id)})`], ['Now held by', c.takeover ? 'You' : null],
+          ['Psychologist', 'Not asked yet'], ['Typed draft', typed === 'kept' ? 'Kept' : typed === 'earlier' ? 'Earlier draft kept; this typing was not' : null]],
+        actions: [{ label: 'Open record', icon: 'eye', onClick: () => navigate(`/report/child/${c.id}`) }],
+      });
     } catch (err) {
       toast.error(err.response?.data?.detail || 'Could not reopen the case.');
     } finally { setReopenBusy(false); }

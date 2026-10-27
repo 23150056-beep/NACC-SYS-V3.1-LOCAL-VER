@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../../api/client';
 import { Badge, Button, FormField, Icon, Input } from '../../ui';
-import { confirmationLive, confirmedUntil, mobileProblem } from '../../config/caseData';
+import { confirmationLive, confirmedUntil } from '../../config/caseData';
 import { firstError } from '../../utils/errors';
 import { shortDate } from '../../utils/time';
 import { consentKey } from './recordForm';
@@ -103,7 +103,7 @@ export default function CustodianFields({ form, setForm, fieldError, readOnly = 
 
   let status;
   if (!form.custodian_contact) status = 'No mobile number - the custodian gets no appointment texts.';
-  else if (!number) status = mobileProblem(form.custodian_contact) || 'Enter a Philippine mobile number, starting 09.';
+  else if (!number) status = 'Texts off until the number is complete.';
   else if (!form.custodian_sms_consent) status = 'Texts off until the custodian agrees to them.';
   else if (!confirmed) status = 'Texts off until the number is confirmed with a code.';
   else status = 'Appointment texts on: booked, a reminder the day before, moved, cancelled, missed.';

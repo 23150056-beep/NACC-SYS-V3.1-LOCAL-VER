@@ -297,6 +297,10 @@ REST_FRAMEWORK = {
         # (children/views.py `exported`). Twenty files an hour is far more than
         # anyone makes by hand; it is the ceiling on a script.
         "exports": None if _TESTING else os.getenv("EXPORT_LOG_RATE", "20/hour"),
+        # Intake's "does this child already have a record" check, per account.
+        # A debounced form makes a handful of calls per record; the ceiling is
+        # for a script stepping through birth dates (children/views.py).
+        "duplicate_check": None if _TESTING else os.getenv("DUPLICATE_CHECK_RATE", "300/hour"),
     },
 }
 

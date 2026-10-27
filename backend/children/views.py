@@ -2,7 +2,7 @@
 from datetime import date
 from django.core.cache import cache
 from django.db import IntegrityError
-from django.db.models import Prefetch, Q
+from django.db.models import Prefetch
 from django.http import Http404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -452,7 +452,13 @@ class ChildViewSet(viewsets.ModelViewSet):
             entity_label=f"Exported {what} (CSV, {rows} {'row' if rows == 1 else 'rows'})")
         return Response(status=status.HTTP_201_CREATED)
 
-    @action(detail=False, methods=["get"], url_path="check-duplicate")
+    # Throttled per account because a row says whether the typed birth date
+    # matches (`blocks_new_record`, `reopenable`): called with no ceiling, a
+    # social worker who knows a name could step through birth dates and learn
+    # another worker's child's. Normal typing is debounced and stays far
+    # under it. The rate is `duplicate_check` in settings.
+    @action(detail=False, methods=["get"], url_path="check-duplicate",
+            throttle_scope="duplicate_check")
     def check_duplicate(self, request):
         """Intake helper: does a record (active OR archived) already exist for
         this child? Staff/Admin only — powers the 'reopen instead of
@@ -477,15 +483,6 @@ class ChildViewSet(viewsets.ModelViewSet):
         ids = duplicates.ids_with_name(first, last)
         if not ids:
             return Response({"matches": []})
-        q = Q(pk__in=ids)
-        # select_related: every row below renders the psychologist's name, and
-        # without the join that is an extra query per match - on an endpoint the
-        # intake form calls while somebody is still typing a name.
-        matches = (Child.objects.filter(q)
-                   .select_related("assigned_psychologist", "social_worker")
-                   .order_by("-updated_at")[:5])
-        mine = set(scope_to_visible(Child.objects.filter(pk__in=[c.pk for c in matches]),
-                                    request, path=None).values_list("pk", flat=True))
         # The records the save would refuse a second one for: same names AND
         # the birth date typed, and still active. Said on every row so the form
         # can stop the intake at once; it tells the typer nothing they did not
@@ -493,6 +490,20 @@ class ChildViewSet(viewsets.ModelViewSet):
         born = _typed_birth(birth)
         same = ({c.pk for c in duplicates.same_child(first, last, born)}
                 if born is not None else set())
+        # select_related: every row below renders the psychologist's name, and
+        # without the join that is an extra query per match - on an endpoint the
+        # intake form calls while somebody is still typing a name.
+        found = list(Child.objects.filter(pk__in=ids)
+                     .select_related("assigned_psychologist", "social_worker")
+                     .order_by("-updated_at"))
+        # The records the save would refuse come first, then the newest: with
+        # a common name more than five records share it, and cutting by date
+        # alone could leave out the very one the save refuses - a warning that
+        # never appears for a refusal that always does. sorted() is stable, so
+        # the order inside each group stays newest first.
+        matches = sorted(found, key=lambda c: c.pk not in same)[:5]
+        mine = set(scope_to_visible(Child.objects.filter(pk__in=[c.pk for c in matches]),
+                                    request, path=None).values_list("pk", flat=True))
 
         def row(c):
             blocks = c.pk in same and c.status == Child.ACTIVE

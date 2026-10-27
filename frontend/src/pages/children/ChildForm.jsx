@@ -190,6 +190,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   // Bumped when the server refuses a save as a second record, so the warning
   // is fetched again even where the typing never produced it.
   const [recheck, setRecheck] = useState(0);
+  const scrollRef = useRef(null);
   useEffect(() => {
     // The server needs both names; a last name alone is too broad.
     if (form.id || !form.last_name?.trim() || !form.first_name?.trim()) { setDupes([]); return undefined; }
@@ -441,6 +442,9 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
     else if (!isEdit && DUPLICATE_REFUSAL.test(String(fieldErrors?.detail || ''))) {
       setStep(1);
       setRecheck((n) => n + 1);
+      // The box keeps the scroll it had on the last step, which put the
+      // warning this jump is for above the visible area.
+      if (scrollRef.current) scrollRef.current.scrollTop = 0;
     }
     // Once per refusal, not on every keystroke after it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -463,7 +467,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             {others.map((o, i) => <Badge key={i} tone="brand" size="sm" dot>{o.name} ({roleLabel(o.role)}) is here</Badge>)}
           </div>
         )}
-        <div className="racco-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <div ref={scrollRef} className="racco-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
           {form._draft && (
             <Alert tone="info" icon={<Icon name="history" size={18} />} title="Unsaved draft found">
               You started a record earlier that wasn&apos;t saved. Continue where you left off?
@@ -504,14 +508,24 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                       Reopen it — it becomes yours
                     </Button>
                   </div>
+                ) : m.reopenable === false ? (
+                  /* A closed record somebody else holds, matched by the name
+                     alone: the birth date typed is not the same (or none is
+                     typed yet), so it may be a different child and nothing is
+                     offered that would take it over. The server sends no id. */
+                  <div key={`held-${i}`} style={{ fontSize: 13 }}>
+                    A record with this name exists — ask the ISA.
+                  </div>
                 ) : (
                   /* Another social worker's ACTIVE record: that it exists
                      and who holds it, nothing from the record (owner's
                      decision, 24 Sep 2026 - children/views.py check_duplicate). */
                   <div key={`held-${i}`} style={{ fontSize: 13 }}>
-                    A record for this child is already held by{' '}
+                    {m.blocks_new_record ? 'A record for this child is already held by' : 'A record with this name is held by'}{' '}
                     <strong>{m.held_by || 'no social worker yet'}</strong>.
-                    Ask the ISA (Administrator) to transfer it to you instead of adding a second record.
+                    {m.blocks_new_record
+                      ? ' Ask the ISA (Administrator) to transfer it to you instead of adding a second record.'
+                      : ' If it is the same child, ask the ISA (Administrator) rather than adding a second record.'}
                   </div>
                 )) : (
                   <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>

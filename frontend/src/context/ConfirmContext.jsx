@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
-import { ConfirmDialog, Icon } from '../ui';
+import { Alert, Button, ConfirmDialog, Icon } from '../ui';
 
 /* "Are you sure you want to proceed?" before anything is saved, sent or
  * changed — asked the owner's way, on every screen, from one place.
@@ -14,6 +14,13 @@ import { ConfirmDialog, Icon } from '../ui';
  * It resolves false on Cancel, Escape or a click outside, so the caller's
  * only job is to stop. Destructive actions keep their own dialogs — those
  * ask for a reason or a typed name, which is more than a yes.
+ *
+ * Two optional extras, for dialogs that have more to say than a sentence:
+ *   warning: { title, items: [...], note }  - a warning-toned box under the
+ *            details, for what the action will take away;
+ *   actions: [{ label, icon, onClick }]     - buttons that close the dialog and
+ *            then go somewhere ("Open record"). An action is a way ONWARD, so
+ *            it is for end dialogs; a question keeps Yes and Go back.
  */
 const ConfirmContext = createContext(null);
 
@@ -66,6 +73,29 @@ export function ConfirmProvider({ children }) {
                 </div>
               ))}
             </dl>
+          )}
+          {request.warning && (
+            <div style={{ marginTop: 12 }}>
+              <Alert tone="warning" icon={<Icon name="alert-triangle" size={18} />} title={request.warning.title}>
+                {request.warning.items?.length > 0 && (
+                  <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                    {request.warning.items.map((t) => <li key={t}>{t}</li>)}
+                  </ul>
+                )}
+                {request.warning.note && <div style={{ marginTop: request.warning.items?.length ? 6 : 0 }}>{request.warning.note}</div>}
+              </Alert>
+            </div>
+          )}
+          {request.actions?.length > 0 && (
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 14 }}>
+              {request.actions.map((a) => (
+                <Button
+                  key={a.label} variant="secondary" size="sm"
+                  iconLeft={a.icon ? <Icon name={a.icon} size={14} /> : undefined}
+                  onClick={() => { settle(true); a.onClick?.(); }}
+                >{a.label}</Button>
+              ))}
+            </div>
           )}
         </ConfirmDialog>
       )}
