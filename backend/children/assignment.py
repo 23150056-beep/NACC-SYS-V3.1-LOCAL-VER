@@ -19,7 +19,7 @@ from django.utils import timezone
 from accounts import email_notifications
 from accounts.display import display_name
 from accounts.models import Role
-from accounts.sms_notifications import notify_new_assignment
+from accounts.sms_notifications import notify_case_answer, notify_new_assignment
 from activity.models import ActivityLog
 from activity.services import log_activity
 from children.models import AssignmentRequest, Child
@@ -162,10 +162,14 @@ def decline(req, *, by, reason):
     # A decline is mailed at once - nothing follows it that could be combined
     # with - and stamped, so the column means the same for every answer: dealt
     # with. The conditional update is the claim an acceptance makes.
-    AssignmentRequest.objects.filter(
+    claimed = AssignmentRequest.objects.filter(
         pk=req.pk, status=AssignmentRequest.DECLINED, answer_mailed_at__isnull=True,
     ).update(answer_mailed_at=timezone.now())
     email_notifications.case_answered(req, by=by)
+    # The text follows the same claim and is independent of the email's switch
+    # and limit (28 Oct 2026); never the reason.
+    if claimed:
+        notify_case_answer(req, "case_declined")
     return req
 
 

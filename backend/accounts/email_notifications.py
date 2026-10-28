@@ -876,6 +876,28 @@ def _superseded(req):
         child_id=req.child_id, status=AssignmentRequest.ACCEPTED, pk__gt=req.pk).exists()
 
 
+def text_answer(req, *, first_session=None):
+    """Text the social worker the psychologist's ACCEPTANCE (owner, 28 Oct
+    2026), by whoever just won `claim_answer_mail` - so it goes once per answer,
+    exactly when the email is decided, and not for a superseded acceptance
+    (`_superseded`, which the email drops too). It does not look at the email
+    opt-out or the email limit: texts have their own limits (sms_catalogue).
+    `first_session` is the session just booked, for the combined text. Never
+    raises."""
+    from accounts import sms_notifications
+    from children.models import AssignmentRequest
+    try:
+        if req.status != AssignmentRequest.ACCEPTED or _superseded(req):
+            return False
+        if first_session is not None:
+            return sms_notifications.notify_case_answer(
+                req, "case_accepted_booked", when=first_session.start)
+        return sms_notifications.notify_case_answer(req, "case_accepted")
+    except Exception:                                            # noqa: BLE001
+        logger.exception("Could not text the acceptance")
+        return False
+
+
 @_never_raises
 def case_answered(req, *, by, first_session=None):
     """A psychologist accepted or declined (children/assignment.py), told to
@@ -1007,8 +1029,13 @@ def accepted_with_first_session(appointment, *, by):
             return False
         claimed = req
         if not wants(req.child.social_worker or req.requested_by, "case_accepted"):
+            # The email is off; the text is its own switch-less nudge.
+            text_answer(req, first_session=appointment)
             return False
         _send_answer(req, by=by, first_session=appointment)
+        # After the email was prepared: had it raised, the claim goes back and
+        # the dialog or the sweep texts instead, so it is never texted twice.
+        text_answer(req, first_session=appointment)
         return True
     except Exception:                                            # noqa: BLE001
         logger.exception("Could not prepare the combined acceptance email")
@@ -1059,6 +1086,7 @@ def mail_overdue_answers(now=None, *, dry_run=False, limit=None):
                 if not claim_answer_mail(req):
                     continue
                 claimed += 1
+                text_answer(req)
                 # decided_by is cleared if that account is ever deleted; the
                 # psychologist asked is the one who accepted.
                 case_answered(req, by=req.decided_by or req.psychologist)

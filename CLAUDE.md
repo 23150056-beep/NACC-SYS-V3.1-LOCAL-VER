@@ -2123,6 +2123,17 @@ is not a system user; see "The custodian and their texts".
   minutes." was accepted and marked Sent three times and never arrived;
   "NACC RACCO I: ..." with the same sentence arrived. It is the catalogue's
   wording now, and a test refuses "NACC SYS" next to "expires in".
+- **The social worker is texted when a psychologist answers** (owner, 28 Oct
+  2026): `case_declined`, `case_accepted`, or `case_accepted_booked` with the
+  first session's time - before this only the email and the bell said so, and
+  the owner, testing on the demo, read the missing decline text as a fault.
+  Sent by whoever wins the `answer_mailed_at` claim (decline, the combined
+  booking email, the dialog's mail-answer, the sweep), so once per answer and
+  at the email's moment, whatever the email opt-out or limit did; a
+  superseded acceptance texts nothing. Case reference only - no child,
+  psychologist or reason. Limited per ANSWER (`answer:<request id>`), not per
+  child: a second psychologist declining the same child within the hour is a
+  second answer. `children/tests/test_answer_texts.py`.
 - **Codes stay on the OTP route** (2 credits), the custodian's too. Measured
   27 Oct 2026: the normal route delivered, but a text sent at 18:08 reached
   the handset after ones sent at 18:15, while the OTP code arrived at once.
@@ -2340,7 +2351,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 3,630 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 3,647 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

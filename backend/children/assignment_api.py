@@ -190,4 +190,5 @@ class AssignmentRequestViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         mailed = email_notifications.claim_answer_mail(req)
         if mailed:
             email_notifications.case_answered(req, by=request.user)
+            email_notifications.text_answer(req)
         return Response({"mailed": mailed})

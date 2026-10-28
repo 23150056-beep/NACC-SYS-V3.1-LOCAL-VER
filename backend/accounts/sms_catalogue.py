@@ -110,6 +110,32 @@ ENTRIES = {e.key: e for e in [
         NORMAL, STAFF,
         samples={"case_ref": "C-99999"},
         rules=[Rule(1, 3600, BY_NUMBER_SUBJECT)]),
+    # The psychologist's answer, told to the social worker whose record it is
+    # (owner, 28 Oct 2026). No child, no psychologist, no reason: a text sits on
+    # a lock screen, and the reason is read on the record behind the sign-in.
+    # The two acceptances share one allowance, because one answer is only ever
+    # one of them.
+    Entry(
+        "case_declined",
+        "NACC SYS: the psychologist declined case {case_ref}. Sign in to see "
+        "why and ask another.",
+        NORMAL, STAFF,
+        samples={"case_ref": "C-99999"},
+        rules=[Rule(1, 3600, BY_NUMBER_SUBJECT)]),
+    Entry(
+        "case_accepted",
+        "NACC SYS: the psychologist accepted case {case_ref}. Sign in to see "
+        "the next steps.",
+        NORMAL, STAFF,
+        samples={"case_ref": "C-99999"},
+        rules=[Rule(1, 3600, BY_NUMBER_SUBJECT, "case_accepted")]),
+    Entry(
+        "case_accepted_booked",
+        "NACC SYS: the psychologist accepted case {case_ref} and booked the "
+        "first session, {when}.",
+        NORMAL, STAFF,
+        samples={"case_ref": "C-99999", "when": _WHEN},
+        rules=[Rule(1, 3600, BY_NUMBER_SUBJECT, "case_accepted")]),
     Entry(
         "session_reminder",
         "NACC SYS: you have {count} {sessions} scheduled {when}. "

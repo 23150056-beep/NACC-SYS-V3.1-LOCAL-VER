@@ -108,6 +108,54 @@ def notify_new_assignment(child, psychologist=None):
     )
 
 
+def notify_case_answer(req, kind, when=None):
+    """Tell the social worker a psychologist answered a request (owner, 28 Oct
+    2026): `kind` is "case_declined", "case_accepted" or "case_accepted_booked"
+    (which also takes `when`, the first session's start).
+
+    The same recipient the answer email goes to - the child's social worker, or
+    whoever asked where it has none - and only an active Staff account, as the
+    email is. Never the psychologist's own phone. The text carries the case
+    reference alone: no child, no psychologist, no decline reason.
+
+    Called by whoever won the `answer_mailed_at` claim, so it goes once per
+    answer; it does not depend on the email being switched on or sent. Never
+    raises."""
+    from scheduling.visibility import case_ref
+    try:
+        child = req.child
+        recipient = child.social_worker or req.requested_by
+        if (recipient is None or not recipient.is_active
+                or recipient.pk == req.psychologist_id
+                or getattr(getattr(recipient, "role", None), "role_name", None) != "Staff"):
+            return False
+        number = _deliverable(recipient)
+        if not number:
+            return False
+        ref = case_ref(child)
+        # Per ANSWER, not per child: a child declined by one psychologist and,
+        # asked again, by the next within the hour is two answers, and the
+        # second must not be swallowed by the first's hourly allowance.
+        subject = f"answer:{req.pk}"
+        by = req.psychologist
+        if kind == "case_declined":
+            return queue_sms(number, sms_catalogue.render("case_declined", case_ref=ref),
+                             "case_declined", subject=subject, requested_by=by)
+        if kind == "case_accepted":
+            return queue_sms(number, sms_catalogue.render("case_accepted", case_ref=ref),
+                             "case_accepted", subject=subject, requested_by=by)
+        if kind == "case_accepted_booked" and when is not None:
+            return queue_sms(
+                number,
+                sms_catalogue.render("case_accepted_booked", case_ref=ref,
+                                     when=custodian_when(when)),
+                "case_accepted_booked", subject=subject, requested_by=by)
+        return False
+    except Exception:                                            # noqa: BLE001
+        logger.exception("Could not queue the %s text", kind)
+        return False
+
+
 # --------------------------------------------------------------------------
 # 3. Tomorrow's sessions
 # --------------------------------------------------------------------------
