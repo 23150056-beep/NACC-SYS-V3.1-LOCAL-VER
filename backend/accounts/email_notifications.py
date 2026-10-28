@@ -1028,6 +1028,10 @@ def accepted_with_first_session(appointment, *, by):
         if earlier.exists() or not claim_answer_mail(req):
             return False
         claimed = req
+        # This booking is the acceptance's own: whichever way the email goes,
+        # the acceptance text (combined, or later by the dialog) covers it, so
+        # scheduling/session_mail.py must not text the booking as well.
+        appointment.acceptance_claimed = True
         if not wants(req.child.social_worker or req.requested_by, "case_accepted"):
             # The email is off; the text is its own switch-less nudge.
             text_answer(req, first_session=appointment)

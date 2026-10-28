@@ -136,6 +136,15 @@ ENTRIES = {e.key: e for e in [
         NORMAL, STAFF,
         samples={"case_ref": "C-99999", "when": _WHEN},
         rules=[Rule(1, 3600, BY_NUMBER_SUBJECT, "case_accepted")]),
+    # A session booked for a social worker's child after the acceptance was
+    # already told (28 Oct 2026). Booked only; one per appointment.
+    Entry(
+        "session_booked_sw",
+        "NACC SYS: a session for case {case_ref} is booked for {when}. "
+        "Sign in to see the schedule.",
+        NORMAL, STAFF,
+        samples={"case_ref": "C-99999", "when": _WHEN},
+        rules=[Rule(1, 86400, BY_NUMBER_SUBJECT)]),
     Entry(
         "session_reminder",
         "NACC SYS: you have {count} {sessions} scheduled {when}. "

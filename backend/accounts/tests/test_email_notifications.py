@@ -75,6 +75,11 @@ class MailBase(TestCase):
             first_name="Ana", last_name="Cruz", fullname="Ana Cruz",
             birth_date=self.born, case_type="Foster Care", case_category="Neglected",
             social_worker=self.sw)
+        # A child who has been through intake has a case referral; without one
+        # an acceptance is told at once (children/assignment.py), and these
+        # tests are about the acceptance that waits.
+        from scheduling.tests.test_api import give_referral
+        give_referral(self.child, self.sw)
 
     def _as(self, user):
         client = APIClient()

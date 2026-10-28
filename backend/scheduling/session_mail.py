@@ -178,6 +178,11 @@ def _tell_social_worker(appointment, event, *, by, was, was_psychologist=None):
         # The psychologist who has just accepted this child booked the first
         # session: the social worker has had ONE email for both, from there.
         return
+    if event == BOOKED and not getattr(appointment, "acceptance_claimed", False):
+        # Not folded into the acceptance, so the acceptance text did not carry
+        # it: text the booking itself (independent of the email's switch).
+        from accounts.sms_notifications import notify_session_booked
+        notify_session_booked(appointment, by)
     ref, who = case_ref(appointment.child_id), entered_name(by, "A colleague")
     subject = f"{who} {event} a session for case {ref}"
     facts = _facts(appointment, was)

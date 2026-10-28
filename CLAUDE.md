@@ -2134,6 +2134,18 @@ is not a system user; see "The custodian and their texts".
   psychologist or reason. Limited per ANSWER (`answer:<request id>`), not per
   child: a second psychologist declining the same child within the hour is a
   second answer. `children/tests/test_answer_texts.py`.
+- **Two gaps the owner hit on the demo, closed** (28 Oct 2026). An acceptance
+  with NO case referral is answered at once (`assignment.accept` claims
+  `answer_mailed_at`, emails and texts): nothing can be booked, so waiting for
+  the dialog or the 10-minute sweep - which on the demo runs only when some
+  browser loads the activity feed - only left the SW untold. And a session
+  booked by someone other than the SW, not folded into the acceptance (Book
+  later, a referral filed later, the calendar), texts `session_booked_sw`
+  (`session_mail._tell_social_worker`; skipped when `accepted_with_first_session`
+  set `acceptance_claimed`, so never both). Bookings only, not moves.
+  `children/tests/test_sw_answer_and_booking_texts.py` runs the REAL
+  queue_sms -> send_sms -> SmsSend chain: the earlier answer-text tests
+  patched `queue_sms`, which is how the second gap went unseen.
 - **Codes stay on the OTP route** (2 credits), the custodian's too. Measured
   27 Oct 2026: the normal route delivered, but a text sent at 18:08 reached
   the handset after ones sent at 18:15, while the OTP code arrived at once.
@@ -2351,7 +2363,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 3,647 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 3,656 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

@@ -156,6 +156,35 @@ def notify_case_answer(req, kind, when=None):
         return False
 
 
+def notify_session_booked(appointment, by):
+    """Text the child's social worker that a session was booked (owner, 28 Oct
+    2026), for a booking that is NOT folded into the acceptance text. Only an
+    active Staff account with a verified number, never the person who made the
+    booking and never the psychologist. Case reference and time only. Independent
+    of the email switch and limit. Never raises."""
+    from scheduling.visibility import case_ref
+    try:
+        worker = appointment.child.social_worker
+        if (worker is None or not worker.is_active
+                or (by is not None and worker.pk == by.pk)
+                or worker.pk == appointment.psychologist_id
+                or getattr(getattr(worker, "role", None), "role_name", None) != "Staff"):
+            return False
+        number = _deliverable(worker)
+        if not number:
+            return False
+        return queue_sms(
+            number,
+            sms_catalogue.render("session_booked_sw",
+                                 case_ref=case_ref(appointment.child_id),
+                                 when=custodian_when(appointment.start)),
+            "session_booked_sw", subject=f"appointment:{appointment.pk}",
+            requested_by=by)
+    except Exception:                                            # noqa: BLE001
+        logger.exception("Could not queue the session booked text")
+        return False
+
+
 # --------------------------------------------------------------------------
 # 3. Tomorrow's sessions
 # --------------------------------------------------------------------------

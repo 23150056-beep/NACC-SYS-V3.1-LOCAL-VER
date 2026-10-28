@@ -144,6 +144,16 @@ def accept(req, *, by):
     #   1. the psychologist books (scheduling/session_mail.py),
     #   2. the dialog ends without a booking (POST .../mail-answer/),
     #   3. ten minutes pass (email_notifications.mail_overdue_answers).
+    #
+    # Except when the child has no case referral on file (28 Oct 2026): nothing
+    # can be booked without one, so there is nothing to combine the answer with
+    # and waiting only leaves the social worker untold. Claim it now with the
+    # same conditional UPDATE, so the dialog's call, pagehide and the sweep find
+    # it taken and send nothing more. Queued after the commit like the rest.
+    if not req.child.case_referrals.exists():
+        if email_notifications.claim_answer_mail(req):
+            email_notifications.case_answered(req, by=by)
+            email_notifications.text_answer(req)
     return req
 
 
