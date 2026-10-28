@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useLayout } from '../context/LayoutContext';
 import { useCensus } from '../context/CensusContext';
@@ -26,12 +26,14 @@ const STATUS_TONE = {
   cancelled: { label: 'Cancelled', tone: 'var(--text-faint)', time: 'var(--text-faint)' },
 };
 
-function RailCard({ icon, title, meta, children, footer }) {
+// `wide`: in the Dashboard's main column, where the header matches the
+// Dashboard's own cards (CardHead) instead of the rail's smaller one.
+function RailCard({ icon, title, meta, children, footer, wide = false }) {
   return (
     <div style={{ flex: 'none', background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-card)', overflow: 'hidden' }}>
-      <div style={{ padding: '11px 13px', borderBottom: '1px solid var(--divider)', display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Icon name={icon} size={17} style={{ color: 'var(--blue-600)' }} />
-        <span style={{ flex: 1, fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 13, color: 'var(--text-strong)' }}>{title}</span>
+      <div style={{ padding: wide ? '12px 14px' : '11px 13px', borderBottom: '1px solid var(--divider)', display: 'flex', alignItems: 'center', gap: wide ? 10 : 8 }}>
+        <Icon name={icon} size={wide ? 18 : 17} style={{ color: 'var(--blue-600)' }} />
+        <span style={{ flex: 1, fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: wide ? 15 : 13, ...(wide ? { letterSpacing: '-0.01em' } : null), color: 'var(--text-strong)' }}>{title}</span>
         {meta}
       </div>
       {children}
@@ -85,18 +87,18 @@ export function CensusCard({ wide = false }) {
   ];
 
   return (
-    <RailCard icon="line-chart" title={isPsych ? 'My caseload' : 'Census at a glance'}>
+    <RailCard icon="line-chart" title={isPsych ? 'My caseload' : 'Census at a glance'} wide={wide}>
       <div style={{ display: 'grid', gridTemplateColumns: wide ? 'repeat(auto-fit, minmax(140px, 1fr))' : '1fr 1fr', gap: 1, background: 'var(--divider)' }}>
         {railStats.map((s) => (
           <button
             key={s.label} type="button" onClick={() => navigate(s.to)}
-            style={{ background: 'var(--surface)', padding: '11px 13px', display: 'flex', flexDirection: 'column', gap: 2, border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-sans)' }}
+            style={{ background: 'var(--surface)', padding: wide ? '13px 14px' : '11px 13px', display: 'flex', flexDirection: 'column', gap: 2, border: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-sans)' }}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--ink-25)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--surface)'; }}
           >
             <span style={{ fontWeight: 800, fontSize: 'var(--text-3xs)', letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>{s.label}</span>
-            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 24, lineHeight: 1.15, color: s.color, fontVariantNumeric: 'tabular-nums' }}>{s.value}</span>
-            <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>{s.hint}</span>
+            <span style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: wide ? 32 : 24, lineHeight: wide ? 1 : 1.15, color: s.color, fontVariantNumeric: 'tabular-nums' }}>{s.value}</span>
+            <span style={{ fontSize: wide ? 12 : 10.5, color: 'var(--text-faint)' }}>{s.hint}</span>
           </button>
         ))}
       </div>
@@ -162,35 +164,37 @@ function OnDutyToday({ availability }) {
   );
 }
 
-export function TodayCard() {
+// `wide`: as CensusCard - sized to match the Dashboard's own cards.
+export function TodayCard({ wide = false }) {
   const navigate = useNavigate();
   const { isPsych, today, availability } = useRailData();
   return (
     <RailCard
       icon="calendar-check"
-      title={isPsych ? 'My day' : 'Today'}
+      title={wide ? "Today's appointments" : (isPsych ? 'My day' : 'Today')}
+      wide={wide}
       meta={<span style={{ fontWeight: 600, fontSize: 11, color: 'var(--text-muted)' }}>{today.length} appt{today.length === 1 ? '' : 's'}</span>}
       footer={availability.length > 0 && <OnDutyToday availability={availability} />}
     >
       {today.length === 0 ? (
-        <p style={{ padding: '16px 13px', fontSize: 12, color: 'var(--text-muted)' }}>Nothing booked today.</p>
+        <p style={{ padding: wide ? '16px 14px' : '16px 13px', fontSize: wide ? 12.5 : 12, color: 'var(--text-muted)' }}>Nothing booked today.</p>
       ) : today.map((a) => {
         const t = STATUS_TONE[a.status] || STATUS_TONE.scheduled;
         return (
           <button
             key={a.id} type="button" onClick={() => navigate('/schedule')}
-            style={{ width: '100%', display: 'flex', gap: 11, padding: '9px 13px', borderBottom: '1px solid var(--divider-row)', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-sans)' }}
+            style={{ width: '100%', display: 'flex', gap: 11, padding: wide ? '10px 14px' : '9px 13px', borderBottom: '1px solid var(--divider-row)', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-sans)' }}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--blue-50)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
           >
-            <span className="racco-mono" style={{ width: 62, flex: 'none', whiteSpace: 'nowrap', fontWeight: 600, fontSize: 12, color: t.time, paddingTop: 1 }}>{clock(a.time)}</span>
+            <span className="racco-mono" style={{ width: wide ? 72 : 62, flex: 'none', whiteSpace: 'nowrap', fontWeight: 600, fontSize: wide ? 13 : 12, color: t.time, paddingTop: 1 }}>{clock(a.time)}</span>
             <span style={{ flex: 1, minWidth: 0, borderLeft: `2px solid ${t.tone}`, paddingLeft: 10 }}>
-              <span style={{ display: 'block', fontWeight: 700, fontSize: 12.5, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{scheduleName(a)}</span>
-              <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              <span style={{ display: 'block', fontWeight: 700, fontSize: wide ? 13.5 : 12.5, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{scheduleName(a)}</span>
+              <span style={{ display: 'block', fontSize: wide ? 12 : 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {PURPOSE_LABEL[a.purpose] || a.purpose}{!isPsych && a.psychologist ? ` · ${a.psychologist}` : ''}
               </span>
             </span>
-            <span style={{ fontWeight: 700, fontSize: 9.5, letterSpacing: '0.05em', textTransform: 'uppercase', color: t.tone, flex: 'none', paddingTop: 2 }}>{t.label}</span>
+            <span style={{ fontWeight: 700, fontSize: wide ? 10.5 : 9.5, letterSpacing: '0.05em', textTransform: 'uppercase', color: t.tone, flex: 'none', paddingTop: 2 }}>{t.label}</span>
           </button>
         );
       })}
@@ -242,6 +246,11 @@ export function ActivityCard() {
 }
 
 export function RailCards() {
+  const { pathname } = useLocation();
+  const { role } = useRailData();
+  // On a social worker's Dashboard, Census and Today sit in the main column
+  // (owner, 28 Oct 2026), so the rail does not repeat them.
+  if (pathname === '/' && role === 'Staff') return <ActivityCard />;
   return (
     <>
       <CensusCard />

@@ -69,6 +69,7 @@ export default function Dashboard() {
 
   const role = user?.role_name || 'Staff';
   const isPsych = role === 'Psychologist';
+  const isStaff = role === 'Staff';
   const name = user?.fullname || user?.username || '';
   const firstName = name.split(' ')[0] || 'there';
 
@@ -179,11 +180,16 @@ export default function Dashboard() {
       {/* The numbers first: staff and the others come here for the figures,
           and they were at the bottom (the owner, 24 Sep 2026). Without a third
           column the rail's census figures lead them. */}
-      {!layout.rightRailOn && <CensusCard wide />}
+      {/* A social worker's Census sits where the pre-assessment card is, below
+          (owner, 28 Oct 2026), so it is not also led with here. */}
+      {!layout.rightRailOn && !isStaff && <CensusCard wide />}
 
       {/* The figures. Highlighted the way care gaps are, in the brand colour
           rather than red: a header band and a border, and the numbers larger
           than anything else on the page. */}
+      {/* A social worker gets the Census at a glance in this place instead
+          (owner, 28 Oct 2026); everyone else keeps the pre-assessment card. */}
+      {isStaff ? <CensusCard wide /> : (
       <div style={{ ...cardStyle, border: '1px solid var(--blue-200)' }}>
         <div style={{ background: 'var(--blue-50)' }}>
           <CardHead icon="hourglass" tone="warning" title="Pre-assessments waiting on someone" meta={`${stats.pending_pre_assessments ?? 0} open`} />
@@ -202,10 +208,14 @@ export default function Dashboard() {
           ))}
         </div>
       </div>
+      )}
 
       {/* The team. A psychologist has no business reading their colleagues'
           throughput, so this is the one block they do not get. */}
-      {!isPsych && perPsych.length > 0 && (
+      {/* A social worker gets Today's appointments here instead (owner,
+          28 Oct 2026). */}
+      {isStaff && <TodayCard wide />}
+      {!isPsych && !isStaff && perPsych.length > 0 && (
         <div style={cardStyle}>
           <CardHead title="Clinical team this range" meta="completed sessions" />
           <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -347,7 +357,7 @@ export default function Dashboard() {
           activity stream down here. The same components, not a second copy. */}
       {!layout.rightRailOn && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, alignItems: 'start' }}>
-          <TodayCard />
+          {!isStaff && <TodayCard />}
           <ActivityCard />
         </div>
       )}
