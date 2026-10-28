@@ -1053,6 +1053,56 @@ middle name, a date found, and every question that applies made mandatory.
   redeploy of the same commit went through in two minutes. Prefer additive
   migrations (add, copy, drop later); widening a column, as 0022 does, is safe.
 
+## The Records screen (friendlier, 28 Oct 2026)
+
+Owner's request: "improve the overall UI of the record module for friendly
+user purposes". Audited first, by screenshots of every role at 1440 and 390;
+the owner picked the plan. Presentation only - no server rule changed.
+
+- **Next possible sessions offers only what books** (same day): `next-slots`
+  is built on `booking.next_openings`, so on `errors_for`. It used to count
+  capacity per window and offer the window's START, which clashed with a
+  session already there ("already booked (case C-...)").
+- **The list**: a row ends in a chevron and a quick-action menu (Open, Book -
+  only with a referral, Upload, Edit), the same links and rules as the header
+  search's quick actions. The child's name is the real button; the row stays
+  clickable but is no longer `role="button"`, so the menu is not nested in it.
+  Under 640px rows become cards with wrapped chips. Empty screens say why and
+  offer Clear search, or "Search all records instead" only when another tab
+  has a match.
+- **Needs attention** replaces Case Status on the Active tab, for SWs and the
+  ISA: No case referral, No psychologist, Waiting / No answer (7+ days),
+  Declined, No signed consent - the SW care gaps' rules and thresholds
+  (`care_gaps.py`), never contradicting the Dashboard. The ISA sees the SW
+  rules here, not its own Dashboard list. Case Status stays on All/Archived.
+- **The record window** is the shared `Drawer` (focus trap, Escape); a tap
+  outside does not close it while a booking question or the referral replace
+  is open. Open full record, Edit as the main button, Terminate outlined red
+  and set apart. Details grouped (Identity, Care, People, Address & dates),
+  empty rows last. The booking area says why there is nothing to pick (no
+  referral, waiting on / declined by a psychologist, the server's `reason`).
+  A Staff account on its own record gets one "Next step" line from
+  `brief_facts.next_steps`. Hints explain the agency's words, which stay as
+  they are (owner): Answered = pre-assessment done, not yet in counseling;
+  Completed = done and in counseling - read from `pre_assessment_status`.
+  Upcoming appointments open `/schedule`, which cannot open one appointment
+  from a link yet.
+- **The record form**: each step says how many answers it still needs, and
+  "N answers still needed - Show me" jumps to each field. Next still moves on
+  freely and Save is held exactly as before (the existing blockers, not a
+  second copy). A proper attach button for the referral, "(optional)" on the
+  optional fields, a "Draft saved on this computer" note with Clear draft.
+  Full screen under 640px.
+- **The header under 480px** (owner's choice): the search pill becomes a
+  magnifier that opens the same field and panel, and tabs that do not fit go
+  under More. At 480 and wider nothing changed. Known: at exactly 480-~520 six
+  tabs at 36px still crowd the bell; moving the breakpoint changes the search
+  sizes, so it is the owner's call.
+- Styles for these live in their own files (`children/records.css`,
+  `drawer.css`, `form.css`, `components/header-phone.css`), mostly scoped
+  `!important` phone overrides because the shared controls size themselves
+  inline.
+
 ## One child, one record
 
 Found 9 Oct 2026: the owner pressed Save Record again while the first save

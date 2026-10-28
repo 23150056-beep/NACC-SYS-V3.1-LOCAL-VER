@@ -15,6 +15,7 @@ import { ACTION_META, eventDestination, eventText } from '../utils/activity';
 import { initialsOf } from '../utils/child';
 import { timeAgo } from '../utils/time';
 import GlobalSearch from './GlobalSearch';
+import './header-phone.css';
 
 /* The chrome, on deep navy, 56px tall, identical on every screen.
  *
@@ -43,6 +44,7 @@ const EMPTY_PW = { current_password: '', new_password: '', confirm: '' };
  * and three copies of the same effect is how they drift. */
 function Popover({ open, onClose, width, children, label }) {
   const ref = useRef(null);
+  const { phone } = useLayout();
   useEffect(() => {
     if (!open) return undefined;
     const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose(); };
@@ -60,7 +62,11 @@ function Popover({ open, onClose, width, children, label }) {
           role="menu"
           aria-label={label}
           style={{
-            position: 'absolute', top: 46, right: 0, width,
+            // On a phone the menu hangs from the bar's foot at the screen's own
+            // edges: anchored to its button it ran off the left of a 320 screen.
+            ...(phone
+              ? { position: 'fixed', top: 'calc(var(--topbar-h) + 4px)', right: 8, width: `min(${width}px, calc(100vw - 16px))` }
+              : { position: 'absolute', top: 46, right: 0, width }),
             background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 'var(--radius-card)', boxShadow: 'var(--shadow-xl)',
             overflow: 'hidden', zIndex: 60, animation: 'racco-pop-in var(--dur-base) var(--ease-out)',
@@ -138,7 +144,14 @@ export default function AppHeader() {
   // Everything the tab strip does not carry. Only offered when the rail is
   // gone — otherwise the rail is already showing all of it, and a menu
   // duplicating the thing next to it is just noise.
-  const overflow = screensFor(role).filter((s) => !tabs.some((t) => t.id === s.id));
+  /* Under 480 the six tabs do not fit beside the logo, the search icon, the bell
+   * and the avatar, and they drew over their neighbours. The ones that do not
+   * fit go to "More" instead. 206px is what the other four controls and the
+   * gaps cost; each tab may shrink to 32px, and More is one more of them. */
+  const phoneTabs = layout.phone
+    ? Math.max(1, Math.floor((layout.width - 206 - 32) / 34)) : tabs.length;
+  const shownTabs = tabs.slice(0, phoneTabs);
+  const overflow = screensFor(role).filter((s) => !shownTabs.some((t) => t.id === s.id));
 
   const [searchOpen, setSearchOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -220,7 +233,7 @@ export default function AppHeader() {
     <header
       style={{
         height: 'var(--topbar-h)', flex: 'none', background: 'var(--chrome)',
-        display: 'flex', alignItems: 'center', gap: 16, padding: '0 16px',
+        display: 'flex', alignItems: 'center', gap: layout.phone ? 6 : 16, padding: layout.phone ? '0 10px' : '0 16px',
         position: 'relative', zIndex: 30,
       }}
     >
@@ -247,8 +260,8 @@ export default function AppHeader() {
           spill: under 1180 the strip has less room than six tabs at full
           width, and centred overflow ran out under the search box on its left
           (the clear button sat beneath the first tab) and the bell on its right. */}
-      <nav aria-label="Primary" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, minWidth: 0 }}>
-        {tabs.map((t) => {
+      <nav aria-label="Primary" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: layout.phone ? 2 : 4, minWidth: 0 }}>
+        {shownTabs.map((t) => {
           const on = tabIsActive(t.id, screenId, role);
           const badge = badgeFor(t.id);
           return (
@@ -256,7 +269,7 @@ export default function AppHeader() {
               key={t.id} type="button" title={t.label} aria-label={t.label} aria-current={on ? 'page' : undefined}
               onClick={() => navigate(t.to)}
               style={{
-                position: 'relative', width: layout.tabWidth, minWidth: 36, height: 44, border: 'none',
+                position: 'relative', width: layout.tabWidth, minWidth: layout.phone ? 32 : 36, height: 44, border: 'none',
                 borderRadius: 'var(--radius-sm)', background: on ? 'rgba(255,255,255,0.12)' : 'transparent',
                 cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 color: on ? 'var(--chrome-ink)' : 'var(--chrome-ink-soft)', flex: '0 1 auto',
@@ -290,7 +303,7 @@ export default function AppHeader() {
               type="button" title="More" aria-label="More destinations" aria-expanded={moreOpen}
               onClick={() => openOnly(moreOpen ? null : 'more')}
               style={{
-                width: layout.tabWidth, height: 44, border: 'none', borderRadius: 'var(--radius-sm)',
+                width: layout.phone ? 32 : layout.tabWidth, height: 44, border: 'none', borderRadius: 'var(--radius-sm)',
                 background: moreOpen ? 'rgba(255,255,255,0.12)' : 'transparent', cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 color: moreOpen ? 'var(--chrome-ink)' : 'var(--chrome-ink-soft)', flex: 'none',

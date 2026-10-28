@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { useActivity } from '../context/ActivityContext';
 import {
   Alert, Avatar, Badge, Button, ConfirmDialog, EmptyState, FilterPills, hoverLift, Icon, iconBtn,
-  Input, PAGE, PageHeader, Segmented, Select, TD, TH, THEAD_ROW, TOOLBAR, TR,
+  Input, Menu, PAGE, PageHeader, Segmented, Select, TD, TH, THEAD_ROW, TOOLBAR, TR,
 } from '../ui';
 import { useToast } from '../context/ToastContext';
 import { useConfirm, useNotice } from '../context/ConfirmContext';
@@ -18,7 +18,8 @@ import { EMPTY, NOT_AN_ANSWER, formFromRecord, newIntakeToken } from './children
 import ChildDrawer, { TerminateModal } from './children/ChildDrawer';
 import CaseloadCard from './children/CaseloadCard';
 import RemoveDuplicateDialog from './children/RemoveDuplicateDialog';
-import { fmtDay, fmtTime, localDate } from './children/shared';
+import { ASSIGNMENT_ANSWER_MS, PA_HINT, fmtDay, fmtTime, localDate, needsAttention } from './children/shared';
+import './children/records.css';
 import { ageFrom, ageGroup, caseRef } from '../utils/child';
 import { shortDate } from '../utils/time';
 import AssignmentRequests from '../components/AssignmentRequests';
@@ -76,12 +77,39 @@ function ScheduleChip({ appts = [] }) {
  * records only when they accept - so between the pick and the answer the row
  * has to say so, or it reads as "nobody" and gets picked again. A decline
  * shows until someone else is asked, with the reason on hover. */
-// How long a psychologist may sit on a request before it counts as unanswered:
-// ASSIGNMENT_ANSWER_DAYS in backend/clinical/care_gaps.py, which lists the
-// child as a care gap from that moment. The row offers someone else to the
-// same people from the same moment.
-const ASSIGNMENT_ANSWER_MS = 7 * 24 * 60 * 60 * 1000;
+// ASSIGNMENT_ANSWER_MS (7 days, the care gap's line) is in children/shared.jsx,
+// where needsAttention reads it too.
 
+/* A small coloured pill for the list; the phone card and the Needs attention
+ * column share it so a state looks the same in both. */
+function Chip({ tone = 'neutral', title, children }) {
+  return <span className="racco-rec-chip" data-tone={tone} title={title}>{children}</span>;
+}
+
+// The pre-assessment word with its dot, and what the word means on hover.
+function PaState({ status }) {
+  return (
+    <span title={PA_HINT[status] || undefined} style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 700, fontSize: 'inherit', color: 'inherit' }}>
+      <span className="racco-rec-dot" style={{ background: PA_DOT[status] || 'var(--ink-300)' }} />
+      {status || '—'}
+    </span>
+  );
+}
+
+/* Needs attention, for the Active tab: only what varies. The first two are
+ * named, the rest counted, so a row never grows tall. */
+function AttentionCell({ child }) {
+  const items = needsAttention(child);
+  if (items.length === 0) return <span style={{ color: 'var(--text-faint)' }}>Nothing needed</span>;
+  const shown = items.slice(0, 2);
+  const more = items.length - shown.length;
+  return (
+    <span style={{ display: 'inline-flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+      {shown.map((i) => <Chip key={i.key} tone={i.tone} title={i.title}>{i.label}</Chip>)}
+      {more > 0 && <Chip tone="faint" title={items.slice(2).map((i) => i.label).join(', ')}>+{more} more</Chip>}
+    </span>
+  );
+}
 function PsychologistCell({ child: c, canManage, onAssign }) {
   const pending = c.pending_assignment;
   const declined = !pending && !c.psychologist ? c.declined_assignment : null;
@@ -244,6 +272,11 @@ export default function Children() {
   /* Columns fold against the CENTRE PANE, not the window. With both rails up a
    * 1600px window leaves this table about 1000px, and sizing it against 1600
    * is what used to push it into a horizontal scroll. */
+  // The Active tab's Case Status said "Active" on every row, so there it gives
+  // way to what actually varies. Only for those who can act on it (SW, ISA):
+  // the facts are the social worker's care gaps. All and Archived keep it.
+  const showAttention = canManage && status === 'active' && !showArchiveColumns;
+  const phone = layout.width < 640;
   const columns = showArchiveColumns
     ? [
       { key: 'child', label: 'Child' }, { key: 'type', label: 'Case type' },
@@ -255,7 +288,7 @@ export default function Children() {
       { key: 'child', label: 'Child' },
       { key: 'type', label: 'Case type' },
       ...(layout.recordsCategoryCol ? [{ key: 'cat', label: 'Category' }] : []),
-      { key: 'status', label: 'Case status' },
+      { key: 'status', label: showAttention ? 'Needs attention' : 'Case status' },
       ...(layout.recordsPsychCol ? [{ key: 'psych', label: 'Psychologist' }] : []),
       { key: 'pa', label: 'Pre-assessment' },
       { key: 'next', label: 'Next appointment' },
@@ -276,6 +309,133 @@ export default function Children() {
       // is all theirs, and saying so on every row would be noise.
       isAdmin ? (c.social_worker_name ? `SW ${c.social_worker_name}` : 'no social worker') : null,
     ].filter(Boolean).join(' · ');
+  };
+
+  /* The row's quick actions, each only where this account may do it - the same
+   * rules as the header search (components/GlobalSearch.jsx childActions) and
+   * through the same links, so nothing is widened here and the server checks
+   * again. Edit opens the form on this page, as ?edit=<id> would. */
+  const rowActions = (c) => {
+    const active = c.status === 'active';
+    const mine = isPsych && String(c.psychologist) === String(user?.id);
+    const items = [{ id: 'open', label: 'Open record', icon: 'folder-open', onSelect: () => setSel(c) }];
+    if (active && c.has_case_referral) {
+      items.push({ id: 'book', label: 'Book a session', icon: 'calendar-plus', onSelect: () => navigate(`/schedule?book=1&child=${c.id}`) });
+    }
+    if (active && canManage) {
+      items.push({ id: 'referral', label: 'Upload a case referral', icon: 'upload', hint: c.has_case_referral ? undefined : 'Needed before a session can be booked', onSelect: () => navigate(`/reports?upload=1&child=${c.id}`) });
+    }
+    if (active && mine) {
+      items.push({ id: 'report', label: 'Upload a report', icon: 'upload', onSelect: () => navigate(`/reports?upload=1&child=${c.id}`) });
+    }
+    if (canEditRecord(c)) {
+      items.push({ id: 'edit', label: 'Edit record', icon: 'pencil', onSelect: () => openEdit(c) });
+    }
+    return items;
+  };
+  const rowMenu = (c, size) => (
+    <Menu label={`Actions for ${c.fullname}`} size={size} items={rowActions(c)} trigger={<Icon name="more-vertical" size={17} />} />
+  );
+
+  /* The next appointment as a phone chip. The list only knows the coming seven
+   * days, so "none" is said as "none this week", never as "none". */
+  const nextChip = (c) => {
+    if (c.status !== 'active') return null;
+    const next = (apptsByChild[c.id] || [])[0];
+    if (!next) return <Chip tone="faint">No session this week</Chip>;
+    const isToday = next.start.slice(0, 10) === localDate(new Date());
+    return <Chip tone={isToday ? 'amber' : 'neutral'}>{isToday ? `Next: today ${fmtTime(next.start)}` : `Next: ${fmtDay(next.start)}`}</Chip>;
+  };
+
+  /* One child as a phone card. Everything the table shows is here, as chips
+   * that wrap, so a narrow screen loses nothing (the table folded it all into
+   * one grey line that was cut off). */
+  const renderCard = (c) => {
+    const pending = c.pending_assignment;
+    const declined = !pending && !c.psychologist ? c.declined_assignment : null;
+    const attention = showAttention ? needsAttention(c) : [];
+    const sub = [c.ref, c.age != null ? `${c.age}y` : null, isAdmin ? (c.social_worker_name ? `SW ${c.social_worker_name}` : 'No social worker') : null].filter(Boolean).join(' · ');
+    return (
+      <li key={c.id} className="racco-rec-card" data-closed={c.status === 'inactive'} onClick={() => setSel(c)}>
+        <div className="racco-rec-card-top">
+          <Avatar name={c.fullname} tone={c.status === 'inactive' ? 'neutral' : 'brand'} size={32} />
+          <div className="racco-rec-card-main">
+            <button type="button" className="racco-rec-card-name" aria-label={`${c.fullname}, case ${c.ref}. Open details.`}
+              onClick={(e) => { e.stopPropagation(); setSel(c); }}>{c.fullname}</button>
+            <div className="racco-rec-card-sub">{sub}</div>
+          </div>
+          {showArchiveColumns ? null : rowMenu(c, 44)}
+        </div>
+        <div className="racco-rec-card-chips">
+          {c.case_type && <Chip tone="brand">{c.case_type}</Chip>}
+          {c.case_category && <Chip>{c.case_category}</Chip>}
+          {status === 'all' && <Chip tone={c.status === 'active' ? 'success' : 'neutral'}>{c.status === 'active' ? 'Active' : 'Archived'}</Chip>}
+          {showArchiveColumns ? (
+            <>
+              {c.termination?.reason_category && <Chip>{c.termination.reason_category}</Chip>}
+              {c.termination?.date && <Chip tone="faint">Terminated {c.termination.date}{c.termination.terminated_by ? ` by ${c.termination.terminated_by}` : ''}</Chip>}
+            </>
+          ) : (
+            <>
+              {c.psychologist_name && <Chip>{c.psychologist_name}</Chip>}
+              {pending && <Chip tone="amber" title="The child joins their records once they accept.">Awaiting {pending.psychologist_name}</Chip>}
+              {declined && <Chip tone="danger" title={`${declined.psychologist_name} declined: ${declined.reason}`}>Declined by {declined.psychologist_name}</Chip>}
+              {!c.psychologist_name && !pending && !declined && c.status === 'active' && <Chip tone="amber">No psychologist</Chip>}
+              <Chip title={PA_HINT[c.pre_assessment_status]}><span className="racco-rec-dot" style={{ background: PA_DOT[c.pre_assessment_status] || 'var(--ink-300)' }} />{c.pre_assessment_status || '—'}</Chip>
+              {nextChip(c)}
+              {attention.filter((i) => i.key !== 'psych' || i.label.startsWith('No answer')).map((i) => <Chip key={i.key} tone={i.tone} title={i.title}>{i.label}</Chip>)}
+            </>
+          )}
+        </div>
+        {showArchiveColumns && c.termination?.note && <p className="racco-rec-card-note">{c.termination.note}</p>}
+        {showArchiveColumns && (
+          <div className="racco-rec-card-actions">
+            <button type="button" className="racco-rec-tap" title="View full record" aria-label={`View ${c.fullname}'s record`} onClick={(e) => { e.stopPropagation(); navigate(`/report/child/${c.id}`); }} style={iconBtn('var(--blue-600)', 44)}><Icon name="eye" size={17} /></button>
+            {canManage && (
+              <button type="button" className="racco-rec-tap" title="Reopen case" aria-label={`Reopen ${c.fullname}'s case`} onClick={(e) => { e.stopPropagation(); setReopening(c); }} style={iconBtn('var(--success-600)', 44)}><Icon name="rotate-ccw" size={17} /></button>
+            )}
+          </div>
+        )}
+      </li>
+    );
+  };
+
+  /* An empty list says WHY it is empty. "No records found" gave the same
+   * advice for a typo, an empty archive and a filter that excludes everyone. */
+  const emptyList = () => {
+    const filtered = Boolean((isAdmin && swFilter) || (showArchiveColumns && reasonFilter));
+    const clearFilters = () => { setSwFilter(''); setReasonFilter(''); };
+    if (wanted) {
+      const elsewhere = status !== 'all' && rows.some((c) => fold(c.fullname).includes(wanted) || c.ref.toLowerCase().includes(wanted));
+      return (
+        <EmptyState icon={<Icon name="folder-search" size={24} />} title={`Nobody matches “${q.trim()}”`}
+          description={elsewhere ? `Nothing on the ${status === 'active' ? 'Active' : 'Archived'} tab. A match exists in another tab.` : 'Check the spelling, or try the case ref, like C-0042.'}
+          action={(
+            <span style={{ display: 'inline-flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <Button variant="secondary" size="sm" onClick={() => setQ('')}>Clear search</Button>
+              {elsewhere && <Button variant="outline" size="sm" onClick={() => setStatus('all')}>Search all records instead</Button>}
+            </span>
+          )} />
+      );
+    }
+    if (filtered) {
+      return (
+        <EmptyState icon={<Icon name="folder-search" size={24} />} title="Nothing matches these filters"
+          description="Another social worker or closing reason may have what you are looking for."
+          action={<Button variant="secondary" size="sm" onClick={clearFilters}>Clear filters</Button>} />
+      );
+    }
+    if (status === 'inactive') {
+      return <EmptyState icon={<Icon name="archive" size={24} />} title="No closed cases yet." description="A case appears here once it is terminated." />;
+    }
+    if (status === 'active') {
+      return (
+        <EmptyState icon={<Icon name="folder-open" size={24} />} title="No active cases yet."
+          description={canManage ? 'Add a record to start one.' : 'Cases appear here once they are assigned to you.'}
+          action={canManage ? <Button variant="primary" size="sm" onClick={openCreate} iconLeft={<Icon name="user-plus" size={16} />}>Add record</Button> : null} />
+      );
+    }
+    return <EmptyState icon={<Icon name="folder-open" size={24} />} title="No records yet." description={canManage ? 'Add a record to start one.' : undefined} />;
   };
 
   /* Built in the browser from the rows already on screen — there is no export
@@ -713,12 +873,20 @@ export default function Children() {
         {/* Toolbar. Search, the counted status filters and the sort, all in
             the card's own header strip rather than floating above it — the
             filters and the rows they filter belong to the same object. */}
-        <div style={TOOLBAR}>
-          <Input
-            size="sm" style={{ width: 250 }} fullWidth={false}
-            placeholder="Name or case ref…" value={q} onChange={(e) => setQ(e.target.value)}
-            leading={<Icon name="search" size={16} />} aria-label="Search records"
-          />
+        <div className="racco-rec-toolbar" style={TOOLBAR}>
+          <div className="racco-rec-search">
+            <Input
+              size="sm" style={{ width: 250 }} fullWidth={false}
+              placeholder="Name or case ref…" value={q} onChange={(e) => setQ(e.target.value)}
+              leading={<Icon name="search" size={16} />} aria-label="Search records by name or case ref"
+              trailing={q ? (
+                <button type="button" className="racco-rec-clear" aria-label="Clear search" onClick={() => setQ('')}
+                  style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, padding: 0, border: 'none', background: 'transparent', borderRadius: '50%', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                  <Icon name="x" size={15} />
+                </button>
+              ) : null}
+            />
+          </div>
           <FilterPills
             label="Filter children by status"
             value={status} onChange={setStatus}
@@ -726,7 +894,7 @@ export default function Children() {
           />
           <span style={{ flex: 1 }} />
           {isAdmin && (
-            <div style={{ width: 200 }}>
+            <div className="racco-rec-wide" style={{ width: 200 }}>
               <Select size="sm" value={swFilter} onChange={(e) => setSwFilter(e.target.value)} aria-label="Filter by social worker">
                 <option value="">Every social worker</option>
                 <option value="none">No social worker yet</option>
@@ -735,7 +903,7 @@ export default function Children() {
             </div>
           )}
           {showArchiveColumns && (
-            <div style={{ width: 210 }}>
+            <div className="racco-rec-wide" style={{ width: 210 }}>
               <Select size="sm" value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)} aria-label="Filter by termination reason">
                 <option value="">All termination reasons</option>
                 {ALL_CLOSURE_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
@@ -750,7 +918,9 @@ export default function Children() {
         </div>
 
         {visible.length === 0 ? (
-          <EmptyState icon={<Icon name="folder-search" size={24} />} title="No records found" description="Try a different name, case ID, or status filter." />
+          <div className="racco-rec-empty">{emptyList()}</div>
+        ) : phone ? (
+          <ul className="racco-rec-cards" aria-label="Records">{visible.map(renderCard)}</ul>
         ) : (
           <div className="racco-scroll" style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -763,17 +933,21 @@ export default function Children() {
               </thead>
               <tbody>
                 {visible.map((c) => (
+                  /* The row stays clickable for the mouse, but the keyboard and
+                     screen readers use the child's name, a real button: a row
+                     that is itself role=button cannot hold the buttons in it
+                     (Assign, Reopen, the menu). */
                   <tr
-                    key={c.id} tabIndex={0} role="button" aria-label={`${c.fullname}, case ${c.ref}. Open details.`}
-                    onClick={() => setSel(c)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSel(c); } }}
+                    key={c.id} className="racco-rec-row" onClick={() => setSel(c)}
                     style={{ ...TR, cursor: 'pointer', transition: 'background var(--dur-fast) var(--ease-out)', opacity: c.status === 'inactive' ? 0.72 : 1 }}
                     onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--blue-50)')} onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
                   >
-                    <td style={{ padding: '6px 12px' }}>
+                    <td style={{ padding: '6px 12px', maxWidth: 230 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
                         <Avatar name={c.fullname} tone={c.status === 'inactive' ? 'neutral' : 'brand'} size={26} />
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 700, fontSize: 12.5, lineHeight: 1.25, color: 'var(--text-strong)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.fullname}</div>
+                          <button type="button" className="racco-rec-name" aria-label={`${c.fullname}, case ${c.ref}. Open details.`}
+                            onClick={(e) => { e.stopPropagation(); setSel(c); }}>{c.fullname}</button>
                           {/* Whatever this width dropped is appended here, so
                               no field is ever actually lost — only moved. */}
                           <div className="racco-mono" style={{ fontSize: 10.5, lineHeight: 1.3, color: 'var(--text-faint)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{subLine(c)}</div>
@@ -806,14 +980,16 @@ export default function Children() {
                     ) : (
                       <>
                         <td style={{ ...TD, fontWeight: 600, whiteSpace: 'nowrap' }}>{c.case_type || '—'}</td>
-                        {layout.recordsCategoryCol && <td style={{ ...TD, whiteSpace: 'nowrap' }}>{c.case_category || '—'}</td>}
+                        {layout.recordsCategoryCol && <td style={TD}>{c.case_category || '—'}</td>}
                         {/* Just Active/Archived — Case type is its own column
                             now, and the chip repeating it read as the same
                             fact stated twice on one row. */}
-                        <td style={{ ...TD, whiteSpace: 'nowrap' }}>
-                          <Badge tone={c.status === 'active' ? 'success' : 'neutral'} size="sm" dot>
-                            {c.status === 'active' ? 'Active' : 'Archived'}
-                          </Badge>
+                        <td style={showAttention ? TD : { ...TD, whiteSpace: 'nowrap' }}>
+                          {showAttention ? <AttentionCell child={c} /> : (
+                            <Badge tone={c.status === 'active' ? 'success' : 'neutral'} size="sm" dot>
+                              {c.status === 'active' ? 'Active' : 'Archived'}
+                            </Badge>
+                          )}
                         </td>
                         {layout.recordsPsychCol && (
                           <td style={{ ...TD, fontWeight: 600, whiteSpace: 'nowrap' }}>
@@ -821,14 +997,20 @@ export default function Children() {
                           </td>
                         )}
                         <td style={{ ...TD, whiteSpace: 'nowrap' }}>
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontWeight: 700, fontSize: 11.5, color: 'var(--text-body)' }}>
-                            <span style={{ width: 6, height: 6, borderRadius: '50%', background: PA_DOT[c.pre_assessment_status] || 'var(--ink-300)' }} />
-                            {c.pre_assessment_status || '—'}
-                          </span>
+                          <span style={{ fontSize: 11.5, color: 'var(--text-body)' }}><PaState status={c.pre_assessment_status} /></span>
                         </td>
                         <td style={{ ...TD, whiteSpace: 'nowrap' }}>{c.status === 'active' ? <ScheduleChip appts={apptsByChild[c.id]} /> : <span style={{ color: 'var(--text-faint)' }}>—</span>}</td>
-                        <td style={{ padding: '6px 10px', textAlign: 'right' }}>
-                          <Icon name="more-horizontal" size={17} style={{ color: 'var(--text-faint)' }} />
+                        <td style={{ padding: '4px 6px 4px 4px', textAlign: 'right', whiteSpace: 'nowrap', width: 1 }}>
+                          {/* The chevron says the row opens; the menu holds the
+                              quick actions. This used to be a "..." that did
+                              nothing but what a click anywhere else did. */}
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                            <span className="racco-rec-open" aria-hidden="true">
+                              <span className="racco-rec-open-word">Open</span>
+                              <Icon className="racco-rec-open-chev" name="chevron-right" size={16} />
+                            </span>
+                            {rowMenu(c, 30)}
+                          </span>
                         </td>
                       </>
                     )}
@@ -843,6 +1025,13 @@ export default function Children() {
           <span style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)' }}>
             Showing <strong style={{ color: 'var(--text-strong)' }}>{visible.length}</strong> of {rows.length} children
           </span>
+          {/* Answered and Completed are the agency's words and stay; this says
+              what they stand for, only while a row shows one of them. */}
+          {!showArchiveColumns && visible.some((c) => ['Answered', 'Completed'].includes(c.pre_assessment_status)) && (
+            <span className="racco-rec-legend" style={{ textAlign: 'right' }}>
+              <strong>Answered</strong>: pre-assessment finished, counseling not started. <strong>Completed</strong>: finished and in counseling.
+            </span>
+          )}
         </div>
       </div>
 
