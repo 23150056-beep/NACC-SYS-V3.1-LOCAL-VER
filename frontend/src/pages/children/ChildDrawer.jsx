@@ -8,6 +8,7 @@ import {
 import { ADMISSION, CASE_TYPE_FIELDS, PLACEMENT, SPECIAL_NEEDS, dateFieldFor } from '../../config/caseData';
 import { PURPOSE_LABEL, StatusChip, fmtDay, fmtTime, localDate } from './shared';
 import { clock, clockRange } from '../../utils/time';
+import { firstError } from '../../utils/errors';
 
 /* Text typed into the record's boxes, shown as typed: its line breaks kept,
  * as the printed report keeps them, and a long word or link wrapped inside
@@ -133,8 +134,9 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
       setPendingSlot(null);
       loadSlots();
     } catch (err) {
-      const d = err.response?.data;
-      toast.error(d?.start || d?.psychologist || d?.detail || 'Could not book this slot.');
+      toast.error(firstError(err.response?.data, 'Could not book this slot.'));
+      setPendingSlot(null);
+      loadSlots();
     } finally { setBookingBusy(false); }
   };
   const street = [child.house_number, child.street].filter(Boolean).join(' ');

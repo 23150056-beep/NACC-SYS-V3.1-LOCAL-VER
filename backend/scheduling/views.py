@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date
 
 from django.contrib.auth import get_user_model
 from django.utils import timezone
@@ -16,7 +16,6 @@ from activity.models import ActivityLog
 from activity.services import log_activity
 from children.models import Child
 from scheduling import booking
-from scheduling.availability import free_windows
 from scheduling.models import AvailabilityBlock, Appointment, Unavailability
 from scheduling.serializers import (
     AvailabilityBlockSerializer, AppointmentSerializer, UnavailabilitySerializer,
@@ -178,11 +177,16 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="next-slots")
     def next_slots(self, request):
-        """Upcoming bookable windows for a child's assigned psychologist —
-        staff/psychologist see at a glance when the child can be counseled.
-        Capacity counting mirrors AppointmentViewSet._validate_booking: every
-        non-cancelled appointment inside the block's time window occupies a
-        slot, so this never contradicts what the booking endpoint accepts."""
+        """The next times a child can be booked with their psychologist -
+        the green chips in the Records drawer.
+
+        Every start time offered is run through errors_for (via
+        booking.next_openings), the rule the booking endpoint applies. It used
+        to count capacity per availability block and offer each block's START,
+        so a block of four with one session at 08:00 still offered 08:00 and
+        the click was refused as a clash. Leave, the case-referral rule and
+        the child's own other sessions are covered the same way.
+        """
         child_id = request.query_params.get("child")
         try:
             child = Child.objects.get(pk=child_id)
@@ -198,14 +202,20 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
         psych = child.assigned_psychologist
         if psych is None:
             return Response({"detail": "This child has no assigned psychologist yet."}, status=400)
-        # The capacity arithmetic lives in scheduling.availability, so this
-        # endpoint, the booking validator and the chatbot cannot drift apart
-        # about whether a slot exists.
-        today = timezone.localdate()
-        slots = free_windows(psych, today, today + timedelta(days=14))
+        slots = booking.next_openings(psych, child, duration_minutes=60)
+        reason = ""
+        if not slots:
+            name = display_name(psych) or "This psychologist"
+            if not booking.referral_on_file(child):
+                reason = booking.missing_referral_error(child)["child"]
+            elif not psych.availability_blocks.filter(active=True).exists():
+                reason = f"{name} has no availability posted yet."
+            else:
+                reason = f"{name} has no open time in the next two weeks."
         return Response({
             "psychologist": display_name(psych),
-            "slots": slots[:6],
+            "slots": slots,
+            "reason": reason,
         })
 
 
