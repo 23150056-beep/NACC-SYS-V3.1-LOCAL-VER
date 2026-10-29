@@ -1,0 +1,83 @@
+/* The Records list: its chips, the row's Open hint, and the phone sizes.
+ * Lives here and not in index.css so the list can change without touching the
+ * shared sheet. */
+
+.racco-rec-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  max-width: 100%;
+  padding: 2px 8px; border-radius: var(--radius-pill);
+  font-family: var(--font-sans); font-weight: 700; font-size: 11.5px; line-height: 1.3;
+  background: var(--divider-row); color: var(--ink-700);
+}
+.racco-rec-chip[data-tone="danger"] { background: var(--red-50); color: var(--red-700); }
+.racco-rec-chip[data-tone="amber"] { background: var(--amber-50); color: var(--amber-700); }
+.racco-rec-chip[data-tone="success"] { background: var(--success-50); color: var(--success-700); }
+.racco-rec-chip[data-tone="brand"] { background: var(--blue-50); color: var(--blue-700); }
+.racco-rec-chip[data-tone="faint"] { background: transparent; color: var(--text-muted); font-weight: 600; padding-left: 0; }
+.racco-rec-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+
+/* The name is the real open button; it must read as text, not as a button. */
+.racco-rec-name {
+  display: block; max-width: 100%; margin: 0; padding: 0; border: none; background: none;
+  font-family: var(--font-sans); font-weight: 700; font-size: 12.5px; line-height: 1.25;
+  color: var(--text-strong); text-align: left; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.racco-rec-name:hover { text-decoration: underline; }
+
+/* "Open" shows when the pointer or the keyboard is on the row. The chevron is
+ * always there, so the row never looks inert. */
+.racco-rec-open {
+  position: relative; display: inline-flex; align-items: center; gap: 2px;
+  font-family: var(--font-sans); font-weight: 700; font-size: 12px; color: var(--blue-700);
+}
+.racco-rec-open-word {
+  /* Out of the flow: the word is only a hover hint, and in the flow it kept a
+   * 40px column open on every row and pushed the table past its card. It sits
+   * over the cell's own padding, on the row's hover colour. */
+  position: absolute; right: 100%; padding: 0 2px 0 6px; background: var(--blue-50);
+  opacity: 0; pointer-events: none; transition: opacity var(--dur-fast) var(--ease-out);
+}
+.racco-rec-row:hover .racco-rec-open-word,
+.racco-rec-row:focus-within .racco-rec-open-word { opacity: 1; }
+.racco-rec-open-chev { color: var(--text-faint); }
+.racco-rec-row:hover .racco-rec-open-chev,
+.racco-rec-row:focus-within .racco-rec-open-chev { color: var(--blue-600); }
+
+.racco-rec-legend { font-size: 11.5px; color: var(--text-muted); line-height: 1.45; }
+
+/* ---- Phone cards (the list switches to these under 640px) ---- */
+.racco-rec-cards { list-style: none; margin: 0; padding: 0; }
+.racco-rec-card {
+  display: block; padding: 10px 12px 12px; border-bottom: 1px solid var(--divider-row);
+  cursor: pointer;
+}
+.racco-rec-card[data-closed="true"] { opacity: 0.8; }
+.racco-rec-card-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.racco-rec-card-main { flex: 1; min-width: 0; }
+.racco-rec-card-name {
+  display: block; width: 100%; min-height: 28px; margin: 0; padding: 0; border: none; background: none;
+  font-family: var(--font-sans); font-weight: 700; font-size: 15px; line-height: 1.25;
+  color: var(--text-strong); text-align: left; cursor: pointer;
+}
+.racco-rec-card-sub { font-size: 13px; line-height: 1.35; color: var(--text-muted); margin-top: 1px; }
+.racco-rec-card-chips { display: flex; flex-wrap: wrap; gap: 6px 6px; margin-top: 8px; }
+.racco-rec-card-chips .racco-rec-chip { font-size: 13px; padding: 3px 10px; }
+.racco-rec-card-note { margin: 8px 0 0; font-size: 13px; line-height: 1.4; color: var(--text-muted);
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.racco-rec-card-actions { display: flex; gap: 6px; margin-top: 8px; }
+
+@media (max-width: 639px) {
+  /* A finger-sized target: the eye, Reopen, the caseload's Hide/Show. */
+  .racco-rec-tap { min-width: 44px; min-height: 44px; }
+  /* The toolbar's own controls, at the size a finger needs. The Input and
+   * the shared Segmented/FilterPills set their sizes inline, hence !important. */
+  .racco-rec-search { flex: 1 1 100%; min-width: 0; }
+  .racco-rec-search > div { height: 44px !important; width: 100% !important; }
+  .racco-rec-search input { font-size: 16px !important; }
+  .racco-rec-toolbar button, .racco-rec-toolbar select { min-height: 44px; }
+  .racco-rec-toolbar [role="tablist"] button { padding-left: 16px !important; padding-right: 16px !important; font-size: 13px !important; }
+  .racco-rec-wide { width: 100% !important; }
+  .racco-rec-clear { min-width: 44px; min-height: 44px; }
+  .racco-rec-empty button { min-height: 44px; }
+}

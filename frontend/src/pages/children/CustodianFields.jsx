@@ -121,14 +121,15 @@ export default function CustodianFields({ form, setForm, fieldError, readOnly = 
   return (
     <div style={{ marginBottom: 14 }}>
       <div className="racco-case-grid">
-        <FormField label="Custodian" required error={fieldError('custodian_name')}
+        <FormField label="Custodian" required htmlFor="rf-custodian_name" error={fieldError('custodian_name')}
           hint="Who the child lives with now - a name and relationship, or the facility.">
           <Input value={form.custodian_name || ''} maxLength={150}
             placeholder="e.g. Rosa Dela Cruz (foster parent)"
             onChange={(e) => change({ custodian_name: e.target.value })} />
         </FormField>
-        <FormField label="Contact Number" error={fieldError('custodian_contact')}
-          hint="The custodian's mobile, for appointment texts. Optional.">
+        <FormField htmlFor="rf-custodian_contact" error={fieldError('custodian_contact')}
+          label={<>Contact Number <span style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: 12 }}>(optional)</span></>}
+          hint="The custodian's mobile, for appointment texts.">
           <Input value={form.custodian_contact || ''} maxLength={20} inputMode="tel"
             placeholder="0917 123 4567"
             trailing={confirmed ? <Badge tone="success" size="sm" dot>Confirmed</Badge> : null}

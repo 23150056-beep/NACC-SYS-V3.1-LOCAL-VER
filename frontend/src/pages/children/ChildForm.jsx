@@ -9,10 +9,12 @@ import {
   DYNAMIC, HEALTH_CONDITIONS, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, SPECIAL_NEEDS, TYPES_OF_ADOPTION, ageRange, ageRefusal, caseChanged, caseTypesFor,
   dateFieldFor, requiredFields, unaskedAnswers,
 } from '../../config/caseData';
-import { shortDate, timeAgo } from '../../utils/time';
+import { clock, shortDate, timeAgo } from '../../utils/time';
+import { PolishBar, usePolish } from '../../components/PolishWriting';
 import CustodianFields from './CustodianFields';
 import PsychologistPicker from './PsychologistPicker';
 import { EMPTY, NOT_AN_ANSWER, formFromRecord, newIntakeToken } from './recordForm';
+import './form.css';
 
 // "2008-09-29" from the date's LOCAL parts. toISOString() gives the UTC date,
 // which in Manila (UTC+8) is the previous day for anything before 8 a.m.
@@ -91,6 +93,21 @@ const CHECKED_AGAINST = {
   custodian_sms_consent: ['custodian_name', 'custodian_contact', 'case_type'],
 };
 
+/* The control each required answer is typed into carries id "rf-<answer>", so
+ * "Show me" can put the cursor in it. FormField puts the id on its one control
+ * when it is given htmlFor. The address answers are the name; the picks are
+ * the codes. */
+const FOCUS_ID = { province: 'psgc_province', municipality: 'psgc_municipality', barangay: 'psgc_barangay' };
+function F({ name, ...props }) {
+  return <FormField htmlFor={name ? `rf-${FOCUS_ID[name] || name}` : undefined} {...props} />;
+}
+
+/* "(optional)" beside a label, for the few questions that are deliberately
+ * left to the person (a foundling may have no middle name). */
+const optional = (text) => (
+  <>{text} <span style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: 12 }}>(optional)</span></>
+);
+
 /* "A, B and C". */
 const listed = (xs) => (xs.length < 2 ? xs.join('') : `${xs.slice(0, -1).join(', ')} and ${xs[xs.length - 1]}`);
 
@@ -115,8 +132,46 @@ const snapshot = (f) => JSON.stringify(Object.keys(f).sort()
 
 export default function ChildForm({ form, setForm, draftKey, psychologists, socialWorkers = null, blocks = [], error, fieldErrors = null, refusedWith = null, isPsych = false, canReopen = false, others = [], saving = false, onSubmit, onWithdraw, onClose, onReopen, onOpenExisting }) {
   const [step, setStep] = useState(1);
+  /* Polish writing on the three free-text fields. The setters are functional
+     because the draft lands after an await, by which time `form` has moved on. */
+  const setField = (key) => (text) => setForm((f) => ({ ...f, [key]: text }));
+  const polishReason = usePolish(form.referral_reason, setField('referral_reason'));
+  const polishMedical = usePolish(form.medical_notes, setField('medical_notes'));
+  const polishRecommendation = usePolish(form.recommendation, setField('recommendation'));
+  /* Told the outcome only once the record is really saved: `onSubmit` resolves
+     false on every failed or cancelled save, so a refused save keeps the draft
+     and "Revert to my text" where they were. */
+  const submit = async (e) => {
+    const saved = { reason: form.referral_reason, medical: form.medical_notes, recommendation: form.recommendation };
+    if (!(await onSubmit(e))) return;
+    polishReason.settle(saved.reason);
+    polishMedical.settle(saved.medical);
+    polishRecommendation.settle(saved.recommendation);
+  };
   // Reopening the form for a different record starts at the beginning again.
   useEffect(() => { setStep(1); }, [form.id]);
+  /* Steps already left: their empty required answers say "Required" (a step
+     not yet reached is not nagging about what nobody has seen). Next never
+     checks anything - the form may still be walked through freely. */
+  const [left, setLeft] = useState(() => new Set());
+  const prevStep = useRef(1);
+  useEffect(() => {
+    if (prevStep.current !== step) {
+      const was = prevStep.current;
+      setLeft((s) => (s.has(was) ? s : new Set(s).add(was)));
+      prevStep.current = step;
+    }
+  }, [step]);
+  useEffect(() => { setLeft(new Set()); prevStep.current = 1; }, [form.id]);
+  const referralInput = useRef(null);
+  const [needOpen, setNeedOpen] = useState(false);
+  const [focusReq, setFocusReq] = useState(null);
+  /* The draft on this computer (new records only): when it was last written,
+     and whether the person cleared it - after which nothing more is kept from
+     this form, or "Clear draft" on a shared office PC would be undone by the
+     next keystroke. */
+  const [draftSavedAt, setDraftSavedAt] = useState(null);
+  const [draftOff, setDraftOff] = useState(false);
 
   /* Closing asks first once anything has been typed — by the X, Cancel,
      Escape or a click outside. An edit loses the changes; a new record keeps
@@ -135,7 +190,9 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
         confirmLabel: 'Discard changes', cancelLabel: 'Keep editing', tone: 'warning',
       } : {
         title: 'Close without saving?',
-        description: `This record has not been added yet. What you typed stays as a draft on this device, and Add Record offers to restore it. ${PROCEED}`,
+        description: draftOff
+          ? `This record has not been added yet, and you cleared its draft, so nothing you typed is kept. ${PROCEED}`
+          : `This record has not been added yet. What you typed stays as a draft on this device, and Add Record offers to restore it. ${PROCEED}`,
         confirmLabel: 'Close the form', cancelLabel: 'Keep editing', tone: 'warning',
       });
       if (!ok) return;
@@ -155,7 +212,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   // Draft autosave (create mode only) — debounced write to localStorage so an
   // accidental modal close (or crash) never loses a half-typed intake record.
   const saveDraft = (current) => {
-    if (current.id) return; // edits are server-backed; drafts are create-only
+    if (current.id || draftOff) return; // edits are server-backed; drafts are create-only
     const data = { ...current };
     delete data._draft; delete data._conflict;
     // A File does not survive JSON.stringify — it serialises to {}, which is
@@ -164,19 +221,33 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
     // not something a draft can hold, so it is not kept.
     delete data.referralFile;
     if (Object.entries(data).some(([k, v]) => !NOT_AN_ANSWER.includes(k) && v)) {
-      try { localStorage.setItem(draftKey, JSON.stringify(data)); } catch { /* storage full */ }
+      try {
+        localStorage.setItem(draftKey, JSON.stringify(data));
+        setDraftSavedAt(new Date());
+      } catch { /* storage full */ }
     }
+  };
+  const clearDraft = async () => {
+    const ok = await confirm({
+      title: 'Clear the saved draft?',
+      description: `The draft kept on this computer is deleted, and nothing more is kept from this form. What is on screen stays until you close it. ${PROCEED}`,
+      confirmLabel: 'Clear draft', cancelLabel: 'Keep it', tone: 'warning',
+    });
+    if (!ok) return;
+    try { localStorage.removeItem(draftKey); } catch { /* private browsing */ }
+    setDraftOff(true);
+    setDraftSavedAt(null);
   };
   useEffect(() => {
     // Not while the save is going: a keystroke (or a chosen file) in the half
     // second before Save would otherwise be written as a draft AFTER the save
     // removed it, and Add Record would offer back a child already added.
-    if (form.id || saving) return undefined;
+    if (form.id || saving || draftOff) return undefined;
     const t = setTimeout(() => saveDraft(form), 500);
     return () => clearTimeout(t);
-    // saveDraft reads only its argument and draftKey.
+    // saveDraft reads only its argument, draftKey and draftOff.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [form, draftKey, saving]);
+  }, [form, draftKey, saving, draftOff]);
   // Duplicate/returning-child detection (create mode only): debounce-check
   // while typing so intake staff can reopen an archived record instead of
   // accidentally creating a second one.
@@ -418,14 +489,40 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
 
   const blockers = [...needed, ...Object.keys(problems).filter((k) => !needed.includes(k))];
   const blockedOnStep = (n) => blockers.some((f) => FIELD_INFO[f]?.[0] === n);
-  const firstBlockerStep = blockers.length ? FIELD_INFO[blockers[0]]?.[0] : null;
+  const stepOf = (f) => FIELD_INFO[f]?.[0] || 1;
+  /* "Required" under an empty required answer once its step has been left.
+     Built on `needed`, the list that already holds Save - not a second rule. */
+  const requiredMsg = (f) => (needed.includes(f) && left.has(stepOf(f)) ? 'Required' : null);
+  function shown(f) { return fieldError(f) || requiredMsg(f); }
+  const neededOnStep = (n) => needed.filter((f) => stepOf(f) === n).length;
+  /* What "Show me" lists: every blocker, by step, with the wording a person
+     reads. A blocker that is a refusal of what was typed says so. */
+  const needList = FORM_STEPS.map((label, i) => ({
+    label, n: i + 1,
+    items: blockers.filter((f) => stepOf(f) === i + 1)
+      .map((f) => ({ f, text: labelOf(f), kind: needed.includes(f) ? 'needed' : 'check' })),
+  })).filter((g) => g.items.length);
+  const jumpTo = (f) => {
+    setNeedOpen(false);
+    setStep(stepOf(f));
+    setFocusReq({ f, n: Date.now() });
+  };
+  useEffect(() => {
+    if (!focusReq) return;
+    const el = document.getElementById(`rf-${FOCUS_ID[focusReq.f] || focusReq.f}`);
+    if (el) {
+      el.scrollIntoView({ block: 'center' });
+      el.focus({ preventScroll: true });
+    }
+    setFocusReq(null);
+  }, [focusReq, step]);
+  useEffect(() => { if (blockers.length === 0) setNeedOpen(false); }, [blockers.length]);
   return (
-    <div onClick={requestClose} style={{ position: 'fixed', inset: 0, background: 'rgba(14,19,29,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20, zIndex: 70, animation: 'racco-fade-in var(--dur-base) var(--ease-out)' }}>
-      <form onSubmit={onSubmit} onClick={(e) => e.stopPropagation()}
-        style={{ width: 'min(980px, 96vw)', height: 'min(86vh, 820px)', background: 'var(--surface)', borderRadius: 'var(--radius-xl)', boxShadow: 'var(--shadow-xl)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <div style={{ padding: '18px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--ink-50)' }}>
+    <div className="racco-form-overlay" onClick={requestClose}>
+      <form className="racco-form-shell" onSubmit={submit} onClick={(e) => e.stopPropagation()}>
+        <div className="racco-form-head" style={{ padding: '18px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--ink-50)' }}>
           <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>{isEdit ? 'Edit Record' : 'Add Record'}</div>
-          <button type="button" onClick={requestClose} aria-label="Close" {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--text-muted)')}><Icon name="x" size={17} /></button>
+          <button type="button" className="racco-form-x" onClick={requestClose} aria-label="Close" {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--text-muted)')}><Icon name="x" size={17} /></button>
         </div>
         {others.length > 0 && (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', padding: '8px 24px', background: 'var(--blue-50)', borderBottom: '1px solid var(--blue-100)' }}>
@@ -433,7 +530,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             {others.map((o, i) => <Badge key={i} tone="brand" size="sm" dot>{o.name} ({roleLabel(o.role)}) is here</Badge>)}
           </div>
         )}
-        <div className="racco-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
+        <div className="racco-scroll racco-form-body" style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 18 }}>
           {form._draft && (
             <Alert tone="info" icon={<Icon name="history" size={18} />} title="Unsaved draft found">
               You started a record earlier that wasn&apos;t saved. Continue where you left off?
@@ -476,39 +573,80 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             </Alert>
           )}
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <div className="racco-eyebrow" style={{ fontSize: 10 }}>Profiling steps</div>
-              <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>Step {step} of {FORM_STEPS.length}</div>
-            </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-              {FORM_STEPS.map((label, i) => {
-                const active = step === i + 1;
-                // Visited and nothing left blank. A step walked past with a
-                // required answer still missing is not "done", and says so;
-                // on an edit, any step holding something the save refuses.
-                const lacking = (isEdit || step > i + 1) && blockedOnStep(i + 1);
-                const done = step > i + 1 && !lacking;
-                return (
-                  <React.Fragment key={label}>
-                    <button
-                      type="button" onClick={() => setStep(i + 1)}
-                      aria-current={active ? 'step' : undefined}
-                      aria-label={lacking ? `${label} — still needs answers` : undefined}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 'var(--radius-pill)', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12.5, border: `1px solid ${active ? 'var(--blue-500)' : lacking ? 'var(--amber-500)' : done ? 'var(--success-500)' : 'var(--border)'}`, background: active ? 'var(--blue-50)' : lacking ? 'var(--amber-50)' : done ? 'var(--success-50)' : 'var(--surface)', color: active ? 'var(--blue-700)' : lacking ? 'var(--amber-700)' : done ? 'var(--success-700)' : 'var(--text-muted)' }}
-                    >{lacking && <Icon name="alert-circle" size={13} />}{label}</button>
-                    {i < FORM_STEPS.length - 1 && <span style={{ color: 'var(--text-faint)', fontSize: 13, fontWeight: 700 }}>—</span>}
-                  </React.Fragment>
-                );
-              })}
-            </div>
-          </div>
+          {(() => {
+            // Visited and nothing left blank. A step walked past with a
+            // required answer still missing is not "done", and says so;
+            // on an edit, any step holding something the save refuses.
+            const stateOf = (n) => {
+              const lacking = (isEdit || step > n) && blockedOnStep(n);
+              if (step === n) return 'active';
+              if (lacking) return 'lacking';
+              return step > n ? 'done' : 'todo';
+            };
+            const countText = (n) => {
+              const c = neededOnStep(n);
+              return c ? `${c} to fill` : '';
+            };
+            return (
+              <>
+                <div className="racco-steps-desktop" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <div className="racco-eyebrow" style={{ fontSize: 10 }}>Profiling steps</div>
+                    <div style={{ fontSize: 12, color: 'var(--text-muted)', fontWeight: 700 }}>Step {step} of {FORM_STEPS.length}</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                    {FORM_STEPS.map((label, i) => {
+                      const st = stateOf(i + 1);
+                      const active = st === 'active';
+                      const lacking = st === 'lacking';
+                      const done = st === 'done';
+                      const count = countText(i + 1);
+                      return (
+                        <React.Fragment key={label}>
+                          <button
+                            type="button" onClick={() => setStep(i + 1)}
+                            aria-current={active ? 'step' : undefined}
+                            aria-label={count ? `${label}, ${count}` : lacking ? `${label} — still needs answers` : undefined}
+                            style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '8px 12px', borderRadius: 'var(--radius-pill)', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12.5, border: `1px solid ${active ? 'var(--blue-500)' : lacking ? 'var(--amber-500)' : done ? 'var(--success-500)' : 'var(--border)'}`, background: active ? 'var(--blue-50)' : lacking ? 'var(--amber-50)' : done ? 'var(--success-50)' : 'var(--surface)', color: active ? 'var(--blue-700)' : lacking ? 'var(--amber-700)' : done ? 'var(--success-700)' : 'var(--text-muted)' }}
+                          >
+                            {lacking && <Icon name="alert-circle" size={13} />}{label}
+                            {count && <span style={{ fontWeight: 600, fontSize: 11.5, opacity: 0.9 }}>· {count}</span>}
+                          </button>
+                          {i < FORM_STEPS.length - 1 && <span style={{ color: 'var(--text-faint)', fontSize: 13, fontWeight: 700 }}>—</span>}
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                </div>
+                {/* On a phone the pills wrapped into three ragged rows: one
+                    line saying where you are, and a bar whose segments are
+                    the steps. */}
+                <div className="racco-steps-phone">
+                  <div style={{ fontSize: 13, fontWeight: 800, color: 'var(--text-strong)' }}>
+                    Step {step} of {FORM_STEPS.length} – {FORM_STEPS[step - 1]}
+                  </div>
+                  {countText(step) && <div style={{ fontSize: 12, color: 'var(--amber-700)', fontWeight: 600 }}>{countText(step)}</div>}
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {FORM_STEPS.map((label, i) => {
+                      const c = countText(i + 1);
+                      return (
+                        <button key={label} type="button" className="racco-step-seg" data-state={stateOf(i + 1)}
+                          aria-current={step === i + 1 ? 'step' : undefined}
+                          aria-label={`Go to ${label}${c ? `, ${c}` : ''}`}
+                          onClick={() => setStep(i + 1)}><span /></button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
 
           {step === 1 && (
           <section>
             <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 10 }}>Child&apos;s Profile</div>
             <div className="racco-case-grid">
-              <FormField label="Category" required error={fieldError('case_category')}
+              <F name="case_category" label="Category" required error={shown('case_category')}
                 hint={hiddenCategories.length
                   ? `${listed(hiddenCategories)} ${hiddenCategories.length === 1 ? 'is' : 'are'} not used for ${form.case_type} cases. To use one, change the Case Type first.`
                   : undefined}>
@@ -516,8 +654,8 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   <option value="">— Select category —</option>
                   {withRetired(categoryOptions, form.case_category, form._record?.case_category).map((c) => <option key={c} value={c}>{categoryLabel(c)}</option>)}
                 </Select>
-              </FormField>
-              <FormField label="Case Type" required error={fieldError('case_type')}
+              </F>
+              <F name="case_type" label="Case Type" required error={shown('case_type')}
                 hint={hiddenCaseTypes.length
                   ? `${listed(hiddenCaseTypes)} ${hiddenCaseTypes.length === 1 ? 'does' : 'do'} not take ${form.case_category} children. To pick one, change the Category first.`
                   : undefined}>
@@ -525,7 +663,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   <option value="">— Select case type —</option>
                   {withRetired(caseTypeOptions, form.case_type).map((t) => <option key={t} value={t}>{caseTypeLabel(t)}</option>)}
                 </Select>
-              </FormField>
+              </F>
 
               {/* Child name is not editable once a record exists (adviser). */}
               {isEdit ? (
@@ -542,15 +680,15 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                 </div>
               ) : (
                 <div className="racco-name-grid" style={{ gridColumn: '1 / -1' }}>
-                  <FormField label="First Name" required error={fieldError('first_name')}>
+                  <F name="first_name" label="First Name" required error={shown('first_name')}>
                     <Input value={form.first_name} maxLength={100} onChange={(e) => setForm({ ...form, first_name: e.target.value })} />
-                  </FormField>
-                  <FormField label="Middle Name" hint="Leave blank if the child has none." error={fieldError('middle_name')}>
+                  </F>
+                  <F name="middle_name" label={optional('Middle Name')} hint="Leave blank if the child has none." error={shown('middle_name')}>
                     <Input value={form.middle_name || ''} maxLength={100} onChange={(e) => setForm({ ...form, middle_name: e.target.value })} />
-                  </FormField>
-                  <FormField label="Last Name" required error={fieldError('last_name')}>
+                  </F>
+                  <F name="last_name" label="Last Name" required error={shown('last_name')}>
                     <Input value={form.last_name} maxLength={100} onChange={(e) => setForm({ ...form, last_name: e.target.value })} />
-                  </FormField>
+                  </F>
                 </div>
               )}
               {/* The SCSR: "For Child Without Known Parents, indicate the given
@@ -558,9 +696,9 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   category only; an alias already saved stays when the category
                   changes - hidden, never deleted - and is sent with the save. */}
               {form.case_category === ALIAS_CATEGORY && (
-                <FormField label="Alias" hint="Optional — if the child is known by another name." error={fieldError('alias')}>
+                <F name="alias" label={optional('Alias')} hint="If the child is known by another name." error={shown('alias')}>
                   <Input value={form.alias || ''} maxLength={150} onChange={(e) => setForm({ ...form, alias: e.target.value })} />
-                </FormField>
+                </F>
               )}
               {!isEdit && dupes.length > 0 && (
                 <Alert tone="warning" icon={<Icon name="alert-triangle" size={18} />} title="A similar record already exists" style={{ gridColumn: '1 / -1' }}>
@@ -605,89 +743,89 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   </div>
                 </Alert>
               )}
-              <FormField label="Date of Birth or Given Date of Birth" required error={fieldError('birth_date')}
+              <F name="birth_date" label="Date of Birth or Given Date of Birth" required error={shown('birth_date')}
                 hint={!isEdit
                   ? (oldestAge == null
                     ? `Must be 18 or older for an Adult adoption: born ${shortDate(latestBirth)} or earlier. For a foundling, the given date.`
                     : `The child must be ${youngestAge} to ${oldestAge} today: born ${shortDate(earliestBirth)} to ${shortDate(latestBirth)}. For a foundling, the given date.`)
                   : undefined}>
                 <Input type="date" value={form.birth_date || ''} min={!isEdit ? minBirthDate : undefined} max={!isEdit ? maxBirthDate : undefined} onChange={(e) => setForm({ ...form, birth_date: e.target.value })} />
-              </FormField>
-              <FormField label="Date Found" hint="Only for a child who was found." error={fieldError('date_found')}>
+              </F>
+              <F name="date_found" label={optional('Date Found')} hint="Only for a child who was found." error={shown('date_found')}>
                 <Input type="date" value={form.date_found || ''} min={form.birth_date || undefined} max={todayIso} onChange={(e) => setForm({ ...form, date_found: e.target.value })} />
-              </FormField>
-              <FormField label="Sex" required error={fieldError('gender')}>
+              </F>
+              <F name="gender" label="Sex" required error={shown('gender')}>
                 <Select value={form.gender} onChange={(e) => setForm({ ...form, gender: e.target.value })}>
                   <option value="">—</option><option>Male</option><option>Female</option>
                 </Select>
-              </FormField>
-              <FormField label="Place of Birth or Place Found" required error={fieldError('place_of_birth_or_found')}>
+              </F>
+              <F name="place_of_birth_or_found" label="Place of Birth or Place Found" required error={shown('place_of_birth_or_found')}>
                 <Input value={form.place_of_birth_or_found || ''} maxLength={150} onChange={(e) => setForm({ ...form, place_of_birth_or_found: e.target.value })} />
-              </FormField>
-              <FormField label="Birth Status" required error={fieldError('birth_status')}>
+              </F>
+              <F name="birth_status" label="Birth Status" required error={shown('birth_status')}>
                 <Select value={form.birth_status || ''} onChange={(e) => setForm({ ...form, birth_status: e.target.value })}>
                   <option value="">— Select —</option>
                   {withRetired(BIRTH_STATUSES, form.birth_status, form._record?.birth_status).map((v) => <option key={v} value={v}>{optionLabel(BIRTH_STATUSES, v)}</option>)}
                 </Select>
-              </FormField>
-              <FormField label="Legal Status" hint="Leave blank if none has been issued yet." error={fieldError('legal_status')}>
+              </F>
+              <F name="legal_status" label={optional('Legal Status')} hint="Leave blank if none has been issued yet." error={shown('legal_status')}>
                 <Select value={form.legal_status || ''} onChange={(e) => setForm({ ...form, legal_status: e.target.value })}>
                   <option value="">— Select —</option>
                   {withRetired(LEGAL_STATUSES, form.legal_status, form._record?.legal_status).map((v) => <option key={v} value={v}>{optionLabel(LEGAL_STATUSES, v)}</option>)}
                 </Select>
-              </FormField>
+              </F>
               {form.legal_status && (
-                <FormField label="Date Issued" hint="Optional: when the legal status was issued." error={fieldError('legal_status_date')}>
+                <F name="legal_status_date" label={optional('Date Issued')} hint="When the legal status was issued." error={shown('legal_status_date')}>
                   <Input type="date" value={form.legal_status_date || ''} min={form.birth_date || undefined} max={todayIso}
                     onChange={(e) => setForm({ ...form, legal_status_date: e.target.value })} />
-                </FormField>
+                </F>
               )}
-              <FormField label="Health Condition" required error={fieldError('health_condition')}>
+              <F name="health_condition" label="Health Condition" required error={shown('health_condition')}>
                 <Select value={form.health_condition || ''} onChange={(e) => setForm({ ...form, health_condition: e.target.value })}>
                   <option value="">— Select —</option>
                   {withRetired(HEALTH_CONDITIONS, form.health_condition, form._record?.health_condition).map((v) => <option key={v} value={v}>{optionLabel(HEALTH_CONDITIONS, v)}</option>)}
                 </Select>
-              </FormField>
+              </F>
               {/* Kept, hidden, when the answer changes; the server drops it
                   for anything but "With special needs". */}
               {form.health_condition === SPECIAL_NEEDS && (
-                <FormField label="Specify the special needs" required error={fieldError('special_needs')}>
+                <F name="special_needs" label="Specify the special needs" required error={shown('special_needs')}>
                   <Input value={form.special_needs || ''} maxLength={300} placeholder="e.g. Hearing loss, in therapy"
                     onChange={(e) => setForm({ ...form, special_needs: e.target.value })} />
-                </FormField>
+                </F>
               )}
               {/* Moved here from Recommendation (24 Sep 2026): every child has
                   an answer, even if the answer is that they are not in school. */}
-              <FormField label="Educational Placement" required error={fieldError('education_level')}
+              <F name="education_level" label="Educational Placement" required error={shown('education_level')}
                 hint="The grade level, or “Not in school”.">
                 <Input value={form.education_level || ''} maxLength={100} placeholder="e.g. Grade 4"
                   onChange={(e) => setForm({ ...form, education_level: e.target.value })} />
-              </FormField>
+              </F>
               {/* Taken off on 24 Sep 2026 and asked again on 7 Oct (owner): the
                   SCSR's Part I lists it. */}
-              <FormField label="Current Whereabouts" required error={fieldError('current_placement')}>
+              <F name="current_placement" label="Current Whereabouts" required error={shown('current_placement')}>
                 <Input value={form.current_placement || ''} maxLength={150} placeholder="e.g. Foster family, residential facility"
                   onChange={(e) => setForm({ ...form, current_placement: e.target.value })} />
-              </FormField>
+              </F>
               {asksFor('type_of_adoption') && (
-                <FormField label="Type of Adoption" required error={fieldError('type_of_adoption')}>
+                <F name="type_of_adoption" label="Type of Adoption" required error={shown('type_of_adoption')}>
                   <Select value={form.type_of_adoption || ''} onChange={(e) => setForm({ ...form, type_of_adoption: e.target.value })}>
                     <option value="">— Select —</option>
                     {withRetired(TYPES_OF_ADOPTION, form.type_of_adoption, form._record?.type_of_adoption).map((v) => <option key={v} value={v}>{optionLabel(TYPES_OF_ADOPTION, v)}</option>)}
                   </Select>
-                </FormField>
+                </F>
               )}
               {/* One date, never both: an admission for a child the agency took
                   in, a placement for a child placed with a custodian. */}
               {dateField === ADMISSION && (
-                <FormField label="Date of Admission to the Agency" required error={fieldError(ADMISSION)}>
+                <F name={ADMISSION} label="Date of Admission to the Agency" required error={shown(ADMISSION)}>
                   <Input type="date" value={form[ADMISSION] || ''} min={form.birth_date || undefined} max={todayIso} onChange={(e) => setForm({ ...form, [ADMISSION]: e.target.value })} />
-                </FormField>
+                </F>
               )}
               {dateField === PLACEMENT && (
-                <FormField label="Date of Placement to Custodian" required error={fieldError(PLACEMENT)}>
+                <F name={PLACEMENT} label="Date of Placement to Custodian" required error={shown(PLACEMENT)}>
                   <Input type="date" value={form[PLACEMENT] || ''} min={form.birth_date || undefined} max={todayIso} onChange={(e) => setForm({ ...form, [PLACEMENT]: e.target.value })} />
-                </FormField>
+                </F>
               )}
               {!dateField && (
                 <div style={{ alignSelf: 'end', fontSize: 12.5, color: 'var(--text-muted)', padding: '10px 12px', background: 'var(--ink-50)', border: '1px dashed var(--border-strong)', borderRadius: 'var(--radius-md)' }}>
@@ -706,45 +844,53 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 10 }}>
               Where the child lives now, and with whom.
             </div>
+            {/* The custodian questions depend on the case type, chosen on step
+                1: without this the step promised "with whom" and showed no
+                such question. */}
+            {!form.case_type && (
+              <div style={{ fontSize: 12.5, color: 'var(--text-muted)', padding: '10px 12px', marginBottom: 12, background: 'var(--ink-50)', border: '1px dashed var(--border-strong)', borderRadius: 'var(--radius-md)' }}>
+                Who the child lives with is asked here once you choose a Case Type.
+              </div>
+            )}
             {asksFor('custodian_name') && (
-              <CustodianFields form={form} setForm={setForm} fieldError={fieldError} readOnly={isPsych} />
+              <CustodianFields form={form} setForm={setForm} fieldError={shown} readOnly={isPsych} />
             )}
             <div className="racco-eyebrow" style={{ fontSize: 10, margin: '6px 0 4px' }}>Address</div>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 10 }}>
               Choose the province first — the municipality and barangay lists follow from it.
             </div>
             <div className="racco-case-grid">
-              <FormField label="House Number" required error={fieldError('house_number')}>
+              <F name="house_number" label="House Number" required error={shown('house_number')}>
                 <Input value={form.house_number || ''} maxLength={50} onChange={(e) => setForm({ ...form, house_number: e.target.value })} />
-              </FormField>
-              <FormField label="Street Number" required hint="Or the purok or sitio, where there is no street." error={fieldError('street')}>
+              </F>
+              <F name="street" label="Street Number" required hint="Or the purok or sitio, where there is no street." error={shown('street')}>
                 <Input value={form.street || ''} maxLength={150} onChange={(e) => setForm({ ...form, street: e.target.value })} />
-              </FormField>
+              </F>
               {/* Province, then municipality, then barangay: the order the
                   lists unlock in, each filtered by the one before it. They
                   were laid out the other way round, so the address was filled
                   right to left past two disabled selects. */}
-              <FormField label="Province" required error={fieldError('province')}>
+              <F name="province" label="Province" required error={shown('province')}>
                 <Select value={form.psgc_province || ''} onChange={(e) => pickPlace('province', e.target.value, provinces)}>
                   <option value="">— Select province —</option>
                   {provinces.map((p) => <option key={p.psgc_code} value={p.psgc_code}>{p.name}</option>)}
                 </Select>
-              </FormField>
-              <FormField label="Municipality / City" required error={fieldError('municipality')}>
+              </F>
+              <F name="municipality" label="Municipality / City" required error={shown('municipality')}>
                 <Select value={form.psgc_municipality || ''} disabled={!form.psgc_province || munisLoading} onChange={(e) => pickPlace('municipality', e.target.value, munis)}>
                   <option value="">{!form.psgc_province ? 'Select a province first' : munisLoading ? 'Loading…' : '— Select municipality —'}</option>
                   {munis.map((m) => <option key={m.psgc_code} value={m.psgc_code}>{m.name}</option>)}
                 </Select>
-              </FormField>
-              <FormField label="Barangay" required error={fieldError('barangay')} hint={brgys.length ? `${brgys.length} in this municipality` : undefined}>
+              </F>
+              <F name="barangay" label="Barangay" required error={shown('barangay')} hint={brgys.length ? `${brgys.length} in this municipality` : undefined}>
                 <Select value={form.psgc_barangay || ''} disabled={!form.psgc_municipality || brgysLoading} onChange={(e) => pickPlace('barangay', e.target.value, brgys)}>
                   <option value="">{!form.psgc_municipality ? 'Select a municipality first' : brgysLoading ? 'Loading…' : '— Select barangay —'}</option>
                   {brgys.map((b) => <option key={b.psgc_code} value={b.psgc_code}>{b.name}</option>)}
                 </Select>
-              </FormField>
-              <FormField label="Landmark" hint="Optional — anything that helps find the house." error={fieldError('landmark')}>
+              </F>
+              <F name="landmark" label={optional('Landmark')} hint="Anything that helps find the house." error={shown('landmark')}>
                 <Input value={form.landmark || ''} maxLength={200} onChange={(e) => setForm({ ...form, landmark: e.target.value })} />
-              </FormField>
+              </F>
               {/* An address typed before the picker existed has no code, so the
                   selects above sit empty and would look like a blank address.
                   Show what the record actually says. */}
@@ -767,22 +913,28 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 10 }}>Details beyond the agency&apos;s intake interview.</div>
             <div className="racco-case-grid">
               {/* A pick since 24 Sep 2026. */}
-              <FormField label="Referral Source" error={fieldError('referral_source')}
+              <F name="referral_source" label={optional('Referral Source')} error={shown('referral_source')}
                 hint="RACCO · LGU (local government unit) · CCA (child caring agency) · RCF (residential care facility)">
                 <Select value={form.referral_source || ''} onChange={(e) => setForm({ ...form, referral_source: e.target.value })}>
                   <option value="">— Select —</option>
                   {withRetired(REFERRAL_SOURCES, form.referral_source, form._record?.referral_source).map((v) => <option key={v} value={v}>{optionLabel(REFERRAL_SOURCES, v)}</option>)}
                 </Select>
-              </FormField>
-              <FormField label="Referral Reason" style={{ gridColumn: '1 / -1' }}>
-                <textarea value={form.referral_reason || ''} onChange={(e) => setForm({ ...form, referral_reason: e.target.value })} rows={3} style={textarea} />
-              </FormField>
-              <FormField label="Medical Notes" style={{ gridColumn: '1 / -1' }}>
-                <textarea value={form.medical_notes || ''} onChange={(e) => setForm({ ...form, medical_notes: e.target.value })} rows={3} style={textarea} />
-              </FormField>
-              <FormField label="Recommendation" hint="Follow-ups, referrals, and notes outside the intake timeline." style={{ gridColumn: '1 / -1' }}>
-                <textarea value={form.recommendation || ''} onChange={(e) => setForm({ ...form, recommendation: e.target.value })} rows={3} style={textarea} />
-              </FormField>
+              </F>
+              {/* Each of these holds two children (the box and its polish bar), so
+                  FormField cannot inject the id into the box: the textarea gets
+                  its own and the label points at it, or the label detaches. */}
+              <F label={optional('Referral Reason')} htmlFor="child-referral-reason" style={{ gridColumn: '1 / -1' }}>
+                <textarea id="child-referral-reason" value={form.referral_reason || ''} onChange={(e) => setForm({ ...form, referral_reason: e.target.value })} rows={3} style={textarea} />
+                <PolishBar polisher={polishReason} value={form.referral_reason} />
+              </F>
+              <F label={optional('Medical Notes')} htmlFor="child-medical-notes" style={{ gridColumn: '1 / -1' }}>
+                <textarea id="child-medical-notes" value={form.medical_notes || ''} onChange={(e) => setForm({ ...form, medical_notes: e.target.value })} rows={3} style={textarea} />
+                <PolishBar polisher={polishMedical} value={form.medical_notes} />
+              </F>
+              <F label={optional('Recommendation')} htmlFor="child-recommendation" hint="Follow-ups, referrals, and notes outside the intake timeline." style={{ gridColumn: '1 / -1' }}>
+                <textarea id="child-recommendation" value={form.recommendation || ''} onChange={(e) => setForm({ ...form, recommendation: e.target.value })} rows={3} style={textarea} />
+                <PolishBar polisher={polishRecommendation} value={form.recommendation} />
+              </F>
             </div>
           </section>
           )}
@@ -799,66 +951,64 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                 rather than shown. Uploaded after the record is created, because
                 a referral belongs to a child and there is no id until then. */}
             {!isPsych && (
-              <FormField
+              <F
                 label="Case referral"
-                /* The control is inside a wrapper, so FormField's own id
-                   injection would label the wrapper: point at the input. */
-                htmlFor="case-referral-file"
+                /* The visible control is the button; the file input is
+                   hidden and opened by it. */
+                htmlFor="case-referral-button"
+                style={{ marginBottom: 24 }}
                 hint={form.id
                   ? 'Already on file? Add or replace it from the child’s record.'
-                  : 'PDF or Word. The social worker’s referral — sessions cannot be booked without one, though the record saves either way.'}
+                  : 'Needed before any session can be booked. You can also add it later.'}
               >
-                <div id="case-referral-row" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <div id="case-referral-row" className="racco-attach-row">
+                  {/* The form holds the chosen file, and this row reads it
+                      from there, so it is still here when the step is left
+                      and reopened (each step unmounts). The browser's own box
+                      said "No file chosen" after exactly that. */}
                   <input
-                    id="case-referral-file"
-                    type="file"
+                    id="case-referral-file" ref={referralInput} type="file" hidden
                     /* Exactly what CaseReferralSerializer.validate_file
                        accepts. Offering a .png in the picker and then
                        refusing it on the server is the screen lying. */
                     accept=".pdf,.doc,.docx"
-                    /* Each step unmounts when it is left, and the box came
-                       back saying "No file chosen" while the form still held
-                       the file and filed it on save. It is put back, so the
-                       box says what will be filed; Remove empties both. */
-                    ref={(el) => {
-                      if (!el) return;
-                      const chosen = form.referralFile;
-                      if (!chosen && el.files?.length) el.value = '';
-                      if (chosen instanceof File && el.files?.[0] !== chosen) {
-                        try {
-                          const dt = new DataTransfer();
-                          dt.items.add(chosen);
-                          el.files = dt.files;
-                        } catch { /* no DataTransfer: the badge still names it */ }
-                      }
+                    onChange={(e) => {
+                      const file = e.target.files?.[0] || null;
+                      // Emptied so choosing the same file again is a change.
+                      e.target.value = '';
+                      if (file) setForm({ ...form, referralFile: file });
                     }}
-                    onChange={(e) => setForm({ ...form, referralFile: e.target.files?.[0] || null })}
-                    style={{ fontFamily: 'var(--font-sans)', fontSize: 13, color: 'var(--text-body)' }}
                   />
-                  {form.referralFile && (
-                    <>
-                      <Badge tone="success" size="sm">{form.referralFile.name}</Badge>
+                  {form.referralFile ? (
+                    <span className="racco-attached">
+                      <Icon name="file-text" size={16} />
+                      <span className="racco-attached-name" title={form.referralFile.name}>{form.referralFile.name}</span>
                       <Button type="button" variant="ghost" size="sm" aria-label={`Remove ${form.referralFile.name}`}
                         onClick={() => setForm({ ...form, referralFile: null })}>Remove</Button>
-                    </>
+                    </span>
+                  ) : (
+                    <Button id="case-referral-button" type="button" variant="secondary"
+                      onClick={() => referralInput.current?.click()} iconLeft={<Icon name="paperclip" size={15} />}>
+                      Attach the case referral (PDF or Word)
+                    </Button>
                   )}
                 </div>
-              </FormField>
+              </F>
             )}
 
             {isPsych ? (
-              <FormField label="Assigned Psychologist" hint="Reassignment is done by admin/staff.">
+              <F label="Assigned Psychologist" hint="Reassignment is done by admin/staff.">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 13px', borderRadius: 'var(--radius-md)', background: 'var(--ink-50)', border: '1px solid var(--border)', color: 'var(--text-strong)', fontWeight: 700, fontSize: 14 }}>
                   {form.psychologist_name || '—'}
                   <Icon name="lock" size={13} style={{ color: 'var(--text-faint)', marginLeft: 'auto' }} />
                 </div>
-              </FormField>
+              </F>
             ) : (
               <>
                 {socialWorkers && (
                   /* The ISA only: whose record this is. A SW's new record is
                      theirs, and only the ISA moves one (accounts/scoping.py). */
-                  <FormField label="Social Worker" hint="Only this social worker, and the ISA, can see the record.">
+                  <F label="Social Worker" hint="Only this social worker, and the ISA, can see the record." style={{ marginBottom: 20 }}>
                     <Select value={form.social_worker || ''} onChange={(e) => setForm({ ...form, social_worker: e.target.value })}>
                       <option value="">— No social worker yet —</option>
                       {socialWorkers.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
@@ -866,7 +1016,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                         <option value={form.social_worker}>{form.social_worker_name || 'Current social worker'} (inactive)</option>
                       )}
                     </Select>
-                  </FormField>
+                  </F>
                 )}
                 {/* One way to assign, not two: a dropdown above this list
                     offered the same psychologists without their availability,
@@ -946,35 +1096,75 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
           </section>
           )}
         </div>
-        <div style={{ padding: '14px 24px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-          {/* Editing can save from any step — walking four pages to correct a
-              phone number is the kind of thing that makes people avoid the form.
-              Creating still has to reach the end, so nothing is missed. An old
-              record may have blanks from before the fields were required; the
-              edit names them without refusing to save, and the server refuses
-              only an answer being taken away. */}
-          {(isEdit || step === FORM_STEPS.length) && (blockers.length > 0 || (isEdit && oldBlanks.length > 0)) && (
-            <span role="status" style={{ alignSelf: 'center', display: 'inline-flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: 12.5, marginRight: 'auto', minWidth: 0 }}>
-              {needed.length > 0 && (
-                <span style={{ color: 'var(--amber-700)', fontWeight: 600 }}>
-                  {isEdit ? 'Needed before saving' : 'Still needed'}: {needed.map(labelOf).join(', ')}
+        {/* The strip above the buttons: how many answers are still needed,
+            "Show me" for the list, and the draft note. Editing can save from
+            any step - walking four pages to correct a phone number is the
+            kind of thing that makes people avoid the form. Creating still has
+            to reach the end, so nothing is missed. An old record may have
+            blanks from before the fields were required; the edit names them
+            without refusing to save, and the server refuses only an answer
+            being taken away. */}
+        {(blockers.length > 0 || (isEdit && oldBlanks.length > 0) || (!isEdit && draftSavedAt) || (!isEdit && draftOff)) && (
+          <div className="racco-form-need">
+            <div className="racco-form-need-row">
+              <span role="status" style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', minWidth: 0 }}>
+                {needed.length > 0 && (
+                  <button type="button" className="racco-need-toggle racco-btn" aria-expanded={needOpen} aria-controls="racco-need-list"
+                    onClick={() => setNeedOpen((o) => !o)}>
+                    <Icon name="alert-circle" size={14} />
+                    {needed.length} {needed.length === 1 ? 'answer' : 'answers'} still needed{isEdit ? ' before saving' : ''}
+                    {' '}— <u>{needOpen ? 'Hide' : 'Show me'}</u>
+                  </button>
+                )}
+                {needed.length === 0 && Object.keys(problems).length > 0 && (
+                  <button type="button" className="racco-need-toggle racco-btn" aria-expanded={needOpen} aria-controls="racco-need-list"
+                    onClick={() => setNeedOpen((o) => !o)}>
+                    <Icon name="alert-circle" size={14} />
+                    Check: {Object.keys(problems).map(labelOf).join(', ')} — <u>{needOpen ? 'Hide' : 'Show me'}</u>
+                  </button>
+                )}
+                {needed.length > 0 && Object.keys(problems).length > 0 && (
+                  <span style={{ color: 'var(--red-600)', fontWeight: 600 }}>Check: {Object.keys(problems).map(labelOf).join(', ')}</span>
+                )}
+                {isEdit && oldBlanks.length > 0 && (
+                  <span style={{ color: 'var(--text-muted)' }}>Blank from before, saves as it is: {oldBlanks.map(labelOf).join(', ')}</span>
+                )}
+              </span>
+              {!isEdit && (draftSavedAt || draftOff) && (
+                <span className="racco-draft-note">
+                  {draftOff
+                    ? 'No draft is kept on this computer.'
+                    : <>Draft saved on this computer, {clock(draftSavedAt)}.
+                      <button type="button" className="racco-btn" onClick={clearDraft}>Clear draft</button></>}
                 </span>
               )}
-              {Object.keys(problems).length > 0 && (
-                <span style={{ color: 'var(--red-600)', fontWeight: 600 }}>Check: {Object.keys(problems).map(labelOf).join(', ')}</span>
-              )}
-              {isEdit && oldBlanks.length > 0 && (
-                <span style={{ color: 'var(--text-muted)' }}>Blank from before, saves as it is: {oldBlanks.map(labelOf).join(', ')}</span>
-              )}
-              {firstBlockerStep && firstBlockerStep !== step && (
-                <Button type="button" variant="ghost" size="sm" onClick={() => setStep(firstBlockerStep)}>Go to it</Button>
-              )}
-            </span>
-          )}
-          <Button type="button" variant="secondary" onClick={requestClose}>Cancel</Button>
-          {step > 1 && (
-            <Button type="button" variant="ghost" onClick={() => setStep((n) => n - 1)} iconLeft={<Icon name="arrow-left" size={15} />}>Back</Button>
-          )}
+            </div>
+            {needOpen && needList.length > 0 && (
+              <div id="racco-need-list" className="racco-need-list">
+                {needList.map((g) => (
+                  <div key={g.n} className="racco-need-group">
+                    <div className="racco-eyebrow" style={{ fontSize: 10 }}>{g.label}</div>
+                    <div className="racco-need-items">
+                      {g.items.map((it) => (
+                        <button key={it.f} type="button" className="racco-need-item racco-btn" data-kind={it.kind}
+                          onClick={() => jumpTo(it.f)}>
+                          {it.text.charAt(0).toUpperCase() + it.text.slice(1)}{it.kind === 'check' ? ` — ${problems[it.f]}` : ''}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+        <div className="racco-form-foot">
+          <div className="racco-foot-left">
+            <span className="racco-foot-cancel" style={{ display: 'contents' }}><Button type="button" variant="secondary" onClick={requestClose}>Cancel</Button></span>
+            {step > 1 && (
+              <Button type="button" variant="ghost" onClick={() => setStep((n) => n - 1)} iconLeft={<Icon name="arrow-left" size={15} />}>Back</Button>
+            )}
+          </div>
           {step < FORM_STEPS.length && (
             <Button type="button" variant={isEdit ? 'secondary' : 'primary'} onClick={() => setStep((n) => n + 1)}>Next</Button>
           )}

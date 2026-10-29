@@ -662,6 +662,20 @@ Settings, no per-feature flags.
   date and a number. Building it found two claims the code did not keep:
   remark Polish answered ANY signed-in account (now Psychologist and ISA
   only), and a self-report flag showed the model's own words unchecked.
+- **Record polish is a second door, and guarded** (29 Oct 2026, owner's
+  request). `POST /api/assistant/polish-record/` (`RecordPolishView`, job type
+  `record_polish`) puts "Polish writing" on Referral Reason, Medical Notes and
+  Recommendation in the record form and on the closing summary when
+  terminating (`components/PolishWriting.jsx`). Social workers, the ISA and
+  psychologists may use it; remark polish keeps its own rule. Same prompt as
+  remark polish, same Tagalog-drift refusal, then `checked_draft` for names,
+  dates AND numbers against the typed text, for every role. **It runs on the
+  hosted model where one is configured** (owner, 29 Oct 2026, "Allow on demo
+  only"; `run_job(allow_hosted=True)`): the model gets only the typed text,
+  never the record, and the live deployment configures none. So the button is
+  no longer gated on `drafting`. `save` and `terminate` in `Children.jsx` resolve true
+  only on a real save, so a failed one keeps "Revert to my text". Not measured
+  with a live model: `ai_eval` has no feature for it.
 - **The checker no longer counts a "Part 2" / "Step 1" heading as an invented
   number** (`evaluation.py`); "Part 2 sessions" still counts.
 - **The ISA can see who had the model read a child**: the Assistant log tab
@@ -689,7 +703,8 @@ Settings, no per-feature flags.
   and the serializers return an UNCONFIRMED draft only to those same writers.
 - **`get_ai_client()` refuses a hosted model unless the caller passes
   `allow_hosted=True`.** Only the chatbot, the two administrator probes,
-  `ai_check` and `ai_eval` do. Everything else drafts from case records and
+  `ai_check`, `ai_eval` and `RecordPolishView` (via `run_job`'s `allow_hosted`
+  keyword, default False) do. Everything else drafts from case records and
   answers 503 on a hosted deployment. There `/api/assistant/capabilities/`
   says `drafting: false` (`services.drafting_available()`, the same
   condition), and the screens hide Polish, both AI summary buttons and the
@@ -1160,6 +1175,56 @@ middle name, a date found, and every question that applies made mandatory.
   `middle_initial`. Replayed on PostgreSQL 16 it does exactly that. A manual
   redeploy of the same commit went through in two minutes. Prefer additive
   migrations (add, copy, drop later); widening a column, as 0022 does, is safe.
+
+## The Records screen (friendlier, 28 Oct 2026)
+
+Owner's request: "improve the overall UI of the record module for friendly
+user purposes". Audited first, by screenshots of every role at 1440 and 390;
+the owner picked the plan. Presentation only - no server rule changed.
+
+- **Next possible sessions offers only what books** (same day): `next-slots`
+  is built on `booking.next_openings`, so on `errors_for`. It used to count
+  capacity per window and offer the window's START, which clashed with a
+  session already there ("already booked (case C-...)").
+- **The list**: a row ends in a chevron and a quick-action menu (Open, Book -
+  only with a referral, Upload, Edit), the same links and rules as the header
+  search's quick actions. The child's name is the real button; the row stays
+  clickable but is no longer `role="button"`, so the menu is not nested in it.
+  Under 640px rows become cards with wrapped chips. Empty screens say why and
+  offer Clear search, or "Search all records instead" only when another tab
+  has a match.
+- **Needs attention** replaces Case Status on the Active tab, for SWs and the
+  ISA: No case referral, No psychologist, Waiting / No answer (7+ days),
+  Declined, No signed consent - the SW care gaps' rules and thresholds
+  (`care_gaps.py`), never contradicting the Dashboard. The ISA sees the SW
+  rules here, not its own Dashboard list. Case Status stays on All/Archived.
+- **The record window** is the shared `Drawer` (focus trap, Escape); a tap
+  outside does not close it while a booking question or the referral replace
+  is open. Open full record, Edit as the main button, Terminate outlined red
+  and set apart. Details grouped (Identity, Care, People, Address & dates),
+  empty rows last. The booking area says why there is nothing to pick (no
+  referral, waiting on / declined by a psychologist, the server's `reason`).
+  A Staff account on its own record gets one "Next step" line from
+  `brief_facts.next_steps`. Hints explain the agency's words, which stay as
+  they are (owner): Answered = pre-assessment done, not yet in counseling;
+  Completed = done and in counseling - read from `pre_assessment_status`.
+  Upcoming appointments open `/schedule`, which cannot open one appointment
+  from a link yet.
+- **The record form**: each step says how many answers it still needs, and
+  "N answers still needed - Show me" jumps to each field. Next still moves on
+  freely and Save is held exactly as before (the existing blockers, not a
+  second copy). A proper attach button for the referral, "(optional)" on the
+  optional fields, a "Draft saved on this computer" note with Clear draft.
+  Full screen under 640px.
+- **The header under 480px** (owner's choice): the search pill becomes a
+  magnifier that opens the same field and panel, and tabs that do not fit go
+  under More. At 480 and wider nothing changed. Known: at exactly 480-~520 six
+  tabs at 36px still crowd the bell; moving the breakpoint changes the search
+  sizes, so it is the owner's call.
+- Styles for these live in their own files (`children/records.css`,
+  `drawer.css`, `form.css`, `components/header-phone.css`), mostly scoped
+  `!important` phone overrides because the shared controls size themselves
+  inline.
 
 ## One child, one record
 
@@ -2256,6 +2321,8 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   self-report detector missed 28%; both belong to `qwen2.5:3b` and transfer to
   nothing. Enforced in code since 27 Sep 2026 (`allow_hosted`, above); until
   then every drafting feature used the hosted model once the flag was on.
+  The one exception since 29 Oct 2026 is record polish (owner's decision); its
+  quality on the hosted model is unmeasured.
 - **The free API sleeps after ~15 minutes idle** and the first request then
   takes about a minute (entrypoint.sh re-runs migrate and the PSGC steps on
   every boot). A refresh in that minute used to show a bare "Loading…" that

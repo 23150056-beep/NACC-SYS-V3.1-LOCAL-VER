@@ -21,6 +21,7 @@ const FEATURE_LABELS = {
   case_brief: 'Case briefs',
   doc_intelligence: 'Document summaries',
   remark_polish: 'Remark polishing',
+  record_polish: 'Record text polishing',
   census_narrative: 'Census narrative',
   // Both ran unlabelled — the table printed the raw job type.
   chat: 'Chatbot',

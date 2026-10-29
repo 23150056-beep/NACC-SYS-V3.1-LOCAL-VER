@@ -263,7 +263,8 @@ def _normalize_output(text):
     return text
 
 
-def run_job(job_type, prompt, *, system=None, input_ref="", user=None, child=None):
+def run_job(job_type, prompt, *, system=None, input_ref="", user=None, child=None,
+            allow_hosted=False):
     """Run one generation and audit it. Returns (text, AssistantJob).
 
     Writes an AssistantJob row on failure as well as success, so "it stopped
@@ -272,9 +273,13 @@ def run_job(job_type, prompt, *, system=None, input_ref="", user=None, child=Non
     Pass `child` whenever the prompt is built from a child's record, or the
     ISA's access log on that child's page will not show the read. A refusal
     that sent nothing is not attributed to the child (see below).
+
+    `allow_hosted` is passed through to get_ai_client(): False (the default)
+    refuses a hosted model. Only a caller whose prompt may leave the machine
+    sets it.
     """
     retention.prune_if_due()
-    client = get_ai_client()
+    client = get_ai_client(allow_hosted=allow_hosted)
     creator = user if getattr(user, "is_authenticated", False) else None
     started = time.monotonic()
     try:

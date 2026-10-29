@@ -59,7 +59,7 @@ class MetricsTest(APITestCase):
         self.client.force_authenticate(self.admin)
         types = {r["job_type"] for r in self.client.get(URL).data["features"]}
         self.assertEqual(types, {"brief", "doc_intelligence", "remark_polish",
-                                 "census_narrative", "chat",
+                                 "record_polish", "census_narrative", "chat",
                                  "self_report", "case_brief"})
 
     def test_works_with_the_assistant_switched_off(self):
