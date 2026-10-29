@@ -135,11 +135,39 @@ class RecordPolishTest(APITestCase):
         self.assertEqual(503, res.status_code)
         self.assertFalse(AssistantJob.objects.get().ok)
 
+    def _post_hosted(self, user, text="found at the hall", model=CLEAN, url=URL):
+        self.client.force_authenticate(user)
+        with patch.object(services.OpenAICompatibleClient, "generate",
+                          return_value=model) as hosted, \
+                patch.object(services.OllamaClient, "generate") as local:
+            res = self.client.post(url, {"text": text}, format="json")
+        return res, hosted, local
+
     @override_settings(**HOSTED)
-    def test_503_on_a_hosted_deployment_because_drafting_never_leaves_the_machine(self):
+    def test_a_hosted_deployment_polishes_with_the_hosted_model(self):
+        # Owner's decision, 29 Oct 2026: record polish may use the hosted model.
         for role in (Role.STAFF, Role.ADMINISTRATOR, Role.PSYCHOLOGIST):
             with self.subTest(role=role):
-                res, generate = self._post(self.users[role])
-                self.assertEqual(503, res.status_code)
-                self.assertEqual(services.HOSTED_DRAFTING_REFUSED, res.data["detail"])
-                generate.assert_not_called()
+                res, hosted, local = self._post_hosted(self.users[role])
+                self.assertEqual(200, res.status_code)
+                self.assertEqual(CLEAN, res.data["draft"])
+                hosted.assert_called_once()
+                local.assert_not_called()
+
+    @override_settings(**HOSTED)
+    def test_the_guard_still_refuses_a_hosted_draft_that_invents(self):
+        res, hosted, _ = self._post_hosted(
+            self.users[Role.STAFF], model="Seen by Villanueva on 14 March, 77 times.")
+        self.assertEqual(422, res.status_code)
+        self.assertEqual({"detail": guards.REFUSAL_SENTENCE}, res.data)
+        hosted.assert_called_once()
+
+    @override_settings(**HOSTED)
+    def test_remark_polish_still_refuses_a_hosted_model(self):
+        # The exception is for record polish alone; it must not leak.
+        res, hosted, local = self._post_hosted(
+            self.users[Role.PSYCHOLOGIST], url="/api/assistant/polish-remark/")
+        self.assertEqual(503, res.status_code)
+        self.assertEqual(services.HOSTED_DRAFTING_REFUSED, res.data["detail"])
+        hosted.assert_not_called()
+        local.assert_not_called()

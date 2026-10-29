@@ -630,8 +630,11 @@ Settings, no per-feature flags.
   terminating (`components/PolishWriting.jsx`). Social workers, the ISA and
   psychologists may use it; remark polish keeps its own rule. Same prompt as
   remark polish, same Tagalog-drift refusal, then `checked_draft` for names,
-  dates AND numbers against the typed text, for every role. Hidden where
-  `drafting` is false. `save` and `terminate` in `Children.jsx` resolve true
+  dates AND numbers against the typed text, for every role. **It runs on the
+  hosted model where one is configured** (owner, 29 Oct 2026, "Allow on demo
+  only"; `run_job(allow_hosted=True)`): the model gets only the typed text,
+  never the record, and the live deployment configures none. So the button is
+  no longer gated on `drafting`. `save` and `terminate` in `Children.jsx` resolve true
   only on a real save, so a failed one keeps "Revert to my text". Not measured
   with a live model: `ai_eval` has no feature for it.
 - **The checker no longer counts a "Part 2" / "Step 1" heading as an invented
@@ -661,7 +664,8 @@ Settings, no per-feature flags.
   and the serializers return an UNCONFIRMED draft only to those same writers.
 - **`get_ai_client()` refuses a hosted model unless the caller passes
   `allow_hosted=True`.** Only the chatbot, the two administrator probes,
-  `ai_check` and `ai_eval` do. Everything else drafts from case records and
+  `ai_check`, `ai_eval` and `RecordPolishView` (via `run_job`'s `allow_hosted`
+  keyword, default False) do. Everything else drafts from case records and
   answers 503 on a hosted deployment. There `/api/assistant/capabilities/`
   says `drafting: false` (`services.drafting_available()`, the same
   condition), and the screens hide Polish, both AI summary buttons and the
@@ -2006,6 +2010,8 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   self-report detector missed 28%; both belong to `qwen2.5:3b` and transfer to
   nothing. Enforced in code since 27 Sep 2026 (`allow_hosted`, above); until
   then every drafting feature used the hosted model once the flag was on.
+  The one exception since 29 Oct 2026 is record polish (owner's decision); its
+  quality on the hosted model is unmeasured.
 - **The free API sleeps after ~15 minutes idle** and the first request then
   takes about a minute (entrypoint.sh re-runs migrate and the PSGC steps on
   every boot). A refresh in that minute used to show a bare "Loading…" that

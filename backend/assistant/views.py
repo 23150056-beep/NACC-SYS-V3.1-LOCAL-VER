@@ -189,12 +189,18 @@ class RecordPolishView(AssistantBaseView):
             return Response({"detail": "Nothing to polish."},
                             status=status.HTTP_400_BAD_REQUEST)
         raw = raw.strip()
+        # Owner's decision, 29 Oct 2026 ("Allow on demo only"): record polish,
+        # and only record polish, may use the hosted model. Narrow on purpose:
+        # the model is given only the text the person is typing, never the
+        # child's record; checked_draft still runs below; every other drafting
+        # feature keeps refusing a hosted model.
         draft, job = run_job(
             "record_polish",
             prompts.build_remark_prompt(raw),
             system=prompts.REMARK_POLISH_SYSTEM,
             input_ref="record:draft",
-            user=request.user)
+            user=request.user,
+            allow_hosted=True)
 
         # Same drift as the remark box: Taglish in, Tagalog out.
         drift = evaluation.language_drift(draft)

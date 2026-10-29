@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
 import { Alert, Button, Icon } from '../ui';
 import { useToast } from '../context/ToastContext';
-import { useAssistant } from '../context/AssistantContext';
 import { polishRecordText, sendFeedback } from '../api/assistant';
 
 /* "Polish writing" for the free text of a child's record.
@@ -72,10 +71,10 @@ export function usePolish(value, setValue) {
 }
 
 export function PolishBar({ polisher, value }) {
-  // False on a hosted deployment, where the server refuses every drafting
-  // call: a button that could only fail is not shown.
-  const { drafting } = useAssistant();
-  if (!drafting) return null;
+  // Always shown. `drafting` false means drafting FROM CASE RECORDS is refused
+  // (hosted), which does not apply here: this endpoint sends only the typed
+  // text and may use the hosted model (owner, 29 Oct 2026). If the assistant is
+  // off, the 503 is toasted by usePolish.
   const { busy, job, polish, revert } = polisher;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
