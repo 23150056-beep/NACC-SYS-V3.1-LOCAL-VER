@@ -623,6 +623,17 @@ Settings, no per-feature flags.
   date and a number. Building it found two claims the code did not keep:
   remark Polish answered ANY signed-in account (now Psychologist and ISA
   only), and a self-report flag showed the model's own words unchecked.
+- **Record polish is a second door, and guarded** (29 Oct 2026, owner's
+  request). `POST /api/assistant/polish-record/` (`RecordPolishView`, job type
+  `record_polish`) puts "Polish writing" on Referral Reason, Medical Notes and
+  Recommendation in the record form and on the closing summary when
+  terminating (`components/PolishWriting.jsx`). Social workers, the ISA and
+  psychologists may use it; remark polish keeps its own rule. Same prompt as
+  remark polish, same Tagalog-drift refusal, then `checked_draft` for names,
+  dates AND numbers against the typed text, for every role. Hidden where
+  `drafting` is false. `save` and `terminate` in `Children.jsx` resolve true
+  only on a real save, so a failed one keeps "Revert to my text". Not measured
+  with a live model: `ai_eval` has no feature for it.
 - **The checker no longer counts a "Part 2" / "Step 1" heading as an invented
   number** (`evaluation.py`); "Part 2 sessions" still counts.
 - **The ISA can see who had the model read a child**: the Assistant log tab

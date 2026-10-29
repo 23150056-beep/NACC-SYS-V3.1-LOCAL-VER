@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import api from '../../api/client';
 import { getBriefFacts } from '../../api/assistant';
+import { PolishBar, usePolish } from '../../components/PolishWriting';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import {
@@ -605,6 +606,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
 export function TerminateModal({ child, onConfirm, onClose }) {
   const [reason, setReason] = useState('');
   const [note, setNote] = useState('');
+  const polisher = usePolish(note, setNote);
   const [offer, setOffer] = useState(null);
   const [loadError, setLoadError] = useState('');
   useEffect(() => {
@@ -677,13 +679,14 @@ export function TerminateModal({ child, onConfirm, onClose }) {
             </Select>
           </FormField>
         )}
-        <FormField label="Closing summary" required>
-          <textarea value={note} onChange={(e) => setNote(e.target.value)} rows={4} placeholder="Describe why this case is being terminated…"
+        <FormField label="Closing summary" required htmlFor="terminate-closing-summary">
+          <textarea id="terminate-closing-summary" value={note} onChange={(e) => setNote(e.target.value)} rows={4} placeholder="Describe why this case is being terminated…"
             style={{ width: '100%', resize: 'vertical', padding: '11px 13px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', fontFamily: 'var(--font-sans)', fontSize: 14, lineHeight: 1.55 }} />
+          <PolishBar polisher={polisher} value={note} />
         </FormField>
         <div style={{ display: 'flex', gap: 10 }}>
           <Button variant="secondary" fullWidth onClick={onClose}>Cancel</Button>
-          <Button variant="danger" fullWidth disabled={!chosen?.available || !note.trim()} onClick={() => onConfirm(child, reason, note.trim())} iconLeft={<Icon name="archive" size={16} />}>Terminate</Button>
+          <Button variant="danger" fullWidth disabled={!chosen?.available || !note.trim()} onClick={async () => { const closing = note.trim(); if (await onConfirm(child, reason, closing)) polisher.settle(closing); }} iconLeft={<Icon name="archive" size={16} />}>Terminate</Button>
         </div>
       </div>
     </div>,

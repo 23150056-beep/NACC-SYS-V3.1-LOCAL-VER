@@ -44,6 +44,7 @@ class AssistantJob(models.Model):
         ("brief", "Pre-Session Brief"),
         ("doc_intelligence", "Document Summary"),
         ("remark_polish", "Remark Polishing"),
+        ("record_polish", "Record Text Polishing"),
         ("census_narrative", "Census Narrative"),
         ("chat", "Chatbot Question"),
         ("self_report", "Self-Report Check"),

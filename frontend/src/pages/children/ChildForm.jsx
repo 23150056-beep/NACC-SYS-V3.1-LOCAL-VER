@@ -10,6 +10,7 @@ import {
   dateFieldFor, requiredFields, unaskedAnswers,
 } from '../../config/caseData';
 import { clock, shortDate, timeAgo } from '../../utils/time';
+import { PolishBar, usePolish } from '../../components/PolishWriting';
 import CustodianFields from './CustodianFields';
 import PsychologistPicker from './PsychologistPicker';
 import { EMPTY, NOT_AN_ANSWER, formFromRecord, newIntakeToken } from './recordForm';
@@ -131,6 +132,22 @@ const snapshot = (f) => JSON.stringify(Object.keys(f).sort()
 
 export default function ChildForm({ form, setForm, draftKey, psychologists, socialWorkers = null, blocks = [], error, fieldErrors = null, refusedWith = null, isPsych = false, canReopen = false, others = [], saving = false, onSubmit, onWithdraw, onClose, onReopen, onOpenExisting }) {
   const [step, setStep] = useState(1);
+  /* Polish writing on the three free-text fields. The setters are functional
+     because the draft lands after an await, by which time `form` has moved on. */
+  const setField = (key) => (text) => setForm((f) => ({ ...f, [key]: text }));
+  const polishReason = usePolish(form.referral_reason, setField('referral_reason'));
+  const polishMedical = usePolish(form.medical_notes, setField('medical_notes'));
+  const polishRecommendation = usePolish(form.recommendation, setField('recommendation'));
+  /* Told the outcome only once the record is really saved: `onSubmit` resolves
+     false on every failed or cancelled save, so a refused save keeps the draft
+     and "Revert to my text" where they were. */
+  const submit = async (e) => {
+    const saved = { reason: form.referral_reason, medical: form.medical_notes, recommendation: form.recommendation };
+    if (!(await onSubmit(e))) return;
+    polishReason.settle(saved.reason);
+    polishMedical.settle(saved.medical);
+    polishRecommendation.settle(saved.recommendation);
+  };
   // Reopening the form for a different record starts at the beginning again.
   useEffect(() => { setStep(1); }, [form.id]);
   /* Steps already left: their empty required answers say "Required" (a step
@@ -502,7 +519,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   useEffect(() => { if (blockers.length === 0) setNeedOpen(false); }, [blockers.length]);
   return (
     <div className="racco-form-overlay" onClick={requestClose}>
-      <form className="racco-form-shell" onSubmit={onSubmit} onClick={(e) => e.stopPropagation()}>
+      <form className="racco-form-shell" onSubmit={submit} onClick={(e) => e.stopPropagation()}>
         <div className="racco-form-head" style={{ padding: '18px 24px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'var(--ink-50)' }}>
           <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 17, color: 'var(--text-strong)' }}>{isEdit ? 'Edit Record' : 'Add Record'}</div>
           <button type="button" className="racco-form-x" onClick={requestClose} aria-label="Close" {...hoverLift({ lift: -1, shadow: 'var(--shadow-md)' })} style={iconBtn('var(--text-muted)')}><Icon name="x" size={17} /></button>
@@ -903,14 +920,20 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   {withRetired(REFERRAL_SOURCES, form.referral_source, form._record?.referral_source).map((v) => <option key={v} value={v}>{optionLabel(REFERRAL_SOURCES, v)}</option>)}
                 </Select>
               </F>
-              <F label={optional('Referral Reason')} style={{ gridColumn: '1 / -1' }}>
-                <textarea value={form.referral_reason || ''} onChange={(e) => setForm({ ...form, referral_reason: e.target.value })} rows={3} style={textarea} />
+              {/* Each of these holds two children (the box and its polish bar), so
+                  FormField cannot inject the id into the box: the textarea gets
+                  its own and the label points at it, or the label detaches. */}
+              <F label={optional('Referral Reason')} htmlFor="child-referral-reason" style={{ gridColumn: '1 / -1' }}>
+                <textarea id="child-referral-reason" value={form.referral_reason || ''} onChange={(e) => setForm({ ...form, referral_reason: e.target.value })} rows={3} style={textarea} />
+                <PolishBar polisher={polishReason} value={form.referral_reason} />
               </F>
-              <F label={optional('Medical Notes')} style={{ gridColumn: '1 / -1' }}>
-                <textarea value={form.medical_notes || ''} onChange={(e) => setForm({ ...form, medical_notes: e.target.value })} rows={3} style={textarea} />
+              <F label={optional('Medical Notes')} htmlFor="child-medical-notes" style={{ gridColumn: '1 / -1' }}>
+                <textarea id="child-medical-notes" value={form.medical_notes || ''} onChange={(e) => setForm({ ...form, medical_notes: e.target.value })} rows={3} style={textarea} />
+                <PolishBar polisher={polishMedical} value={form.medical_notes} />
               </F>
-              <F label={optional('Recommendation')} hint="Follow-ups, referrals, and notes outside the intake timeline." style={{ gridColumn: '1 / -1' }}>
-                <textarea value={form.recommendation || ''} onChange={(e) => setForm({ ...form, recommendation: e.target.value })} rows={3} style={textarea} />
+              <F label={optional('Recommendation')} htmlFor="child-recommendation" hint="Follow-ups, referrals, and notes outside the intake timeline." style={{ gridColumn: '1 / -1' }}>
+                <textarea id="child-recommendation" value={form.recommendation || ''} onChange={(e) => setForm({ ...form, recommendation: e.target.value })} rows={3} style={textarea} />
+                <PolishBar polisher={polishRecommendation} value={form.recommendation} />
               </F>
             </div>
           </section>

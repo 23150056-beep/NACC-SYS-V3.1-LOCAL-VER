@@ -537,12 +537,14 @@ export default function Children() {
    * the provider settles the first as "no", and it lands here the same way. */
   const savingRef = useRef(false);
   const [saving, setSaving] = useState(false);
+  // Resolves true only when the record was saved, so the form can tell the
+  // assistant its draft was used (and keep "Revert to my text" when it was not).
   const save = async (e) => {
     e.preventDefault();
-    if (savingRef.current) return;
+    if (savingRef.current) return false;
     savingRef.current = true;
     try {
-      await saveRecord();
+      return await saveRecord();
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -584,7 +586,7 @@ export default function Children() {
            ['Date of birth or given date of birth', form.birth_date], ['Psychologist', asking ? `${assignee} (asked to accept)` : 'Unassigned'],
            ['Case referral', form.referralFile?.name]],
     });
-    if (!ok) return;
+    if (!ok) return false;
     setSaving(true);
     setError('');
     setFieldErrors(null);
@@ -689,6 +691,7 @@ export default function Children() {
           ].filter(Boolean).join(' '),
         });
       }
+      return true;
     } catch (err) {
       /* A new record the server already holds - this very submission, by its
          token. The first attempt got through (a response that never arrived,
@@ -704,19 +707,20 @@ export default function Children() {
           toast.success(referralFile
             ? 'Already saved. Open the record and check its case referral is on file.'
             : 'Already saved');
-          return;
+          // The server already holds this very submission, text included.
+          return true;
         }
         const said = body.detail || 'This record was already saved.';
         setError(String(said));
         toast.error(String(said));
-        return;
+        return false;
       }
       if (err.response?.status === 409) {
         const fresh = err.response.data.current;
         setError('');
         setForm((f) => ({ ...f, _conflict: fresh }));
         toast.error('Someone updated this record while you were editing.');
-        return;
+        return false;
       }
       /* Field by field, beside the fields, rather than one line of JSON: the
          form opens the step holding the first field named. */
@@ -731,6 +735,7 @@ export default function Children() {
         : 'Save failed. Please try again.');
       toast.error(typeof perField?.detail === 'string' ? perField.detail
         : 'Could not save the record. Please check the marked fields.');
+      return false;
     }
   };
 
@@ -773,7 +778,7 @@ export default function Children() {
     } catch (err) {
       const d = err.response?.data;
       toast.error(d?.note || d?.reason_category || d?.detail || 'Could not terminate the case.');
-      return;
+      return false;
     }
     setTerminating(null);
     setSel(null);
@@ -781,7 +786,9 @@ export default function Children() {
     refreshActivity();
     // The end dialog (owner, 30 Sep 2026): what was closed, and with what
     // reason, read back once it is done - a toast was gone before anyone read it.
-    await notice({
+    // Not awaited: the case is closed, so the modal is told it succeeded now
+    // rather than when somebody dismisses this.
+    notice({
       title: 'Case terminated',
       icon: 'archive',
       description: `${c.fullname}'s case is now inactive and moved to the archive. Every record is kept, `
@@ -790,6 +797,7 @@ export default function Children() {
         ['Closing summary', note.length > 160 ? `${note.slice(0, 157)}…` : note],
         ['Closed on', shortDate(new Date())]],
     });
+    return true;
   };
 
   /* The duplicate is gone: close the drawer behind the dialog, reload, and say

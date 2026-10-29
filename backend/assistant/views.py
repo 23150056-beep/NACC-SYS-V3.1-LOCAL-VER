@@ -162,6 +162,63 @@ class RemarkPolishView(AssistantBaseView):
                          "disclaimer": DISCLAIMER})
 
 
+# Who may have the free text of a child's record polished: the people who can
+# write it. A social worker or the ISA edits any record they can see, and the
+# assigned psychologist may edit theirs and close it (ChildRecordAccess,
+# is_admin_or_assignee). Remark polish stays as it was; this is a second door
+# with its own job type so the usage table can tell the two apart.
+RECORD_POLISH_ROLES = (Role.STAFF, Role.ADMINISTRATOR, Role.PSYCHOLOGIST)
+RECORD_POLISH_REFUSED = "Polishing is for the people who write the child's record."
+
+
+class RecordPolishView(AssistantBaseView):
+    """Polish a free-text field of a child's record (referral reason, medical
+    notes, recommendation, closing summary). Returns a draft only - nothing is
+    saved until the person saves the record themselves. The model reads only
+    the text being typed, never the child's record, so no child is passed."""
+    throttle_scope = "assistant_draft"
+
+    def post(self, request):
+        # Before the gate: nothing reaches the model and no job is written for
+        # a request that was refused for who is asking.
+        if _role(request) not in RECORD_POLISH_ROLES:
+            return Response({"detail": RECORD_POLISH_REFUSED}, status=status.HTTP_403_FORBIDDEN)
+        gate()
+        raw = request.data.get("text")
+        if not isinstance(raw, str) or not raw.strip():
+            return Response({"detail": "Nothing to polish."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        raw = raw.strip()
+        draft, job = run_job(
+            "record_polish",
+            prompts.build_remark_prompt(raw),
+            system=prompts.REMARK_POLISH_SYSTEM,
+            input_ref="record:draft",
+            user=request.user)
+
+        # Same drift as the remark box: Taglish in, Tagalog out.
+        drift = evaluation.language_drift(draft)
+        if drift:
+            job.ok = False
+            job.error = f"rejected: language drift ({', '.join(drift[:4])})"[:255]
+            job.save(update_fields=["ok", "error"])
+            return Response(
+                {"detail": "The draft came back in Tagalog rather than English, "
+                           "so it was not shown. Write the text in your own "
+                           "words, or try again in English."},
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+        # A social worker can reach this, so the draft is checked against what
+        # they typed before it is shown (assistant/guards.py).
+        try:
+            guards.checked_draft("record_polish", draft, raw)
+        except guards.DraftRefused as refusal:
+            return _refuse_the_draft(job, refusal)
+
+        return Response({"draft": draft, "job_id": job.id,
+                         "disclaimer": DISCLAIMER})
+
+
 class AssistantJobFeedbackView(AssistantBaseView):
     """Record what the human did with a draft. Deliberately does NOT gate on
     the feature flags: it writes history, and history must stay recordable
