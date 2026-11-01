@@ -1274,16 +1274,45 @@ are unchanged (their assigned children).
   each bell, and the assignment answers are not pushed out. **The Users
   drawer** (the last 25 of what an account did, the ISA's own among them) keeps
   one sentence per move for the same reason. The per-record rows stay in the
-  table, in no screen, for whoever asks who moved a child: "View full audit
-  trail" on the rail goes to Users, whose drawer keeps the one sentence, so the
-  ISA cannot read "who moved C-0042?" on screen today. That is a known gap,
-  not an oversight. If the owner wants it answered, it belongs on the child's
-  own page (a read of that child's `move_detail` lines), never in the feeds,
-  which the same 60-record move would fill again. The actor's name is
+  table and in no feed; **the audit trail answers "who moved C-0042?"**
+  (`/activity?child=<id>`, "The audit trail" below), which is where the rail's
+  "View full audit trail" now goes. The actor's name is
   cut to its 150-character column like the labels: SQLite does not enforce a
   length, PostgreSQL refuses the insert, and a log line must not be what stops
   a move. `children/tests/test_transfer.py`, also run on PostgreSQL 16 - a
   length test that only ever ran on SQLite could not fail.
+
+## The audit trail
+
+Owner's request, 1 Nov 2026: the rail's "View full audit trail" went to the
+Dashboard (Staff, Psychologists) or Users (the ISA), neither of which is one,
+so it looked dead. It now opens `/activity` (`pages/AuditTrail.jsx`, all three
+roles; the bell popover has the same link).
+
+- **`GET /api/activity/trail/`** (`activity/views.py`, `trail`) shares ONE
+  role scope with the feed (`_scoped`): psychologists their own recipient
+  lines, Staff the Child/Assignment/CaseStudy lines of their own records plus
+  what is addressed to them, RECORD category only, the ISA everything minus
+  `move_copy`. Scope is applied before any filter, so `?category=security`
+  cannot widen a Staff account. **The one difference from the feed: the trail
+  INCLUDES `move_detail`**, the per-record transfer lines, which is how the ISA
+  (and the record's SW, by the Child scope) reads who moved a child. The feed
+  is unchanged: newest 50, no paging, no `move_detail`.
+- **Filters** (all optional, 400 with `{field: sentence}` on a bad one):
+  `category`, `action`, `q` (substring of the entity or actor label, 100
+  characters), `child` (an id; Child, Assignment and CaseStudy lines),
+  `date_from` / `date_to` (YYYY-MM-DD, inclusive at both ends, days in
+  `TIME_ZONE`), `page` and `page_size` (default 50, at most 200). The reply is
+  `{count, page, page_size, results}`, newest first with id as tie-break; a
+  page past the end is empty with the real count. Serializer unchanged:
+  no recipient, no kind. `activity/tests/test_audit_trail.py`.
+- **The page keeps every filter in the address** (`q`, `category`, `action`,
+  `from`, `to`, `child`, `page`), so a link reproduces the view; the search is
+  debounced 300 ms, a filter change returns to page 1, and a reply that
+  arrives after a newer request is dropped (sequence number). Category pills
+  are the ISA's only. A row's sentence is a real button to `eventDestination`.
+  The pager's right padding keeps Next clear of the floating assistant button,
+  which sat over it. Axe-core clean at 1440; no horizontal scroll at 390.
 
 ## Assigning a psychologist is asking
 

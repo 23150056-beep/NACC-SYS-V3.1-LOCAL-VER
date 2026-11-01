@@ -209,7 +209,7 @@ export function ActivityCard() {
       meta={<span style={{ fontWeight: 700, fontSize: 10, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--success-500)' }}>live</span>}
       footer={(
         <button
-          type="button" onClick={() => navigate(role === 'Administrator' ? '/users' : '/')}
+          type="button" onClick={() => navigate('/activity')}
           style={{ width: '100%', padding: '9px 13px', textAlign: 'center', background: 'var(--ink-25)', border: 'none', borderTop: '1px solid var(--divider)', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12, color: 'var(--blue-600)' }}
         >
           View full audit trail

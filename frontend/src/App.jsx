@@ -28,6 +28,7 @@ import Instruments from './pages/Instruments';
 import PreAssessment from './pages/PreAssessment';
 import Schedule from './pages/Schedule';
 import Survey from './pages/Survey';
+import AuditTrail from './pages/AuditTrail';
 
 /* The three-column shell.
  *
@@ -100,6 +101,7 @@ export default function App() {
           <Route path="/report/child/:id" element={<ProtectedRoute><Shell><ChildProgressReport /></Shell></ProtectedRoute>} />
           <Route path="/monitoring" element={<ProtectedRoute roles={['Administrator', 'Staff', 'Psychologist']}><Shell><Monitoring /></Shell></ProtectedRoute>} />
           <Route path="/reports/summary" element={<ProtectedRoute roles={['Administrator', 'Staff']}><Shell><AgencySummary /></Shell></ProtectedRoute>} />
+          <Route path="/activity" element={<ProtectedRoute roles={['Administrator', 'Staff', 'Psychologist']}><Shell><AuditTrail /></Shell></ProtectedRoute>} />
           <Route path="/users" element={<ProtectedRoute roles={['Administrator']}><Shell><Users /></Shell></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute roles={['Administrator']}><Shell><Settings /></Shell></ProtectedRoute>} />
           {/* Your own profile. The ISA gets it too (1 Oct 2026): it holds the

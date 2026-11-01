@@ -378,6 +378,13 @@ export default function AppHeader() {
                   );
                 })}
               </div>
+              <button
+                type="button" role="menuitem" className="racco-btn"
+                onClick={() => { setNotifOpen(false); navigate('/activity'); }}
+                style={{ width: '100%', padding: '9px 13px', textAlign: 'center', background: 'var(--ink-25)', border: 'none', borderTop: '1px solid var(--divider)', cursor: 'pointer', fontFamily: 'var(--font-sans)', fontWeight: 700, fontSize: 12, color: 'var(--blue-600)' }}
+              >
+                View full audit trail
+              </button>
             </>
             </Popover>
 
