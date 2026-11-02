@@ -56,6 +56,7 @@ class ChildSerializer(serializers.ModelSerializer):
     # Computed V2 profile surface: has the pre-assessment been answered, and
     # which instrument titles were used (titles only — copyright policy).
     pre_assessment_status = serializers.SerializerMethodField()
+    pre_assessment_progress = serializers.SerializerMethodField()
     instruments_used = serializers.SerializerMethodField()
     has_case_referral = serializers.SerializerMethodField()
     # Assigning is asking (children/assignment.py): `psychologist` is who holds
@@ -90,7 +91,7 @@ class ChildSerializer(serializers.ModelSerializer):
             "medical_notes", "recommendation",
             "psychologist", "psychologist_name", "social_worker", "social_worker_name",
             "termination", "terminations",
-            "pre_assessment_status", "instruments_used", "has_case_referral",
+            "pre_assessment_status", "pre_assessment_progress", "instruments_used", "has_case_referral",
             "pending_assignment", "declined_assignment",
             "intake_token", "updated_at",
         ]
@@ -218,6 +219,10 @@ class ChildSerializer(serializers.ModelSerializer):
     def get_pre_assessment_status(self, obj):
         # 5-state pipeline status; see Child.pre_assessment_status.
         return obj.pre_assessment_status()
+
+    def get_pre_assessment_progress(self, obj):
+        # Not started / Started / In progress / Completed, with the wizard step.
+        return obj.pre_assessment_progress()
 
     def get_has_case_referral(self, obj):
         """Whether a session can be booked for this child at all.

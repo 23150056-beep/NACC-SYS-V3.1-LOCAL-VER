@@ -131,8 +131,8 @@ class PreAssessmentSerializer(serializers.ModelSerializer):
         fields = ["id", "child", "child_name", "psychologist", "psychologist_name",
                   "date", "status", "instruments", "instrument_titles",
                   "consent", "consent_status", "interview", "interview_respondent",
-                  "notes", "completed_at", "created_at"]
-        read_only_fields = ["psychologist", "status", "completed_at"]
+                  "notes", "current_step", "completed_at", "created_at", "updated_at"]
+        read_only_fields = ["psychologist", "status", "completed_at", "updated_at"]
 
     def get_instrument_titles(self, obj):
         return [i.title for i in obj.instruments.all()]
@@ -146,6 +146,10 @@ class PreAssessmentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"consent": "That consent belongs to a different child."})
         if interview and child and interview.child_id != child.id:
             raise serializers.ValidationError({"interview": "That interview belongs to a different child."})
+        if (self.instance and self.instance.status == "completed"
+                and "current_step" in attrs and attrs["current_step"] != self.instance.current_step):
+            raise serializers.ValidationError({
+                "current_step": "This pre-assessment is completed; its step no longer changes."})
         return attrs
 
 

@@ -157,6 +157,21 @@ class PreAssessment(models.Model):
     COMPLETED = "completed"
     STATUS_CHOICES = [(PENDING, "Pending"), (IN_PROGRESS, "In progress"), (COMPLETED, "Completed")]
 
+    # Where the psychologist is in the wizard (PreAssessment.jsx). Mirrored as
+    # literals in children/models.py PA_STEPS, pinned by a test.
+    STEP_CONSENT = "consent"
+    STEP_INTERVIEW = "interview"
+    STEP_INSTRUMENTS = "instruments"
+    STEP_PROBLEMS = "problems"
+    STEP_REVIEW = "review"
+    STEP_CHOICES = [
+        (STEP_CONSENT, "Consent"),
+        (STEP_INTERVIEW, "Clinical interview"),
+        (STEP_INSTRUMENTS, "Instruments"),
+        (STEP_PROBLEMS, "Presenting problems"),
+        (STEP_REVIEW, "Review"),
+    ]
+
     child = models.ForeignKey(Child, on_delete=models.CASCADE, related_name="pre_assessments")
     psychologist = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="pre_assessments")
@@ -171,6 +186,9 @@ class PreAssessment(models.Model):
         ClinicalInterviewRecord, on_delete=models.SET_NULL, null=True, blank=True,
         related_name="pre_assessments")
     notes = models.TextField(blank=True)
+    # db_default so a release still serving during a deploy can still insert.
+    current_step = models.CharField(
+        max_length=20, choices=STEP_CHOICES, default=STEP_CONSENT, db_default=STEP_CONSENT)
     completed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

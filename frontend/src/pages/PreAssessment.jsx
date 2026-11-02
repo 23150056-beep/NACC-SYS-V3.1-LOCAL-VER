@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useToast } from '../context/ToastContext';
-import { useConfirm } from '../context/ConfirmContext';
+import { useConfirm, useNotice } from '../context/ConfirmContext';
 import { useAuth } from '../context/AuthContext';
 import { caseRef } from '../utils/child';
 import { Card, Button, Badge, Input, Select, FormField, FileUpload, Alert, EmptyState, Avatar, Icon, iconBtn, hoverLift, PAGE } from '../ui';
@@ -14,6 +14,7 @@ import PdfFrame from '../components/PdfFrame';
 import TemplateUpload from '../components/TemplateUpload';
 import { pdfObjectUrl } from '../utils/pdf';
 import { useSingleFlight } from '../utils/singleFlight';
+import { stepKeyFor, stepIndexFor, paProgressLabel } from '../utils/preAssessment';
 
 const STEPS = ['Child', 'Consent', 'Interview', 'Instruments', 'Problems', 'Complete'];
 
@@ -36,7 +37,9 @@ function FormBody({ body }) {
 export default function PreAssessment() {
   const toast = useToast();
   const confirm = useConfirm();
+  const notice = useNotice();
   const [once, savingInstrument] = useSingleFlight();
+  const [onceFinish, finishing] = useSingleFlight(); // Mark as completed / save and quit
   const navigate = useNavigate();
   const { user } = useAuth();
   const [step, setStep] = useState(0);
@@ -44,7 +47,11 @@ export default function PreAssessment() {
   const [children, setChildren] = useState([]);
   const [statusFilter, setStatusFilter] = useState('all'); // pipeline-status chip
   const [child, setChild] = useState(null);
-  const [pa, setPa] = useState(null); // the in-progress PreAssessment
+  const [pa, setPaState] = useState(null); // the in-progress PreAssessment
+  // The latest pa, readable in the same tick as setPa (advanceTo runs right
+  // after a patch, before a re-render would hand it the new id).
+  const paRef = useRef(null);
+  const setPa = (data) => { paRef.current = data; setPaState(data); };
   const [consents, setConsents] = useState([]);
   const [consentTemplates, setConsentTemplates] = useState([]);
   const [interviewTemplates, setInterviewTemplates] = useState([]);
@@ -70,15 +77,48 @@ export default function PreAssessment() {
     ], 'Could not load the pre-assessment workspace. Check your connection and refresh.');
   }, [toast]);
 
-  const goToStep = (i) => { if (i <= maxStep) setStep(i); };
+  // Remember where the psychologist is, so the child's page and Monitoring
+  // can say so. Navigation never waits on it. Only current_step and
+  // updated_at are merged back: the reply must not overwrite fields the
+  // wizard has edited since, and a completed pa takes no step change.
+  const saveStep = (i) => {
+    const current = paRef.current;
+    const key = stepKeyFor(i);
+    if (!current || !key || current.status === 'completed' || key === current.current_step) return;
+    api.patch(`/pre-assessments/${current.id}/`, { current_step: key })
+      .then((r) => {
+        const latest = paRef.current;
+        if (!latest || latest.id !== r.data.id || latest.status === 'completed') return;
+        setPa({ ...latest, current_step: r.data.current_step, updated_at: r.data.updated_at });
+      })
+      .catch(() => toast.error('Could not save where you are in the pre-assessment.'));
+  };
 
-  const advanceTo = (i) => { setMaxStep((m) => Math.max(m, Math.floor(i))); setStep(i); };
+  const goToStep = (i) => {
+    if (i > maxStep) return;
+    setStep(i);
+    saveStep(i);
+  };
 
-  const resumeStepFor = (data) => {
-    if (!data.consent) return 1;
+  const advanceTo = (i) => {
+    setMaxStep((m) => Math.max(m, Math.floor(i)));
+    setStep(i);
+    saveStep(i);
+  };
+
+  // Where the data says the psychologist has got to.
+  const derivedStepFor = (data) => {
+    if (!data.consent) return 1; // consent is required
     if (!data.interview) return 2;
     if ((data.instruments || []).length === 0) return 3;
     return 4;
+  };
+
+  // Land on the stored step (no consent linked -> step 1), but let the rail
+  // go forward to any step already reached.
+  const resumeStepFor = (data) => {
+    if (!data.consent) return 1;
+    return stepIndexFor(data.current_step) || derivedStepFor(data);
   };
 
   const start = async (c) => {
@@ -100,7 +140,10 @@ export default function PreAssessment() {
       setNotes(data.notes || '');
       const existing = await api.get(`/consents/?child=${c.id}`);
       setConsents(existing.data);
-      advanceTo(resumeStepFor(data));
+      const landing = resumeStepFor(data);
+      setMaxStep(Math.max(Math.floor(landing), derivedStepFor(data)));
+      setStep(landing);
+      saveStep(landing);
     } catch (err) {
       setError(err.response?.data?.detail || 'Could not start the pre-assessment.');
     }
@@ -156,6 +199,32 @@ export default function PreAssessment() {
       setInstForm(null); reloadInstruments();
     } catch (err) { setInstError(JSON.stringify(err.response?.data || 'Save failed')); }
   });
+
+  const reset = () => {
+    setStep(0); setMaxStep(0); setPa(null); setChild(null); setSelectedInstruments([]); setProblems([]); setNotes('');
+    api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))).catch(() => toast.error('Could not reload the children.'));
+  };
+
+  // "Not yet": keep what is on the tracker, leave it In progress at Review.
+  const saveAndQuit = async () => {
+    setError('');
+    if (!(await confirm({
+      description: `This saves ${child.fullname}'s pre-assessment as it is and keeps it in progress. You can come back to finish it.`,
+      confirmLabel: 'Yes, save and quit',
+    }))) return;
+    try {
+      await patchPa({ notes: notes.trim(), current_step: 'review' });
+    } catch (err) {
+      setError(JSON.stringify(err.response?.data || 'Could not save the pre-assessment.'));
+      return;
+    }
+    const name = child.fullname;
+    reset();
+    await notice({
+      title: 'Saved for now',
+      description: `${name}'s pre-assessment is saved and stays In progress at Review. Open it again from this list to finish it.`,
+    });
+  };
 
   const complete = async () => {
     setError('');
@@ -281,7 +350,7 @@ export default function PreAssessment() {
                         <Avatar name={c.fullname} tone="brand" size="sm" />
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{c.fullname}</div>
-                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{c.case_type || 'No case type'} · Pre-assessment: {c.pre_assessment_status}</div>
+                          <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{c.case_type || 'No case type'} · Pre-assessment: {['started', 'in_progress'].includes(c.pre_assessment_progress?.state) ? paProgressLabel(c.pre_assessment_progress) : c.pre_assessment_status}</div>
                         </div>
                         <Badge tone={PA_STATUS_TONES[c.pre_assessment_status] || 'neutral'} size="sm" dot>{c.pre_assessment_status}</Badge>
                         <Icon name="chevron-right" size={16} style={{ color: 'var(--text-faint)' }} />
@@ -391,7 +460,8 @@ export default function PreAssessment() {
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} style={textarea} placeholder="Observations during the session…" />
           </FormField>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
-            <Button variant="primary" onClick={complete} iconLeft={<Icon name="check-circle-2" size={16} />}>Mark completed</Button>
+            <Button variant="secondary" onClick={() => onceFinish(saveAndQuit)} disabled={finishing} iconLeft={<Icon name="save" size={16} />}>Not yet — save and quit for now</Button>
+            <Button variant="primary" onClick={() => onceFinish(complete)} disabled={finishing} iconLeft={<Icon name="check-circle-2" size={16} />}>Mark as completed</Button>
           </div>
         </Card>
       )}
@@ -402,10 +472,11 @@ export default function PreAssessment() {
             <span style={{ display: 'inline-flex', width: 56, height: 56, borderRadius: '50%', background: 'var(--success-50)', color: 'var(--success-600)', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}><Icon name="check-circle-2" size={28} /></span>
             <div style={{ fontFamily: 'var(--font-display)', fontWeight: 800, fontSize: 20, color: 'var(--text-strong)' }}>Pre-assessment completed</div>
             <p style={{ fontSize: 13.5, color: 'var(--text-muted)', margin: '8px 0 20px' }}>
-              {child?.fullname}&apos;s profile now shows “Answered” with the instrument titles used.
+              {child?.fullname}&apos;s page now shows Pre-Assessment: Completed
+              {(pa?.instrument_titles || []).length > 0 ? `, with ${pa.instrument_titles.join(', ')} as the instruments used` : ''}.
             </p>
             <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
-              <Button variant="secondary" onClick={() => { setStep(0); setMaxStep(0); setPa(null); setChild(null); setSelectedInstruments([]); setProblems([]); setNotes(''); api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))).catch(() => toast.error('Could not reload the children.')); }}>Start another</Button>
+              <Button variant="secondary" onClick={reset}>Start another</Button>
               <Button variant="primary" onClick={() => navigate(`/report/child/${child.id}`)}>Open child report</Button>
             </div>
           </div>

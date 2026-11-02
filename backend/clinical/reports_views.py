@@ -145,6 +145,7 @@ class MonitoringListView(generics.GenericAPIView):
                 "psychologist_name": display_name(psy) or None,
                 "case_status": c.case_status,
                 "pre_assessment_status": c.pre_assessment_status(),
+                "pre_assessment_progress": c.pre_assessment_progress(),
                 "latest_classification": (res.classification or None) if res else None,
                 "latest_remark": (remark.text or None) if remark else None,
                 "last_activity": last_activity.isoformat() if last_activity else None,

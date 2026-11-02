@@ -1371,6 +1371,37 @@ record bears it out:
   "Case terminated", reading back the child and case number, the reason, the
   closing summary and the date - it was a toast, gone before anyone read it.
 
+## The Pre-Assessment status (was "Move to Counseling")
+
+Owner's request, 2 Nov 2026. The child's page had a "Move to Counseling" /
+"Back to Pre-Assessment" button; it is gone. In its place, a STATUS, not a
+button: "Pre-Assessment" with Not started / Started · Consent / In progress ·
+<step> (step N of 6) / Completed, shown to every role.
+
+- **It follows the wizard.** `PreAssessment.current_step` (clinical 0012,
+  additive, `db_default`) is saved every time the psychologist moves to a
+  step, forward or back (`saveStep` in `PreAssessment.jsx`, fire and forget,
+  merging only `current_step`/`updated_at` back so a late reply cannot undo a
+  completion). Resume lands on the stored step; no consent linked is always
+  step 1. A completed pre-assessment refuses a step change.
+- **`Child.pre_assessment_progress()`** works it out (literals, never an
+  import of clinical; reads the prefetch, so `visible_pre_assessments` and the
+  carry-history rule apply). An open row started AFTER the newest completed
+  one is a live re-assessment and wins; an older open row is abandoned and
+  reads Completed. On the child serializer, the child page and Monitoring
+  rows; `utils/preAssessment.js` labels it. Pinned by
+  `clinical/tests/test_pre_assessment_progress.py`.
+- **The last step offers "Not yet — save and quit for now"** beside "Mark as
+  completed": it saves the notes and `review`, keeps the pre-assessment in
+  progress, and returns to the list with an end dialog.
+- **Nothing on screen moves a case to Counseling any more.** Completion does
+  NOT do it either, on purpose: that would close "Favorable pre-assessment,
+  no counseling needed" to every new case. `advance-status` stays in the API.
+  The case-stage badge shows only when it is not `pre_assessment`. The 5-state
+  `pre_assessment_status()` (Records, filters, care gaps) is unchanged, so its
+  "Completed" (= Answered + Counseling stage) is now reached only by older
+  records - the owner's call whether to fold Answered into Completed.
+
 ## Interview templates by upload
 
 The Clinical interview step (pre-assessment step 3) has **Upload a template**:

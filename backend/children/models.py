@@ -16,6 +16,20 @@ def middle_initial_of(middle_name):
     return f"{middle[0].upper()}."
 
 
+# The pre-assessment wizard's steps, in order: a literal copy of
+# clinical.PreAssessment.STEP_CHOICES (this app never imports clinical; a test
+# pins the two together). The wizard shows "step N of 6" with Child as step 1.
+PA_STEPS = (
+    ("consent", "Consent"),
+    ("interview", "Clinical interview"),
+    ("instruments", "Instruments"),
+    ("problems", "Presenting problems"),
+    ("review", "Review"),
+)
+PA_STEP_LABELS = dict(PA_STEPS)
+PA_TOTAL_STEPS = 6
+
+
 class Child(models.Model):
     ACTIVE = "active"
     INACTIVE = "inactive"
@@ -257,6 +271,47 @@ class Child(models.Model):
         if any(c.status == "signed" for c in self.consents.all()):
             return self.PA_NOT_YET
         return self.PA_NO_CONSENT
+
+    def pre_assessment_progress(self):
+        """Where the psychologist is in the pre-assessment, for the child's
+        page, Monitoring and the wizard's list. Same keys in every state.
+        Pending and in-progress rows both count as open; the newest open one
+        wins, and a completed one before it makes it a re-assessment. Literals
+        again, never an import of clinical. Iterates .all() so prefetches
+        keep list views flat."""
+        pas = list(self.pre_assessments.all())
+        done = [p for p in pas if p.status == "completed"]
+        keys = {"state": None, "label": None, "step": None, "step_label": None,
+                "step_number": None, "total_steps": PA_TOTAL_STEPS,
+                "reassessment": False, "updated_at": None, "completed_at": None}
+        # An open row older than the newest completed one is abandoned; only
+        # a row started after the last completion is a live re-assessment.
+        open_ = [p for p in pas if p.status != "completed"]
+        if done:
+            last_done = max((p.created_at, p.id) for p in done)
+            open_ = [p for p in open_ if (p.created_at, p.id) > last_done]
+        if open_:
+            newest = max(open_, key=lambda p: (p.created_at, p.id))
+            step = newest.current_step or "consent"
+            if step not in PA_STEP_LABELS:
+                step = "consent"
+            started = step == "consent" and newest.consent_id is None
+            label = PA_STEP_LABELS[step]
+            keys.update(
+                state="started" if started else "in_progress",
+                step=step, step_label=label,
+                step_number=[k for k, _ in PA_STEPS].index(step) + 2,
+                label=f"{'Started' if started else 'In progress'} \u00b7 {label}",
+                reassessment=bool(done),
+                updated_at=newest.updated_at.isoformat() if newest.updated_at else None)
+            return keys
+        if done:
+            stamps = [p.completed_at for p in done if p.completed_at]
+            keys.update(state="completed", label="Completed",
+                        completed_at=max(stamps).isoformat() if stamps else None)
+            return keys
+        keys.update(state="not_started", label="Not started")
+        return keys
 
     def save(self, *args, **kwargs):
         if self.first_name or self.last_name:

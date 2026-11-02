@@ -6,6 +6,7 @@ import { useToast } from '../context/ToastContext';
 import {
   Avatar, EmptyState, Icon, Input, PAGE, PageHeader, TD, TH, THEAD_ROW, TR,
 } from '../ui';
+import { paProgressLabel } from '../utils/preAssessment';
 
 /* One row per child, and eight columns' worth of case state on it.
  *
@@ -38,7 +39,7 @@ export default function Monitoring() {
   const subLine = (r) => [
     r.case_ref,
     !layout.monitorPsychCol ? (r.psychologist_name || 'no psychologist') : null,
-    !layout.monitorPaCol ? r.pre_assessment_status : null,
+    !layout.monitorPaCol ? paProgressLabel(r.pre_assessment_progress) : null,
     !layout.monitorClassCol ? r.latest_classification : null,
     !layout.monitorLastCol && r.last_activity ? `last ${r.last_activity}` : null,
   ].filter(Boolean).join(' · ');
@@ -107,7 +108,7 @@ export default function Monitoring() {
                           one line it took a quarter of the table. */}
                       <td style={{ ...TD, maxWidth: 180, lineHeight: 1.4 }}>{caseStatus(r)}</td>
                       {layout.monitorPsychCol && <td style={{ ...TD, whiteSpace: 'nowrap' }}>{r.psychologist_name || '—'}</td>}
-                      {layout.monitorPaCol && <td style={{ ...TD, whiteSpace: 'nowrap' }}>{r.pre_assessment_status}</td>}
+                      {layout.monitorPaCol && <td style={{ ...TD, whiteSpace: 'nowrap' }}>{paProgressLabel(r.pre_assessment_progress)}</td>}
                       {layout.monitorClassCol && (
                         <td style={{ ...TD, whiteSpace: 'nowrap', fontWeight: 600, color: borderline ? 'var(--warning-700)' : r.latest_classification ? 'var(--text-body)' : 'var(--text-faint)' }}>
                           {r.latest_classification || '—'}

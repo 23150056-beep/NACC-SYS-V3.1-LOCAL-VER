@@ -10,10 +10,11 @@ import { useAssistant } from '../context/AssistantContext';
 import {
   Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, Modal, Note, PAGE, Select, Tabs,
 } from '../ui';
-import { PA_STATUS_TONES, SPECIAL_NEEDS, caseDate, reportTypeLabel } from '../config/caseData';
+import { SPECIAL_NEEDS, caseDate, reportTypeLabel } from '../config/caseData';
 import { loadAll } from '../utils/load';
 import { useOpenFromLink } from '../utils/links';
 import { clock } from '../utils/time';
+import { paProgressLabel, paProgressTone, paProgressDetail } from '../utils/preAssessment';
 import { polishRemark, sendFeedback, getLatestBrief, generateBrief, getBriefFacts, summarizeDocument, confirmSummary } from '../api/assistant';
 import AssistantAccessLog from '../components/AssistantAccessLog';
 import BriefFacts from '../components/BriefFacts';
@@ -91,7 +92,6 @@ export default function ChildProgressReport() {
   // is no undo button for it — so it is asked for, not just clicked. Declared up
   // here with the other state: everything below the early returns runs
   // conditionally, and a hook that only sometimes runs breaks the render.
-  const [confirmMove, setConfirmMove] = useState(null); // { next, childName }
   const [polishing, setPolishing] = useState(false);
   const [polishJob, setPolishJob] = useState(null); // { id, draft }
   // The remark text as it stood before "Polish writing" overwrote it, so the
@@ -265,14 +265,6 @@ export default function ChildProgressReport() {
     { k: caseDate(child)[0], v: caseDate(child)[1] },
     { k: 'Educational placement', v: child.education_level },
   ];
-
-  const advance = async (next) => {
-    try {
-      await api.post(`/children/${id}/advance-status/`, { case_status: next });
-      toast.success(`Case moved to ${CASE_STATUS_META[next].label}`);
-      load();
-    } catch (err) { toast.error(err.response?.data?.detail || 'Could not update the case status.'); }
-  };
 
   /* The forms come from /opinionnaire-invites/templates/ (shared ones, the
    * child's psychologist's, and the viewer's own), so a social worker, who
@@ -537,8 +529,9 @@ export default function ChildProgressReport() {
               <Badge tone={child.status === 'active' ? 'success' : 'neutral'} size="sm" dot>
                 {child.status === 'active' ? 'Active' : 'Archived (Terminated)'}
               </Badge>
-              <Badge tone={csMeta.tone} size="sm">{csMeta.label}</Badge>
-              <Badge tone={PA_STATUS_TONES[child.pre_assessment_status] || 'amber'} size="sm" dot>{child.pre_assessment_status}</Badge>
+              {child.case_status !== 'pre_assessment' && (
+                <Badge tone={csMeta.tone} size="sm">{csMeta.label}</Badge>
+              )}
               {unreviewedFlags > 0 && (
                 <Badge tone="danger" size="sm">
                   {unreviewedFlags} self-report answer{unreviewedFlags === 1 ? '' : 's'} to read
@@ -581,14 +574,19 @@ export default function ChildProgressReport() {
                 Book appointment
               </Button>
             )}
-            {canAdvance && child.status === 'active' && (child.case_status === 'pre_assessment'
-              ? <Button variant="primary" onClick={() => setConfirmMove({ next: 'counseling', childName: child.fullname })} iconLeft={<Icon name="chevron-right" size={16} />}>Move to Counseling</Button>
-              : <Button variant="secondary" onClick={async () => {
-                  if (await confirm({
-                    description: `This moves ${child.fullname}'s case back to Pre-Assessment.`,
-                    confirmLabel: 'Yes, move it back', tone: 'warning',
-                  })) advance('pre_assessment');
-                }} iconLeft={<Icon name="arrow-left" size={16} />}>Back to Pre-Assessment</Button>)}
+            {/* A status, not a button: where the psychologist is in the
+                pre-assessment wizard. Not focusable on purpose. */}
+            <div
+              role="status"
+              aria-label={`Pre-Assessment: ${paProgressLabel(child.pre_assessment_progress)}${paProgressDetail(child.pre_assessment_progress) ? `, ${paProgressDetail(child.pre_assessment_progress).toLowerCase()}` : ''}`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 8, padding: '6px 12px', border: '1px solid var(--divider-row)', borderRadius: 'var(--radius-control)', background: 'var(--surface-card, #fff)' }}
+            >
+              <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>Pre-Assessment</span>
+              <Badge tone={paProgressTone(child.pre_assessment_progress)} size="sm" dot>{paProgressLabel(child.pre_assessment_progress)}</Badge>
+              {paProgressDetail(child.pre_assessment_progress) && (
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{paProgressDetail(child.pre_assessment_progress)}</span>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1130,16 +1128,6 @@ export default function ChildProgressReport() {
             <Button variant="primary" onClick={savePlan} disabled={!plan.objectives.trim() || writing} iconLeft={<Icon name="save" size={16} />}>Save plan</Button>
           </div>
         </div>
-      )}
-      {confirmMove && (
-        <ConfirmDialog
-          onClose={() => setConfirmMove(null)}
-          onConfirm={() => { const n = confirmMove.next; setConfirmMove(null); advance(n); }}
-          tone="brand" icon={<Icon name="chevron-right" size={19} />}
-          title="Move to counseling?"
-          description={`${confirmMove.childName || 'This child'} moves out of pre-assessment and into counseling. You can move them back, but the change shows in the audit trail either way.`}
-          confirmLabel="Move to counseling" cancelLabel="Cancel"
-        />
       )}
       {resolving && (
         <ConfirmDialog
