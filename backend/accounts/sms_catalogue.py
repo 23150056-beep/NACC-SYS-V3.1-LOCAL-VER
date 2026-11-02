@@ -207,6 +207,18 @@ ENTRIES = {e.key: e for e in [
         samples={"count": 99, "day": "tomorrow", "date": "Wed 30 Sep",
                  "time": "12:30 PM", "office": CUSTODIAN_OFFICE},
         no_rule_reason=_REMINDED_ONCE),
+    # Sent once when the social worker records that the custodian agreed, in
+    # person, to appointment texts at this number (owner, 2 Nov 2026). It
+    # replaced the one-time code: the custodian is no longer asked to read
+    # anything back, and a wrong handset learns it was a mistake from "Not
+    # you?". No child's name and no case detail, like every custodian text.
+    Entry(
+        "custodian_consent",
+        "NACC RACCO I: This number will now get appointment texts for the "
+        "child in your care: date, time and place only. Not you? Tell the "
+        "RACCO I office.",
+        NORMAL, CUSTODIAN,
+        rules=[Rule(1, 86400, BY_NUMBER_SUBJECT)]),
     Entry(
         "phone_code",
         # Measured on the owner's handset on 28 Oct 2026: the old wording
@@ -216,13 +228,6 @@ ENTRIES = {e.key: e for e in [
         # 111111." and this wording both arrived. Do not put "NACC SYS" back
         # next to "expires in".
         "NACC RACCO I: your verification code is {otp}. It expires in 10 minutes.",
-        OTP, STAFF,
-        samples={"otp": "482913"},
-        rules=_CODE_RULES),
-    Entry(
-        "custodian_code",
-        "NACC RACCO I: your code is {otp}. Give it to the social worker "
-        "to confirm this number for appointment reminders.",
         OTP, STAFF,
         samples={"otp": "482913"},
         rules=_CODE_RULES),

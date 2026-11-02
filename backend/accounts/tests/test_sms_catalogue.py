@@ -150,9 +150,10 @@ class TheDeclarationsTest(SimpleTestCase):
                                             sms_catalogue.BY_REQUESTER))
                     self.assertTrue(rule.group)
 
-    def test_the_two_codes_share_one_pool(self):
-        self.assertEqual({"phone_code", "custodian_code"},
-                         set(sms_catalogue.kinds_in_group("code")))
+    def test_the_code_pool_is_the_phone_code_alone(self):
+        # The custodian's code was retired on 2 Nov 2026 (children/custodian.py).
+        self.assertEqual({"phone_code"}, set(sms_catalogue.kinds_in_group("code")))
+        self.assertNotIn("custodian_code", sms_catalogue.ENTRIES)
 
     def test_a_computed_kind_is_built_by_the_catalogue(self):
         for event in sms_catalogue.CUSTODIAN_EVENTS:

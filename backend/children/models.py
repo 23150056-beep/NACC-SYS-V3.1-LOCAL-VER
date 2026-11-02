@@ -168,14 +168,16 @@ class Child(models.Model):
                                       db_column="surrendered_by")
     # The custodian's mobile, for appointment texts (children/custodian.py).
     # Stored as +639XXXXXXXXX (accounts/phone.py). Nothing is texted unless
-    # the custodian agreed AND the number was confirmed with a one-time code:
-    # a number somebody typed may be a typo, and a typo is a stranger.
+    # the custodian agreed. Since 2 Nov 2026 saving a fresh agreement texts the
+    # number once ("Not you?") instead of confirming it with a code.
     custodian_contact = models.CharField(max_length=16, blank=True)
     custodian_sms_consent = models.BooleanField(default=False)
     custodian_sms_consent_at = models.DateTimeField(null=True, blank=True)
     custodian_sms_consent_by = models.ForeignKey(
         "accounts.User", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="+")
+    # Unused since 2 Nov 2026 (the code confirmation was retired); kept so no
+    # column is dropped.
     custodian_contact_verified_at = models.DateTimeField(null=True, blank=True)
     # Remaining "I. Identifying Information" fields not already covered above.
     place_of_birth_or_found = models.CharField(max_length=150, blank=True)
@@ -376,7 +378,12 @@ class AssignmentRequest(models.Model):
 
 
 class CustodianContactCheck(models.Model):
-    """A one-time code texted to a custodian's number, and its answer
+    """UNUSED since 2 Nov 2026: the social worker no longer confirms a
+    custodian's number with a code (the custodian agrees in person and saving
+    the consent texts the number once). The model and its table are kept so no
+    migration drops anything; nothing reads or writes it.
+
+    A one-time code texted to a custodian's number, and its answer
     (29 Sep 2026, children/custodian.py).
 
     The social worker asks for a code while the custodian is present, the
@@ -385,9 +392,6 @@ class CustodianContactCheck(models.Model):
     code and its resend limits live in the database, not the per-process
     cache, for the reasons given there.
 
-    A confirmed number stays usable for CONFIRMED_FOR, long enough to finish
-    the intake it was checked for (siblings with one custodian included), and
-    only by the person who checked it.
     """
     requested_by = models.OneToOneField(
         "accounts.User", on_delete=models.CASCADE,

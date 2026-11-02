@@ -496,24 +496,23 @@ class TheLimitsTest(TestCase):
         for _ in range(5):
             self.assertTrue(self._send("custodian_reminder", subject="appointment:1").ok)
 
-    def test_the_two_code_kinds_share_two_an_hour_to_one_number(self):
+    def test_a_code_is_two_an_hour_to_one_number(self):
         self.assertTrue(self._send("phone_code", otp_code="111111").ok)
-        self.assertTrue(self._send("custodian_code", otp_code="222222").ok)
-        for kind in ("phone_code", "custodian_code"):
-            result = self._send(kind, otp_code="333333")
-            self.assertEqual(LIMITED, result.outcome, kind)
+        self.assertTrue(self._send("phone_code", otp_code="222222").ok)
+        result = self._send("phone_code", otp_code="333333")
+        self.assertEqual(LIMITED, result.outcome)
         self._age(minutes=61)
         self.assertTrue(self._send("phone_code", otp_code="444444").ok)
 
-    def test_the_two_code_kinds_share_four_a_day_to_one_number(self):
+    def test_a_code_is_four_a_day_to_one_number(self):
         for i in range(4):
             self.assertTrue(self._send("phone_code", otp_code=f"{i}00000").ok, i)
             self._age(minutes=61)             # clear the hourly rule each time
-        self.assertEqual(LIMITED, self._send("custodian_code", otp_code="555555").outcome)
+        self.assertEqual(LIMITED, self._send("phone_code", otp_code="555555").outcome)
 
     def test_one_requester_gets_ten_codes_a_day_whoever_the_numbers_are(self):
         for number in self._numbers(10):
-            self.assertTrue(self._send("custodian_code", number=number,
+            self.assertTrue(self._send("phone_code", number=number,
                                        otp_code="111111", requested_by=self.user).ok)
         over = self._send("phone_code", number="09179999999", otp_code="111111",
                           requested_by=self.user)

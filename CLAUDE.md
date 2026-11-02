@@ -1459,13 +1459,22 @@ address logic is unchanged) and asks who the child lives with now - the
   Nothing invents a custodian for a real record; demo data gets one from
   `children/demo_custodians.py`, called by `seed_demo_data` and
   `import_demo_data` only.
-- **A custodian is texted only with consent AND a confirmed number**
-  (`texts_allowed()`): the SW ticks that the custodian agreed (recorded with
-  who and when), and confirms the number with a one-time code the custodian
-  reads back (`/api/custodian-contact/code/`, SW and ISA only, same limits as
-  a user's own number). A different custodian or number clears both unless
-  given again in the same save; a confirmation counts only for whoever made
-  it, within the hour. **Consent follows the person and number it was given
+- **A custodian is texted with consent and a number - no code** (owner,
+  2 Nov 2026; until then a one-time code the custodian read back had to
+  confirm the number). `texts_allowed()` is number + consent + an open case.
+  The SW ticks that the custodian agreed in person (recorded with who and
+  when); saving a FRESH agreement - consent newly on, or a new number, or a
+  new custodian ticked again - texts that number `custodian_consent` once
+  ("This number will now get appointment texts ... Not you? Tell the RACCO I
+  office.", `custodian.is_fresh_agreement`, `ChildViewSet._tell_custodian`),
+  and the save's end dialog says so (`custodian_consent_text`). That text is
+  what now catches a mistyped number - the form asks the SW to have the
+  custodian check it arrived; the code used to. One a day per number and
+  child, so a re-tick the same day sends nothing and says nothing. The code
+  endpoint, `send_code`/`confirm_code` and the `custodian_code` text are gone;
+  the `CustodianContactCheck` table and `custodian_contact_verified_at` stay,
+  unused. A different custodian or number clears consent unless given again
+  in the same save. **Consent follows the person and number it was given
   for** (`_consentFor`): change either and it is off, put both back and it is
   on again - it used to go off for good on one stray keystroke, and the save
   withdrew it. A psychologist cannot change any of it, except that
@@ -2146,7 +2155,8 @@ is not a system user; see "The custodian and their texts".
   `children/tests/test_sw_answer_and_booking_texts.py` runs the REAL
   queue_sms -> send_sms -> SmsSend chain: the earlier answer-text tests
   patched `queue_sms`, which is how the second gap went unseen.
-- **Codes stay on the OTP route** (2 credits), the custodian's too. Measured
+- **Codes stay on the OTP route** (2 credits); since 2 Nov 2026 the only
+  code is a user's own phone (the custodian's is gone, above). Measured
   27 Oct 2026: the normal route delivered, but a text sent at 18:08 reached
   the handset after ones sent at 18:15, while the OTP code arrived at once.
   A code is read back by somebody waiting for it.
@@ -2154,7 +2164,7 @@ is not a system user; see "The custodian and their texts".
   were last told (`Appointment.custodian_told_start`); no day-before
   reminder within 12 hours of the booked text; children sharing one
   custodian number get ONE reminder (`custodian_reminder_group`, or
-  `_many` from five). An already-verified number gets no code.
+  `_many` from five). An already-verified own number gets no code.
 - **`manage.py sms_live_check --to 09...`** sends every catalogue message
   once (asks for the number to be typed back first; `--dry-run` sends
   nothing; refuses a hosted database), then asks Semaphore for each one's
@@ -2363,7 +2373,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 3,656 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 3,662 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

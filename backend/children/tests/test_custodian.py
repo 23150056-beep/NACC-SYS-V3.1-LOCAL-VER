@@ -2,8 +2,10 @@
 
 "Previous Custodian" became the Custodian (children 0028), with a contact
 number the system may text about appointments - only when the custodian
-agreed and the number was confirmed with a one-time code. children/custodian.py
-holds the rules, accounts/sms_notifications.py section 4 the wording.
+agreed. Since 2 Nov 2026 there is no code: the custodian agrees in person and
+saving a fresh agreement texts the number once (test_custodian_consent_text.py).
+children/custodian.py holds the rules, accounts/sms_notifications.py section 4
+the wording.
 """
 from datetime import datetime, timedelta
 from importlib import import_module
@@ -15,11 +17,11 @@ from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from accounts import sms_notifications
+from accounts import sms_catalogue, sms_notifications
 from accounts.models import Role
 from accounts.sms import SmsResult, fits_one_segment
 from children import custodian, demo_custodians, intake
-from children.models import Child, CustodianContactCheck
+from children.models import Child
 from children.tests.payloads import complete
 from scheduling.models import Appointment, CustodianReminder
 from scheduling.reminders import send_session_reminders
@@ -57,32 +59,11 @@ class CustodianBase(TestCase):
         client.force_authenticate(user)
         return client
 
-    def _confirm(self, user=None, number=NUMBER):
-        """Send a code and read it back, as the social worker at intake. The
-        once-a-minute limit is lifted first: a test that confirms twice is
-        not the abuse it exists to stop (test_codes_are_rate_limited is)."""
-        CustodianContactCheck.objects.update(last_sent_at=None)
-        sent = []
-        with patch("accounts.sms.send_sms", side_effect=fake_send(sent)):
-            res = self._as(user or self.sw).post("/api/custodian-contact/code/",
-                                                 {"number": number}, format="json")
-        self.assertEqual(200, res.status_code, res.data)
-        if res.data.get("verified"):
-            # Confirmed within the hour already: nothing is sent to prove it
-            # again (test_a_number_confirmed_within_the_hour_sends_nothing).
-            return sent
-        code = sent[-1][1].split("code is ")[1][:6]
-        res = self._as(user or self.sw).put("/api/custodian-contact/code/",
-                                            {"number": number, "code": code}, format="json")
-        self.assertEqual(200, res.status_code, res.data)
-        return sent
-
     def _patch(self, user=None, **fields):
         return self._as(user or self.sw).patch(f"/api/children/{self.child.id}/", fields,
                                                format="json")
 
     def _texts_on(self):
-        self._confirm()
         res = self._patch(custodian_contact="0917 123 4567", custodian_sms_consent=True)
         self.assertEqual(200, res.status_code, res.data)
         self.child.refresh_from_db()
@@ -138,7 +119,7 @@ class ContactAndConsentTest(CustodianBase):
         self.assertIsNotNone(self.child.custodian_sms_consent_at)
         self.assertEqual("Editha Pascua", res.data["custodian_sms_consent_by_name"])
 
-    def test_a_new_custodian_or_number_clears_consent_and_confirmation(self):
+    def test_a_new_custodian_or_number_clears_consent(self):
         self._texts_on()
         self._patch(custodian_name="Mercedes Soriano (foster parent)")
         self.child.refresh_from_db()
@@ -147,7 +128,6 @@ class ContactAndConsentTest(CustodianBase):
         self._patch(custodian_contact="0918 765 4321")
         self.child.refresh_from_db()
         self.assertFalse(self.child.custodian_sms_consent)
-        self.assertIsNone(self.child.custodian_contact_verified_at)
         self.assertFalse(custodian.texts_allowed(self.child))
 
     def test_an_unrelated_edit_keeps_both(self):
@@ -181,7 +161,6 @@ class ContactAndConsentTest(CustodianBase):
         self.assertEqual(200, res.status_code, res.data)
         self.child.refresh_from_db()
         self.assertEqual(("", ""), (self.child.custodian_name, self.child.custodian_contact))
-        self.assertIsNone(self.child.custodian_contact_verified_at)
         self.assertFalse(custodian.texts_allowed(self.child))
 
     def test_a_psychologist_is_not_asked_for_a_custodian_they_cannot_record(self):
@@ -207,56 +186,33 @@ class ContactAndConsentTest(CustodianBase):
             self.assertIn("custodian_name", res.data, over)
 
 
-class OneTimeCodeTest(CustodianBase):
-    def test_a_confirmed_number_is_put_on_the_record_by_the_save(self):
-        self._confirm()
+class NoCodeNeededTest(CustodianBase):
+    """The social worker no longer confirms the number with a code (owner,
+    2 Nov 2026): a number and the custodian's consent are enough."""
+
+    def test_consent_and_a_number_turn_texts_on_with_no_code(self):
         res = self._patch(custodian_contact="0917 123 4567", custodian_sms_consent=True)
-        self.assertTrue(res.data["custodian_contact_verified"])
+        self.assertEqual(200, res.status_code, res.data)
         self.assertEqual({"on": True, "status": "Texts on"}, res.data["custodian_texts"])
+        self.child.refresh_from_db()
+        self.assertIsNone(self.child.custodian_contact_verified_at)
+        self.assertTrue(custodian.texts_allowed(self.child))
 
-    def test_without_the_code_texts_stay_off(self):
-        res = self._patch(custodian_contact="0917 123 4567", custodian_sms_consent=True)
-        self.assertFalse(res.data["custodian_contact_verified"])
-        self.assertEqual("Number not confirmed - texts off", res.data["custodian_texts"]["status"])
-
-    def test_the_code_text_carries_no_name_and_fits_one_segment(self):
-        sent = self._confirm()
-        number, text = sent[-1]
-        self.assertEqual(NUMBER, number)
-        self.assertNotIn("Ana", text)
-        self.assertTrue(fits_one_segment(text))
-        self.assertFalse(text.upper().startswith("TEST"))
-
-    def test_a_wrong_code_is_refused_and_counted(self):
-        with patch("accounts.sms.send_sms", side_effect=fake_send([])):
-            self._as(self.sw).post("/api/custodian-contact/code/", {"number": NUMBER}, format="json")
-        res = self._as(self.sw).put("/api/custodian-contact/code/",
-                                    {"number": NUMBER, "code": "000000x"}, format="json")
-        self.assertEqual(400, res.status_code)
-        self.assertIn("attempts left", res.data["code"])
-
-    def test_one_persons_confirmation_is_not_anothers(self):
-        self._confirm(user=self.sw2)
+    def test_without_consent_texts_stay_off(self):
         res = self._patch(custodian_contact="0917 123 4567")
-        self.assertFalse(res.data["custodian_contact_verified"])
+        self.assertEqual("No consent recorded - texts off", res.data["custodian_texts"]["status"])
 
-    def test_a_confirmation_goes_stale(self):
-        self._confirm()
-        CustodianContactCheck.objects.update(
-            verified_at=timezone.now() - custodian.CONFIRMED_FOR - timedelta(minutes=1))
-        res = self._patch(custodian_contact="0917 123 4567")
-        self.assertFalse(res.data["custodian_contact_verified"])
+    def test_without_a_number_texts_stay_off(self):
+        self.assertEqual("No contact number - texts off", custodian.status_of(self.child))
 
-    def test_codes_are_rate_limited(self):
-        with patch("accounts.sms.send_sms", side_effect=fake_send([])):
-            first = self._as(self.sw).post("/api/custodian-contact/code/", {"number": NUMBER}, format="json")
-            again = self._as(self.sw).post("/api/custodian-contact/code/", {"number": NUMBER}, format="json")
-        self.assertEqual(200, first.status_code)
-        self.assertEqual(429, again.status_code)
-
-    def test_only_staff_and_the_isa_send_codes(self):
-        res = self._as(self.psy).post("/api/custodian-contact/code/", {"number": NUMBER}, format="json")
-        self.assertEqual(403, res.status_code)
+    def test_the_code_door_is_gone(self):
+        res = self._as(self.sw).post("/api/custodian-contact/code/",
+                                     {"number": NUMBER}, format="json")
+        self.assertEqual(404, res.status_code)
+        for gone in ("send_code", "confirm_code", "confirmed_at", "CONFIRMED_FOR"):
+            self.assertFalse(hasattr(custodian, gone), gone)
+        self.assertNotIn("custodian_code", sms_catalogue.ENTRIES)
+        self.assertNotIn("custodian_contact_verified", self._patch(medical_notes="x").data)
 
 
 class AppointmentTextsTest(CustodianBase):

@@ -137,9 +137,9 @@ class LiveCheckTest(TestCase):
         self.assertEqual(set(sms_catalogue.ENTRIES), set(SmsSend.objects.values_list("kind", flat=True)))
         self.assertFalse(SmsSend.objects.exclude(outcome="sent").exists())
         self.assertEqual({"live-check"}, set(SmsSend.objects.values_list("subject", flat=True)))
-        # Every code message went to the code route with a six-digit code.
+        # The code message went to the code route with a six-digit code.
         otp = [p for p in gateway.posts if p.full_url.endswith("/otp")]
-        self.assertEqual(2, len(otp))
+        self.assertEqual(1, len(otp))
         for request in otp:
             form = dict(urllib.parse.parse_qsl(request.data.decode()))
             self.assertRegex(form["code"], r"^\d{6}$")

@@ -434,9 +434,9 @@ export default function Children() {
     delete payload.psychologist_name; delete payload.social_worker_name;
     delete payload._origPsychologist; delete payload.termination; delete payload.photo;
     delete payload._basePsychologist; delete payload.pending_assignment; delete payload.declined_assignment;
-    for (const k of ['_origContact', '_origCustodian', '_origConsent', '_confirmedNumber', '_consentFor',
+    for (const k of ['_origContact', '_origCustodian', '_origConsent', '_consentFor',
       'custodian_contact_display', 'custodian_sms_consent_at', 'custodian_sms_consent_by_name',
-      'custodian_contact_verified', 'custodian_texts']) delete payload[k];
+      'custodian_texts', 'custodian_consent_text']) delete payload[k];
     delete payload.updated_at; delete payload._conflict; delete payload._draft; delete payload._record;
     // The form keeps the answers a case type does not ask for, hidden, so a
     // changed mind brings them back. What the final case does not ask is sent
@@ -502,13 +502,17 @@ export default function Children() {
       setForm(null);
       load();
       refreshActivity();
+      // The server says when this save texted the custodian: a fresh
+      // agreement (children/custodian.py is_fresh_agreement).
+      const texted = saved?.custodian_consent_text
+        ? ' A confirmation text was sent to the custodian.' : '';
       // The end dialog. "Joins their records once they accept" is the
       // sentence that explains why the row does not show them yet.
       if (asking) {
         await notice({
           title: 'Request sent',
           description: `${assignee} is asked to take ${name}'s case. ${name} joins their records once they `
-            + 'accept. Their answer comes to your notifications and shows on this record.',
+            + `accept. Their answer comes to your notifications and shows on this record.${texted}`,
           details: [['Record', was.id ? 'Changes saved' : 'Added to Records'], ['Asked', assignee],
             ['Currently with', was.id ? (was.psychologist_name || 'Nobody yet') : null],
             ['Case referral', referralFile ? (referralFailed ? 'Did not upload — add it from the record' : 'On file') : null]],
@@ -516,7 +520,7 @@ export default function Children() {
       } else if (withdrawing) {
         await notice({
           title: 'Request withdrawn',
-          description: `${wasAsked} is no longer asked to take ${name}'s case. ${name} stays with ${holderName}.`,
+          description: `${wasAsked} is no longer asked to take ${name}'s case. ${name} stays with ${holderName}.${texted}`,
           details: [['Record', 'Changes saved'], ['Withdrawn', wasAsked], ['Stays with', holderName]],
         });
       } else if (clearing) {
@@ -526,7 +530,13 @@ export default function Children() {
             was.pending_assignment ? `The request to ${was.pending_assignment.psychologist_name} is withdrawn.` : '',
             was._origPsychologist ? `${was.psychologist_name || 'The psychologist'} no longer holds ${name}'s case.` : '',
             'Pick a psychologist whenever you are ready.',
+            texted.trim(),
           ].filter(Boolean).join(' '),
+        });
+      } else if (texted) {
+        await notice({
+          title: was.id ? 'Record updated' : 'Record added',
+          description: texted.trim(),
         });
       }
     } catch (err) {

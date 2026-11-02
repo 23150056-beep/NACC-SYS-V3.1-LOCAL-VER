@@ -227,7 +227,7 @@ def notify_session_reminder(psychologist, count, when="tomorrow"):
 # of this file apply hardest here. No child's name, no case detail, nothing
 # clinical - a date, a time and a place. "The child in your care" is who it is
 # about; the custodian knows. Only when children/custodian.texts_allowed()
-# says so: consent recorded, number confirmed with a code, case open.
+# says so: a number, consent recorded, case open.
 #
 # The wording lives in accounts/sms_catalogue.py, one entry per text, so it can
 # be changed in one place (the owner means to revise it). Every entry must stay
@@ -311,6 +311,30 @@ def notify_custodian(appointment, event):
         appointment.custodian_told_start = appointment.start
         appointment.custodian_told_at = told_at
     return "queued"
+
+
+def notify_custodian_consent(child, by):
+    """Tell the custodian's number that it will now get appointment texts
+    (owner, 2 Nov 2026): the social worker has recorded, after the custodian
+    agreed in person, that this person wants them at this number. It replaced
+    the one-time code - nobody reads anything back; a wrong handset reads
+    "Not you?".
+
+    Queued for after the save commits, only when texts to this custodian are
+    allowed (a number, consent, an open case). The caller decides that this is
+    a FRESH agreement (children/custodian.is_fresh_agreement); this function
+    does not guess. One a day per number and child (the catalogue's rule).
+    Returns True when a text was queued, False when it was off or the limit
+    held it - the record form says so in its end dialog.
+    """
+    number = _custodian_number(child)
+    if not number:
+        return False
+    subject = f"child:{child.pk}"
+    if limit_reason(number, "custodian_consent", requested_by=by, subject=subject):
+        return False
+    return queue_sms(number, sms_catalogue.render("custodian_consent"),
+                     "custodian_consent", requested_by=by, subject=subject)
 
 
 def remind_custodian(appointment, day="tomorrow"):

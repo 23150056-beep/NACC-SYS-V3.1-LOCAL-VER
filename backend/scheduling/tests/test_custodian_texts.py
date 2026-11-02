@@ -213,7 +213,7 @@ class TheReminderTest(CustodianBase):
             first_name=name, last_name="Cruz", fullname=f"{name} Cruz",
             case_type="Foster Care", custodian_name="Rosa", social_worker=self.sw,
             assigned_psychologist=self.psy, custodian_contact=NUMBER,
-            custodian_sms_consent=consent, custodian_contact_verified_at=NOON)
+            custodian_sms_consent=consent)
         return child
 
     def test_one_appointment_gets_the_single_wording(self):

@@ -289,17 +289,12 @@ class CaseBriefFactsTest(FactsFixture):
         self.assertEqual(self._case()["custodian_texts"],
                          "No consent recorded - texts off")
         Child.objects.filter(pk=self.child.pk).update(custodian_sms_consent=True)
-        self.assertEqual(self._case()["custodian_texts"],
-                         "Number not confirmed - texts off")
-        Child.objects.filter(pk=self.child.pk).update(
-            custodian_contact_verified_at=NOW)
         self.assertEqual(self._case()["custodian_texts"], "Texts on")
 
     def test_the_custodians_name_and_number_never_leave(self):
         Child.objects.filter(pk=self.child.pk).update(
             case_type="Foster Care", custodian_name="Lola Cora Dizon",
-            custodian_contact="+639171234567", custodian_sms_consent=True,
-            custodian_contact_verified_at=NOW)
+            custodian_contact="+639171234567", custodian_sms_consent=True)
         for user in (self.sw, self.admin):
             body = json.dumps(self._facts(user).json())
             with self.subTest(user=user.email):

@@ -386,7 +386,7 @@ class WhatItMustNeverReadTest(CaseBriefFixture):
         Child.objects.filter(pk=self.child.pk).update(
             case_type="Foster Care", custodian_name=self.SECRETS["custodian name"],
             custodian_contact=self.SECRETS["custodian number"],
-            custodian_sms_consent=True, custodian_contact_verified_at=NOW)
+            custodian_sms_consent=True)
         self.child.refresh_from_db()
         ProblemEntry.objects.create(child=self.child, logged_by=self.psy,
                                     description=self.SECRETS["problem description"])

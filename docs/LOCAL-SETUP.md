@@ -292,11 +292,11 @@ with an error, and running it again retries only those.
 A child's custodian is texted about the child's appointments: when one is
 booked, the day before, when it is moved, when it is cancelled, and when a
 no-show is recorded the same day. Only once the record holds the custodian's
-consent **and** a number confirmed with a code. To see every one on your own
+consent **and** a number. To see every one on your own
 phone, make yourself the custodian of one demo child.
 
-With `SMS_PROVIDER` unset all of this still works, free: each text, the code
-included, appears in the API window as a line starting `SMS (console)`.
+With `SMS_PROVIDER` unset all of this still works, free: each text
+appears in the API window as a line starting `SMS (console)`.
 
 1. **Sign in as a social worker**: `e.pascua@racco1.gov.ph` / `demo1234`
    after `seed_demo_data`. Only a social worker or the ISA can set a
@@ -304,13 +304,13 @@ included, appears in the API window as a line starting `SMS (console)`.
 2. **Records → one of your Adoption, Foster Care, Kinship Care or Family
    Tracing children → Edit → Present Environment.** The other case types do
    not ask for a custodian, so the fields are not there.
-3. **Contact Number**: type your own mobile, then **Send a code to confirm
-   this number**. Type in the six digits that arrive (or from the
-   `your code is` line in the API window) and press **Confirm**. The code
-   lasts ten minutes; the confirmation counts only for you, for an hour.
+3. **Contact Number**: type your own mobile. No code is sent or read back:
+   the custodian agrees in person.
 4. **Tick "The custodian agreed to receive appointment texts".** The line below
-   should read *Appointment texts on*. **Save Record.** The record's drawer
-   now shows the number with "Texts on".
+   should read *Appointment texts on*. **Save Record.** A confirmation text
+   ("This number will now get appointment texts...") goes to the number once -
+   in the API window as a line starting `SMS (console)` - and the record's
+   drawer shows the number with "Texts on".
 5. **Schedule**, for that child:
 
    | Text | How to make it go |
@@ -327,7 +327,7 @@ included, appears in the API window as a line starting `SMS (console)`.
    clears the consent with it.
 
 A text that should have gone and did not usually means the record is not
-ready: the drawer says whether the consent or the confirmation is missing,
+ready: the drawer says whether the consent or the number is missing,
 and a closed case is never texted. What each text costs is below.
 
 ### What it costs, and what it refuses

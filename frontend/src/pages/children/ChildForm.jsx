@@ -311,7 +311,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
    * switching back brings it back, and the save leaves out whatever the final
    * choice does not ask (caseData.js unaskedBlanked; Children.jsx save).
    * Until 29 Sep 2026 they were deleted on the spot, so a slip of the dropdown
-   * lost the custodian, their confirmed number and texting consent, and the
+   * lost the custodian, their number and texting consent, and the
    * date - and clearing the Case Type to re-pair the Category cost what
    * clearing the Category did not. */
 
