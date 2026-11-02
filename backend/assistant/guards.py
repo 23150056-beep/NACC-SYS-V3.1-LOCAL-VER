@@ -46,6 +46,11 @@ CHECKS = {
     # The model's reason for flagging a child's answer, in a few words, drawn
     # from the question and the answer it was shown.
     "self_report": (NAMES, DATES, NUMBERS),
+    # A polish rewrites the writer's own words and nothing else, so any name,
+    # date or number that is not in what they typed is an invention. Unlike a
+    # summary it does not paraphrase dates ("two weeks later"), so all three
+    # apply, against the text they sent.
+    "record_polish": (NAMES, DATES, NUMBERS),
 }
 
 
@@ -171,4 +176,9 @@ STAFF_DRAFTING = {
     # against the question and answer it was drawn from and, when it fails,
     # replaced by a fixed one. The flag itself is never lost.
     "self_report": GUARDED,
+    # A child's record text (referral reason, medical notes, recommendation,
+    # closing summary), polished while a social worker, the ISA or the
+    # psychologist writes it. Staff may ask, so the draft is checked against the
+    # text they sent before it is shown; it is never stored by the assistant.
+    "record_polish": GUARDED,
 }

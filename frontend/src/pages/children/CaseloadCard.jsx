@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Icon, MiniBar } from '../../ui';
+import './records.css';
 
 /* How many active cases each psychologist holds, under the Records table.
  *
@@ -40,7 +41,7 @@ export default function CaseloadCard({ psychologists }) {
           </div>
         </div>
         <button
-          type="button" onClick={toggle} aria-expanded={open} aria-controls="caseload-list"
+          type="button" className="racco-rec-tap" onClick={toggle} aria-expanded={open} aria-controls="caseload-list"
           style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '5px 10px', border: '1px solid var(--border)', borderRadius: 'var(--radius-control)', background: 'var(--surface)', fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 12, color: 'var(--text-body)', cursor: 'pointer', flex: 'none' }}
         >
           {open ? 'Hide' : 'Show'}

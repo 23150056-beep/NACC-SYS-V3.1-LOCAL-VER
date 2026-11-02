@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { screensFor } from '../config/nav';
@@ -11,6 +12,7 @@ import { Icon, roleLabel } from '../ui';
 import { ageFrom, caseRef, initialsOf } from '../utils/child';
 import { loadAll } from '../utils/load';
 import { matchChildren, matchesCommand, matchStaff, recentChildIds, rememberChild } from '../utils/search';
+import './header-phone.css';
 
 /* One search box, in the chrome, on every screen - and the quickest way to
  * DO something, not only to find somebody (owner, 11 Oct 2026).
@@ -35,6 +37,12 @@ import { matchChildren, matchesCommand, matchStaff, recentChildIds, rememberChil
  * - Actions and screens are found by typing them: "book", "upload", "add".
  * - Before anything is typed it shows the children opened lately, what is
  *   waiting on this account, and its actions.
+ *
+ * - Under 480px there is no room for the pill beside the tabs, so it is a
+ *   magnifier button (`phone`, LayoutContext). Pressing it puts the SAME field
+ *   and panel across the full width of the header, over the tabs, with a Close
+ *   button because a phone has no Esc. Nothing else changes: it is the one
+ *   input, so the keys, the focus rules and the listbox are untouched.
  *
  * The roster is fetched each time the box opens, and the last copy is shown
  * meanwhile: the server already scopes it to what this account may see, a
@@ -148,12 +156,21 @@ export default function GlobalSearch({ open, onOpenChange }) {
   // Where the pointer last was, to tell a pointer that moved from a list that
   // moved under it.
   const pointerAt = useRef(null);
+  // The magnifier, and whether the last close came from Esc or Close - those
+  // give the focus back to it. A Tab away must not: focus is already leaving.
+  const iconRef = useRef(null);
+  const returnFocus = useRef(false);
+  const phone = !!layout.phone;
 
   const reset = useCallback(() => {
     onOpenChange(false); setQ(''); setCursor(0); setFocus(null);
   }, [onOpenChange]);
   // Closing lets go of the field too, so the keys go back to the page.
   const close = useCallback(() => { reset(); inputRef.current?.blur(); }, [reset]);
+  const closeAndReturn = useCallback(() => { returnFocus.current = true; close(); }, [close]);
+  useEffect(() => {
+    if (!open && returnFocus.current) { returnFocus.current = false; iconRef.current?.focus(); }
+  }, [open, phone]);
 
   // Closed for ANY reason - this component, another header popover opening,
   // a new screen - the text goes with it. A query left in the bar with no
@@ -170,7 +187,7 @@ export default function GlobalSearch({ open, onOpenChange }) {
     const onKey = (e) => {
       if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'k') {
         e.preventDefault();
-        if (open) { close(); return; }
+        if (open) { closeAndReturn(); return; }
         // A drawer or dialog owns the keyboard. Opened over it, the panel
         // would sit under its scrim and take the focus out of it.
         if (document.querySelector('[aria-modal="true"]')) return;
@@ -181,7 +198,7 @@ export default function GlobalSearch({ open, onOpenChange }) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [open, onOpenChange, close]);
+  }, [open, onOpenChange, close, closeAndReturn]);
 
   // Every child's record opened, from here or anywhere else, is "recent".
   useEffect(() => {
@@ -352,7 +369,7 @@ export default function GlobalSearch({ open, onOpenChange }) {
     // the browser's back button). Enter must not open a row nobody can see, so
     // only the way back in is read.
     if (!open) {
-      if (e.key === 'Escape') { e.preventDefault(); close(); }
+      if (e.key === 'Escape') { e.preventDefault(); closeAndReturn(); }
       else if (e.key === 'ArrowDown') { e.preventDefault(); onOpenChange(true); }
       return;
     }
@@ -361,7 +378,7 @@ export default function GlobalSearch({ open, onOpenChange }) {
     // focused there would not answer Esc or the arrows. Not close(): the
     // browser is about to move focus on from where it is.
     if (e.key === 'Tab') { reset(); return; }
-    if (e.key === 'Escape') { e.preventDefault(); if (focus) back(); else close(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); if (focus) back(); else closeAndReturn(); return; }
     if (e.key === 'ArrowDown') { e.preventDefault(); setCursor((i) => Math.min(flat.length - 1, i + 1)); return; }
     if (e.key === 'ArrowUp') { e.preventDefault(); setCursor((i) => Math.max(0, i - 1)); return; }
     if (e.key === 'Enter') { e.preventDefault(); go(flat[cursor]); return; }
@@ -433,12 +450,18 @@ export default function GlobalSearch({ open, onOpenChange }) {
   // The "Ask" row is the answer to nothing matching, not a match.
   const nothing = term && !focus && loaded && flat.every((i) => i.key === 'ask-text');
 
-  return (
-    <div ref={boxRef} style={{ position: 'relative', flex: 'none' }}>
-      {/* The pill is the field. Clicking anywhere on it, icon, padding and the
-          Ctrl K chip included, puts the caret in the input and opens the panel
-          - also when the field already has focus with the panel shut (the
-          browser's back button leaves it so), where focusing does nothing. */}
+  const openFromIcon = () => {
+    // Inside the press, so a phone raises its keyboard: a field focused from an
+    // effect, after the press has ended, is not allowed to.
+    flushSync(() => onOpenChange(true));
+    inputRef.current?.focus();
+  };
+
+  // The pill is the field. Clicking anywhere on it, icon, padding and the
+  // Ctrl K chip included, puts the caret in the input and opens the panel
+  // - also when the field already has focus with the panel shut (the
+  // browser's back button leaves it so), where focusing does nothing.
+  const pill = (
       <div
         className="racco-chrome-search"
         onMouseDown={(e) => {
@@ -449,7 +472,7 @@ export default function GlobalSearch({ open, onOpenChange }) {
         onMouseLeave={() => setHover(false)}
         style={{
           display: 'flex', alignItems: 'center', gap: 9,
-          width: layout.searchWidth, height: 36, padding: '0 8px 0 12px',
+          width: phone ? 'auto' : layout.searchWidth, flex: phone ? 1 : undefined, minWidth: 0, height: phone ? 40 : 36, padding: '0 8px 0 12px',
           border: `1px solid ${open ? 'rgba(255,255,255,0.35)' : 'var(--chrome-line)'}`,
           borderRadius: 'var(--radius-pill)',
           background: open || hover ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.09)',
@@ -475,7 +498,7 @@ export default function GlobalSearch({ open, onOpenChange }) {
           // No onFocus: tabbing onto the bar is a pass through the header, not
           // a search. A press, typing, the down arrow and Ctrl K open it.
           onKeyDown={onKeyDown}
-          style={{ flex: 1, minWidth: 0, height: '100%', padding: 0, border: 'none', background: 'transparent', color: 'var(--chrome-ink)', fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: 13 }}
+          style={{ flex: 1, minWidth: 0, height: '100%', padding: 0, border: 'none', background: 'transparent', color: 'var(--chrome-ink)', fontFamily: 'var(--font-sans)', fontWeight: 600, fontSize: phone ? 16 : 13 }}
         />
         {q && (
           <button
@@ -493,6 +516,30 @@ export default function GlobalSearch({ open, onOpenChange }) {
           </span>
         )}
       </div>
+  );
+
+  return (
+    <div ref={boxRef} style={{ position: 'relative', flex: 'none' }}>
+      {phone && !open && (
+        <button
+          ref={iconRef} type="button" className="racco-phone-search" aria-label="Find a child" title="Find a child"
+          aria-expanded={false} onClick={openFromIcon}
+        >
+          <Icon name="search" size={20} aria-hidden="true" />
+        </button>
+      )}
+      {phone && open && (
+        <div className="racco-phone-searchbar">
+          {pill}
+          <button
+            type="button" tabIndex={-1} className="racco-phone-search-close"
+            onMouseDown={(e) => e.preventDefault()} onClick={closeAndReturn}
+          >
+            Close
+          </button>
+        </div>
+      )}
+      {!phone && pill}
 
       {open && (
         <div
@@ -508,8 +555,10 @@ export default function GlobalSearch({ open, onOpenChange }) {
             if (hit) setCursor(+hit.dataset.row);
           }}
           style={{
-            position: 'absolute', top: 44, left: 0, width: layout.searchPanelWidth, maxWidth: '80vw',
-            background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-card)',
+            ...(phone
+              ? { position: 'fixed', top: 'var(--topbar-h)', left: 0, right: 0, borderRadius: '0 0 var(--radius-card) var(--radius-card)' }
+              : { position: 'absolute', top: 44, left: 0, width: layout.searchPanelWidth, maxWidth: '80vw', borderRadius: 'var(--radius-card)' }),
+            background: 'var(--surface)', border: '1px solid var(--border)',
             boxShadow: 'var(--shadow-xl)', overflow: 'hidden', zIndex: 60,
             animation: 'racco-pop-in var(--dur-base) var(--ease-out)',
           }}
@@ -529,7 +578,7 @@ export default function GlobalSearch({ open, onOpenChange }) {
             </div>
           )}
 
-          <div ref={listRef} className="racco-scroll" style={{ padding: '2px 8px 10px', maxHeight: 400, overflowY: 'auto' }}>
+          <div ref={listRef} className="racco-scroll" style={{ padding: '2px 8px 10px', maxHeight: phone ? 'min(400px, calc(100dvh - var(--topbar-h) - 120px))' : 400, overflowY: 'auto' }}>
             {!term && !focus && (
               <p style={{ ...noteStyle, padding: '8px 8px 2px' }}>
                 Search by name, case no., custodian, barangay or birth year{isAdmin ? ", or a colleague's name" : ''}.

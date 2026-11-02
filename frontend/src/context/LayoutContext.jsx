@@ -76,7 +76,11 @@ export function LayoutProvider({ children }) {
     const paneWidth = Math.max(320, width - leftRailW - rightRailW - gap * 2 - pad * 2);
 
     return {
-      width, paneWidth, threeCol, railMode, gap, pad,
+      width, paneWidth,
+      // Under 480 the header has no room for the search pill beside the tabs
+      // (owner, 28 Oct 2026): the pill becomes a magnifier that opens the same
+      // panel. Every size above 480 is as the owner set it.
+      phone: width < 480, threeCol, railMode, gap, pad,
       leftRailOn: railMode !== 'hidden',
       railLabels: railMode === 'full',
       leftRailWidth: leftRailW,
@@ -119,7 +123,7 @@ export function LayoutProvider({ children }) {
  * a component can read layout without caring whether it is inside one. */
 export function useLayout() {
   return useContext(LayoutContext) || {
-    width: 1440, paneWidth: 1100, threeCol: true, railMode: 'full', gap: 16, pad: 16,
+    width: 1440, phone: false, paneWidth: 1100, threeCol: true, railMode: 'full', gap: 16, pad: 16,
     leftRailOn: true, railLabels: true, leftRailWidth: 234,
     rightRailOn: false, rightRailWidth: 0, brandWidth: 234,
     brandTextOn: true, identityOn: true, utilityIconsOn: true,

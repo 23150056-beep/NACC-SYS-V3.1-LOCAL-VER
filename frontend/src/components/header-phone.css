@@ -1,0 +1,53 @@
+/* The header's search on a phone (under 480px, LayoutContext `phone`). A
+ * magnifier that stands in for the pill, and the bar that takes the whole
+ * header while a search is open. Nothing here applies at 480 and wider. */
+.racco-phone-search {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 50%;
+  background: var(--chrome-fill);
+  color: var(--chrome-ink);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+}
+.racco-phone-search:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+/* Not --shadow-focus: pale blue vanishes on the navy (as the pill's own ring). */
+.racco-phone-search:focus-visible,
+.racco-phone-search-close:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--chrome-ink) 40%, transparent);
+}
+/* Over the tabs, the bell and the avatar: the open search owns the bar. */
+.racco-phone-searchbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--topbar-h);
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  background: var(--chrome);
+}
+.racco-phone-search-close {
+  flex: none;
+  min-width: 44px;
+  height: 44px;
+  padding: 0 6px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--chrome-ink);
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}

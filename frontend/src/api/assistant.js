@@ -5,6 +5,12 @@ import api from './client';
 export const polishRemark = (text) =>
   api.post('/assistant/polish-remark/', { text }).then((r) => r.data);
 
+// The free text of a child's record (referral reason, medical notes,
+// recommendation, closing summary). A separate door from polishRemark because
+// the people who write the record are not the people who write case notes.
+export const polishRecordText = (text) =>
+  api.post('/assistant/polish-record/', { text }).then((r) => r.data);
+
 /* Whether a draft was accepted or discarded, for the usage metrics.
  *
  * Every caller deliberately ignores a failure - `catch(() => {})` at six
