@@ -218,6 +218,12 @@ class RefusalTest(TrailCase):
         self.refused("date_from", date_from="10/10/2026")
         self.refused("date_to", date_to="2026-13-40")
 
+    def test_a_date_out_of_range_is_refused(self):
+        self.refused("date_to", date_to="9999-12-31")
+
+    def test_the_earliest_date_still_works(self):
+        self.assertEqual(self.get(self.admin, date_from="0001-01-01").status_code, 200)
+
     def test_from_after_to(self):
         self.refused("date_from", date_from="2026-10-12", date_to="2026-10-10")
 

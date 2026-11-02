@@ -1416,8 +1416,11 @@ roles; the bell popover has the same link).
   role scope with the feed (`_scoped`): psychologists their own recipient
   lines, Staff the Child/Assignment/CaseStudy lines of their own records plus
   what is addressed to them, RECORD category only, the ISA everything minus
-  `move_copy`. Scope is applied before any filter, so `?category=security`
-  cannot widen a Staff account. **The one difference from the feed: the trail
+  `move_copy` and `email_limit` (the trail is sent no kind, so it could only
+  tell them apart by their words, which are never read back; the console's
+  security log shows them). Scope is applied before any filter, so
+  `?category=security` cannot widen a Staff account. **The one difference
+  from the feed: the trail
   INCLUDES `move_detail`**, the per-record transfer lines, which is how the ISA
   (and the record's SW, by the Child scope) reads who moved a child. The feed
   is unchanged: newest 50, no paging, no `move_detail`.

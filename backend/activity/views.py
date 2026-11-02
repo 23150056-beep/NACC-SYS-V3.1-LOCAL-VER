@@ -160,13 +160,22 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         if child is not None:
             qs = qs.filter(entity_type__in=["Child", "Assignment", "CaseStudy"], entity_id=child)
         tz = timezone.get_current_timezone()
+        out_of_range = "That date is out of range."
         if "date_from" in dates:
-            qs = qs.filter(created_at__gte=timezone.make_aware(
-                datetime.datetime.combine(dates["date_from"], datetime.time.min), tz))
+            try:
+                start = timezone.make_aware(
+                    datetime.datetime.combine(dates["date_from"], datetime.time.min), tz)
+            except (OverflowError, ValueError):
+                return bad("date_from", out_of_range)
+            qs = qs.filter(created_at__gte=start)
         if "date_to" in dates:
-            qs = qs.filter(created_at__lt=timezone.make_aware(
-                datetime.datetime.combine(dates["date_to"] + datetime.timedelta(days=1),
-                                          datetime.time.min), tz))
+            try:
+                end = timezone.make_aware(
+                    datetime.datetime.combine(dates["date_to"] + datetime.timedelta(days=1),
+                                              datetime.time.min), tz)
+            except (OverflowError, ValueError):
+                return bad("date_to", out_of_range)
+            qs = qs.filter(created_at__lt=end)
         qs = qs.order_by("-created_at", "-id")
         count = qs.count()
         offset = (page - 1) * size
