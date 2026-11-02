@@ -93,7 +93,10 @@ ALIASES = {
     "by": {
         "": "none", "total": "none", "all": "none", "nothing": "none",
         "type": "case_type", "case type": "case_type", "casetype": "case_type",
-        "stage": "case_stage", "case stage": "case_stage", "case_status": "case_stage",
+        # The Counseling stage is gone, so a breakdown by stage is one row; a
+        # model that still asks for it gets the plain total.
+        "stage": "none", "case stage": "none", "case_status": "none",
+        "case_stage": "none",
         "age": "age_band", "age group": "age_band", "age groups": "age_band",
         "age_group": "age_band", "edad": "age_band",
         "gender": "sex", "kasarian": "sex",
@@ -572,7 +575,7 @@ def _resolve_appointments(request, args):
 # Only numbers a screen already shows, counted the way that screen counts them,
 # so the chatbot and the screen cannot disagree:
 #
-#   children by case type or case stage .... the Dashboard's census
+#   children by case type ............... the Dashboard's census
 #   children by age group, sex, psychologist  the Agency Summary
 #   intake and closures by month ............ the Dashboard's intake vs termination
 #   closures by reason ...................... the Agency Summary
@@ -587,10 +590,10 @@ def _resolve_appointments(request, args):
 
 STAT_MEASURES = ("children", "intake", "closures", "pre_assessments", "sessions",
                  "first_session_wait", "pre_assessment_duration")
-STAT_BREAKDOWNS = ("none", "case_type", "case_stage", "age_band", "sex",
+STAT_BREAKDOWNS = ("none", "case_type", "age_band", "sex",
                    "psychologist", "reason", "month", "status")
 STAT_BY = {
-    "children": {"none", "case_type", "case_stage", "age_band", "sex", "psychologist"},
+    "children": {"none", "case_type", "age_band", "sex", "psychologist"},
     "intake": {"none", "month"},
     "closures": {"none", "reason", "month"},
     "pre_assessments": {"none"},
@@ -611,7 +614,7 @@ STAT_BY = {
 STAT_DATED = {"intake", "closures", "sessions", "first_session_wait",
               "pre_assessment_duration"}
 
-_BY_WORDS = {"case_type": "case type", "case_stage": "case stage",
+_BY_WORDS = {"case_type": "case type",
              "age_band": "age group", "sex": "sex", "psychologist": "psychologist",
              "reason": "reason", "month": "month", "status": "status"}
 _MEASURE_WORDS = {"children": "children", "intake": "new intakes",
@@ -683,15 +686,12 @@ def _sorted_rows(counts, order=None):
 
 def _child_rows(children, by, today):
     """Children counted by one attribute, each the way its screen counts it."""
-    from children.models import Child
     from clinical.reports import AGE_BANDS, UNSPECIFIED_AGE, age_band
 
     counts, order = {}, None
     for c in children:
         if by == "case_type":                      # Dashboard census
             label = c.case_type or "Unspecified"
-        elif by == "case_stage":                   # Dashboard census
-            label = c.get_case_status_display() if c.case_status else "Unspecified"
         elif by == "age_band":                     # Agency Summary, shared rule
             label = age_band(c.birth_date, today)
         elif by == "sex":                          # Agency Summary
@@ -705,9 +705,6 @@ def _child_rows(children, by, today):
     if by == "age_band":
         order = [label for label, _, _ in AGE_BANDS] + (
             [UNSPECIFIED_AGE] if counts.get(UNSPECIFIED_AGE) else [])
-    elif by == "case_stage":
-        order = [label for value, label in Child.CASE_STATUS_CHOICES
-                 if value != Child.STAGE_TERMINATED or counts.get(label)]
     elif by == "sex":
         order = ["Male", "Female"] + (["Unspecified"] if counts.get("Unspecified") else [])
     return _sorted_rows(counts, order)
@@ -1334,7 +1331,7 @@ REGISTRY = {
         # of the question.
         "description": (
             "Numbers about children and cases: the count of children, and how "
-            "they break down by case type, case stage, age group, sex or the "
+            "they break down by case type, age group, sex or the "
             "psychologist they are assigned to; new intakes and case closures "
             "in a period, and closures by reason; pre-assessments still "
             "pending; attendance — sessions held, no-shows and the no-show "
@@ -1496,10 +1493,10 @@ _NEAR_BOOKING = {"today": ("tomorrow", "this_week"), "tomorrow": ("this_week", "
                  "this_week": ("next_week",), "next_week": ("this_week",)}
 _PERIOD_CHIP = {p: p.replace("_", " ").capitalize() + "?" for p in PERIODS}
 _BY_CHIP = {"case_type": "By case type?", "age_band": "By age group?", "sex": "By sex?",
-            "psychologist": "By psychologist?", "case_stage": "By case stage?",
+            "psychologist": "By psychologist?",
             "reason": "By reason?", "month": "Month by month?", "status": "By status?"}
 # Most asked-for first: the NACC form's own breakdowns, then caseload.
-_BY_ORDER = ("case_type", "age_band", "sex", "psychologist", "case_stage",
+_BY_ORDER = ("case_type", "age_band", "sex", "psychologist",
              "reason", "month", "status")
 
 

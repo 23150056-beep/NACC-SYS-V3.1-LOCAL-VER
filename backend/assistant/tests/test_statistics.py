@@ -116,7 +116,7 @@ class DefaultsTest(StatisticsBase):
         self.assertEqual("2 active children", out["title"])
 
     def test_every_breakdown_adds_up_to_the_total(self):
-        for by in ("case_type", "case_stage", "age_band", "sex", "psychologist"):
+        for by in ("case_type", "age_band", "sex", "psychologist"):
             out = self.stats(self.admin, by=by)
             self.assertEqual(out["total"], sum(r["count"] for r in out["rows"]), by)
 
@@ -125,12 +125,6 @@ class ChildBreakdownTest(StatisticsBase):
     def test_by_case_type_most_first_unspecified_last(self):
         rows = self.stats(self.admin, by="case_type")["rows"]
         self.assertEqual([("Foster Care", 2), ("Adoption", 1), ("Unspecified", 1)],
-                         [(r["label"], r["count"]) for r in rows])
-
-    def test_by_case_stage_in_the_stage_order(self):
-        rows = self.stats(self.admin, by="case_stage")["rows"]
-        # Terminated is a stage no active child is in, so it is not listed.
-        self.assertEqual([("Pre-Assessment", 4)],
                          [(r["label"], r["count"]) for r in rows])
 
     def test_by_age_group_in_the_forms_order_every_band_shown(self):
@@ -204,6 +198,11 @@ class ForgivingTest(StatisticsBase):
         self.assertEqual(("none", 2, []), (out["by"], out["total"], out["rows"]))
         self.assertIn("can't be broken down by case type", out["note"])
 
+    def test_a_removed_case_stage_breakdown_answers_with_the_total(self):
+        for word in ("case_stage", "case stage", "stage", "case_status"):
+            out = self.stats(self.admin, by=word)
+            self.assertEqual(("none", 4, []), (out["by"], out["total"], out["rows"]), word)
+
     def test_a_period_on_a_count_as_of_today_is_explained(self):
         out = self.stats(self.admin, period="this_year")
         self.assertEqual(4, out["total"])
@@ -225,15 +224,6 @@ class ScreenParityTest(StatisticsBase):
         census = self._screen(self.admin, "/api/reports/dashboard/")["census"]
         self.assertEqual(census["by_case_type"],
                          self.counts(self.stats(self.admin, by="case_type")))
-
-    def test_case_stage_matches_the_dashboard_census(self):
-        # Every open case is in Pre-Assessment now (no counseling stage), so
-        # the stage count is the census's active count, and the census's
-        # pre-assessment states add up to the same children.
-        census = self._screen(self.admin, "/api/reports/dashboard/")["census"]
-        self.assertEqual({"Pre-Assessment": census["active"]},
-                         self.counts(self.stats(self.admin, by="case_stage")))
-        self.assertEqual(census["active"], sum(census["by_pre_assessment"].values()))
 
     def test_age_group_and_sex_match_the_agency_summary(self):
         groups = self._screen(self.admin, "/api/reports/summary/")[

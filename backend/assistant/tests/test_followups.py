@@ -40,7 +40,8 @@ class OffersTest(SimpleTestCase):
     def test_a_psychologist_is_not_offered_a_one_row_breakdown_of_themselves(self):
         offers = self._offers("get_statistics", {}, self._stats(), role=Role.PSYCHOLOGIST)
         self.assertNotIn("By psychologist?", labels(offers))
-        self.assertIn("By case stage?", labels(offers))
+        self.assertIn("By age group?", labels(offers))
+        self.assertNotIn("By case stage?", labels(offers))
 
     def test_the_breakdown_already_shown_is_not_offered_again(self):
         offers = self._offers("get_statistics", {"by": "case_type"},

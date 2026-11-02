@@ -1410,9 +1410,12 @@ button: "Pre-Assessment" with Not started / Started · Consent / In progress ·
   counted by `pre_assessment_status()` so they agree with Records); the
   Monitoring column is "Case type". Closure reasons no longer read the stage and
   were renamed to "Sessions ..." (see "Closing a case"). KEPT on purpose: the
-  "Needs Counseling" result category, and the
-  assistant's case-stage statistic (now one row; removing it changes tool
-  descriptions and needs `ai_eval`).
+  "Needs Counseling" result category. **The assistant's "by case stage"
+  breakdown is removed too** (owner, same day): gone from `get_statistics`
+  and its description, its follow-up chip dropped, and "case_stage" and its
+  aliases now read as the plain total rather than a refusal. That description
+  change has NOT been measured - run `ai_eval --feature chat` on the owner's
+  PC before trusting the chatbot's routing again.
 
 ## Interview templates by upload
 
