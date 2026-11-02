@@ -3,11 +3,13 @@
 The ISA closes a case for where the child went - reunified, adopted,
 transferred: `TerminationRecord.CASE_OUTCOMES`, unchanged. A psychologist
 closes one for where the clinical work ended, and each of those reasons is
-offered only when the child's record shows it happened:
+offered only when the child's record shows it happened. There is no
+counseling case stage (removed 2 Nov 2026); "counseling" means sessions on the
+calendar and nothing else:
 
 - "Counseling completed" needs a counseling session marked completed;
 - the two pre-assessment reasons need a completed pre-assessment and no
-  counseling at all;
+  counseling session held;
 - "Counseling discontinued" needs counseling to have been started;
 - a referral elsewhere, and Other, are always open.
 
@@ -46,20 +48,18 @@ def record_facts(child):
     counseling = Appointment.objects.filter(
         child=child, purpose__in=[Appointment.SESSION, Appointment.FOLLOW_UP])
     held = counseling.filter(status=Appointment.COMPLETED).count()
-    in_counseling = child.case_status == Child.STAGE_COUNSELING
     return {
         "pre_assessment_completed": PreAssessment.objects.filter(
             child=child, status=PreAssessment.COMPLETED).exists(),
-        "in_counseling": in_counseling,
         "sessions_held": held,
-        "counseling_started": (in_counseling or held > 0
+        "counseling_started": (held > 0
                                or counseling.exclude(status=Appointment.CANCELLED).exists()),
     }
 
 
 def _why_not(reason, facts):
     """'' when the record bears the reason out, else what is missing."""
-    no_counseling = not facts["in_counseling"] and facts["sessions_held"] == 0
+    no_counseling = facts["sessions_held"] == 0
     if reason == COUNSELING_COMPLETED and facts["sessions_held"] == 0:
         return "No counseling session is marked completed on the calendar yet."
     if reason in (FAVORABLE_PRE_ASSESSMENT, PRE_ASSESSMENT_ONLY):

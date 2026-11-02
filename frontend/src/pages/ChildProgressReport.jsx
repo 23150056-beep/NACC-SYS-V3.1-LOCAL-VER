@@ -36,12 +36,6 @@ function ownWordsTitle(child) {
   return "In the child's own words";
 }
 
-const CASE_STATUS_META = {
-  pre_assessment: { label: 'Pre-Assessment', tone: 'amber' },
-  counseling: { label: 'Counseling', tone: 'brand' },
-  terminated: { label: 'Terminated', tone: 'neutral' },
-};
-
 const td = { padding: '10px 14px', fontSize: 13, color: 'var(--text-body)', whiteSpace: 'nowrap' };
 const textarea = { width: '100%', resize: 'vertical', padding: '11px 13px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', fontFamily: 'var(--font-sans)', fontSize: 14, lineHeight: 1.55 };
 
@@ -226,7 +220,6 @@ export default function ChildProgressReport() {
   const canSummariseReport = canAdvance && drafting;
   const canSummariseReferral = isStaffOrAdmin && drafting;
   const activePlan = (data.treatment_plans || []).find((p) => p.status === 'active') || (data.treatment_plans || [])[0];
-  const csMeta = CASE_STATUS_META[child.case_status] || CASE_STATUS_META.pre_assessment;
 
   // Sessions cannot be booked without the social worker's referral on file —
   // enforced in the booking endpoint, so the button must not pretend otherwise.
@@ -529,9 +522,6 @@ export default function ChildProgressReport() {
               <Badge tone={child.status === 'active' ? 'success' : 'neutral'} size="sm" dot>
                 {child.status === 'active' ? 'Active' : 'Archived (Terminated)'}
               </Badge>
-              {child.case_status !== 'pre_assessment' && (
-                <Badge tone={csMeta.tone} size="sm">{csMeta.label}</Badge>
-              )}
               {unreviewedFlags > 0 && (
                 <Badge tone="danger" size="sm">
                   {unreviewedFlags} self-report answer{unreviewedFlags === 1 ? '' : 's'} to read

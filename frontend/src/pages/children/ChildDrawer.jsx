@@ -23,14 +23,12 @@ const TYPED_TEXT = { fontSize: 13, color: 'var(--text-body)', margin: 0, lineHei
 
 /* What each Pre-Assessment word means, read off Child.pre_assessment_status
  * (backend children/models.py) rather than guessed. The words stay the
- * agency's; this only says them plainly. "Answered" and "Completed" differ by
- * the case tracker, not by who did the scoring. */
+ * agency's; this only says them plainly. */
 const PRE_ASSESSMENT_HINT = {
   'No Consent Yet': 'No signed consent is on file yet.',
   'Not Yet Pre-Assessed': 'Consent is signed; no pre-assessment has been started.',
   'In Progress': 'A pre-assessment has been started but is not finished.',
-  Answered: 'A pre-assessment is finished. The case has not moved to counseling yet.',
-  Completed: 'A pre-assessment is finished and the case is now in counseling.',
+  Completed: 'A pre-assessment is finished.',
 };
 
 /* How many upcoming sessions the window lists before it says "and N more". */
@@ -161,8 +159,8 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
   const [pendingSlot, setPendingSlot] = useState(null);
   const [purpose, setPurpose] = useState(null);
   const [bookingBusy, setBookingBusy] = useState(false);
-  // Answered/Completed both mean the pre-assessment was administered.
-  const defaultPurpose = ['Answered', 'Completed'].includes(child.pre_assessment_status) ? 'session' : 'pre_assessment';
+  // Completed means the pre-assessment was administered.
+  const defaultPurpose = child.pre_assessment_status === 'Completed' ? 'session' : 'pre_assessment';
   const bookSlot = async () => {
     setBookingBusy(true);
     try {
@@ -640,9 +638,6 @@ export function TerminateModal({ child, onConfirm, onClose }) {
             <span className="racco-eyebrow" style={{ fontSize: 10, marginRight: 2 }}>The record shows</span>
             <Badge tone={facts.pre_assessment_completed ? 'success' : 'neutral'} size="sm" dot>
               Pre-assessment {facts.pre_assessment_completed ? 'completed' : 'not completed'}
-            </Badge>
-            <Badge tone={facts.in_counseling ? 'brand' : 'neutral'} size="sm" dot>
-              {facts.in_counseling ? 'In counseling' : 'Not moved to counseling'}
             </Badge>
             <Badge tone={facts.sessions_held ? 'success' : 'neutral'} size="sm" dot>
               {facts.sessions_held} counseling session{facts.sessions_held === 1 ? '' : 's'} held

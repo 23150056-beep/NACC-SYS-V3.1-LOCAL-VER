@@ -48,7 +48,10 @@ _RENAMED_FIELDS = {"middle_initial": "middle_name", "surrendered_by": "custodian
 _RENAMED_VALUES = {"case_category": {"Orphan": "Orphaned"},
                    "birth_status": {"N/A": "Unknown"},
                    "type_of_adoption": {"Stepparent": "Step-parent"},
-                   "custodian_name": {"Social Worker": "", "Police": "", "Relatives": ""}}
+                   "custodian_name": {"Social Worker": "", "Police": "", "Relatives": ""},
+                   # The counseling stage was retired on 2 Nov 2026
+                   # (children 0032).
+                   "case_status": {"counseling": "pre_assessment"}}
 
 
 def upgrade_rows(rows):

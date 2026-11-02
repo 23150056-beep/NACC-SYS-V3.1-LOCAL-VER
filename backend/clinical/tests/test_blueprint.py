@@ -8,7 +8,7 @@ from django.contrib.auth import get_user_model
 from accounts.models import Role
 from children.models import Child
 from clinical.models import (
-    AgencyFormTemplate, CaseReferral, OpinionnaireInvite, ResultEntry,
+    AgencyFormTemplate, CaseReferral, OpinionnaireInvite, PreAssessment, ResultEntry,
 )
 
 User = get_user_model()
@@ -40,25 +40,18 @@ class CaseTrackerTest(BlueprintBase):
     def test_default_stage_is_pre_assessment(self):
         self.assertEqual(self.child.case_status, Child.STAGE_PRE_ASSESSMENT)
 
-    def test_psychologist_advances_to_counseling(self):
+    def test_there_is_no_endpoint_that_advances_the_stage(self):
         self._auth("p@racco1.gov.ph")
         resp = self.client.post(f"/api/children/{self.child.id}/advance-status/",
-                                {"case_status": "counseling"}, format="json")
-        self.assertEqual(resp.status_code, 200)
+                                {"case_status": "pre_assessment"}, format="json")
+        self.assertEqual(resp.status_code, 404)
+
+    def test_the_stage_cannot_be_set_through_an_edit(self):
+        self._auth("a@racco1.gov.ph")
+        self.client.patch(f"/api/children/{self.child.id}/",
+                          {"case_status": "terminated"}, format="json")
         self.child.refresh_from_db()
-        self.assertEqual(self.child.case_status, Child.STAGE_COUNSELING)
-
-    def test_staff_cannot_advance(self):
-        self._auth("s@racco1.gov.ph")
-        resp = self.client.post(f"/api/children/{self.child.id}/advance-status/",
-                                {"case_status": "counseling"}, format="json")
-        self.assertEqual(resp.status_code, 403)
-
-    def test_terminated_not_settable_directly(self):
-        self._auth("p@racco1.gov.ph")
-        resp = self.client.post(f"/api/children/{self.child.id}/advance-status/",
-                                {"case_status": "terminated"}, format="json")
-        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(self.child.case_status, Child.STAGE_PRE_ASSESSMENT)
 
     def test_terminate_sets_stage_terminated(self):
         self._auth("p@racco1.gov.ph")
@@ -84,13 +77,36 @@ class CaseTrackerTest(BlueprintBase):
             "baseline_category": "Maybe"}, format="json")
         self.assertEqual(resp.status_code, 400)
 
-    def test_dashboard_counts_counseling_per_psychologist(self):
-        self.child.case_status = Child.STAGE_COUNSELING
-        self.child.save()
+    def test_dashboard_counts_pre_assessed_per_psychologist(self):
+        PreAssessment.objects.create(
+            child=self.child, psychologist=self.psy, status=PreAssessment.COMPLETED)
         self._auth("a@racco1.gov.ph")
         resp = self.client.get("/api/reports/dashboard/")
-        self.assertEqual(resp.data["census"]["by_case_status"]["counseling"], 1)
-        self.assertEqual(resp.data["counseling_per_psychologist"][0]["count"], 1)
+        self.assertEqual(resp.data["census"]["by_pre_assessment"],
+                         {"not_started": 0, "in_progress": 0, "completed": 1})
+        self.assertNotIn("by_case_status", resp.data["census"])
+        self.assertEqual(resp.data["pre_assessed_per_psychologist"][0]["count"], 1)
+
+    def test_dashboard_counts_an_open_pre_assessment_as_in_progress(self):
+        PreAssessment.objects.create(
+            child=self.child, psychologist=self.psy, status=PreAssessment.IN_PROGRESS)
+        self._auth("a@racco1.gov.ph")
+        resp = self.client.get("/api/reports/dashboard/")
+        self.assertEqual(resp.data["census"]["by_pre_assessment"],
+                         {"not_started": 0, "in_progress": 1, "completed": 0})
+        self.assertEqual(resp.data["pre_assessed_per_psychologist"], [])
+
+    def test_dashboard_counts_a_reassessment_after_a_completed_one_as_completed(self):
+        PreAssessment.objects.create(
+            child=self.child, psychologist=self.psy, status=PreAssessment.COMPLETED)
+        PreAssessment.objects.create(
+            child=self.child, psychologist=self.psy, status=PreAssessment.IN_PROGRESS)
+        self.assertEqual(self.child.pre_assessment_status(), Child.PA_COMPLETED)
+        self._auth("a@racco1.gov.ph")
+        resp = self.client.get("/api/reports/dashboard/")
+        self.assertEqual(resp.data["census"]["by_pre_assessment"],
+                         {"not_started": 0, "in_progress": 0, "completed": 1})
+        self.assertEqual(resp.data["pre_assessed_per_psychologist"][0]["count"], 1)
 
 
 class CaseReferralTest(BlueprintBase):

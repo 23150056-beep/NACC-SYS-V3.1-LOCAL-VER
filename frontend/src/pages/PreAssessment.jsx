@@ -126,7 +126,7 @@ export default function PreAssessment() {
     // Resuming a pre-assessment already under way asks nothing; anything else
     // creates one (a re-assessment, for a child who has answered before), so
     // that is asked.
-    const again = ['Answered', 'Completed'].includes(c.pre_assessment_status);
+    const again = c.pre_assessment_status === 'Completed';
     if (c.pre_assessment_status !== 'In Progress' && !(await confirm({
       description: again
         ? `This starts a new pre-assessment for ${c.fullname}. The earlier one is kept on the record.`

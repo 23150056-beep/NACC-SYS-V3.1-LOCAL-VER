@@ -45,7 +45,7 @@ class StatisticsBase(TestCase):
 
         # Pia: two active, one closed. Oscar: one active. One nobody's.
         self.m1 = child("Maria Santos", self.psy, case_type="Foster Care",
-                        case_status=Child.STAGE_COUNSELING, gender="Female",
+                        case_status=Child.STAGE_PRE_ASSESSMENT, gender="Female",
                         birth_date=years_ago(9))
         self.m2 = child("Mario Lopez", self.psy, case_type="Adoption",
                         case_status=Child.STAGE_PRE_ASSESSMENT, gender="Male",
@@ -53,7 +53,7 @@ class StatisticsBase(TestCase):
         self.m3 = child("Mila Garcia", self.psy, case_type="Adoption",
                         case_status=Child.STAGE_TERMINATED, status=Child.INACTIVE)
         self.t1 = child("Tomas Reyes", self.other, case_type="Foster Care",
-                        case_status=Child.STAGE_COUNSELING, gender="Male",
+                        case_status=Child.STAGE_PRE_ASSESSMENT, gender="Male",
                         birth_date=years_ago(15))
         self.u1 = child("Una Diaz", None, case_status=Child.STAGE_PRE_ASSESSMENT)
 
@@ -130,7 +130,7 @@ class ChildBreakdownTest(StatisticsBase):
     def test_by_case_stage_in_the_stage_order(self):
         rows = self.stats(self.admin, by="case_stage")["rows"]
         # Terminated is a stage no active child is in, so it is not listed.
-        self.assertEqual([("Pre-Assessment", 2), ("Counseling", 2)],
+        self.assertEqual([("Pre-Assessment", 4)],
                          [(r["label"], r["count"]) for r in rows])
 
     def test_by_age_group_in_the_forms_order_every_band_shown(self):
@@ -227,10 +227,13 @@ class ScreenParityTest(StatisticsBase):
                          self.counts(self.stats(self.admin, by="case_type")))
 
     def test_case_stage_matches_the_dashboard_census(self):
+        # Every open case is in Pre-Assessment now (no counseling stage), so
+        # the stage count is the census's active count, and the census's
+        # pre-assessment states add up to the same children.
         census = self._screen(self.admin, "/api/reports/dashboard/")["census"]
-        labels = dict(Child.CASE_STATUS_CHOICES)
-        self.assertEqual({labels[k]: v for k, v in census["by_case_status"].items()},
+        self.assertEqual({"Pre-Assessment": census["active"]},
                          self.counts(self.stats(self.admin, by="case_stage")))
+        self.assertEqual(census["active"], sum(census["by_pre_assessment"].values()))
 
     def test_age_group_and_sex_match_the_agency_summary(self):
         groups = self._screen(self.admin, "/api/reports/summary/")[

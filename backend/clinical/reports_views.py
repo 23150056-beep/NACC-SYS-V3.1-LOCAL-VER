@@ -143,7 +143,6 @@ class MonitoringListView(generics.GenericAPIView):
                 "case_ref": f"C-{c.id:04d}",
                 "case_type": c.case_type or None,
                 "psychologist_name": display_name(psy) or None,
-                "case_status": c.case_status,
                 "pre_assessment_status": c.pre_assessment_status(),
                 "pre_assessment_progress": c.pre_assessment_progress(),
                 "latest_classification": (res.classification or None) if res else None,
@@ -393,23 +392,32 @@ class DashboardView(generics.GenericAPIView):
         # separate times in the response - four trips for one set of rows,
         # each of them a hop to another region on the hosted deployment.
         active_rows = list(scoped_children.filter(status=Child.ACTIVE)
-                           .select_related("assigned_psychologist"))
+                           .select_related("assigned_psychologist")
+                           .prefetch_related(visible_pre_assessments(request), "consents"))
         active_count = len(active_rows)
         inactive_count = scoped_children.filter(status=Child.INACTIVE).count()
 
         # Census: ACTIVE children per case type (the interview's
-        # "active/adoption, active/foster care" view) + case-tracker stages.
+        # "active/adoption, active/foster care" view) + where each child is in
+        # the pre-assessment (Child.pre_assessment_status, the same rule Records uses, read
+        # through the carry-history prefetch above: any completed one is Completed).
         census_by_case_type = {}
-        by_case_status = {Child.STAGE_PRE_ASSESSMENT: 0, Child.STAGE_COUNSELING: 0}
-        counseling_per_psy = {}
+        by_pre_assessment = {"not_started": 0, "in_progress": 0, "completed": 0}
+        pre_assessed_per_psy = {}
         for c in active_rows:
             ct = c.case_type or "Unspecified"
             census_by_case_type[ct] = census_by_case_type.get(ct, 0) + 1
-            if c.case_status in by_case_status:
-                by_case_status[c.case_status] += 1
-            if c.case_status == Child.STAGE_COUNSELING and c.assigned_psychologist_id:
+            status = c.pre_assessment_status()
+            if status == Child.PA_COMPLETED:
+                state = "completed"
+            elif status == Child.PA_IN_PROGRESS:
+                state = "in_progress"
+            else:
+                state = "not_started"
+            by_pre_assessment[state] += 1
+            if state == "completed" and c.assigned_psychologist_id:
                 name = display_name(c.assigned_psychologist)
-                counseling_per_psy[name] = counseling_per_psy.get(name, 0) + 1
+                pre_assessed_per_psy[name] = pre_assessed_per_psy.get(name, 0) + 1
 
         # Intake vs termination trend (follows the range selector, last 6 buckets).
         intake, term = {}, {}
@@ -462,11 +470,11 @@ class DashboardView(generics.GenericAPIView):
                 "active": active_count,
                 "inactive": inactive_count,
                 "by_case_type": census_by_case_type,
-                "by_case_status": by_case_status,
+                "by_pre_assessment": by_pre_assessment,
             },
-            "counseling_per_psychologist": [
+            "pre_assessed_per_psychologist": [
                 {"name": k, "count": v}
-                for k, v in sorted(counseling_per_psy.items(), key=lambda kv: -kv[1])],
+                for k, v in sorted(pre_assessed_per_psy.items(), key=lambda kv: -kv[1])],
             "total_children": active_count,
             "unassessed": max(0, active_count - len({p.child_id for p in pas})),
             "pending_pre_assessments": pending.count(),

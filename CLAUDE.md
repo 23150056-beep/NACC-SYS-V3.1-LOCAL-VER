@@ -1082,9 +1082,9 @@ the owner picked the plan. Presentation only - no server rule changed.
   empty rows last. The booking area says why there is nothing to pick (no
   referral, waiting on / declined by a psychologist, the server's `reason`).
   A Staff account on its own record gets one "Next step" line from
-  `brief_facts.next_steps`. Hints explain the agency's words, which stay as
-  they are (owner): Answered = pre-assessment done, not yet in counseling;
-  Completed = done and in counseling - read from `pre_assessment_status`.
+  `brief_facts.next_steps`. Hints explain the agency's words (owner); "Completed" is a finished
+  pre-assessment, read from `pre_assessment_status` ("Answered" and the
+  Counseling stage were retired on 2 Nov 2026).
   Upcoming appointments open `/schedule`, which cannot open one appointment
   from a link yet.
 - **The record form**: each step says how many answers it still needs, and
@@ -1394,13 +1394,23 @@ button: "Pre-Assessment" with Not started / Started · Consent / In progress ·
 - **The last step offers "Not yet — save and quit for now"** beside "Mark as
   completed": it saves the notes and `review`, keeps the pre-assessment in
   progress, and returns to the list with an end dialog.
-- **Nothing on screen moves a case to Counseling any more.** Completion does
-  NOT do it either, on purpose: that would close "Favorable pre-assessment,
-  no counseling needed" to every new case. `advance-status` stays in the API.
-  The case-stage badge shows only when it is not `pre_assessment`. The 5-state
-  `pre_assessment_status()` (Records, filters, care gaps) is unchanged, so its
-  "Completed" (= Answered + Counseling stage) is now reached only by older
-  records - the owner's call whether to fold Answered into Completed.
+- **The Counseling stage is gone** (owner, 2 Nov 2026: "this counseling
+  logic will be fully removed" - the status comes from the tracker and
+  nothing else). `case_status` keeps only `pre_assessment` and `terminated`;
+  children 0032 moved every `counseling` row back (data step, noop reverse,
+  choices-only `AlterField`, column kept) and `import_demo_data` upgrades an
+  older fixture the same way. `advance-status` is deleted (404).
+  `pre_assessment_status()` is four states - No Consent Yet, Not Yet
+  Pre-Assessed, In Progress, Completed - and Completed is any completed
+  pre-assessment; "Answered" is retired. The Dashboard and rail tiles are
+  "Pre-assessed" (`by_pre_assessment`, `pre_assessed_per_psychologist`,
+  counted by `pre_assessment_status()` so they agree with Records); the
+  Monitoring column is "Case type". Closure reasons no longer read the stage:
+  the two pre-assessment reasons need no session held, "Counseling
+  discontinued" a session booked or held. KEPT on purpose: those closure
+  reasons' wording, the "Needs Counseling" result category, and the
+  assistant's case-stage statistic (now one row; removing it changes tool
+  descriptions and needs `ai_eval`).
 
 ## Interview templates by upload
 

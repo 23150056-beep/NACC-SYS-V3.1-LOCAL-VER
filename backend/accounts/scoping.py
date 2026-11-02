@@ -114,7 +114,7 @@ def visible_pre_assessments(request):
     A child's pre-assessment status and "instruments used" are worked out from
     `child.pre_assessments.all()`, which reads whatever was prefetched. Hiding
     the pre-assessment rows was not enough on its own: prefetched whole, the
-    same response said "Answered" and listed the previous psychologist's test
+    same response said "Completed" and listed the previous psychologist's test
     titles beside an empty pre-assessment list, and Monitoring counted and
     dated them. Every screen that shows those fields prefetches through this.
 

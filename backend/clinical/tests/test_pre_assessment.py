@@ -88,7 +88,7 @@ class PreAssessmentFlowTest(APITestCase):
         self.assertEqual(resp.status_code, 400)
         self.assertIn("consent", resp.data)
 
-    def test_child_profile_surfaces_answered_and_titles(self):
+    def test_child_profile_surfaces_completed_and_titles(self):
         self._auth("p@racco1.gov.ph")
         before = self.client.get(f"/api/children/{self.child.id}/").data
         self.assertEqual(before["pre_assessment_status"], "No Consent Yet")
@@ -99,7 +99,7 @@ class PreAssessmentFlowTest(APITestCase):
             "consent": consent.id, "instruments": [self.tool.id]}, format="json")
         self.client.post(f"/api/pre-assessments/{pid}/complete/")
         after = self.client.get(f"/api/children/{self.child.id}/").data
-        self.assertEqual(after["pre_assessment_status"], "Answered")
+        self.assertEqual(after["pre_assessment_status"], "Completed")
         self.assertEqual(after["instruments_used"], ["CBCL"])
 
     def test_starting_again_resumes_in_progress_instead_of_duplicating(self):

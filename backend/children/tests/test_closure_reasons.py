@@ -115,22 +115,20 @@ class WhatThePsychologistIsOfferedTest(ClosureBase):
         self._session(status=Appointment.CANCELLED)
         self.assertNotIn(t.DISCONTINUED, self._open())
 
-    def test_moving_the_case_to_counseling_closes_the_pre_assessment_reasons(self):
+    def test_a_session_held_closes_the_pre_assessment_reasons(self):
         self._pre_assessment()
-        self.child.case_status = Child.STAGE_COUNSELING
-        self.child.save()
+        self._session()
         offer = {r["value"]: r for r in self._offer()["reasons"]}
         self.assertFalse(offer[t.PRE_ASSESSMENT_ONLY]["available"])
         self.assertIn("Counseling has started", offer[t.PRE_ASSESSMENT_ONLY]["why"])
         self.assertTrue(offer[t.DISCONTINUED]["available"])
-        self.assertFalse(offer[t.COUNSELING_COMPLETED]["available"],
-                         "the stage alone is not a session held")
+        self.assertTrue(offer[t.COUNSELING_COMPLETED]["available"])
 
     def test_the_facts_come_with_the_offer(self):
         self._pre_assessment()
         self._session()
         self._session()
-        self.assertEqual({"pre_assessment_completed": True, "in_counseling": False,
+        self.assertEqual({"pre_assessment_completed": True,
                           "sessions_held": 2, "counseling_started": True},
                          self._offer()["facts"])
 

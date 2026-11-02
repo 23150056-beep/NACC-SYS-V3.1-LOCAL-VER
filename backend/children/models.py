@@ -35,14 +35,13 @@ class Child(models.Model):
     INACTIVE = "inactive"
     STATUS_CHOICES = [(ACTIVE, "Active"), (INACTIVE, "Inactive")]
 
-    # Linear case tracker (blueprint milestones): the psychologist advances
-    # pre_assessment -> counseling; terminate sets terminated (and inactive).
+    # Case tracker: every open case is pre_assessment; terminate sets
+    # terminated (and inactive) and reopen puts it back. There is no
+    # counseling stage (removed 2 Nov 2026).
     STAGE_PRE_ASSESSMENT = "pre_assessment"
-    STAGE_COUNSELING = "counseling"
     STAGE_TERMINATED = "terminated"
     CASE_STATUS_CHOICES = [
         (STAGE_PRE_ASSESSMENT, "Pre-Assessment"),
-        (STAGE_COUNSELING, "Counseling"),
         (STAGE_TERMINATED, "Terminated"),
     ]
 
@@ -246,26 +245,23 @@ class Child(models.Model):
     class Meta:
         db_table = "tbl_child"
 
-    # Derived 5-state pre-assessment pipeline (product decision 2026-07-18).
-    # Ordered: No Consent Yet → Not Yet Pre-Assessed → In Progress → Answered
-    # → Completed. Never stored — always computed from consent/PA/case data.
+    # Derived 4-state pre-assessment pipeline. Ordered: No Consent Yet →
+    # Not Yet Pre-Assessed → In Progress → Completed. Never stored — always
+    # computed from consent/PA data.
     PA_NO_CONSENT = "No Consent Yet"
     PA_NOT_YET = "Not Yet Pre-Assessed"
     PA_IN_PROGRESS = "In Progress"
-    PA_ANSWERED = "Answered"
     PA_COMPLETED = "Completed"
 
     def pre_assessment_status(self):
         """Mutually exclusive pipeline state. A completed pre-assessment
         outranks a newer in-progress re-assessment (the child HAS answered),
-        and upgrades to Completed once the case tracker reaches counseling
-        (assessment proper underway). Status strings are compared as literals
+        whatever the case tracker says. Status strings are compared as literals
         so this app never imports clinical. Iterates .all() so callers'
         prefetch_related keeps list views at O(1) queries per child."""
         pas = self.pre_assessments.all()
         if any(p.status == "completed" for p in pas):
-            return (self.PA_COMPLETED if self.case_status == self.STAGE_COUNSELING
-                    else self.PA_ANSWERED)
+            return self.PA_COMPLETED
         if pas:
             return self.PA_IN_PROGRESS
         if any(c.status == "signed" for c in self.consents.all()):

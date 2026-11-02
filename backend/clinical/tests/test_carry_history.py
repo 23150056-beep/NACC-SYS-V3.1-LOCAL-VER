@@ -177,7 +177,7 @@ class ScreensAgreeTest(CarryHistoryBase):
         """Review of the first version: the rows were hidden, but the child's
         pre-assessment status, the instruments used, and Monitoring's count and
         last activity were still worked out from every pre-assessment - so
-        "Answered" and the previous psychologist's test titles sat beside an
+        "Completed" and the previous psychologist's test titles sat beside an
         empty pre-assessment list."""
         from clinical.models import InstrumentCatalog
         PreAssessment.objects.filter(psychologist=self.previous).update(
@@ -206,7 +206,7 @@ class ScreensAgreeTest(CarryHistoryBase):
         # is shown it everywhere.
         chart, record, listed, row = seen_by(self.admin)
         for seen in (chart, record, listed, row):
-            self.assertEqual(seen["pre_assessment_status"], Child.PA_ANSWERED)
+            self.assertEqual(seen["pre_assessment_status"], Child.PA_COMPLETED)
         self.assertEqual(chart["instruments_used"], ["PREVIOUS-TEST-TITLE"])
         self.assertEqual(row["pre_assessment_count"], 1)
         self.assertEqual(row["last_activity"], "2099-01-01")

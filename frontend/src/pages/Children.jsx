@@ -50,7 +50,6 @@ const PA_DOT = {
   'No Consent Yet': 'var(--red-500)',
   'Not Yet Pre-Assessed': 'var(--ink-300)',
   'In Progress': 'var(--amber-500)',
-  Answered: 'var(--blue-500)',
   Completed: 'var(--success-500)',
 };
 
@@ -1025,13 +1024,6 @@ export default function Children() {
           <span style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)' }}>
             Showing <strong style={{ color: 'var(--text-strong)' }}>{visible.length}</strong> of {rows.length} children
           </span>
-          {/* Answered and Completed are the agency's words and stay; this says
-              what they stand for, only while a row shows one of them. */}
-          {!showArchiveColumns && visible.some((c) => ['Answered', 'Completed'].includes(c.pre_assessment_status)) && (
-            <span className="racco-rec-legend" style={{ textAlign: 'right' }}>
-              <strong>Answered</strong>: pre-assessment finished, counseling not started. <strong>Completed</strong>: finished and in counseling.
-            </span>
-          )}
         </div>
       </div>
 

@@ -23,16 +23,15 @@ export const fmtTime = (iso) => clock(iso);
 export const fmtDay = (iso) => new Date(iso).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
 
 /* What each pre-assessment word means, read from Child.pre_assessment_status()
- * (children/models.py) and not from the words themselves: "Answered" is a
- * finished pre-assessment on a case that has NOT reached the Counseling stage;
- * "Completed" is the same with the case in Counseling. The agency's words stay
- * as they are (owner, 28 Oct 2026) - these only say what they stand for. */
+ * (children/models.py) and not from the words themselves. There are four
+ * states since the Counseling stage was removed (2 Nov 2026); "Completed" is a
+ * finished pre-assessment. The agency's words stay as they are (owner,
+ * 28 Oct 2026) - these only say what they stand for. */
 export const PA_HINT = {
   'No Consent Yet': 'No signed consent is on file yet.',
   'Not Yet Pre-Assessed': 'Consent is signed; no pre-assessment has been started.',
   'In Progress': 'A pre-assessment has been started and is not finished.',
-  Answered: 'The pre-assessment is finished. The case has not reached Counseling yet.',
-  Completed: 'The pre-assessment is finished and the case is in Counseling.',
+  Completed: 'The pre-assessment is finished.',
 };
 
 // How long a psychologist may sit on a request before it counts as unanswered:

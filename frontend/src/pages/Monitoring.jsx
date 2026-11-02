@@ -32,9 +32,8 @@ export default function Monitoring() {
     .sort((a, b) => (a.child_name || '').localeCompare(b.child_name || '', undefined, { sensitivity: 'base' })),
   [rows, q]);
 
-  const caseStatus = (r) => (r.case_status === 'counseling' ? 'Counseling'
-    : r.case_status === 'terminated' ? 'Terminated' : 'Pre-Assessment')
-    + (r.case_type ? ` · ${r.case_type}` : '');
+  // Monitoring lists active children only, so there is no closed row to word.
+  const caseType = (r) => r.case_type || '—';
 
   const subLine = (r) => [
     r.case_ref,
@@ -46,7 +45,7 @@ export default function Monitoring() {
 
   const columns = [
     { key: 'child', label: 'Child' },
-    { key: 'status', label: 'Case status', wrap: true },
+    { key: 'status', label: 'Case type', wrap: true },
     ...(layout.monitorPsychCol ? [{ key: 'psych', label: 'Psychologist' }] : []),
     ...(layout.monitorPaCol ? [{ key: 'pa', label: 'Pre-assessment' }] : []),
     ...(layout.monitorClassCol ? [{ key: 'class', label: 'Classification' }] : []),
@@ -103,10 +102,9 @@ export default function Monitoring() {
                           </div>
                         </div>
                       </td>
-                      {/* Wraps rather than running on: "Pre-Assessment ·
-                          Family Tracing & Reunification" is two facts, and on
-                          one line it took a quarter of the table. */}
-                      <td style={{ ...TD, maxWidth: 180, lineHeight: 1.4 }}>{caseStatus(r)}</td>
+                      {/* Wraps rather than running on: "Family Tracing &
+                          Reunification" is long. */}
+                      <td style={{ ...TD, maxWidth: 180, lineHeight: 1.4 }}>{caseType(r)}</td>
                       {layout.monitorPsychCol && <td style={{ ...TD, whiteSpace: 'nowrap' }}>{r.psychologist_name || '—'}</td>}
                       {layout.monitorPaCol && <td style={{ ...TD, whiteSpace: 'nowrap' }}>{paProgressLabel(r.pre_assessment_progress)}</td>}
                       {layout.monitorClassCol && (

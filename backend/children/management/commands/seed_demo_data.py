@@ -398,7 +398,7 @@ class Command(BaseCommand):
                 date_of_admission=intake if dated == intake_rules.ADMISSION else None,
                 date_of_placement_to_custodian=intake if dated == intake_rules.PLACEMENT else None,
                 assigned_psychologist=psych,
-                case_status=rng.choice(["pre_assessment", "counseling"]),
+                case_status="pre_assessment",
             )
             # The record dates from intake, as it would for a child entered at
             # intake. Left at the moment the seeder ran, every seeded session

@@ -12,11 +12,11 @@ import { useAuth } from './AuthContext';
  * to re-fetch the figures the rail is reading.
  */
 const EMPTY = {
-  census: { active: 0, inactive: 0, by_case_type: {}, by_case_status: {} },
+  census: { active: 0, inactive: 0, by_case_type: {}, by_pre_assessment: {} },
   total_children: 0, unassessed: 0, pending_pre_assessments: 0,
   today_schedule: [], availability_today: [], intake_vs_termination: [],
   trend: [], per_psychologist: [], by_case_type: {}, care_gaps: [],
-  counseling_per_psychologist: [],
+  pre_assessed_per_psychologist: [],
 };
 
 const CensusContext = createContext(null);

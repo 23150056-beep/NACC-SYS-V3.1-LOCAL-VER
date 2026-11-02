@@ -84,9 +84,9 @@ export default function Dashboard() {
   // fresh array every render and the memo never holds.
   const caseload = useMemo(
     () => Object.fromEntries(
-      (stats.counseling_per_psychologist || []).map((c) => [c.name, c.count]),
+      (stats.pre_assessed_per_psychologist || []).map((c) => [c.name, c.count]),
     ),
-    [stats.counseling_per_psychologist],
+    [stats.pre_assessed_per_psychologist],
   );
 
   const dueToday = gaps.filter((g) => g.severity === 'danger').length;
@@ -192,7 +192,7 @@ export default function Dashboard() {
           {[
             { label: 'Not yet started', n: stats.unassessed ?? 0, hint: 'Active children with no completed pre-assessment', fg: 'var(--red-700)' },
             { label: 'In progress', n: stats.pending_pre_assessments ?? 0, hint: 'Started, waiting on interview or instrument titles', fg: 'var(--warning-700)' },
-            { label: 'In counseling', n: (census.by_case_status || {}).counseling ?? 0, hint: 'Pre-assessment closed; the case moved on', fg: 'var(--blue-700)' },
+            { label: 'Pre-assessed', n: (census.by_pre_assessment || {}).completed ?? 0, hint: 'Pre-assessment finished', fg: 'var(--blue-700)' },
           ].map((b) => (
             <div key={b.label} style={{ background: 'var(--surface)', padding: '13px 14px', display: 'flex', flexDirection: 'column', gap: 5 }}>
               <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 'var(--text-3xs)', letterSpacing: '0.08em', textTransform: 'uppercase', color: b.fg }}>{b.label}</span>
@@ -220,7 +220,7 @@ export default function Dashboard() {
                 </span>
                 <span className="racco-mono" style={{ fontWeight: 600, fontSize: 13, color: 'var(--text-strong)', width: 28, textAlign: 'right', flex: 'none' }}>{p.count ?? 0}</span>
                 <span style={{ fontWeight: 600, fontSize: 11.5, color: 'var(--text-muted)', width: 96, textAlign: 'right', flex: 'none' }}>
-                  {caseload[p.name] != null ? `${caseload[p.name]} active` : '—'}
+                  {caseload[p.name] != null ? `${caseload[p.name]} pre-assessed` : '—'}
                 </span>
               </div>
             ))}

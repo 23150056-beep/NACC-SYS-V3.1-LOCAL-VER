@@ -68,18 +68,18 @@ function useRailData() {
 export function CensusCard({ wide = false }) {
   const navigate = useNavigate();
   const { isPsych, census, gaps, today, dueToday } = useRailData();
-  const byStatus = census.by_case_status || {};
+  const byPa = census.by_pre_assessment || {};
 
   /* Four numbers, and each one is a link to the screen that explains it —
    * a count you cannot act on is decoration. */
   const railStats = isPsych ? [
     { label: 'My active', value: census.active ?? 0, hint: 'children assigned', color: 'var(--success-700)', to: '/children' },
-    { label: 'Counseling', value: byStatus.counseling ?? 0, hint: `${byStatus.pre_assessment ?? 0} pre-assessment`, color: 'var(--blue-600)', to: '/monitoring' },
+    { label: 'Pre-assessed', value: byPa.completed ?? 0, hint: `${byPa.in_progress ?? 0} in progress`, color: 'var(--blue-600)', to: '/monitoring' },
     { label: 'Today', value: today.length, hint: 'appointments', color: 'var(--text-body)', to: '/schedule' },
     { label: 'Care gaps', value: gaps.length, hint: `${dueToday} need today`, color: 'var(--red-700)', to: '/' },
   ] : [
     { label: 'Active', value: census.active ?? 0, hint: 'children in care', color: 'var(--success-700)', to: '/children' },
-    { label: 'Counseling', value: byStatus.counseling ?? 0, hint: `${byStatus.pre_assessment ?? 0} pre-assessment`, color: 'var(--blue-600)', to: '/monitoring' },
+    { label: 'Pre-assessed', value: byPa.completed ?? 0, hint: `${byPa.in_progress ?? 0} in progress`, color: 'var(--blue-600)', to: '/monitoring' },
     { label: 'Archived', value: census.inactive ?? 0, hint: 'terminated cases', color: 'var(--text-body)', to: '/children' },
     { label: 'Care gaps', value: gaps.length, hint: `${dueToday} need today`, color: 'var(--red-700)', to: '/' },
   ];

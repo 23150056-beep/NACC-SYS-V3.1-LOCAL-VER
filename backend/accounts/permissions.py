@@ -84,8 +84,8 @@ class ChildRecordAccess(RecordsAccess):
 def is_admin_or_assignee(request, child):
     """An administrator, or the psychologist this child is assigned to.
 
-    The rule behind `terminate` and `advance-status`, which was written out
-    by hand at both. Two copies is a thin case for a helper anywhere else;
+    The rule behind `terminate` (once also the removed `advance-status`),
+    which was written out by hand at both. Two copies is a thin case for a helper anywhere else;
     for the predicate deciding who may END A CASE it is one too many, and it
     is the same reasoning that put scope_to_visible in accounts/scoping.py.
 

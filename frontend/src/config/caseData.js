@@ -229,14 +229,13 @@ export const TYPES_OF_ADOPTION = [
   'Foster-Adopt',
 ];
 
-// Derived 5-state pre-assessment pipeline status, in pipeline order (must
+// Derived 4-state pre-assessment pipeline status, in pipeline order (must
 // match backend Child.pre_assessment_status). Drives the filter chips and
 // sorting on the Pre-Assessment child picker plus status badges elsewhere.
 export const PA_STATUSES = [
   'No Consent Yet',
   'Not Yet Pre-Assessed',
   'In Progress',
-  'Answered',
   'Completed',
 ];
 
@@ -245,7 +244,6 @@ export const PA_STATUS_TONES = {
   'No Consent Yet': 'danger',
   'Not Yet Pre-Assessed': 'neutral',
   'In Progress': 'amber',
-  Answered: 'brand',
   Completed: 'success',
 };
 

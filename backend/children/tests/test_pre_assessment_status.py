@@ -8,10 +8,10 @@ User = get_user_model()
 
 
 class PreAssessmentPipelineStatusTest(APITestCase):
-    """Derived 5-state pre-assessment pipeline status on the child profile:
-    No Consent Yet → Not Yet Pre-Assessed → In Progress → Answered → Completed.
-    Answered upgrades to Completed when the case tracker reaches counseling
-    (assessment proper underway — product decision 2026-07-18)."""
+    """Derived 4-state pre-assessment pipeline status on the child profile:
+    No Consent Yet → Not Yet Pre-Assessed → In Progress → Completed. There is
+    no counseling stage any more (removed 2 Nov 2026), so a completed
+    pre-assessment is Completed whatever the case tracker says."""
 
     def setUp(self):
         self.admin_role = Role.objects.create(role_name=Role.ADMINISTRATOR)
@@ -47,22 +47,15 @@ class PreAssessmentPipelineStatusTest(APITestCase):
             child=self.child, psychologist=self.psy, status="in_progress")
         self.assertEqual(self._status(), "In Progress")
 
-    def test_completed_pre_assessment_is_answered_while_case_in_pre_assessment(self):
+    def test_completed_pre_assessment_is_completed(self):
         PreAssessment.objects.create(
             child=self.child, psychologist=self.psy, status="completed")
-        self.assertEqual(self._status(), "Answered")
-
-    def test_answered_becomes_completed_once_case_advances_to_counseling(self):
-        PreAssessment.objects.create(
-            child=self.child, psychologist=self.psy, status="completed")
-        self.child.case_status = Child.STAGE_COUNSELING
-        self.child.save(update_fields=["case_status"])
         self.assertEqual(self._status(), "Completed")
 
-    def test_answered_outranks_a_newer_in_progress_re_assessment(self):
+    def test_completed_outranks_a_newer_in_progress_re_assessment(self):
         # A re-assessment in progress doesn't erase the fact the child answered.
         PreAssessment.objects.create(
             child=self.child, psychologist=self.psy, status="completed")
         PreAssessment.objects.create(
             child=self.child, psychologist=self.psy, status="in_progress")
-        self.assertEqual(self._status(), "Answered")
+        self.assertEqual(self._status(), "Completed")

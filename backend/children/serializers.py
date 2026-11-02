@@ -95,7 +95,7 @@ class ChildSerializer(serializers.ModelSerializer):
             "pending_assignment", "declined_assignment",
             "intake_token", "updated_at",
         ]
-        # The tracker moves only through the advance-status / terminate actions.
+        # The tracker moves only through the terminate / reopen actions.
         # fullname is derived (Child.save() composes it from the name parts).
         read_only_fields = ["case_status", "updated_at", "fullname", "custodian_sms_consent_at"]
 

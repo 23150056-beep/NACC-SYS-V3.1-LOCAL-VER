@@ -35,7 +35,6 @@ class AssignmentRequestSerializer(serializers.ModelSerializer):
     child_gender = serializers.CharField(source="child.gender", read_only=True)
     case_type = serializers.CharField(source="child.case_type", read_only=True)
     case_category = serializers.CharField(source="child.case_category", read_only=True)
-    case_status = serializers.CharField(source="child.case_status", read_only=True)
     referral_reason = serializers.CharField(source="child.referral_reason", read_only=True)
     has_case_referral = serializers.SerializerMethodField()
     psychologist_name = serializers.SerializerMethodField()
@@ -47,7 +46,7 @@ class AssignmentRequestSerializer(serializers.ModelSerializer):
         model = AssignmentRequest
         fields = [
             "id", "status", "child", "child_ref", "child_name", "child_age",
-            "child_gender", "case_type", "case_category", "case_status",
+            "child_gender", "case_type", "case_category",
             "referral_reason", "has_case_referral",
             "psychologist", "psychologist_name", "requested_by_name",
             "previous_psychologist_name", "carry_history", "reason",

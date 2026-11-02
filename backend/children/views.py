@@ -53,10 +53,10 @@ class ChildViewSet(viewsets.ModelViewSet):
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
     def get_permissions(self):
-        # Terminate/advance have their own rule (admin OR the child's assigned
+        # Terminate has its own rule (admin OR the child's assigned
         # psychologist), enforced in the action body - RecordsAccess would
         # block psychologists.
-        if self.action in ("terminate", "advance_status", "presence", "reopen",
+        if self.action in ("terminate", "presence", "reopen",
                            "closure_reasons", "remove_duplicate", "exported", "transfer_records"):
             return [IsAuthenticated()]
         return super().get_permissions()
@@ -229,26 +229,6 @@ class ChildViewSet(viewsets.ModelViewSet):
             self.request.user, action_name, ActivityLog.RECORD,
             entity_type="Child", entity_label=getattr(obj, "fullname", ""),
             entity_id=obj.id, recipient=obj.assigned_psychologist)
-
-    @action(detail=True, methods=["post"], url_path="advance-status")
-    def advance_status(self, request, pk=None):
-        """Move the case tracker between pre_assessment and counseling.
-        Terminated is only reachable through the terminate action."""
-        child = self.get_object()
-        if not is_admin_or_assignee(request, child):
-            return Response({"detail": "Only the assigned psychologist or an administrator can update the case status."},
-                            status=status.HTTP_403_FORBIDDEN)
-        if child.status == Child.INACTIVE:
-            return Response({"detail": "This case is terminated; staff or an administrator can reopen it from the child's record."},
-                            status=status.HTTP_400_BAD_REQUEST)
-        new_status = request.data.get("case_status")
-        if new_status not in (Child.STAGE_PRE_ASSESSMENT, Child.STAGE_COUNSELING):
-            return Response({"case_status": "Choose pre_assessment or counseling."},
-                            status=status.HTTP_400_BAD_REQUEST)
-        child.case_status = new_status
-        child.save(update_fields=["case_status", "updated_at"])
-        self._log(child, ActivityLog.UPDATED)
-        return Response({"case_status": child.case_status}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
     def terminate(self, request, pk=None):

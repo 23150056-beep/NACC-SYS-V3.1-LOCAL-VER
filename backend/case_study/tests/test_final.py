@@ -425,7 +425,7 @@ class WhatEachRoleGetsTest(FinalTestCase):
         self.assertTrue(self.as_user(self.sw).get(self.url()).data["can_finalize"])
         Child.objects.filter(pk=self.child.pk).update(case_status="terminated", status="inactive")
         self.assertFalse(self.as_user(self.sw).get(self.url()).data["can_finalize"])
-        Child.objects.filter(pk=self.child.pk).update(case_status="counseling", status="active")
+        Child.objects.filter(pk=self.child.pk).update(case_status="pre_assessment", status="active")
         self.make_final()
         self.assertFalse(self.as_user(self.sw).get(self.url()).data["can_finalize"])
 
