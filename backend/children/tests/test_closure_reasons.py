@@ -93,23 +93,23 @@ class WhatThePsychologistIsOfferedTest(ClosureBase):
         self.assertFalse(offer[t.FAVORABLE_PRE_ASSESSMENT]["available"])
         self.assertIn("not completed", offer[t.FAVORABLE_PRE_ASSESSMENT]["why"])
 
-    def test_a_completed_session_opens_counseling_completed_and_closes_the_pre_assessment_ones(self):
+    def test_a_completed_session_opens_sessions_completed_and_closes_the_pre_assessment_ones(self):
         self._pre_assessment()
         self._session()
-        self.assertEqual({t.COUNSELING_COMPLETED, t.DISCONTINUED, t.REFERRED, t.OTHER},
+        self.assertEqual({t.SESSIONS_COMPLETED, t.DISCONTINUED, t.REFERRED, t.OTHER},
                          self._open())
 
     def test_a_follow_up_counts_as_counseling_but_a_pre_assessment_appointment_does_not(self):
         self._session(purpose=Appointment.PRE_ASSESSMENT)
-        self.assertNotIn(t.COUNSELING_COMPLETED, self._open())
+        self.assertNotIn(t.SESSIONS_COMPLETED, self._open())
         self._session(purpose=Appointment.FOLLOW_UP)
-        self.assertIn(t.COUNSELING_COMPLETED, self._open())
+        self.assertIn(t.SESSIONS_COMPLETED, self._open())
 
     def test_a_session_only_booked_is_counseling_started_not_completed(self):
         self._session(status=Appointment.SCHEDULED, days=3)
         opened = self._open()
         self.assertIn(t.DISCONTINUED, opened)
-        self.assertNotIn(t.COUNSELING_COMPLETED, opened)
+        self.assertNotIn(t.SESSIONS_COMPLETED, opened)
 
     def test_a_cancelled_session_is_not_counseling_started(self):
         self._session(status=Appointment.CANCELLED)
@@ -120,9 +120,9 @@ class WhatThePsychologistIsOfferedTest(ClosureBase):
         self._session()
         offer = {r["value"]: r for r in self._offer()["reasons"]}
         self.assertFalse(offer[t.PRE_ASSESSMENT_ONLY]["available"])
-        self.assertIn("Counseling has started", offer[t.PRE_ASSESSMENT_ONLY]["why"])
+        self.assertIn("Sessions have started", offer[t.PRE_ASSESSMENT_ONLY]["why"])
         self.assertTrue(offer[t.DISCONTINUED]["available"])
-        self.assertTrue(offer[t.COUNSELING_COMPLETED]["available"])
+        self.assertTrue(offer[t.SESSIONS_COMPLETED]["available"])
 
     def test_the_facts_come_with_the_offer(self):
         self._pre_assessment()
@@ -142,17 +142,17 @@ class WhatThePsychologistIsOfferedTest(ClosureBase):
 
 
 class TheEndpointRefusesByTheSameRuleTest(ClosureBase):
-    def test_counseling_completed_is_refused_without_a_session_held(self):
-        res = self._close(t.COUNSELING_COMPLETED)
+    def test_sessions_completed_is_refused_without_a_session_held(self):
+        res = self._close(t.SESSIONS_COMPLETED)
         self.assertEqual(400, res.status_code)
-        self.assertIn("No counseling session", res.data["reason_category"])
+        self.assertIn("No session is marked", res.data["reason_category"])
         self.assertFalse(TerminationRecord.objects.exists())
 
     def test_and_accepted_with_one(self):
         self._session()
-        res = self._close(t.COUNSELING_COMPLETED)
+        res = self._close(t.SESSIONS_COMPLETED)
         self.assertEqual(200, res.status_code, res.data)
-        self.assertEqual(t.COUNSELING_COMPLETED, TerminationRecord.objects.get().reason_category)
+        self.assertEqual(t.SESSIONS_COMPLETED, TerminationRecord.objects.get().reason_category)
 
     def test_a_favorable_pre_assessment_closes_a_case_with_no_counseling(self):
         self._pre_assessment()
@@ -165,7 +165,7 @@ class TheEndpointRefusesByTheSameRuleTest(ClosureBase):
 
     def test_the_isa_cannot_use_the_clinical_reasons(self):
         self._session()
-        self.assertEqual(400, self._close(t.COUNSELING_COMPLETED, user=self.admin).status_code)
+        self.assertEqual(400, self._close(t.SESSIONS_COMPLETED, user=self.admin).status_code)
         self.assertEqual(200, self._close("Reunified with family", user=self.admin).status_code)
 
     def test_every_offer_marked_open_is_accepted(self):

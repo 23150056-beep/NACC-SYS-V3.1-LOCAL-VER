@@ -54,11 +54,25 @@ _RENAMED_VALUES = {"case_category": {"Orphan": "Orphaned"},
                    "case_status": {"counseling": "pre_assessment"}}
 
 
+# The psychologist's closure reasons were renamed on 2 Nov 2026 (children
+# 0033); a fixture exported before then still carries the old wording.
+_RENAMED_REASONS = {"Counseling completed": "Sessions completed",
+                    "Favorable pre-assessment, no counseling needed":
+                        "Favorable pre-assessment, no sessions needed",
+                    "Counseling discontinued": "Sessions discontinued"}
+
+
 def upgrade_rows(rows):
     """Bring child rows exported before 24 Sep 2026 up to today's model.
     Returns True if anything changed."""
     changed = False
     for row in rows:
+        if row.get("model") == "children.terminationrecord":
+            fields = row.get("fields", {})
+            if fields.get("reason_category") in _RENAMED_REASONS:
+                fields["reason_category"] = _RENAMED_REASONS[fields["reason_category"]]
+                changed = True
+            continue
         if row.get("model") != "children.child":
             continue
         fields = row.get("fields", {})

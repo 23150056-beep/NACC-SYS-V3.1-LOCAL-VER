@@ -16,6 +16,20 @@ class OlderFixtureTest(SimpleTestCase):
                          [r["fields"]["case_status"] for r in rows])
 
 
+class RenamedClosureReasonsTest(SimpleTestCase):
+    def test_old_reason_wording_in_an_older_fixture_is_upgraded(self):
+        upgrade = import_module("children.management.commands.import_demo_data").upgrade_rows
+        old = ["Counseling completed", "Favorable pre-assessment, no counseling needed",
+               "Counseling discontinued", "Other"]
+        rows = [{"model": "children.terminationrecord", "fields": {"reason_category": r}}
+                for r in old]
+        self.assertTrue(upgrade(rows))
+        self.assertEqual(["Sessions completed", "Favorable pre-assessment, no sessions needed",
+                          "Sessions discontinued", "Other"],
+                         [r["fields"]["reason_category"] for r in rows])
+        self.assertFalse(upgrade(rows))
+
+
 class TheStageIsGoneTest(TestCase):
     def test_no_counseling_choice_remains(self):
         self.assertFalse(hasattr(Child, "STAGE_COUNSELING"))

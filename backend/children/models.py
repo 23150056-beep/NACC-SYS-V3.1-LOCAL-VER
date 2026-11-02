@@ -336,10 +336,10 @@ class TerminationRecord(models.Model):
         "Other",
     ]
     CLINICAL = [
-        "Counseling completed",
-        "Favorable pre-assessment, no counseling needed",
+        "Sessions completed",
+        "Favorable pre-assessment, no sessions needed",
         "Pre-assessment only, evaluation completed",
-        "Counseling discontinued",
+        "Sessions discontinued",
         "Referred to another specialist or service",
         "Other",
     ]

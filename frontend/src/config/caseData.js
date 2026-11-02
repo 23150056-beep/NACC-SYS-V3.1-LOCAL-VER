@@ -263,10 +263,10 @@ export const TERMINATION_REASONS = [
 // offers each only when the record bears it out. Must match
 // TerminationRecord.CLINICAL; test_closure_reasons.py pins both.
 export const CLINICAL_CLOSURE_REASONS = [
-  'Counseling completed',
-  'Favorable pre-assessment, no counseling needed',
+  'Sessions completed',
+  'Favorable pre-assessment, no sessions needed',
   'Pre-assessment only, evaluation completed',
-  'Counseling discontinued',
+  'Sessions discontinued',
   'Referred to another specialist or service',
   'Other',
 ];

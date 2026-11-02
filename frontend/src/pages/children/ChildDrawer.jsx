@@ -594,10 +594,10 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
  * refuses by - so the dialog cannot offer a reason the save would refuse.
  *
  * A psychologist closes for where the clinical work ended, and each reason is
- * open only when the record bears it out: "Counseling completed" needs a
+ * open only when the record bears it out: "Sessions completed" needs a
  * session marked completed, the pre-assessment reasons need a completed
- * pre-assessment and no counseling. The ones not open are shown greyed with
- * why - hidden, "Counseling completed" would simply be missing, and nobody
+ * pre-assessment and no sessions. The ones not open are shown greyed with
+ * why - hidden, "Sessions completed" would simply be missing, and nobody
  * would know it wants a session recorded first. The ISA keeps the case-outcome
  * list as a dropdown (owner, 28 Sep 2026: "the psychologist side only"). */
 export function TerminateModal({ child, onConfirm, onClose }) {
@@ -640,7 +640,7 @@ export function TerminateModal({ child, onConfirm, onClose }) {
               Pre-assessment {facts.pre_assessment_completed ? 'completed' : 'not completed'}
             </Badge>
             <Badge tone={facts.sessions_held ? 'success' : 'neutral'} size="sm" dot>
-              {facts.sessions_held} counseling session{facts.sessions_held === 1 ? '' : 's'} held
+              {facts.sessions_held} session{facts.sessions_held === 1 ? '' : 's'} held
             </Badge>
           </div>
         )}

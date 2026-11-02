@@ -4,13 +4,13 @@ The ISA closes a case for where the child went - reunified, adopted,
 transferred: `TerminationRecord.CASE_OUTCOMES`, unchanged. A psychologist
 closes one for where the clinical work ended, and each of those reasons is
 offered only when the child's record shows it happened. There is no
-counseling case stage (removed 2 Nov 2026); "counseling" means sessions on the
-calendar and nothing else:
+counseling case stage (removed 2 Nov 2026); the reasons are about sessions on
+the calendar and nothing else (renamed from "Counseling ..." on 2 Nov 2026):
 
-- "Counseling completed" needs a counseling session marked completed;
+- "Sessions completed" needs a session marked completed;
 - the two pre-assessment reasons need a completed pre-assessment and no
-  counseling session held;
-- "Counseling discontinued" needs counseling to have been started;
+  session held;
+- "Sessions discontinued" needs sessions to have been started;
 - a referral elsewhere, and Other, are always open.
 
 The dialog asks `ChildViewSet.closure_reasons` for this list and the terminate
@@ -21,19 +21,19 @@ docs/superpowers/specs/2026-09-28-interview-upload-and-closure-reasons-design.md
 from accounts.models import Role
 from children.models import Child, TerminationRecord
 
-COUNSELING_COMPLETED = "Counseling completed"
-FAVORABLE_PRE_ASSESSMENT = "Favorable pre-assessment, no counseling needed"
+SESSIONS_COMPLETED = "Sessions completed"
+FAVORABLE_PRE_ASSESSMENT = "Favorable pre-assessment, no sessions needed"
 PRE_ASSESSMENT_ONLY = "Pre-assessment only, evaluation completed"
-DISCONTINUED = "Counseling discontinued"
+DISCONTINUED = "Sessions discontinued"
 REFERRED = "Referred to another specialist or service"
 OTHER = "Other"
 
 # What each clinical reason means, for the dialog.
 HINTS = {
-    COUNSELING_COMPLETED: "Counseling sessions are finished and the goals were met.",
-    FAVORABLE_PRE_ASSESSMENT: "The pre-assessment found the child adjusting well; counseling is not needed.",
+    SESSIONS_COMPLETED: "Sessions are finished and the goals were met.",
+    FAVORABLE_PRE_ASSESSMENT: "The pre-assessment found the child adjusting well; sessions are not needed.",
     PRE_ASSESSMENT_ONLY: "The referral asked for an evaluation, and it is done.",
-    DISCONTINUED: "Counseling started but stopped - the child or family stopped attending or declined.",
+    DISCONTINUED: "Sessions started but stopped - the child or family stopped attending or declined.",
     REFERRED: "The child needs a psychiatrist, another specialist or another service.",
     OTHER: "Anything else. The closing summary says what.",
 }
@@ -60,15 +60,15 @@ def record_facts(child):
 def _why_not(reason, facts):
     """'' when the record bears the reason out, else what is missing."""
     no_counseling = facts["sessions_held"] == 0
-    if reason == COUNSELING_COMPLETED and facts["sessions_held"] == 0:
-        return "No counseling session is marked completed on the calendar yet."
+    if reason == SESSIONS_COMPLETED and facts["sessions_held"] == 0:
+        return "No session is marked completed on the calendar yet."
     if reason in (FAVORABLE_PRE_ASSESSMENT, PRE_ASSESSMENT_ONLY):
         if not facts["pre_assessment_completed"]:
             return "The pre-assessment is not completed yet."
         if not no_counseling:
-            return "Counseling has started on this case - choose a counseling reason."
+            return "Sessions have started on this case - choose a sessions reason."
     if reason == DISCONTINUED and not facts["counseling_started"]:
-        return "No counseling was started on this case."
+        return "No session was started on this case."
     return ""
 
 

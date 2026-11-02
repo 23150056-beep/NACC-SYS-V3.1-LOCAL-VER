@@ -1354,13 +1354,16 @@ unchanged). A psychologist closes for where the clinical work ended
 (`TerminationRecord.CLINICAL`), and each of those is offered only when the
 record bears it out:
 
-- **Counseling completed** needs a Session or Follow-up marked *completed* on
-  the calendar. The Counseling stage alone is not a session held.
-- **Favorable pre-assessment** and **Pre-assessment only** need a completed
-  pre-assessment and no counseling at all (not in Counseling, no session held).
-- **Counseling discontinued** needs counseling started (Counseling stage, or a
-  session booked or held, cancelled ones aside). Referred elsewhere and Other
-  are always open.
+- **Sessions completed** needs a Session or Follow-up marked *completed* on
+  the calendar.
+- **Favorable pre-assessment, no sessions needed** and **Pre-assessment only**
+  need a completed pre-assessment and no session held.
+- **Sessions discontinued** needs a session booked or held, cancelled ones
+  aside. Referred elsewhere and Other are always open.
+- **Renamed 2 Nov 2026** from "Counseling completed / discontinued" and "...no
+  counseling needed" (owner), with the Counseling stage gone. Children 0033
+  renamed the stored reasons too (reversible), and `import_demo_data`
+  upgrades an older fixture's (`_RENAMED_REASONS`).
 - **The dialog asks `/children/{id}/closure-reasons/` and the terminate
   endpoint refuses by the same function** — never add a reason to one side.
   `test_every_offer_marked_open_is_accepted` holds them together, and
@@ -1405,10 +1408,9 @@ button: "Pre-Assessment" with Not started / Started · Consent / In progress ·
   pre-assessment; "Answered" is retired. The Dashboard and rail tiles are
   "Pre-assessed" (`by_pre_assessment`, `pre_assessed_per_psychologist`,
   counted by `pre_assessment_status()` so they agree with Records); the
-  Monitoring column is "Case type". Closure reasons no longer read the stage:
-  the two pre-assessment reasons need no session held, "Counseling
-  discontinued" a session booked or held. KEPT on purpose: those closure
-  reasons' wording, the "Needs Counseling" result category, and the
+  Monitoring column is "Case type". Closure reasons no longer read the stage and
+  were renamed to "Sessions ..." (see "Closing a case"). KEPT on purpose: the
+  "Needs Counseling" result category, and the
   assistant's case-stage statistic (now one row; removing it changes tool
   descriptions and needs `ai_eval`).
 
