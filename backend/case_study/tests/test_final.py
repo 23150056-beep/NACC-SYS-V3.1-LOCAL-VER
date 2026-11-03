@@ -156,7 +156,8 @@ class MakingItFinalTest(FinalTestCase):
         sections = self.snapshot()["sections"]
         child = Child.objects.get(pk=self.child.pk)
         wanted = [e["key"] for e in SCSR_SECTIONS if applies(e, child, self.study)]
-        self.assertEqual(wanted, list(sections))
+        # Same boxes, any order: PostgreSQL jsonb does not keep key order.
+        self.assertCountEqual(wanted, list(sections))
         self.assertNotIn("a5_abandonment", sections)
         self.assertNotIn("a5_search_efforts", sections)
         for key, box in sections.items():

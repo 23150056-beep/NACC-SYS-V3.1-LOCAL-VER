@@ -342,7 +342,8 @@ class SeededFinalsAreWhatTheEndpointWouldMakeTest(CaseStudyTestCase):
                     self.assertIsNotNone(study.date_prepared, label)
                     final = CaseStudyFinal.objects.get(case_study=study)
                     wanted = [e["key"] for e in SCSR_SECTIONS if applies(e, child, study)]
-                    self.assertEqual(wanted, list(final.snapshot["sections"]), label)
+                    # Same boxes, any order: PostgreSQL jsonb does not keep key order.
+                    self.assertCountEqual(wanted, list(final.snapshot["sections"]), label)
                     for key, box in final.snapshot["sections"].items():
                         entry = entry_for(key)
                         if box["not_applicable"]:
