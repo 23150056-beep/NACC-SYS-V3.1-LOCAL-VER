@@ -1413,9 +1413,12 @@ button: "Pre-Assessment" with Not started / Started · Consent / In progress ·
   "Needs Counseling" result category. **The assistant's "by case stage"
   breakdown is removed too** (owner, same day): gone from `get_statistics`
   and its description, its follow-up chip dropped, and "case_stage" and its
-  aliases now read as the plain total rather than a refusal. That description
-  change has NOT been measured - run `ai_eval --feature chat` on the owner's
-  PC before trusting the chatbot's routing again.
+  aliases now read as the plain total rather than a refusal. Measured on
+  the owner's PC on 3 Nov 2026, `ai_eval --feature chat` with qwen2.5:3b, 82
+  runs each, same machine, only `tools.py` swapped: old description 6 wrong
+  tool / 4 wrong argument / 4 rejected; new 5 / 3 / 2, plus one empty answer
+  per role (not yet traced to its question). Within noise, so it stands. The
+  "3/87" figure under "The chatbot" is from 30 Aug, on an older question set.
 
 ## Interview templates by upload
 
