@@ -2496,8 +2496,12 @@ labelled without touching ~200 call sites. Pass your own `id` or `aria-label`
 to opt out.
 
 **Toasts are two live regions** (`ToastContext.jsx`, 20 Oct 2026): errors
-`role="alert"` and kept until dismissed, the rest `role="status"`, at least 5 s
-and longer for longer text. An assistant failure that matters (Polish, AI
+`role="alert"`, gone by themselves after 8-20 s by length (owner, 3 Nov 2026:
+the sign-in error sat until clicked), the rest `role="status"`, 5-15 s. All are
+held while pointed at, focused, or the page is hidden, and start over in full
+afterwards. An identical toast already showing is replaced, not stacked, and
+read again. A sign-in that succeeds clears the failures it showed
+(`Login.jsx`). An assistant failure that matters (Polish, AI
 summary, the brief, the census narrative, a 503 saying it is switched off) is
 also said inline beside its button, persistently - a toast alone is gone
 before anyone reads it. A status that announces stages (`LiveStatus` in `ui`)

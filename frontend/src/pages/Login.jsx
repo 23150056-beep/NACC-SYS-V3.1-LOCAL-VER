@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { wakeServer } from '../api/client';
 import { useAuth } from '../context/AuthContext';
@@ -92,6 +92,14 @@ export default function Login() {
   // Held only between the role question and the answer. Google's credential is
   // short-lived and single-purpose, and nothing outside this component sees it.
   const [credential, setCredential] = useState(null);
+  // The error toasts this page raised for sign-in attempts. A new attempt or a
+  // success clears them, so an old failure is never shown beside the outcome.
+  const failureToasts = useRef([]);
+  const clearFailures = () => {
+    failureToasts.current.forEach((id) => toast.dismiss(id));
+    failureToasts.current = [];
+  };
+  const failed = (message) => { failureToasts.current.push(toast.error(message)); };
 
   // Wake the server while the person types, so their sign-in finds it up.
   useEffect(() => { wakeServer(); }, []);
@@ -106,6 +114,7 @@ export default function Login() {
   const submit = async (e) => {
     e.preventDefault();
     setError('');
+    clearFailures();
     setBusy(true);
     try {
       const u = await login(email, password);
@@ -115,16 +124,17 @@ export default function Login() {
         setView('forced');
         return;
       }
+      clearFailures();
       toast.success(`Welcome back, ${u?.first_name || u?.fullname || 'there'}`);
       navigate(after);
     } catch (err) {
       if (err.response?.status === 429) {
         const message = err.response.data?.detail || 'Too many failed login attempts. Try again later.';
         setError(message);
-        toast.error(message);
+        failed(message);
       } else {
         setError('Invalid username or password.');
-        toast.error('Sign-in failed. Check your credentials.');
+        failed('Sign-in failed. Check your credentials.');
       }
     } finally {
       setBusy(false);
@@ -133,9 +143,11 @@ export default function Login() {
 
   const submitGoogle = async (cred, requestedRole = null) => {
     setError('');
+    clearFailures();
     setBusy(true);
     try {
       const u = await loginWithGoogle(cred, requestedRole);
+      clearFailures();
       toast.success(`Welcome back, ${u?.first_name || u?.fullname || 'there'}`);
       navigate(after);
     } catch (err) {
@@ -151,7 +163,7 @@ export default function Login() {
       const message = data?.detail
         || 'Google sign-in failed. Please try again or use your password.';
       setError(message);
-      toast.error(message);
+      failed(message);
       // A refused account lands back on the form with the message. The server
       // keeps that message identical for "declined", "deactivated" and "no
       // such account", so there is deliberately nothing more specific to show.
@@ -166,7 +178,7 @@ export default function Login() {
         prefillCurrent={password}
         title="Set a new password"
         subtitle="This account has a temporary password issued by an administrator. Choose a new password to continue."
-        onDone={() => { toast.success('Password updated. Welcome!'); navigate(after); }}
+        onDone={() => { clearFailures(); toast.success('Password updated. Welcome!'); navigate(after); }}
         // The change ends the session, so the way on is the sign-in form -
         // not this card, which stayed up after the change went through. The
         // email stays filled in; the temporary password no longer works.

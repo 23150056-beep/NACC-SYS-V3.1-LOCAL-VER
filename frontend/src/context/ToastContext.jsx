@@ -13,11 +13,21 @@ import { Alert, Icon, iconBtn } from '../ui';
 // interrupts, everything else in `role="status"`, which waits its turn. A
 // region that appears together with its text is often not announced at all.
 //
-// An error stays until it is dismissed: the thing it reports is something the
-// person has to act on, and three seconds is not long enough to read it, let
-// alone find what failed. A success or an info goes by itself, after a time
-// that grows with the length of the sentence (5 seconds at the least) and
-// that stops while the pointer or the keyboard is on it.
+// Every toast goes by itself (3 Nov 2026, owner's request: an error sat on
+// the sign-in page until it was clicked). A success or an info leaves after a
+// time that grows with the length of the sentence, 5 to 15 seconds. An error
+// stays longer, 8 to 20 seconds, because the person has to read it and often
+// find what failed; it can go earlier, since what it reports is also said where
+// it happened (the sign-in form's own alert, a field's message). The time stops
+// while the pointer is on the toast or the keyboard focus is inside it, and
+// while the page is hidden, so a message raised while the person was on another
+// browser tab is still there when they come back; it then starts over in full.
+// The X button and Escape (the newest error) close a toast at once.
+//
+// The same message, in the same tone, is never stacked: a toast already on
+// screen is replaced by a fresh one with the same id, so its time starts over
+// and the live region reads it again. A message that is not a string (a React
+// node) is never compared. show() returns the id, and dismiss(id) closes it.
 
 const ToastContext = createContext(null);
 
@@ -31,15 +41,33 @@ const toastDuration = (message) => {
   return Math.min(MAX_MS, Math.max(MIN_MS, 1000 + length * 70));
 };
 
+const ERROR_MIN_MS = 8000;
+const ERROR_MAX_MS = 20000;
+const errorDuration = (message) => {
+  const length = typeof message === 'string' ? message.length : 60;
+  return Math.min(ERROR_MAX_MS, Math.max(ERROR_MIN_MS, 2000 + length * 90));
+};
+
+function usePageHidden() {
+  const [hidden, setHidden] = useState(() => typeof document !== 'undefined' && document.visibilityState === 'hidden');
+  useEffect(() => {
+    const onChange = () => setHidden(document.visibilityState === 'hidden');
+    document.addEventListener('visibilitychange', onChange);
+    return () => document.removeEventListener('visibilitychange', onChange);
+  }, []);
+  return hidden;
+}
+
 function ToastItem({ toast, onDismiss }) {
   const { id, message, tone } = toast;
-  const sticky = tone === 'danger';
+  const isError = tone === 'danger';
   const [held, setHeld] = useState(false);
+  const hidden = usePageHidden();
   useEffect(() => {
-    if (sticky || held) return undefined;
+    if (held || hidden) return undefined;
     const timer = setTimeout(() => onDismiss(id), toast.duration);
     return () => clearTimeout(timer);
-  }, [sticky, held, id, toast.duration, onDismiss]);
+  }, [held, hidden, id, toast.duration, onDismiss]);
 
   return (
     <div
@@ -48,15 +76,15 @@ function ToastItem({ toast, onDismiss }) {
       onFocus={() => setHeld(true)}
       onBlur={() => setHeld(false)}
       // An error is read, and often copied; only its own button closes it.
-      onClick={sticky ? undefined : () => onDismiss(id)}
-      style={{ pointerEvents: 'auto', cursor: sticky ? 'default' : 'pointer', minWidth: 260, maxWidth: 380, marginBottom: 10, position: 'relative', animation: 'racco-fade-in var(--dur-base) var(--ease-out)' }}
+      onClick={isError ? undefined : () => onDismiss(id)}
+      style={{ pointerEvents: 'auto', cursor: isError ? 'default' : 'pointer', minWidth: 260, maxWidth: 380, marginBottom: 10, position: 'relative', animation: 'racco-fade-in var(--dur-base) var(--ease-out)' }}
     >
       <Alert tone={tone} icon={<Icon name={ICONS[tone] || 'info'} size={18} aria-hidden="true" />} style={{ boxShadow: 'var(--shadow-lg)', paddingRight: 44 }}>
         {message}
       </Alert>
       <button
         type="button"
-        aria-label={sticky ? 'Dismiss error message' : 'Dismiss message'}
+        aria-label={isError ? 'Dismiss error message' : 'Dismiss message'}
         onClick={(e) => { e.stopPropagation(); onDismiss(id); }}
         style={{ ...iconBtn('var(--text-muted)', 26), position: 'absolute', top: 8, right: 8 }}
       >
@@ -70,26 +98,43 @@ export function ToastProvider({ children }) {
   const [toasts, setToasts] = useState([]);
   const idRef = useRef(0);
 
-  const dismiss = useCallback((id) => setToasts((list) => list.filter((t) => t.id !== id)), []);
+  // The list is mirrored in a ref so show() can look for a repeat without
+  // doing it inside a state updater (which React may run twice).
+  const listRef = useRef([]);
+  const commit = useCallback((next) => { listRef.current = next; setToasts(next); }, []);
+
+  const dismiss = useCallback((id) => commit(listRef.current.filter((t) => t.id !== id)), [commit]);
 
   const show = useCallback((message, tone = 'success') => {
+    const duration = tone === 'danger' ? errorDuration(message) : toastDuration(message);
+    const same = typeof message === 'string'
+      ? listRef.current.find((t) => t.tone === tone && t.message === message)
+      : undefined;
+    if (same) {
+      // Same id, new version: the node is replaced, so the time and the
+      // entrance start over and the live region announces it again.
+      const fresh = { ...same, version: same.version + 1, duration };
+      commit([...listRef.current.filter((t) => t.id !== same.id), fresh]);
+      return same.id;
+    }
     const id = (idRef.current += 1);
-    setToasts((list) => [...list, { id, message, tone, duration: toastDuration(message) }]);
+    commit([...listRef.current, { id, version: 0, message, tone, duration }]);
     return id;
-  }, []);
+  }, [commit]);
 
   const value = useMemo(() => ({
     show,
+    dismiss,
     success: (m) => show(m, 'success'),
     error: (m) => show(m, 'danger'),
     info: (m) => show(m, 'info'),
     warning: (m) => show(m, 'warning'),
-  }), [show]);
+  }), [show, dismiss]);
 
   // Escape closes the newest error when nothing else wanted the key: a dialog
   // that closes on Escape has already handled it (and stopped it) by then, so
-  // this never shuts an error behind a dialog's back. Without it an error that
-  // stays on screen could only be reached by tabbing through the whole page.
+  // this never shuts an error behind a dialog's back. It lets a person clear an
+  // error at once without reaching for the mouse or tabbing to its button.
   const errorsRef = useRef([]);
   errorsRef.current = toasts.filter((t) => t.tone === 'danger');
   useEffect(() => {
@@ -112,10 +157,10 @@ export function ToastProvider({ children }) {
         {/* Both regions are always mounted, empty or not. `aria-atomic` is off so
             a second message is read on its own rather than after the first again. */}
         <div role="alert" aria-atomic="false">
-          {errors.map((t) => <ToastItem key={t.id} toast={t} onDismiss={dismiss} />)}
+          {errors.map((t) => <ToastItem key={`${t.id}:${t.version}`} toast={t} onDismiss={dismiss} />)}
         </div>
         <div role="status" aria-live="polite" aria-atomic="false">
-          {others.map((t) => <ToastItem key={t.id} toast={t} onDismiss={dismiss} />)}
+          {others.map((t) => <ToastItem key={`${t.id}:${t.version}`} toast={t} onDismiss={dismiss} />)}
         </div>
       </div>
     </ToastContext.Provider>
