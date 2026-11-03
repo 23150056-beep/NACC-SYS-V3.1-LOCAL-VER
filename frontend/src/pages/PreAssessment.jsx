@@ -81,18 +81,49 @@ export default function PreAssessment() {
   // can say so. Navigation never waits on it. Only current_step and
   // updated_at are merged back: the reply must not overwrite fields the
   // wizard has edited since, and a completed pa takes no step change.
+  //
+  // Saves are serialized: one PATCH in flight at a time, and when it lands
+  // another goes out only if the step the psychologist now WANTS (not merely
+  // the one the server last confirmed) differs from what the server holds. Two
+  // PATCHes in flight can be applied out of order and leave an old step.
+  const wantedStep = useRef(null); // { id, key } - the latest step asked for
+  const savedStep = useRef(null);  // { id, key } - what the server last confirmed
+  const stepFlight = useRef(null); // the promise of the running save loop
+  const pumpSteps = () => {
+    if (stepFlight.current) return stepFlight.current;
+    const run = async () => {
+      for (;;) {
+        const current = paRef.current;
+        const want = wantedStep.current;
+        if (!current || !want || want.id !== current.id || current.status === 'completed') return;
+        const held = savedStep.current && savedStep.current.id === current.id
+          ? savedStep.current.key : current.current_step;
+        if (want.key === held) return;
+        try {
+          const r = await api.patch(`/pre-assessments/${current.id}/`, { current_step: want.key });
+          savedStep.current = { id: r.data.id, key: r.data.current_step };
+          const latest = paRef.current;
+          if (latest && latest.id === r.data.id && latest.status !== 'completed') {
+            setPa({ ...latest, current_step: r.data.current_step, updated_at: r.data.updated_at });
+          }
+        } catch {
+          toast.error('Could not save where you are in the pre-assessment.');
+          return;
+        }
+      }
+    };
+    stepFlight.current = run().finally(() => { stepFlight.current = null; });
+    return stepFlight.current;
+  };
   const saveStep = (i) => {
     const current = paRef.current;
     const key = stepKeyFor(i);
-    if (!current || !key || current.status === 'completed' || key === current.current_step) return;
-    api.patch(`/pre-assessments/${current.id}/`, { current_step: key })
-      .then((r) => {
-        const latest = paRef.current;
-        if (!latest || latest.id !== r.data.id || latest.status === 'completed') return;
-        setPa({ ...latest, current_step: r.data.current_step, updated_at: r.data.updated_at });
-      })
-      .catch(() => toast.error('Could not save where you are in the pre-assessment.'));
+    if (!current || !key || current.status === 'completed') return;
+    wantedStep.current = { id: current.id, key };
+    pumpSteps();
   };
+  // Anything that writes the pre-assessment after a step save waits for it.
+  const settleSteps = async () => { while (stepFlight.current) await stepFlight.current; };
 
   const goToStep = (i) => {
     if (i > maxStep) return;
@@ -151,6 +182,7 @@ export default function PreAssessment() {
 
   const patchPa = async (patch) => {
     const { data } = await api.patch(`/pre-assessments/${pa.id}/`, patch);
+    savedStep.current = { id: data.id, key: data.current_step };
     setPa(data);
     return data;
   };
@@ -213,6 +245,7 @@ export default function PreAssessment() {
       confirmLabel: 'Yes, save and quit',
     }))) return;
     try {
+      await settleSteps();
       await patchPa({ notes: notes.trim(), current_step: 'review' });
     } catch (err) {
       setError(JSON.stringify(err.response?.data || 'Could not save the pre-assessment.'));
@@ -233,6 +266,7 @@ export default function PreAssessment() {
       confirmLabel: 'Yes, complete it',
     }))) return;
     try {
+      await settleSteps();
       if (notes.trim()) await patchPa({ notes: notes.trim() });
       const { data } = await api.post(`/pre-assessments/${pa.id}/complete/`);
       setPa(data);

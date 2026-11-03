@@ -1,5 +1,6 @@
 import logging
 
+from django.db import transaction
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -317,13 +318,57 @@ class PreAssessmentViewSet(_ChildScopedClinicalViewSet):
         if child_id and str(child_id).isdigit():
             # Through get_queryset() so assignment scoping still applies if the
             # child has since been reassigned away from this psychologist.
-            existing = self.get_queryset().filter(
-                child_id=child_id, psychologist=request.user,
-                status=PreAssessment.IN_PROGRESS,
-            ).first()
+            # Only an OPEN row (pending or in progress) that is newer than the
+            # child's newest completed pre-assessment is resumed - the same
+            # rule Child.pre_assessment_progress() uses. An older open row is
+            # abandoned; resuming it would show a finished child as mid-way.
+            visible = self.get_queryset().filter(child_id=child_id)
+            last_done = max(
+                ((p.created_at, p.id) for p in visible.filter(status=PreAssessment.COMPLETED)),
+                default=None)
+            open_rows = visible.filter(
+                psychologist=request.user,
+                status__in=[PreAssessment.PENDING, PreAssessment.IN_PROGRESS],
+            ).order_by("-created_at", "-id")
+            existing = next(
+                (p for p in open_rows
+                 if last_done is None or (p.created_at, p.id) > last_done), None)
             if existing:
                 return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
         return super().create(request, *args, **kwargs)
+
+    def perform_update(self, serializer):
+        """Write only the fields this request changed, and never over a
+        completion that landed in between.
+
+        serializer.save() writes every column of the row it loaded, so a PATCH
+        of the wizard step that was read before /complete/ committed wrote
+        status back to in_progress and cleared completed_at. A row that was
+        open when read is updated only while it is still open in the database.
+        """
+        instance = serializer.instance
+        self._assert_can_write(instance.child)
+        _refuse_a_move(serializer)
+        data = dict(serializer.validated_data)
+        data.pop("child", None)
+        instruments = data.pop("instruments", None)
+        was_open = instance.status != PreAssessment.COMPLETED
+        now = timezone.now()
+        with transaction.atomic():
+            rows = PreAssessment.objects.filter(pk=instance.pk)
+            if was_open:
+                rows = rows.exclude(status=PreAssessment.COMPLETED)
+            if not rows.update(updated_at=now, **data):
+                raise ValidationError({
+                    "detail": "This pre-assessment is completed; it no longer changes."})
+            if instruments is not None:
+                instance.instruments.set(instruments)
+        for name, value in data.items():
+            setattr(instance, name, value)
+        instance.updated_at = now
+        log_activity(self.request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
+                     entity_type="PreAssessment", entity_label=instance.child.fullname,
+                     entity_id=instance.id, recipient=instance.child.assigned_psychologist)
 
     def perform_create(self, serializer):
         self._assert_can_write(serializer.validated_data["child"])

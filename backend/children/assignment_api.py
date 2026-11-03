@@ -6,6 +6,7 @@ door for asking, and it is the one that already checks the record.
 
 Design: docs/superpowers/specs/2026-09-28-assignment-acceptance-design.md
 """
+from django.db.models import Prefetch
 from django.utils import timezone
 from rest_framework import mixins, serializers, status, viewsets
 from rest_framework.decorators import action
@@ -14,7 +15,7 @@ from rest_framework.response import Response
 
 from accounts.display import display_name
 from accounts.models import Role
-from accounts.scoping import role_of
+from accounts.scoping import role_of, visible_pre_assessments
 from children import assignment
 from children.models import AssignmentRequest
 from clinical.reports import age_on
@@ -37,6 +38,7 @@ class AssignmentRequestSerializer(serializers.ModelSerializer):
     case_category = serializers.CharField(source="child.case_category", read_only=True)
     referral_reason = serializers.CharField(source="child.referral_reason", read_only=True)
     has_case_referral = serializers.SerializerMethodField()
+    pre_assessment_status = serializers.SerializerMethodField()
     psychologist_name = serializers.SerializerMethodField()
     requested_by_name = serializers.SerializerMethodField()
     previous_psychologist_name = serializers.SerializerMethodField()
@@ -47,7 +49,7 @@ class AssignmentRequestSerializer(serializers.ModelSerializer):
         fields = [
             "id", "status", "child", "child_ref", "child_name", "child_age",
             "child_gender", "case_type", "case_category",
-            "referral_reason", "has_case_referral",
+            "referral_reason", "has_case_referral", "pre_assessment_status",
             "psychologist", "psychologist_name", "requested_by_name",
             "previous_psychologist_name", "carry_history", "reason",
             "created_at", "decided_at", "decided_by_name",
@@ -63,6 +65,10 @@ class AssignmentRequestSerializer(serializers.ModelSerializer):
     def get_has_case_referral(self, obj):
         # Prefetched by the viewset: one query for the page, not one a row.
         return bool(obj.child.case_referrals.all())
+
+    def get_pre_assessment_status(self, obj):
+        # Read through the viewset's prefetch (carry-history rule applied).
+        return obj.child.pre_assessment_status()
 
     def get_psychologist_name(self, obj):
         return display_name(obj.psychologist) or None
@@ -95,7 +101,9 @@ class AssignmentRequestViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         qs = (AssignmentRequest.objects
               .select_related("child", "psychologist", "requested_by",
                               "previous_psychologist", "decided_by")
-              .prefetch_related("child__case_referrals"))
+              .prefetch_related("child__case_referrals", "child__consents",
+                                Prefetch("child__pre_assessments",
+                                         queryset=visible_pre_assessments(self.request).queryset)))
         role = role_of(self.request)
         if role == Role.PSYCHOLOGIST:
             qs = qs.filter(psychologist=self.request.user)

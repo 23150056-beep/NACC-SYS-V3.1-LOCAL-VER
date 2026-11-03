@@ -5,6 +5,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from rest_framework.test import APITestCase
 from django.contrib.auth import get_user_model
+from accounts.display import display_name
 from accounts.models import Role
 from children.models import Child
 from clinical.models import (
@@ -48,8 +49,9 @@ class CaseTrackerTest(BlueprintBase):
 
     def test_the_stage_cannot_be_set_through_an_edit(self):
         self._auth("a@racco1.gov.ph")
-        self.client.patch(f"/api/children/{self.child.id}/",
-                          {"case_status": "terminated"}, format="json")
+        resp = self.client.patch(f"/api/children/{self.child.id}/",
+                                 {"case_status": "terminated"}, format="json")
+        self.assertEqual(resp.status_code, 200)
         self.child.refresh_from_db()
         self.assertEqual(self.child.case_status, Child.STAGE_PRE_ASSESSMENT)
 
@@ -85,7 +87,9 @@ class CaseTrackerTest(BlueprintBase):
         self.assertEqual(resp.data["census"]["by_pre_assessment"],
                          {"not_started": 0, "in_progress": 0, "completed": 1})
         self.assertNotIn("by_case_status", resp.data["census"])
-        self.assertEqual(resp.data["pre_assessed_per_psychologist"][0]["count"], 1)
+        row = resp.data["pre_assessed_per_psychologist"][0]
+        self.assertEqual(row["name"], display_name(self.psy))
+        self.assertEqual(row["count"], 1)
 
     def test_dashboard_counts_an_open_pre_assessment_as_in_progress(self):
         PreAssessment.objects.create(
@@ -106,7 +110,9 @@ class CaseTrackerTest(BlueprintBase):
         resp = self.client.get("/api/reports/dashboard/")
         self.assertEqual(resp.data["census"]["by_pre_assessment"],
                          {"not_started": 0, "in_progress": 0, "completed": 1})
-        self.assertEqual(resp.data["pre_assessed_per_psychologist"][0]["count"], 1)
+        row = resp.data["pre_assessed_per_psychologist"][0]
+        self.assertEqual(row["name"], display_name(self.psy))
+        self.assertEqual(row["count"], 1)
 
 
 class CaseReferralTest(BlueprintBase):

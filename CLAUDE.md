@@ -1369,7 +1369,7 @@ record bears it out:
   `test_every_offer_marked_open_is_accepted` holds them together, and
   `caseData.js` keeps both lists (for the archive filter) pinned by a test.
 - Neither role can use the other's list. Past closures keep what they were
-  written with.
+  written with, except a rename the owner chose to carry back (0033, above).
 - **Terminating ends with an end dialog** (`useNotice`, owner 30 Sep 2026):
   "Case terminated", reading back the child and case number, the reason, the
   closing summary and the date - it was a toast, gone before anyone read it.

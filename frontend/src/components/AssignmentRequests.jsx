@@ -269,7 +269,7 @@ function ScheduleFirstSession({ request, psychologistId, onDone }) {
   const [date, setDate] = useState(localIsoDay());
   const [time, setTime] = useState('');
   const [duration, setDuration] = useState(60);
-  const [purpose, setPurpose] = useState('pre_assessment');
+  const [purpose, setPurpose] = useState(request.pre_assessment_status === 'Completed' ? 'session' : 'pre_assessment');
   const [openings, setOpenings] = useState(null);
   const [openingsNote, setOpeningsNote] = useState('');
   const [picked, setPicked] = useState(null);

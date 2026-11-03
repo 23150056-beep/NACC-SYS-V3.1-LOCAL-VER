@@ -557,3 +557,33 @@ class OpeningsAfterAcceptingTest(AssignmentBase):
         res = self._as(self.psy).get(f"/api/availability/openings/?child={self.child.id}")
         self.assertEqual([], res.data["openings"])
         self.assertIn("no availability posted", res.data["reason"])
+
+
+class RequestListQueryCountTest(AssignmentBase):
+    """The queue shows each child's pre-assessment status (it sets the first
+    session's default purpose), so it must not cost a query per row."""
+
+    def test_pre_assessment_status_is_exposed_and_the_count_is_flat(self):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+        from clinical.models import ConsentRecord, PreAssessment
+
+        def count_for(n):
+            for i in range(n):
+                c = Child.objects.create(
+                    first_name=f"K{n}{i}", last_name="Reyes", fullname=f"K{n}{i} Reyes",
+                    case_type="Foster Care", social_worker=self.sw)
+                AssignmentRequest.objects.create(
+                    child=c, psychologist=self.psy, requested_by=self.sw)
+                ConsentRecord.objects.create(child=c, status="signed", recorded_by=self.psy)
+                PreAssessment.objects.create(
+                    child=c, psychologist=self.psy, status=PreAssessment.COMPLETED)
+            with CaptureQueriesContext(connection) as ctx:
+                res = self._as(self.psy).get("/api/assignment-requests/")
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual({r["pre_assessment_status"] for r in res.data}, {"Completed"})
+            return len(ctx)
+
+        small = count_for(2)
+        large = count_for(8)
+        self.assertEqual(small, large)
