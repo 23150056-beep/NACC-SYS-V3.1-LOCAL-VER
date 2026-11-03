@@ -1,3 +1,4 @@
+import re
 from datetime import date
 
 from django.contrib.auth import get_user_model
@@ -25,6 +26,8 @@ from scheduling.serializers import (
 from scheduling.session_mail import BOOKED, CANCELLED, MOVED, session_changed
 
 
+# How far ahead a month can be asked for: a year, this month included.
+MONTHS_AHEAD = 12
 
 
 class AvailabilityBlockViewSet(viewsets.ModelViewSet):
@@ -166,16 +169,80 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
         # on the grid offering to move it.
         exclude = request.query_params.get("exclude")
         exclude = int(exclude) if (exclude or "").isdigit() else None
+        diary = booking.Diary.load(psych, child, day, day,
+                                   duration_minutes=duration, exclude_id=exclude)
         found = booking.bookable_slots(psych, child, day,
-                                       duration_minutes=duration,
-                                       exclude_id=exclude)
+                                       duration_minutes=duration, diary=diary)
         return Response({
             "psychologist": display_name(psych),
             "date": day.isoformat(),
             "duration": duration,
             "slots": found,
             "reason": "" if found else booking.why_empty(
-                psych, day, duration, child=child, exclude_id=exclude),
+                psych, day, duration, child=child, exclude_id=exclude, diary=diary),
+        })
+
+    @action(detail=False, methods=["get"], url_path="month")
+    def month(self, request):
+        """Every day of one month for one psychologist, with the bookable
+        start times of each - the booking drawer's calendar.
+
+        The same question as `slots`, asked for a month at once: the month is
+        read in a handful of queries and every candidate time goes through the
+        same rule (booking.Diary), so a day shown open has times that book.
+        Access follows `slots`: a psychologist asks about themselves only, a
+        child must be one the asker can see, and times are returned without
+        any child's name or case reference.
+        """
+        psy_id = request.query_params.get("psychologist")
+        if not (psy_id or "").isdigit():
+            return Response({"detail": "Which psychologist?"}, status=400)
+        psy_id = int(psy_id)
+        if _role(request) == Role.PSYCHOLOGIST and psy_id != request.user.id:
+            return Response({"detail": "Not found."}, status=404)
+        psych = get_user_model().objects.filter(pk=psy_id).first()
+        if psych is None:
+            return Response({"detail": "Not found."}, status=404)
+
+        asked = request.query_params.get("month", "")
+        match = re.fullmatch(r"(\d{4})-(\d{2})", asked)
+        if not match or not 1 <= int(match.group(2)) <= 12 or int(match.group(1)) < 1:
+            return Response({"detail": "A month in YYYY-MM, please."}, status=400)
+        year, month = int(match.group(1)), int(match.group(2))
+        today = timezone.localdate()
+        ahead = (year - today.year) * 12 + (month - today.month)
+        if ahead < 0:
+            # `today` is the agency's date, so a browser on another clock can
+            # find the month the server will take instead of getting stuck.
+            return Response({"detail": "That month has already passed.",
+                             "today": today.isoformat()}, status=400)
+        if ahead > MONTHS_AHEAD:
+            return Response({"detail": f"Months can be booked up to {MONTHS_AHEAD} "
+                                       f"months ahead.",
+                             "today": today.isoformat()}, status=400)
+
+        child = None
+        child_id = request.query_params.get("child")
+        if child_id and str(child_id).isdigit():
+            child = scope_to_visible(Child.objects.filter(pk=child_id), request,
+                                     path=None).first()
+            if child is None:
+                return Response({"detail": "Not found."}, status=404)
+        try:
+            duration = int(request.query_params.get("duration") or 60)
+        except ValueError:
+            duration = 60
+        duration = max(15, min(duration, 8 * 60))
+        exclude = request.query_params.get("exclude")
+        exclude = int(exclude) if (exclude or "").isdigit() else None
+
+        found = booking.month_view(psych, child, year, month,
+                                   duration_minutes=duration, exclude_id=exclude)
+        return Response({
+            "psychologist": display_name(psych),
+            "month": f"{year:04d}-{month:02d}",
+            "duration": duration,
+            **found,
         })
 
     @action(detail=False, methods=["get"], url_path="next-slots")

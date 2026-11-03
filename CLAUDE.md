@@ -380,6 +380,46 @@ offer and the refusal are computed two different ways the screen starts lying,
 and a booking screen that lies is worse than a blank time field because it
 looks authoritative.
 
+**One rule, two ways to feed it** (3 Nov 2026, `booking.Diary`). `errors_for`
+asked the database per candidate time, about six queries each: fine for a day,
+thousands for a month on the hosted PostgreSQL, and the temptation was a
+cheaper look-alike for the month. Instead `Diary.load(psychologist, child,
+first_day, last_day, duration_minutes=, exclude_id=)` reads what the rule needs
+once (the psychologist's active windows, leave overlapping the range, their
+sessions and the child's, whether the referral exists: five queries, four when
+moving) and `Diary.errors_for` is the ONLY place the rule is written, with the
+same messages, order, `own_calendar` waiver and `exclude_id` rule. The module
+function `errors_for()` loads one day and asks it; `bookable_slots`,
+`why_empty`, `next_openings` and the month all read a diary and put every
+candidate through the same method. A moved appointment is left out of the
+sessions at load (the same as ignoring it in both clash checks and in
+capacity) and lifts the referral rule. A diary raises `ValueError` for a time
+or a length it was not read for rather than answering from data it lacks.
+`test_month.py` holds the equivalence: every half hour of December, with and
+without `own_calendar`, gives the same dict from the diary and from a fresh
+`errors_for`, and every day of the month equals `/slots`. One `/slots` request
+went from 37 queries to 9.
+
+**The month endpoint** (`GET /api/availability/month/?psychologist=&month=YYYY-MM`,
+optional `child`, `duration` 15-480, `exclude`): the booking drawer's calendar.
+Access is `/slots`: a psychologist asks about themselves only (anyone else
+404), a child must be one the asker can see (404), anonymous 401. A malformed
+month, one before this month and one more than 12 months ahead are 400, the
+two range refusals carrying `today` (the agency's date) so a browser on another
+clock re-aims at the month the server takes instead of showing an error. One
+entry per day, `state` being past (before today), leave (outranks off, so an
+away weekend is shaded), open (a bookable start exists), full (a window
+applies, nothing is bookable) or off (no window); `slots` are exactly what
+`bookable_slots` returns, so a day marked open books. Today is judged on the
+times still ahead. `reason` is one sentence only when no day is open (no
+referral, no availability posted, away all month, a length no window fits,
+fully booked, else "no open time in <Month>"). It carries times only: a clash's
+message names a case number, and none of those messages is ever sent. A missing
+referral shows every working day as "full" with the reason saying why, and the
+answer says `blocked: true` so the screen can lead with that sentence. The answer also carries `reason_kind` (empty when a day is open, else referral, no_availability, away, too_long, full or none), set in the same branches as the sentence, so the screen never matches text. `today` is
+the server's date in `TIME_ZONE`, which the screen uses for its "today" mark. Query count is pinned at five and tested to
+stay put as windows, leave and sessions are added.
+
 **A child needs a case referral on file before any session is booked**, checked
 for every role. Moving an appointment that already exists is exempt, so
 children booked before the rule are not stranded by it.
@@ -403,6 +443,35 @@ psychologist and the ISA on 2 Oct 2026):
   leave or see what the ISA had recorded for them. The leave serializer does
   not require `psychologist`; the view fills in the psychologist's own and
   asks anybody else "Whose leave is this?".
+- **The booking drawer's Day field is a month calendar** (3 Nov 2026,
+  `pages/schedule/MonthSlots.jsx`, the asking and month state in
+  `monthSlots.js`). It replaced a native date box and five "next working day"
+  chips worked out from the weekly pattern, which gave a fully booked day a chip
+  and showed about a week. One `GET /availability/month/` per psychologist,
+  child, length, moved appointment and month (stale answers are never drawn:
+  the answer carries the key it was asked for); the Time grid reads the chosen
+  day from that same answer, so no second request, and a day or time the answer
+  no longer offers is cleared. Sunday-first like the Calendar. Only an "open"
+  day can be chosen; full, away, day-off and past days are `aria-disabled`, not
+  `disabled`, so the keyboard still lands on them and hears why ("Tuesday,
+  November 17, away on leave"). Arrows, Home/End and PageUp/PageDown move
+  (roving tabindex; a key that crosses a month pages first, then focuses).
+  Months run from this one to twelve ahead, the server's own window. **No day
+  is chosen until somebody picks one**, except where the drawer opens WITH one
+  (moving an appointment, or a click on a Calendar day): it opens on that month
+  with the day chosen, and a move passes `exclude` so its own time is offered; a
+  day that is not open (a past one) is cleared. Paging a month keeps the pick (the chosen day's times are held for the same psychologist, child and length, and only the month a day belongs to can say it is no longer open).
+  A month with nothing open puts the server's reason in an amber alert ABOVE
+  the grid, with "Next month" only when `reason_kind` is away, full or none (a missing referral, no posted hours or a length no window fits read the same next month); when `blocked` (no case referral) the working
+  days carry no "Full" word and their names say a referral is needed. The month
+  the drawer opened on is remembered, so a preset day that turns out not to be
+  open clears with a line ("Dec 6 is not open for ...") and the month stays.
+  Non-open cells have a hover title. A cell's accessible name STARTS with its
+  visible text ("5 14 open, Thursday, November 5, ..."), or voice control says
+  what it sees and misses (axe `label-content-name-mismatch`, WCAG 2.5.3). A
+  refusal is scrolled into view, since it sits at the top of a tall drawer. After a refused booking (400 or
+  409) the month is asked again. Under 360px the word "open" goes and the count
+  stands alone. Measured locally, the month answer takes 70-350 ms.
 - **The drawers and the appointment card are the shared `Drawer` and `Modal`**
   from `ui`, so Escape, a close button, a focus trap and focus return come
   with them. Hand-built overlays had none of those. The card closes when
