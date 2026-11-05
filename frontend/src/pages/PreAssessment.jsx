@@ -14,7 +14,7 @@ import PdfFrame from '../components/PdfFrame';
 import TemplateUpload from '../components/TemplateUpload';
 import { pdfObjectUrl } from '../utils/pdf';
 import { useSingleFlight } from '../utils/singleFlight';
-import { stepKeyFor, stepIndexFor, paProgressLabel, PA_STEPS, stepSummary, stepEntry } from '../utils/preAssessment';
+import { stepKeyFor, stepIndexFor, paProgressLabel, PA_STEPS, stepSummary, stepRailLine, stepEntry } from '../utils/preAssessment';
 
 const STEPS = ['Child', 'Consent', 'Interview', 'Instruments', 'Problems', 'Complete'];
 
@@ -314,7 +314,7 @@ export default function PreAssessment() {
               </span>
             </span>
             <Badge tone={step >= 5 ? 'success' : 'warning'} size="md">
-              {step >= 5 ? 'Complete' : `In progress · step ${step + 1} of ${STEPS.length}`}
+              {step >= 5 ? 'Complete' : `In progress · step ${Math.min(Math.ceil(step) + 1, STEPS.length)} of ${STEPS.length}`}
             </Badge>
           </div>
         ) : (
@@ -334,9 +334,11 @@ export default function PreAssessment() {
             const barAfter = i === STEPS.length - 1 ? 'transparent' : i < step ? 'var(--blue-600)' : 'var(--divider)';
             // Rail positions 1-5 are the tracker's five steps (Complete = Review).
             const trackKey = i >= 1 ? PA_STEPS[i - 1].key : null;
-            const note = trackKey && pa ? stepSummary(stepEntry(pa.step_times, trackKey)) : '';
+            const entry = trackKey && pa ? stepEntry(pa.step_times, trackKey) : null;
+            const note = trackKey && pa ? stepRailLine(entry) : '';
+            const full = trackKey && pa ? stepSummary(entry) : '';
             return (
-              <div key={s} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 0 }}>
+              <div key={s} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden' }}>
                 <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
                   <span style={{ flex: 1, height: 3, background: barBefore }} />
                   <button
@@ -358,8 +360,8 @@ export default function PreAssessment() {
                 </div>
                 <span style={{ fontWeight: now ? 800 : 600, fontSize: 11.5, color: now ? 'var(--text-strong)' : 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{s}</span>
                 {note && (
-                  <span className="racco-pa-rail-note" title={`${s}: ${note}`}
-                    style={{ fontWeight: 500, fontSize: 10.5, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', marginTop: -3 }}>{note}</span>
+                  <span className="racco-pa-rail-note" title={`${s}: ${full}`}
+                    style={{ fontWeight: 500, fontSize: 10.5, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', boxSizing: 'border-box', padding: '0 4px', marginTop: -3 }}>{note}</span>
                 )}
               </div>
             );

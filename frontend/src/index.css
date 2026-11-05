@@ -1114,3 +1114,8 @@ input::-ms-clear {
 @media (max-width: 479px) {
   .racco-pa-rail-note { display: none !important; }
 }
+
+/* Pre-assessment tracker card: the same four columns on every row; two by two
+   on a narrow card. */
+.racco-pa-track-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 14px; }
+@media (max-width: 519px) { .racco-pa-track-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

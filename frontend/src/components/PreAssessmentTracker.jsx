@@ -44,15 +44,15 @@ export default function PreAssessmentTracker({ progress }) {
                 <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 6 }}>
                   <span aria-hidden="true" style={{ width: 10, height: 10, borderRadius: '50%', background: dot.bg, flex: 'none' }} />
                   <span style={{ fontWeight: 800, fontSize: 13, color: 'var(--text-strong)' }}>
-                    <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', marginRight: 6 }}>{i + 2}</span>{s.label}
+                    <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', marginRight: 6 }}>{i + 1}</span>{s.label}
                   </span>
                   <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>{dot.label}</span>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '6px 14px', paddingLeft: 19 }}>
+                <div className="racco-pa-track-grid" style={{ paddingLeft: 19 }}>
                   <Field label="Started" value={formatStepMoment(s.started_at)} />
                   <Field label="Last edited" value={formatStepMoment(s.last_edited_at)} />
                   <Field label="Done" value={formatStepMoment(s.done_at)} />
-                  {s.done_at && s.seconds != null && <Field label="Time spent" value={formatDuration(s.seconds)} />}
+                  <Field label="Time spent" value={s.done_at && s.seconds != null ? formatDuration(s.seconds) : ''} />
                 </div>
               </li>
             );

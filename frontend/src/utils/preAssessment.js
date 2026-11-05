@@ -24,7 +24,9 @@ export const paProgressTone = (progress) => TONES[progress?.state] || 'neutral';
 export const paProgressDetail = (progress) => {
   if (progress?.state !== 'in_progress' && progress?.state !== 'started') return '';
   const parts = [];
-  if (progress.step_number) parts.push(`Step ${progress.step_number} of ${progress.total_steps || 6}`);
+  // The server counts the Child step as 1 (the wizard's "of 6"); the tracker's
+  // five steps start at Consent, so convert.
+  if (progress.step_number > 1) parts.push(`Step ${progress.step_number - 1} of ${PA_STEPS.length}`);
   if (progress.reassessment) parts.push('re-assessment');
   return parts.join(' · ');
 };
@@ -74,6 +76,29 @@ export function stepSummary(entry, now = new Date()) {
   }
   if (entry.last_edited_at) return `Edited ${formatStepMoment(entry.last_edited_at, now)}`;
   if (entry.started_at) return `Started ${formatStepMoment(entry.started_at, now)}`;
+  return 'Not started';
+}
+
+/** Short moment for a narrow place: "10:06 AM" today, "Nov 3" any other day. */
+export function shortMoment(iso, now = new Date()) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  if (dayKey(d) === dayKey(now)) return clock(d);
+  const year = d.getFullYear() === now.getFullYear() ? '' : ` ${d.getFullYear()}`;
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}${year}`;
+}
+
+/** The short line under a wizard rail step: "Done 9:14 AM · 9 min",
+ *  "Edited 10:06 AM", "Started 9:58 AM", "Not started". */
+export function stepRailLine(entry, now = new Date()) {
+  if (!entry) return 'Not started';
+  if (entry.done_at) {
+    const spent = entry.seconds != null ? ` · ${formatDuration(entry.seconds)}` : '';
+    return `Done ${shortMoment(entry.done_at, now)}${spent}`;
+  }
+  if (entry.last_edited_at) return `Edited ${shortMoment(entry.last_edited_at, now)}`;
+  if (entry.started_at) return `Started ${shortMoment(entry.started_at, now)}`;
   return 'Not started';
 }
 
