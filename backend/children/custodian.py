@@ -1,56 +1,38 @@
 """The child's custodian: who they live with now, and whether the system may
-text them (owner's decision, 29 Sep 2026).
+text them (owner's decision, 29 Sep 2026; changed 2 Nov 2026).
 
 A custodian is not a system user. They never agreed to anything by signing
 up, so the system texts them only when BOTH are recorded on the child:
 
-- **consent** - the social worker asked, in person or by phone, and the
-  custodian said yes. Recorded with who ticked it and when. It belongs to the
-  person, not the child: a different custodian, or a different number, clears
-  it, so nobody inherits somebody else's yes.
-- **a confirmed number** - a one-time code texted to the number and read back
-  by the custodian while the social worker is with them. A typed number may be
-  a typo, and a typo is a stranger's handset.
+- **a contact number**, and
+- **consent** - the custodian agreed in person to receive appointment texts at
+  that number (the date, time and place only). Recorded with who ticked it and
+  when. It belongs to the person and the number, so a different custodian or a
+  different number clears it: nobody inherits somebody else's yes.
+
+Since 2 Nov 2026 the number is no longer confirmed with a one-time code. The
+custodian agrees in person, the social worker ticks the box, and saving a
+fresh agreement texts that number once to say so
+(accounts/sms_notifications.notify_custodian_consent), which is how a typo is
+noticed: the wrong handset gets a text that says "Not you?".
 
 `texts_allowed()` is the one test every custodian text goes through
 (accounts/sms_notifications.py). The ISA and social workers record all of this;
 a psychologist cannot change it.
 """
-import secrets
-from datetime import timedelta
-
-from django.db import transaction
 from django.utils import timezone
 
 from accounts.models import Role
 from accounts.phone import InvalidPhilippineMobile, normalise_ph_mobile
 from children import intake
 
-# Same limits as a user confirming their own number (accounts/sms_notifications):
-# every code is a paid text to a number somebody typed.
-CODE_TTL_SECONDS = 10 * 60
-CODE_MAX_ATTEMPTS = 5
-CODE_RESEND_SECONDS = 60
-CODE_MAX_PER_HOUR = 5
-# How long a confirmed number may be put on a record by whoever confirmed it -
-# the rest of the intake, a sibling's record with the same custodian.
-CONFIRMED_FOR = timedelta(hours=1)
-
-CODE_TEXT = ("NACC RACCO I: your code is {otp}. Give it to the social worker "
-             "to confirm this number for appointment reminders.")
-
 FIELDS = ("custodian_name", "custodian_contact", "custodian_sms_consent")
 
 
-class TooManyCodes(Exception):
-    """Raised with a sentence for the social worker waiting on a code."""
-
-
 def texts_allowed(child):
-    """May the system text this child's custodian? Consent, a confirmed
-    number, and a case still open."""
+    """May the system text this child's custodian? A number, the custodian's
+    consent, and a case still open."""
     return bool(child.custodian_contact and child.custodian_sms_consent
-                and child.custodian_contact_verified_at
                 and child.status == child.ACTIVE)
 
 
@@ -67,8 +49,6 @@ def status_of(child):
         return "No contact number" + TEXTS_OFF_ENDING
     if not child.custodian_sms_consent:
         return "No consent recorded" + TEXTS_OFF_ENDING
-    if not child.custodian_contact_verified_at:
-        return "Number not confirmed" + TEXTS_OFF_ENDING
     return TEXTS_ON
 
 
@@ -91,8 +71,7 @@ def apply(attrs, instance, user, role):
       moves it. Refusing that left a psychologist's case-type change unsavable,
       with the refusal on a field the new case type does not show.
     - A new custodian or a new number clears consent unless consent is given
-      again in the same save, and clears the confirmation unless the new
-      number was confirmed by this person within CONFIRMED_FOR.
+      again in the same save.
     - Consent needs a number to be about.
     """
     before = {f: getattr(instance, f, None) if instance is not None else None
@@ -106,8 +85,7 @@ def apply(attrs, instance, user, role):
         if changed and _leaves_custodian_behind(attrs, instance) and not any(
                 attrs.get(f) for f in FIELDS):
             attrs.update(custodian_name="", custodian_contact="", custodian_sms_consent=False,
-                         custodian_sms_consent_at=None, custodian_sms_consent_by=None,
-                         custodian_contact_verified_at=None)
+                         custodian_sms_consent_at=None, custodian_sms_consent_by=None)
             return {}
         if changed:
             return {changed[0]: "Only the social worker or the ISA records the custodian."}
@@ -133,12 +111,6 @@ def apply(attrs, instance, user, role):
         attrs["custodian_sms_consent_at"] = now
         attrs["custodian_sms_consent_by"] = user
 
-    number = after["custodian_contact"]
-    if not number:
-        attrs["custodian_contact_verified_at"] = None
-    elif number != before["custodian_contact"] or (
-            instance is not None and not instance.custodian_contact_verified_at):
-        attrs["custodian_contact_verified_at"] = confirmed_at(user, number)
     return {}
 
 
@@ -149,84 +121,26 @@ def _leaves_custodian_behind(attrs, instance):
     return "custodian_name" not in intake.CASE_TYPE_FIELDS.get(attrs["case_type"], [])
 
 
-def confirmed_at(user, number):
-    """When `user` confirmed `number` with a code, if recently enough to put
-    it on a record now; else None."""
-    from children.models import CustodianContactCheck
-    row = (CustodianContactCheck.objects
-           .filter(requested_by=user, number=number, verified_at__isnull=False)
-           .first())
-    if row is None or timezone.now() - row.verified_at > CONFIRMED_FOR:
-        return None
-    return row.verified_at
+# --- A fresh agreement ------------------------------------------------------
+
+def agreement_snapshot(child):
+    """What a save is compared against to tell whether it recorded a NEW yes:
+    (name, number, consent) as the record held them. A record that does not
+    exist yet holds nothing."""
+    if child is None:
+        return ("", "", False)
+    return ((child.custodian_name or "").strip(), child.custodian_contact or "",
+            bool(child.custodian_sms_consent))
 
 
-# --- The one-time code -------------------------------------------------------
-
-def send_code(user, number):
-    """Text a code to `number`. Returns the gateway's SmsResult; raises
-    TooManyCodes when this person has asked too recently or too often. A
-    refused send does not count against either limit."""
-    from accounts.sms import send_sms
-    from children.models import CustodianContactCheck
-
-    now = timezone.now()
-    with transaction.atomic():
-        CustodianContactCheck.objects.get_or_create(requested_by=user)
-        row = CustodianContactCheck.objects.select_for_update().get(requested_by=user)
-        before = {"last_sent_at": row.last_sent_at,
-                  "window_started_at": row.window_started_at,
-                  "sent_in_window": row.sent_in_window}
-        if (row.window_started_at is None
-                or now - row.window_started_at >= timedelta(hours=1)):
-            row.window_started_at, row.sent_in_window = now, 0
-        if row.sent_in_window >= CODE_MAX_PER_HOUR:
-            raise TooManyCodes("Too many codes have been sent from your account in "
-                               "the last hour. Try again later.")
-        if (row.last_sent_at is not None
-                and now - row.last_sent_at < timedelta(seconds=CODE_RESEND_SECONDS)):
-            raise TooManyCodes("A code was sent less than a minute ago. Give it a "
-                               "moment to arrive, or ask again in a minute.")
-        code = f"{secrets.randbelow(1_000_000):06d}"
-        row.number, row.code, row.tries, row.verified_at = number, code, 0, None
-        row.expires_at = now + timedelta(seconds=CODE_TTL_SECONDS)
-        row.last_sent_at = now
-        row.sent_in_window += 1
-        row.save()
-
-    # After the claim commits: a gateway can take twenty seconds, and SQLite
-    # locks the whole database for a write.
-    result = send_sms(number, CODE_TEXT, "custodian number check", otp_code=code)
-    mine = CustodianContactCheck.objects.filter(pk=row.pk, code=code)
-    if not result.ok:
-        mine.update(code="", **before)
-        return result
-    if result.code and result.code != code:
-        mine.update(code=result.code)
-    return result
-
-
-def confirm_code(user, number, submitted):
-    """Check the code read back for `number`. Returns (ok, message)."""
-    from children.models import CustodianContactCheck
-
-    with transaction.atomic():
-        row = (CustodianContactCheck.objects.select_for_update()
-               .filter(requested_by=user).first())
-        if (row is None or not row.code or row.number != number
-                or row.expires_at is None or row.expires_at <= timezone.now()):
-            return False, "That code has expired or was for another number. Send a new one."
-        row.tries += 1
-        if row.tries > CODE_MAX_ATTEMPTS:
-            row.code = ""
-            row.save(update_fields=["code", "tries"])
-            return False, "Too many wrong codes. Send a new one."
-        if (submitted or "").strip() != row.code:
-            row.save(update_fields=["tries"])
-            left = CODE_MAX_ATTEMPTS - row.tries
-            return False, (f"That code is not right. {left} attempt"
-                           f"{'' if left == 1 else 's'} left.")
-        row.code = ""
-        row.verified_at = timezone.now()
-        row.save(update_fields=["code", "tries", "verified_at"])
-    return True, "Number confirmed. Save the record to keep it."
+def is_fresh_agreement(before, child):
+    """Did the save that just happened record a custodian's yes for THIS person
+    at THIS number? True when consent is on now and it was off before, or the
+    number changed, or the custodian changed (consent given again in the same
+    save, or `apply` would have cleared it). An unrelated edit of an already
+    consented record, a withdrawal and a closed case are not."""
+    name, number, consent = before
+    return bool(texts_allowed(child) and (
+        not consent
+        or (child.custodian_contact or "") != number
+        or (child.custodian_name or "").strip() != name))

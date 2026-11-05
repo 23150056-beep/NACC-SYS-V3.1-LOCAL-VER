@@ -119,7 +119,7 @@ class NothingConfidentialLeavesTest(SmsBase):
 
         sent = []
 
-        def capture(number, text, description, otp_code=None):
+        def capture(number, text, kind, otp_code=None, **extra):
             sent.append(text.replace("{otp}", otp_code) if otp_code else text)
             return SmsResult(True, "captured", code=otp_code)
 
@@ -259,25 +259,31 @@ class PhoneEndpointIsBoundToTheCallerTest(SmsBase):
         PhoneVerification.objects.filter(user=self.psy).update(
             last_sent_at=timezone.now() - timedelta(minutes=2))
 
+    # The account's own ceiling is what these two test, so each request asks for
+    # a different number: the catalogue's per-number rule (two codes an hour to
+    # one number) would otherwise answer first, and that has its own tests.
+    def _ask_for_a_code(self, n):
+        return self.client.post(URL, {"phone": f"0917 123 45{n:02d}"},
+                                format="json")
+
     def test_there_is_an_hourly_ceiling_as_well(self):
         self._auth("p@racco1.gov.ph")
         codes = []
-        for _ in range(sms_notifications.CODE_MAX_PER_HOUR):
-            codes.append(self.client.post(
-                URL, {"phone": "0917 123 4567"}, format="json").status_code)
+        for n in range(sms_notifications.CODE_MAX_PER_HOUR):
+            codes.append(self._ask_for_a_code(n).status_code)
             self._a_minute_passes()
-        over = self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
+        over = self._ask_for_a_code(99)
         self.assertEqual(codes, [200] * sms_notifications.CODE_MAX_PER_HOUR)
         self.assertEqual(over.status_code, 429)
 
     def test_the_ceiling_resets_after_an_hour(self):
         self._auth("p@racco1.gov.ph")
-        for _ in range(sms_notifications.CODE_MAX_PER_HOUR):
-            self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
+        for n in range(sms_notifications.CODE_MAX_PER_HOUR):
+            self._ask_for_a_code(n)
             self._a_minute_passes()
         PhoneVerification.objects.filter(user=self.psy).update(
             window_started_at=timezone.now() - timedelta(hours=1, minutes=1))
-        resp = self.client.post(URL, {"phone": "0917 123 4567"}, format="json")
+        resp = self._ask_for_a_code(99)
         self.assertEqual(resp.status_code, 200, resp.data)
 
     def test_the_code_and_the_limits_are_shared_by_every_worker(self):
@@ -406,7 +412,7 @@ class TheSenderRefusesBadInputTest(TestCase):
         for number, text in [("", "hi"), ("02 8123 4567", "hi"),
                              ("09171234567", ""), (None, "hi")]:
             with self.subTest(number=number):
-                self.assertFalse(send_sms(number, text, "probe").ok)
+                self.assertFalse(send_sms(number, text, "session_reminder").ok)
 
     # The console provider stood in by one that hands back the text it was
     # given, so the tests can read what would have gone out.
@@ -414,7 +420,7 @@ class TheSenderRefusesBadInputTest(TestCase):
 
     def test_an_over_long_message_is_trimmed_not_split(self):
         with patch.dict("accounts.sms.PROVIDERS", self.ECHO):
-            result = send_sms("09171234567", "x" * 400, "probe")
+            result = send_sms("09171234567", "x" * 400, "session_reminder")
         self.assertTrue(result.ok)
         self.assertTrue(fits_one_segment(result.detail))
         # Not "…": that is outside GSM-7, and appending it to trim a message
@@ -423,20 +429,20 @@ class TheSenderRefusesBadInputTest(TestCase):
 
     def test_a_non_gsm_message_is_trimmed_to_seventy(self):
         with patch.dict("accounts.sms.PROVIDERS", self.ECHO):
-            result = send_sms("09171234567", "Salamat — " * 20, "probe")
+            result = send_sms("09171234567", "Salamat — " * 20, "session_reminder")
         self.assertTrue(result.ok)
         self.assertTrue(fits_one_segment(result.detail))
         self.assertLessEqual(len(result.detail), UCS2_SEGMENT)
 
     def test_a_code_is_never_trimmed(self):
         """A message cut off through the code is worse than none."""
-        result = send_sms("09171234567", "x" * 200 + " {otp}", "probe",
+        result = send_sms("09171234567", "x" * 200 + " {otp}", "session_reminder",
                           otp_code="123456")
         self.assertFalse(result.ok)
 
     def test_a_code_is_written_in_where_there_is_no_code_route(self):
         with patch.dict("accounts.sms.PROVIDERS", self.ECHO):
-            result = send_sms("09171234567", "Code {otp}.", "probe",
+            result = send_sms("09171234567", "Code {otp}.", "session_reminder",
                               otp_code="012345")
         self.assertEqual("Code 012345.", result.detail)
         self.assertEqual("012345", result.code)

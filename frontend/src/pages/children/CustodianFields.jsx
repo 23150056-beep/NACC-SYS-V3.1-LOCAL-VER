@@ -1,26 +1,19 @@
-import { useState } from 'react';
-import api from '../../api/client';
-import { Badge, Button, FormField, Icon, Input } from '../../ui';
-import { firstError } from '../../utils/errors';
+import { FormField, Icon, Input } from '../../ui';
 import { shortDate } from '../../utils/time';
 import { consentKey } from './recordForm';
 
 /* The custodian on the Present Environment step: who the child lives with
  * now, their mobile number, and whether the system may text them about
- * appointments (owner's decision, 29 Sep 2026; backend children/custodian.py).
+ * appointments (backend children/custodian.py).
  *
- * Texts go only when BOTH are recorded:
- * - consent - the custodian agreed, asked in person or by phone. It belongs to
- *   the person and the number, so changing either unticks it here, and the
- *   server clears it too unless it is given again in the same save;
- * - a confirmed number - a one-time code texted to it and read back by the
- *   custodian. A typed number may be a typo, and a typo is a stranger.
- *
- * Confirming does not save anything: the record's own save puts the
- * confirmed number on the child, and only for whoever confirmed it. */
+ * Texts go when a number is recorded AND the custodian agreed - in person; the
+ * social worker ticks the box (owner's decision, 2 Nov 2026: the one-time code
+ * is gone). Consent belongs to the person and the number, so changing either
+ * unticks it here, and the server clears it too unless it is given again in
+ * the same save. Saving a fresh agreement texts the number once. */
 
 // The server's reading of a typed number (accounts/phone.py), used here only
-// to tell whether the number on screen is the one already confirmed.
+// to tell whether the number on screen is a readable one.
 function asE164(raw) {
   let n = String(raw || '').replace(/[\s\-().]/g, '');
   if (n.startsWith('+63')) n = n.slice(3);
@@ -30,16 +23,7 @@ function asE164(raw) {
 }
 
 export default function CustodianFields({ form, setForm, fieldError, readOnly = false }) {
-  const [sentTo, setSentTo] = useState('');
-  const [code, setCode] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState('');
-  const [error, setError] = useState('');
-
   const number = asE164(form.custodian_contact);
-  const confirmed = !!number && (
-    (form.custodian_contact_verified && number === form._origContact)
-    || number === form._confirmedNumber);
   const unchangedPerson = number === (form._origContact || '')
     && (form.custodian_name || '').trim() === (form._origCustodian || '').trim();
   const consentOnFile = form.custodian_sms_consent && form._origConsent && unchangedPerson;
@@ -55,41 +39,12 @@ export default function CustodianFields({ form, setForm, fieldError, readOnly = 
     setForm({ ...next, custodian_sms_consent: same });
   };
 
-  const sendCode = async () => {
-    setError(''); setNote(''); setBusy(true);
-    try {
-      const { data } = await api.post('/custodian-contact/code/', { number: form.custodian_contact });
-      setSentTo(data.number);
-      setCode('');
-      setNote(data.detail);
-    } catch (err) {
-      setError(firstError(err.response?.data, 'The code could not be sent. Try again.'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const confirmCode = async () => {
-    setError(''); setBusy(true);
-    try {
-      const { data } = await api.put('/custodian-contact/code/', { number: sentTo, code });
-      setForm({ ...form, _confirmedNumber: data.number });
-      setSentTo('');
-      setNote(data.detail);
-    } catch (err) {
-      setError(firstError(err.response?.data, 'That code could not be checked. Try again.'));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   let status;
   if (!form.custodian_contact) status = 'No contact number - the custodian gets no appointment texts.';
   else if (!number) status = 'Enter a Philippine mobile number, starting 09.';
   else if (!form.custodian_sms_consent) status = 'Texts off until the custodian agrees to them.';
-  else if (!confirmed) status = 'Texts off until the number is confirmed with a code.';
   else status = 'Appointment texts on: booked, a reminder the day before, moved, cancelled, missed.';
-  const on = !!number && form.custodian_sms_consent && confirmed;
+  const on = !!number && form.custodian_sms_consent;
 
   if (readOnly) {
     return (
@@ -118,8 +73,7 @@ export default function CustodianFields({ form, setForm, fieldError, readOnly = 
           hint="The custodian's mobile, for appointment texts.">
           <Input value={form.custodian_contact || ''} maxLength={20} inputMode="tel"
             placeholder="0917 123 4567"
-            trailing={confirmed ? <Badge tone="success" size="sm" dot>Confirmed</Badge> : null}
-            onChange={(e) => { setSentTo(''); setNote(''); setError(''); change({ custodian_contact: e.target.value }); }} />
+            onChange={(e) => change({ custodian_contact: e.target.value })} />
         </FormField>
       </div>
 
@@ -143,29 +97,11 @@ export default function CustodianFields({ form, setForm, fieldError, readOnly = 
           </span>
         </label>
 
-        {number && !confirmed && (
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            {sentTo === number ? (
-              <>
-                <div style={{ width: 150 }}>
-                  <Input size="sm" value={code} maxLength={8} inputMode="numeric"
-                    placeholder="6-digit code" aria-label="Code the custodian read back"
-                    onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))} />
-                </div>
-                <Button type="button" size="sm" variant="primary" disabled={busy || code.length < 4}
-                  onClick={confirmCode} iconLeft={<Icon name="check" size={14} />}>Confirm</Button>
-                <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={sendCode}>Send again</Button>
-              </>
-            ) : (
-              <Button type="button" size="sm" variant="secondary" disabled={busy} onClick={sendCode}
-                iconLeft={<Icon name="message-square" size={14} />}>
-                {busy ? 'Sending…' : 'Send a code to confirm this number'}
-              </Button>
-            )}
-          </div>
+        {number && (
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            When you save, a confirmation text goes to this number. Ask the custodian to check it arrived.
+          </span>
         )}
-        {note && <span style={{ fontSize: 12, color: 'var(--text-body)' }}>{note}</span>}
-        {error && <span role="alert" style={{ fontSize: 12, color: 'var(--red-700)', fontWeight: 600 }}>{error}</span>}
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: on ? 'var(--success-700)' : 'var(--text-muted)' }}>
           <Icon name={on ? 'message-square' : 'message-square-off'} size={14} /> {status}
         </span>

@@ -60,14 +60,16 @@ class SessionReminderTaskView(generics.GenericAPIView):
 
         dry_run = str(request.query_params.get("dry_run", "")).lower() in ("1", "true", "yes")
         report = send_session_reminders(today=False, dry_run=dry_run)
-        logger.info("Session reminders for %s: %s sent, %s skipped, %s failed",
+        logger.info("Session reminders for %s: %s sent, %s skipped, %s failed, "
+                    "%s unconfirmed",
                     report["date"], report["sent"], report["skipped"],
-                    report["failed"])
+                    report["failed"], report["unconfirmed"])
         # Counts, not names. A scheduler's logs are not a place for a caseload.
         return Response({
             "date": report["date"],
             "sent": report["sent"],
             "skipped": report["skipped"],
             "failed": report["failed"],
+            "unconfirmed": report["unconfirmed"],
             "dry_run": report["dry_run"],
         }, status=status.HTTP_200_OK)

@@ -152,7 +152,7 @@ export const DYNAMIC = ['custodian_name', 'type_of_adoption', 'date_of_admission
  * SENDS, never for the form. The form keeps an answer when the case type
  * changes and only hides it, so switching back brings it back; until 29 Sep
  * 2026 it deleted them on the spot, and Foster Care -> Residential Care ->
- * Foster Care lost the custodian, their confirmed number, the texting consent
+ * Foster Care lost the custodian, their number, the texting consent
  * and the date of placement. */
 export const unaskedBlanked = (caseType, typeOfAdoption) => {
   const asked = CASE_TYPE_FIELDS[caseType] || [];

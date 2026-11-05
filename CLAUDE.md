@@ -380,6 +380,46 @@ offer and the refusal are computed two different ways the screen starts lying,
 and a booking screen that lies is worse than a blank time field because it
 looks authoritative.
 
+**One rule, two ways to feed it** (3 Nov 2026, `booking.Diary`). `errors_for`
+asked the database per candidate time, about six queries each: fine for a day,
+thousands for a month on the hosted PostgreSQL, and the temptation was a
+cheaper look-alike for the month. Instead `Diary.load(psychologist, child,
+first_day, last_day, duration_minutes=, exclude_id=)` reads what the rule needs
+once (the psychologist's active windows, leave overlapping the range, their
+sessions and the child's, whether the referral exists: five queries, four when
+moving) and `Diary.errors_for` is the ONLY place the rule is written, with the
+same messages, order, `own_calendar` waiver and `exclude_id` rule. The module
+function `errors_for()` loads one day and asks it; `bookable_slots`,
+`why_empty`, `next_openings` and the month all read a diary and put every
+candidate through the same method. A moved appointment is left out of the
+sessions at load (the same as ignoring it in both clash checks and in
+capacity) and lifts the referral rule. A diary raises `ValueError` for a time
+or a length it was not read for rather than answering from data it lacks.
+`test_month.py` holds the equivalence: every half hour of December, with and
+without `own_calendar`, gives the same dict from the diary and from a fresh
+`errors_for`, and every day of the month equals `/slots`. One `/slots` request
+went from 37 queries to 9.
+
+**The month endpoint** (`GET /api/availability/month/?psychologist=&month=YYYY-MM`,
+optional `child`, `duration` 15-480, `exclude`): the booking drawer's calendar.
+Access is `/slots`: a psychologist asks about themselves only (anyone else
+404), a child must be one the asker can see (404), anonymous 401. A malformed
+month, one before this month and one more than 12 months ahead are 400, the
+two range refusals carrying `today` (the agency's date) so a browser on another
+clock re-aims at the month the server takes instead of showing an error. One
+entry per day, `state` being past (before today), leave (outranks off, so an
+away weekend is shaded), open (a bookable start exists), full (a window
+applies, nothing is bookable) or off (no window); `slots` are exactly what
+`bookable_slots` returns, so a day marked open books. Today is judged on the
+times still ahead. `reason` is one sentence only when no day is open (no
+referral, no availability posted, away all month, a length no window fits,
+fully booked, else "no open time in <Month>"). It carries times only: a clash's
+message names a case number, and none of those messages is ever sent. A missing
+referral shows every working day as "full" with the reason saying why, and the
+answer says `blocked: true` so the screen can lead with that sentence. The answer also carries `reason_kind` (empty when a day is open, else referral, no_availability, away, too_long, full or none), set in the same branches as the sentence, so the screen never matches text. `today` is
+the server's date in `TIME_ZONE`, which the screen uses for its "today" mark. Query count is pinned at five and tested to
+stay put as windows, leave and sessions are added.
+
 **A child needs a case referral on file before any session is booked**, checked
 for every role. Moving an appointment that already exists is exempt, so
 children booked before the rule are not stranded by it.
@@ -403,6 +443,35 @@ psychologist and the ISA on 2 Oct 2026):
   leave or see what the ISA had recorded for them. The leave serializer does
   not require `psychologist`; the view fills in the psychologist's own and
   asks anybody else "Whose leave is this?".
+- **The booking drawer's Day field is a month calendar** (3 Nov 2026,
+  `pages/schedule/MonthSlots.jsx`, the asking and month state in
+  `monthSlots.js`). It replaced a native date box and five "next working day"
+  chips worked out from the weekly pattern, which gave a fully booked day a chip
+  and showed about a week. One `GET /availability/month/` per psychologist,
+  child, length, moved appointment and month (stale answers are never drawn:
+  the answer carries the key it was asked for); the Time grid reads the chosen
+  day from that same answer, so no second request, and a day or time the answer
+  no longer offers is cleared. Sunday-first like the Calendar. Only an "open"
+  day can be chosen; full, away, day-off and past days are `aria-disabled`, not
+  `disabled`, so the keyboard still lands on them and hears why ("Tuesday,
+  November 17, away on leave"). Arrows, Home/End and PageUp/PageDown move
+  (roving tabindex; a key that crosses a month pages first, then focuses).
+  Months run from this one to twelve ahead, the server's own window. **No day
+  is chosen until somebody picks one**, except where the drawer opens WITH one
+  (moving an appointment, or a click on a Calendar day): it opens on that month
+  with the day chosen, and a move passes `exclude` so its own time is offered; a
+  day that is not open (a past one) is cleared. Paging a month keeps the pick (the chosen day's times are held for the same psychologist, child and length, and only the month a day belongs to can say it is no longer open).
+  A month with nothing open puts the server's reason in an amber alert ABOVE
+  the grid, with "Next month" only when `reason_kind` is away, full or none (a missing referral, no posted hours or a length no window fits read the same next month); when `blocked` (no case referral) the working
+  days carry no "Full" word and their names say a referral is needed. The month
+  the drawer opened on is remembered, so a preset day that turns out not to be
+  open clears with a line ("Dec 6 is not open for ...") and the month stays.
+  Non-open cells have a hover title. A cell's accessible name STARTS with its
+  visible text ("5 14 open, Thursday, November 5, ..."), or voice control says
+  what it sees and misses (axe `label-content-name-mismatch`, WCAG 2.5.3). A
+  refusal is scrolled into view, since it sits at the top of a tall drawer. After a refused booking (400 or
+  409) the month is asked again. Under 360px the word "open" goes and the count
+  stands alone. Measured locally, the month answer takes 70-350 ms.
 - **The drawers and the appointment card are the shared `Drawer` and `Modal`**
   from `ui`, so Escape, a close button, a focus trap and focus return come
   with them. Hand-built overlays had none of those. The card closes when
@@ -511,7 +580,46 @@ the only access control the system has.
   refused**, so everybody signs in once after that ships. Expected, not a fault.
 - **Tokens live in `sessionStorage`**, via `api/session.js` so the client and
   AuthContext cannot disagree about where they are. Closing the browser ends
-  the session, and it is per-TAB — a second tab signs in again.
+  the session. Each tab holds its own copy.
+- **A new tab borrows the sign-in from an open one** (owner, 26 Oct 2026; design
+  `docs/superpowers/specs/2026-10-26-shared-tab-session-design.md`): a
+  notification email's button opened the form beside a signed-in tab. A tab
+  with no token asks over the `nacc-session` BroadcastChannel (same origin,
+  same browser profile) and waits at most 400 ms.
+  - **Whose a session is comes from the token's own `user_id` claim**
+    (`heldUserId()`), never from screen state. A tab still loading knows it,
+    and a share cannot be mislabelled.
+  - **An email's button (and the calendar invite's link) carries
+    `for=<recipient id>`**, and such a tab borrows only that user's session.
+    `for` is stripped from the address at start-up, so bookmarks never carry
+    it. Without it, the tab borrows only if every answer names the same user.
+  - **`/login`, `/signup` and `/survey/` never borrow**, and neither does a
+    tab that has just dropped a signed-out session. `/login` must always
+    reach the form: a dead session is sent there and must not come up as
+    whoever else is signed in. The temporary-password email's button goes to
+    `/login` for that reason.
+  - **Signing out signs out every tab of that account in this browser**, a
+    password change included. Tabs are matched by the refresh token's last 24
+    characters or its `user_id`, so a tab still loading is caught.
+    `{tail, userId}` is also listed in `localStorage` for 24 hours, for a tab
+    that was discarded or navigated away at the time. Signing in again blanks
+    the user's id in those entries but keeps the tails, so an old tab stays
+    dead.
+  - **The start-up drop is decided once, at module load**, like `for`. React
+    StrictMode runs effects twice in dev (`run-local.bat`). A flag kept
+    inside the effect was forgotten by the second run, which then borrowed
+    somebody else's session.
+  - A tab told by ANOTHER tab clears only its tokens, its Recent list and its
+    user. It leaves the drafts alone, because a late message would delete
+    what the next person typed.
+  - Only a refused refresh (401) ends the session in every tab. A network
+    failure ends it in one tab, as before.
+  - Still `sessionStorage`, never `localStorage`.
+  - **It relies on refresh tokens NOT rotating**: turn on
+    `ROTATE_REFRESH_TOKENS` and one tab's refresh kills the token the others
+    hold.
+  - **Script on any page of the origin can now ask for every tab's tokens**,
+    which rests on nothing being able to run script here.
 - **A Google account has `set_unusable_password()`.** Never flag one
   `must_change_password`: the gate asks for the CURRENT password and
   `check_password()` is False for an unusable one, so it locks them out with no
@@ -623,6 +731,20 @@ Settings, no per-feature flags.
   date and a number. Building it found two claims the code did not keep:
   remark Polish answered ANY signed-in account (now Psychologist and ISA
   only), and a self-report flag showed the model's own words unchecked.
+- **Record polish is a second door, and guarded** (29 Oct 2026, owner's
+  request). `POST /api/assistant/polish-record/` (`RecordPolishView`, job type
+  `record_polish`) puts "Polish writing" on Referral Reason, Medical Notes and
+  Recommendation in the record form and on the closing summary when
+  terminating (`components/PolishWriting.jsx`). Social workers, the ISA and
+  psychologists may use it; remark polish keeps its own rule. Same prompt as
+  remark polish, same Tagalog-drift refusal, then `checked_draft` for names,
+  dates AND numbers against the typed text, for every role. **It runs on the
+  hosted model where one is configured** (owner, 29 Oct 2026, "Allow on demo
+  only"; `run_job(allow_hosted=True)`): the model gets only the typed text,
+  never the record, and the live deployment configures none. So the button is
+  no longer gated on `drafting`. `save` and `terminate` in `Children.jsx` resolve true
+  only on a real save, so a failed one keeps "Revert to my text". Not measured
+  with a live model: `ai_eval` has no feature for it.
 - **The checker no longer counts a "Part 2" / "Step 1" heading as an invented
   number** (`evaluation.py`); "Part 2 sessions" still counts.
 - **The ISA can see who had the model read a child**: the Assistant log tab
@@ -650,7 +772,8 @@ Settings, no per-feature flags.
   and the serializers return an UNCONFIRMED draft only to those same writers.
 - **`get_ai_client()` refuses a hosted model unless the caller passes
   `allow_hosted=True`.** Only the chatbot, the two administrator probes,
-  `ai_check` and `ai_eval` do. Everything else drafts from case records and
+  `ai_check`, `ai_eval` and `RecordPolishView` (via `run_job`'s `allow_hosted`
+  keyword, default False) do. Everything else drafts from case records and
   answers 503 on a hosted deployment. There `/api/assistant/capabilities/`
   says `drafting: false` (`services.drafting_available()`, the same
   condition), and the screens hide Polish, both AI summary buttons and the
@@ -676,6 +799,75 @@ Built 26 Aug 2026. A docked panel on every protected screen, backed by
   discarded by the validator before it can reach a queryset.
 - **Stateless — no conversation history.** History would sit after the cached
   prefix and be re-prefilled at CPU speed every turn.
+- **Children's names never reach the chat model** (20 Oct 2026,
+  `assistant/redact.py`). A question is masked before it is sent - full names,
+  first+last and last names of the children in the asker's OWN
+  `visible_children` become `CHILD` / `CHILD 1`, phones `PHONE`, emails
+  `EMAIL` - and the server puts the name back into the tool's arguments. Only
+  the asker's own children are known, so another SW's child is never
+  recognised (and the model never learns it is a child). A first name alone is
+  not masked, and a last name alone only from four letters ("Ang" is Tagalog).
+  The stored question and tool call are the masked ones. CHAT_SYSTEM's
+  examples are in the token form; that change needs the owner's
+  `ai_eval --feature chat`.
+- **The model runtime stays on this machine**: `ollama_url` must be loopback
+  unless `ASSISTANT_ALLOW_REMOTE_RUNTIME=true`, checked by the Settings API,
+  the Django admin AND `get_ai_client()`, so an address saved any other way is
+  never used. Every change of address or model is a security ActivityLog entry
+  (hosts only).
+- **Assistant text is kept only as long as it is used**
+  (`assistant/retention.py`, run at most hourly per process from `run_job` and
+  the chat path, or `manage.py prune_assistant_text [--dry-run]`): chat text 30
+  days; brief and polish output 2 days; a summary once confirmed, after 30 days
+  or when its document goes; a self-report reason 30 days. Rows and their
+  metadata stay - the access log and metrics read them - and a non-chat
+  `input_ref` is never blanked. The admin view of `AssistantJob` is read-only
+  and shows no text. The ISA's unanswered-questions list shows the masked
+  question and names a role only when 3+ active users hold it.
+- **A starter question or chip never goes through the model** (20 Oct
+  2026). `/assistant/capabilities/` gives each example as `{label, tool,
+  args}` and the panel runs it through `/assistant/followup/`, so it works with
+  the model stopped and sends nothing outside. A schema entry marked
+  `internal` (`child_id` on `get_child_summary` and `list_care_gaps`) is left
+  out of what the model sees and dropped from a typed question; only
+  `validate(..., allow_internal=True)` on the follow-up path takes it, and it
+  is looked up in `visible_children`, so another SW's child is "none". "Ask
+  about this child" sends only the id: the name never leaves the system.
+- **"Tell me about CHILD" answers with the brief facts** (`brief_facts`, the
+  same scope and carry-history; next steps only for the record's own SW), and
+  `list_care_gaps` answers "what do I need to do" grouped by child, 15 shown
+  with totals. That description change and four CHAT_CASES (`todo en`, `todo
+  left en`, `todo tl`, `consent tl`) await the owner's `ai_eval --feature
+  chat`; "Sino ang walang consent?" has the shape that once pulled questions
+  into `list_unassigned_children`.
+  **Measured on the owner's PC, 20 Oct 2026** (47 cases x 2, local 3B,
+  median 4.2 s): the three to-do cases and both `CHILD` cases 2/2 clean, so
+  the masking and the to-do wording hold. `consent tl` 0/2 (unassigned, then
+  concern search) - left as a known limit: the guards only ever DECLINE, and
+  re-routing it would be a guard asserting an answer; the "What do I need to
+  do?" chip answers it without the model. `stats pending tl` went to
+  `list_care_gaps` 1/2 - possibly the new wording; watch it on the next run.
+  "What did I do last week?" (`get_statistics`) and "Caseload per
+  psychologist?" (`count_people`) failed 2/2 before this work too. A runner
+  that cannot reach Ollama mid-run dies with a traceback: leave
+  `start-ollama.bat`'s window open, and check the run says 47 cases.
+- **"any" on an optional enum is "not given"** (`_means_no_restriction` in
+  `tools.py`): the model sent `period: "any"` to `get_statistics` and the call
+  was refused. Only for an argument that is optional, has an enum, and does
+  not list the word itself, and only after the aliases have had their turn -
+  `status: "any"` and `role: "any"` -> `anyone` are unchanged, and a required
+  `when` still refuses it.
+- **The panel is a dialog** (`components/AssistantPanel.jsx`): one toggle with
+  `aria-expanded`, Esc returns focus to whatever opened it, modal below 640px,
+  a polite log, the input readOnly (not disabled) while answering. Its dot is
+  green only after the model actually answered; a 503 carries a fixed
+  `reason` (`switched_off`, `runtime_unreachable`, `hosted_not_allowed`) that
+  the panel says in words. Doors: the header button (1024px+), Ctrl+/ (not
+  while another modal is up), the launcher, "Ask about this child", and the
+  header search's "Ask the assistant" row, which sends only when chosen.
+- **`ai_eval` against a hosted model** runs only the fixed chat and
+  self-report cases; the features that send real records are refused unless
+  `--allow-hosted-records` AND DEBUG.
 - **Concern search matches words, not the whole phrase.** The model says
   "school refusal"; this agency records "School attendance difficulty".
   Whole-phrase `icontains` returned **zero children for every real question**
@@ -1274,16 +1466,48 @@ are unchanged (their assigned children).
   each bell, and the assignment answers are not pushed out. **The Users
   drawer** (the last 25 of what an account did, the ISA's own among them) keeps
   one sentence per move for the same reason. The per-record rows stay in the
-  table, in no screen, for whoever asks who moved a child: "View full audit
-  trail" on the rail goes to Users, whose drawer keeps the one sentence, so the
-  ISA cannot read "who moved C-0042?" on screen today. That is a known gap,
-  not an oversight. If the owner wants it answered, it belongs on the child's
-  own page (a read of that child's `move_detail` lines), never in the feeds,
-  which the same 60-record move would fill again. The actor's name is
+  table and in no feed; **the audit trail answers "who moved C-0042?"**
+  (`/activity?child=<id>`, "The audit trail" below), which is where the rail's
+  "View full audit trail" now goes. The actor's name is
   cut to its 150-character column like the labels: SQLite does not enforce a
   length, PostgreSQL refuses the insert, and a log line must not be what stops
   a move. `children/tests/test_transfer.py`, also run on PostgreSQL 16 - a
   length test that only ever ran on SQLite could not fail.
+
+## The audit trail
+
+Owner's request, 1 Nov 2026: the rail's "View full audit trail" went to the
+Dashboard (Staff, Psychologists) or Users (the ISA), neither of which is one,
+so it looked dead. It now opens `/activity` (`pages/AuditTrail.jsx`, all three
+roles; the bell popover has the same link).
+
+- **`GET /api/activity/trail/`** (`activity/views.py`, `trail`) shares ONE
+  role scope with the feed (`_scoped`): psychologists their own recipient
+  lines, Staff the Child/Assignment/CaseStudy lines of their own records plus
+  what is addressed to them, RECORD category only, the ISA everything minus
+  `move_copy` and `email_limit` (the trail is sent no kind, so it could only
+  tell them apart by their words, which are never read back; the console's
+  security log shows them). Scope is applied before any filter, so
+  `?category=security` cannot widen a Staff account. **The one difference
+  from the feed: the trail
+  INCLUDES `move_detail`**, the per-record transfer lines, which is how the ISA
+  (and the record's SW, by the Child scope) reads who moved a child. The feed
+  is unchanged: newest 50, no paging, no `move_detail`.
+- **Filters** (all optional, 400 with `{field: sentence}` on a bad one):
+  `category`, `action`, `q` (substring of the entity or actor label, 100
+  characters), `child` (an id; Child, Assignment and CaseStudy lines),
+  `date_from` / `date_to` (YYYY-MM-DD, inclusive at both ends, days in
+  `TIME_ZONE`), `page` and `page_size` (default 50, at most 200). The reply is
+  `{count, page, page_size, results}`, newest first with id as tie-break; a
+  page past the end is empty with the real count. Serializer unchanged:
+  no recipient, no kind. `activity/tests/test_audit_trail.py`.
+- **The page keeps every filter in the address** (`q`, `category`, `action`,
+  `from`, `to`, `child`, `page`), so a link reproduces the view; the search is
+  debounced 300 ms, a filter change returns to page 1, and a reply that
+  arrives after a newer request is dropped (sequence number). Category pills
+  are the ISA's only. A row's sentence is a real button to `eventDestination`.
+  The pager's right padding keeps Next clear of the floating assistant button,
+  which sat over it. Axe-core clean at 1440; no horizontal scroll at 390.
 
 ## Assigning a psychologist is asking
 
@@ -1450,13 +1674,22 @@ address logic is unchanged) and asks who the child lives with now - the
   Nothing invents a custodian for a real record; demo data gets one from
   `children/demo_custodians.py`, called by `seed_demo_data` and
   `import_demo_data` only.
-- **A custodian is texted only with consent AND a confirmed number**
-  (`texts_allowed()`): the SW ticks that the custodian agreed (recorded with
-  who and when), and confirms the number with a one-time code the custodian
-  reads back (`/api/custodian-contact/code/`, SW and ISA only, same limits as
-  a user's own number). A different custodian or number clears both unless
-  given again in the same save; a confirmation counts only for whoever made
-  it, within the hour. **Consent follows the person and number it was given
+- **A custodian is texted with consent and a number - no code** (owner,
+  2 Nov 2026; until then a one-time code the custodian read back had to
+  confirm the number). `texts_allowed()` is number + consent + an open case.
+  The SW ticks that the custodian agreed in person (recorded with who and
+  when); saving a FRESH agreement - consent newly on, or a new number, or a
+  new custodian ticked again - texts that number `custodian_consent` once
+  ("This number will now get appointment texts ... Not you? Tell the RACCO I
+  office.", `custodian.is_fresh_agreement`, `ChildViewSet._tell_custodian`),
+  and the save's end dialog says so (`custodian_consent_text`). That text is
+  what now catches a mistyped number - the form asks the SW to have the
+  custodian check it arrived; the code used to. One a day per number and
+  child, so a re-tick the same day sends nothing and says nothing. The code
+  endpoint, `send_code`/`confirm_code` and the `custodian_code` text are gone;
+  the `CustodianContactCheck` table and `custodian_contact_verified_at` stay,
+  unused. A different custodian or number clears consent unless given again
+  in the same save. **Consent follows the person and number it was given
   for** (`_consentFor`): change either and it is off, put both back and it is
   on again - it used to go off for good on one stray keystroke, and the save
   withdrew it. A psychologist cannot change any of it, except that
@@ -1906,6 +2139,133 @@ and census stay underneath, as they were.
   scrolls to the agency card and focuses its first field when it has loaded
   (`useOpenFromLink`, so it is used up and does not fire again on a reload).
 
+## Email notifications
+
+Owner's request, 21 Oct 2026: each user gets their own emails, starting with
+the psychologist asked to take a child. Design and what was settled in review:
+`docs/superpowers/specs/2026-10-21-email-notifications-design.md`.
+
+- **The "Google notification" the owner meant is the existing Brevo sender**
+  (`children/notifications.py _post`, `BREVO_API_KEY`, from
+  `racco1nacc@gmail.com`). It was what mailed temporary passwords; nothing new
+  was added to send. Sending from each user's own Gmail would need Google's
+  restricted `gmail.send` scope and the live OAuth app changed.
+- **One catalogue, `KINDS` in `accounts/email_notifications.py`**: psychologist
+  `case_request`, `request_withdrawn`, `my_calendar`; SW `case_accepted`,
+  `case_declined`, `records_transferred` (the console's Transfer records only,
+  not a single Social Worker pick), `case_taken_over`, `child_sessions`. The
+  ISA gets none yet; the design note lists the suggested ones. **A key is never
+  renamed**: opt-outs are stored by key, and the test pins the list.
+- **Fired from the domain functions, never from `log_activity`.** The bell
+  addresses lines to the psychologist even for their own actions and every
+  line names the child.
+- **No child's name, ever**, in a subject, body, text part or invite: the case
+  reference (`case_ref`), session times, staff names and counts only. People
+  are named through `accounts.display.entered_name`, never `display_name`:
+  `username` is the email address, so a nameless colleague would have read as
+  their address in someone else's subject line. `entered_name` also makes the
+  name one plain line of at most 60 characters (no control, bidi or zero-width
+  characters, no newlines): a colleague's typed name lands in genuine agency
+  mail. The privacy tests plant a token in every free-text Child column
+  (`children/tests/payloads.planted_text`).
+- **Links come from `SITE_URL`** (23 Oct 2026), the address people actually
+  open NACC SYS at, checked by `config/guards.checked_site_url` (http/https,
+  a host, no user/password, query, fragment or path; https unless DEBUG; a bad
+  value is ignored with a warning). Unset, `sign_in_url()` falls back to the
+  first non-localhost CORS origin, as before - on the local copy that is
+  `localhost`, a link that opens only on the host PC. **Never from the
+  request's Host header**: that is password-reset poisoning. Forced to '' under
+  `manage.py test` so a developer's .env cannot change pinned links. A button
+  path must start with `/` or `render()` refuses it.
+- **Every notification email shows the site address in plain text under the
+  button, and a safety line**: "NACC SYS never asks for your password or a code
+  by email, and nothing in this email signs you in. Not sure it is from us? Do
+  not use the button: open NACC SYS from your bookmark ...". It deliberately
+  does NOT say "check the address above": a clone can print the same address.
+  **Never add a link that signs someone in** (forwarded mail, link scanners,
+  tokens in history). `case_request` has its own fuller layout (an "Action
+  needed" chip, greeting, fact card, three steps naming "Waiting for your
+  answer").
+- **Never for your own action**, except the psychologist's "Calendar update":
+  moving or cancelling a session they hold an invite for re-sends the invite,
+  or Google Calendar keeps the old time.
+- **Session emails carry an `.ics` invite** (`scheduling/calendar_invite.py`,
+  `scheduling/session_mail.py`), the psychologist's only. `CalendarInvite`
+  counts SEQUENCE per (appointment, attendee), under a row lock, and only when
+  the email is really queued. **The event UID is stored** (`CalendarInvite.uid`,
+  scheduling 0007): drawn at random for an appointment's first invite, under
+  the appointment's row lock, and reused for every later invite to anyone, so
+  changing `SITE_URL` or CORS never gives a session a second event. A row from
+  before the column keeps the old CORS-derived value (`legacy_uid`). **Not yet seen in a real Gmail inbox** - this was
+  built with no Brevo key. Book a session as a SW with the key set and check the
+  psychologist's Gmail shows an invitation before relying on it. A 400 from
+  Brevo for a message with an attachment is sent again without it.
+- **"Accepted" and the first session are ONE email** (owner, 24 Oct 2026).
+  Accepting no longer mails the social worker; the acceptance is owed
+  (`AssignmentRequest.answer_mailed_at` NULL, children 0032) until the first
+  of: the psychologist books (one `case_accepted` email, "... and booked the
+  first session" with its time, and no "booked" email for that booking - only
+  when it is their first non-cancelled session with the child); the
+  "When will you see them first?" dialog ends without a booking (Book later,
+  Finish, X, Escape, or `pagehide` with `fetch keepalive`) and calls
+  `POST /api/assignment-requests/<id>/mail-answer/`; or the sweep
+  (`mail_overdue_answers`), 10 minutes after the acceptance
+  (`ANSWER_MAIL_GRACE`), run by `GET /api/activity/` at most once a minute per
+  process and ten at a time, and by `send_session_reminders` (fifty, then it
+  waits for the send threads). One conditional UPDATE claims it, so the three
+  can race and the SW still gets one email. A superseded acceptance (the child
+  moved on, or a later one accepted) is dropped, a closed case says so, and a
+  send that fails gives the claim back. The dialog ignores its close buttons
+  while a booking is in flight; leaving the page by Back leaves it to the
+  sweep (StrictMode runs unmount cleanups, so sending there would mail at
+  once). A request accepted by the release still serving during the deploy
+  that adds 0032 can be mailed twice; accepted.
+- **Each person's switches** are `EmailOptOut` rows (a row means OFF, so a new
+  kind starts on), at `GET/PUT /api/auth/me/email-notifications/`, shown on My
+  Profile under the mobile number. Only the caller's role's keys are accepted.
+- **One account can cause only so many of them** (25 Oct 2026, design note
+  "Round four"): counted per ACTOR (the `by` of the domain function, passed to
+  `notify(..., by=)` by every caller - a test reads the source for a call that
+  leaves it out) in `EmailSendRecord` rows: 20 an hour to one colleague, 60 an
+  hour in all, 150 in 24 hours (`EMAIL_LIMIT_PER_RECIPIENT_HOUR`,
+  `EMAIL_LIMIT_PER_HOUR`, `EMAIL_LIMIT_PER_DAY`; 0 = off; all off under
+  `manage.py test`, the tests of the limit switch them on). A table and not the
+  cache: each gunicorn worker has its own cache. Past a limit the email is HELD
+  - not built, `attachment` not called, so no invite SEQUENCE moves, and never
+  tried again later, an acceptance included (`claim_answer_mail` stands; the
+  social worker has the notice) - and the colleague gets a "More updates are
+  waiting" notice (no case, no kind of change; not counted by the limits): at
+  most one an hour and `OVERFLOW_PER_DAY` (3) in 24 hours per actor and
+  colleague, because the daily limit can hold an account for most of a day and
+  a notice every hour was 428 emails a day from one account measured, not 150.
+  So what one account can cause in 24 hours is 150 plus three notices to each
+  colleague it reaches. The ISA's security log gets one `email_limit` line an
+  hour per account (a bulk kind there, newest five shown; picked out by
+  `ActivityLog.kind`, not by its words); the ISA's bell leaves it out
+  (`/api/activity/`), or a held account would fill its 50 lines. Hourly holds
+  lift within the hour, the daily one can take up to a day, and neither the
+  notice nor the line promises the hour. The "once" is checked, not locked: two
+  held emails in the same instant can each send a notice, as two can each pass
+  the limit. Rows are pruned at 25 hours by the once-a-minute sweep and
+  `send_session_reminders`.
+- **With no `BREVO_API_KEY`** (the local copy) each email is one WARNING line,
+  `EMAIL (console) <kind> to <address>: <subject>` (`EMAIL (held: limit) ...`
+  when the limit holds it, so the limit can be watched working locally; console
+  lines are counted for it), and no CalendarInvite is recorded - so the
+  Calendar update cannot happen locally.
+- **A link in an email opens a new tab**, which borrows the sign-in of a tab
+  already open (see "Signing in"). With none open it is signed out, so
+  `ProtectedRoute` passes `state.from` and `Login` returns there after any
+  sign-in (`returnPath`: a single leading `/`, never `/login`). The button's
+  `for=<recipient id>` says whose open session to borrow. It is not a secret
+  and signs nobody in.
+- **Left open for the owner**: a session PATCHed onto another child (API only)
+  sends nothing; the footer's "No case details are included" is stronger than
+  a session's date and time; dark mode is unchecked on a real phone. **The sender is the bigger risk**: gmail.com sent
+  through Brevo cannot pass DMARC, so it is spoofable and spam-prone - send
+  from an agency-controlled domain with SPF/DKIM/DMARC. Brevo also rewrites
+  links for click tracking (no API switch; support only).
+
 ## Text messages (Semaphore)
 
 Audited 26 Sep 2026 when the owner chose Semaphore. `SMS_PROVIDER` picks the
@@ -1951,6 +2311,83 @@ is not a system user; see "The custodian and their texts".
   and the button could never work. The ISA sees the personal column only:
   the right-hand column reads `/children/`, `/appointments/` and
   `/activity/`, which for an administrator are the whole agency's.
+- **The reply is read whole** (27 Oct 2026). `_post` kept its first 400
+  characters, and Semaphore echoes the message, the account email and the
+  sender name: real replies run 400-460, so nine of eleven texts sent live
+  that day were recorded as failed although every one was delivered and
+  charged. Custodian numbers could never be confirmed (the code was wiped
+  on "failure"). The tests' fake replies were short - write a gateway
+  fixture from a REAL reply, at its real length. Design:
+  `docs/superpowers/specs/2026-10-27-sms-credit-safety-design.md`.
+- **A new SMS feature is a catalogue entry and a `send_sms(kind=)` call,
+  nothing else.** `accounts/sms_catalogue.py` holds every message: wording,
+  route, recipient, worst-case sample values and its own limits.
+  `test_sms_catalogue.py` fails on a message over one segment, outside
+  GSM-7, opening with TEST, with no limits decided, or sent under a kind
+  not in the catalogue (it reads the call sites). The limits, the spend
+  record and the live check then cover it with nothing more written.
+- **Four outcomes** (`SmsResult.outcome`): sent, refused, unknown (a timeout
+  or lost answer - it may have gone), limited. Give a limit back, wipe a
+  code or delete a reminder claim ONLY on `result.refused`; an unknown one
+  is kept and never resent automatically ("UNCONFIRMED" in the reminder
+  report).
+- **Every send is a `SmsSend` row** (accounts 0016): kind, route, credits,
+  outcome, Semaphore's message id, and the number as a keyed hash plus its
+  last four digits - never the number or the text. The limits are counted
+  from it, in `send_sms`, before the network: 10 texts a day to one number
+  (`SMS_PER_NUMBER_DAILY`), 300 credits a day for the agency
+  (`SMS_DAILY_CREDIT_LIMIT`), then each message's own rules (codes 2 an
+  hour and 4 a day per number across both code kinds, 10 a day per
+  account; the password notice once per 10 minutes; "case waiting" once an
+  hour per child; the test text 1 a minute and 5 an hour; 4 custodian
+  event texts per appointment a day). The console's Text messages row shows
+  the last 24 hours from it and turns amber at 80%, red at 100%.
+- **The phone code's wording matters to the network** (28 Oct 2026, owner's
+  handset): "NACC SYS: your verification code is {otp}. It expires in 10
+  minutes." was accepted and marked Sent three times and never arrived;
+  "NACC RACCO I: ..." with the same sentence arrived. It is the catalogue's
+  wording now, and a test refuses "NACC SYS" next to "expires in".
+- **The social worker is texted when a psychologist answers** (owner, 28 Oct
+  2026): `case_declined`, `case_accepted`, or `case_accepted_booked` with the
+  first session's time - before this only the email and the bell said so, and
+  the owner, testing on the demo, read the missing decline text as a fault.
+  Sent by whoever wins the `answer_mailed_at` claim (decline, the combined
+  booking email, the dialog's mail-answer, the sweep), so once per answer and
+  at the email's moment, whatever the email opt-out or limit did; a
+  superseded acceptance texts nothing. Case reference only - no child,
+  psychologist or reason. Limited per ANSWER (`answer:<request id>`), not per
+  child: a second psychologist declining the same child within the hour is a
+  second answer. `children/tests/test_answer_texts.py`.
+- **Two gaps the owner hit on the demo, closed** (28 Oct 2026). An acceptance
+  with NO case referral is answered at once (`assignment.accept` claims
+  `answer_mailed_at`, emails and texts): nothing can be booked, so waiting for
+  the dialog or the 10-minute sweep - which on the demo runs only when some
+  browser loads the activity feed - only left the SW untold. And a session
+  booked by someone other than the SW, not folded into the acceptance (Book
+  later, a referral filed later, the calendar), texts `session_booked_sw`
+  (`session_mail._tell_social_worker`; skipped when `accepted_with_first_session`
+  set `acceptance_claimed`, so never both). Bookings only, not moves.
+  `children/tests/test_sw_answer_and_booking_texts.py` runs the REAL
+  queue_sms -> send_sms -> SmsSend chain: the earlier answer-text tests
+  patched `queue_sms`, which is how the second gap went unseen.
+- **Codes stay on the OTP route** (2 credits); since 2 Nov 2026 the only
+  code is a user's own phone (the custodian's is gone, above). Measured
+  27 Oct 2026: the normal route delivered, but a text sent at 18:08 reached
+  the handset after ones sent at 18:15, while the OTP code arrived at once.
+  A code is read back by somebody waiting for it.
+- **Custodian texts**: "moved" only when the start differs from what they
+  were last told (`Appointment.custodian_told_start`); no day-before
+  reminder within 12 hours of the booked text; children sharing one
+  custodian number get ONE reminder (`custodian_reminder_group`, or
+  `_many` from five). An already-verified own number gets no code.
+- **`manage.py sms_live_check --to 09...`** sends every catalogue message
+  once (asks for the number to be typed back first; `--dry-run` sends
+  nothing; refuses a hosted database), then asks Semaphore for each one's
+  status and marks MISMATCH where the system and Semaphore disagree - the
+  check that found the 400-character bug. About 15 credits. Never part of
+  `manage.py test`. Semaphore's "Sent" means the network took it; look at
+  the handset too. Live-check rows count toward the agency's credits but
+  not toward any per-number limit, so the tester's own number still works.
 
 ## Role names on screen
 
@@ -2044,6 +2481,8 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   self-report detector missed 28%; both belong to `qwen2.5:3b` and transfer to
   nothing. Enforced in code since 27 Sep 2026 (`allow_hosted`, above); until
   then every drafting feature used the hosted model once the flag was on.
+  The one exception since 29 Oct 2026 is record polish (owner's decision); its
+  quality on the hosted model is unmeasured.
 - **The free API sleeps after ~15 minutes idle** and the first request then
   takes about a minute (entrypoint.sh re-runs migrate and the PSGC steps on
   every boot). A refresh in that minute used to show a bare "Loading…" that
@@ -2105,6 +2544,18 @@ are decoration and not held to the text rule.
 labelled without touching ~200 call sites. Pass your own `id` or `aria-label`
 to opt out.
 
+**Toasts are two live regions** (`ToastContext.jsx`, 20 Oct 2026): errors
+`role="alert"`, gone by themselves after 8-20 s by length (owner, 3 Nov 2026:
+the sign-in error sat until clicked), the rest `role="status"`, 5-15 s. All are
+held while pointed at, focused, or the page is hidden, and start over in full
+afterwards. An identical toast already showing is replaced, not stacked, and
+read again. A sign-in that succeeds clears the failures it showed
+(`Login.jsx`). An assistant failure that matters (Polish, AI
+summary, the brief, the census narrative, a 503 saying it is switched off) is
+also said inline beside its button, persistently - a toast alone is gone
+before anyone reads it. A status that announces stages (`LiveStatus` in `ui`)
+stays mounted and changes its words; one that mounts with its text is not read.
+
 Audit with **axe-core**, never a hand-rolled probe. Mine gave three different
 answers and each was its own bug: it missed a fixed header's background, read
 `rgba(255,255,255,0.1)` as opaque white, then sampled a badge's coloured dot
@@ -2143,7 +2594,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 2,828 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 3,662 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

@@ -215,8 +215,7 @@ class EveryRuleTest(SimpleTestCase):
     def test_texts_off_say_why_once_and_send_the_social_worker_to_the_record(self):
         for sentence, reason in (
                 ("No contact number - texts off", "no contact number"),
-                ("No consent recorded - texts off", "no consent recorded"),
-                ("Number not confirmed - texts off", "number not confirmed")):
+                ("No consent recorded - texts off", "no consent recorded")):
             with self.subTest(sentence=sentence):
                 self.assertEqual(
                     [{"key": "custodian_texts", "link": "/children?edit=7",
@@ -231,14 +230,11 @@ class EveryRuleTest(SimpleTestCase):
     def test_the_sentences_the_record_gives_are_all_understood(self):
         # Whatever custodian.status_of() says when texts are off must make a
         # step, and "on" must not: if a new sentence is added there, this fails.
-        record = SimpleNamespace(custodian_contact="", custodian_sms_consent=False,
-                                 custodian_contact_verified_at=None)
+        record = SimpleNamespace(custodian_contact="", custodian_sms_consent=False)
         off = [custodian.status_of(record)]
         record.custodian_contact = "+639171234567"
         off.append(custodian.status_of(record))
         record.custodian_sms_consent = True
-        off.append(custodian.status_of(record))
-        record.custodian_contact_verified_at = NOW
         on = custodian.status_of(record)
         for sentence in off:
             with self.subTest(sentence=sentence):
@@ -326,7 +322,7 @@ class EveryRuleTest(SimpleTestCase):
 
     def test_the_order_when_a_psychologist_is_there_and_a_session_is_wanted(self):
         got = keys(case_referral=REFERRAL, consent=None, next_session=None,
-                   custodian_texts="Number not confirmed - texts off",
+                   custodian_texts="No consent recorded - texts off",
                    survey={"state": "expired", "date": "2026-09-30", "elapsed_days": 9},
                    unreviewed_self_reports=1, case_study={"state": "draft", "missing": 4})
         self.assertEqual(
@@ -486,13 +482,11 @@ class OverARecordTest(FactsFixture):
             "Texts to the custodian are off: no contact number. Fix it on the record.",
             next(s["text"] for s in self._steps() if s["key"] == "custodian_texts"))
         Child.objects.filter(pk=self.child.pk).update(
-            custodian_contact="+639171234567", custodian_sms_consent=True,
-            custodian_contact_verified_at=NOW)
+            custodian_contact="+639171234567", custodian_sms_consent=True)
         self.assertNotIn("custodian_texts", self._keys())
         # A case type that asks for no custodian has no such step.
         Child.objects.filter(pk=self.child.pk).update(
-            case_type="", custodian_contact="", custodian_sms_consent=False,
-            custodian_contact_verified_at=None)
+            case_type="", custodian_contact="", custodian_sms_consent=False)
         self.assertNotIn("custodian_texts", self._keys())
 
     def test_self_report_answers_waiting_are_counted(self):

@@ -12,7 +12,7 @@ there would be writing fiction into a case file.
 
 No contact numbers. An invented mobile number is somebody's real handset, and
 a demo someone clicks through could text it. Demo custodians therefore never
-receive texts: no number, so no consent and no confirmed number either.
+receive texts: no number, so no consent either.
 """
 from children import intake
 from children.models import Child

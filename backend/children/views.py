@@ -8,9 +8,8 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.views import APIView
+from accounts import email_notifications, sms_notifications
 from accounts.display import display_name
-from accounts.phone import as_typed as phone_as_typed
 from accounts.models import Role
 from accounts.permissions import (ChildRecordAccess,
                                   is_admin_or_assignee)
@@ -76,8 +75,9 @@ class ChildViewSet(viewsets.ModelViewSet):
             again = duplicates.already_saved(request, token)
             if again is not None:
                 return again
+        self._consent_text = False
         try:
-            return super().create(request, *args, **kwargs)
+            return self._with_consent_text(super().create(request, *args, **kwargs))
         except IntegrityError:
             # Two attempts arrived together: both found no record for the
             # token, and the unique column let one of them in. The loser gets
@@ -86,6 +86,20 @@ class ChildViewSet(viewsets.ModelViewSet):
             if again is None:
                 raise
             return again
+
+    def _with_consent_text(self, response):
+        """Say in the reply whether a confirmation text to the custodian was
+        queued by this save, so the end dialog can tell the social worker."""
+        if response.status_code in (200, 201) and isinstance(response.data, dict):
+            response.data["custodian_consent_text"] = bool(
+                getattr(self, "_consent_text", False))
+        return response
+
+    def _tell_custodian(self, before, obj):
+        """A fresh agreement (children/custodian.py) texts the custodian once."""
+        if custodian.is_fresh_agreement(before, obj):
+            self._consent_text = sms_notifications.notify_custodian_consent(
+                obj, by=self.request.user)
 
     def perform_create(self, serializer):
         # A record a social worker adds is theirs (accounts/scoping.py), and
@@ -111,6 +125,7 @@ class ChildViewSet(viewsets.ModelViewSet):
         else:
             obj = duplicates.save_new(serializer)
         self._log(obj, ActivityLog.CREATED)
+        self._tell_custodian(custodian.agreement_snapshot(None), obj)
         if asked is not None:
             assignment.request_assignment(obj, asked, by=self.request.user)
 
@@ -130,6 +145,7 @@ class ChildViewSet(viewsets.ModelViewSet):
         """
         data = serializer.validated_data
         instance = serializer.instance
+        before = custodian.agreement_snapshot(instance)
         # The carry-history choice belongs to a request and is applied when it
         # is accepted - never by an edit. Saved here it changed what the
         # CURRENT psychologist sees with nobody asked: pick someone else,
@@ -140,6 +156,7 @@ class ChildViewSet(viewsets.ModelViewSet):
                 or "assigned_psychologist" not in data):
             obj = serializer.save()
             self._log(obj, ActivityLog.UPDATED)
+            self._tell_custodian(before, obj)
             return
         wanted = data.pop("assigned_psychologist")
         asking = wanted is not None and wanted.pk != instance.assigned_psychologist_id
@@ -149,6 +166,7 @@ class ChildViewSet(viewsets.ModelViewSet):
             data["assigned_psychologist"] = None
         obj = serializer.save()
         self._log(obj, ActivityLog.UPDATED)
+        self._tell_custodian(before, obj)
         if wanted is None:
             assignment.withdraw_pending(obj, by=self.request.user)
         else:
@@ -201,7 +219,8 @@ class ChildViewSet(viewsets.ModelViewSet):
                     {"detail": "This record was updated by someone else while you were editing.",
                      "current": serialized},
                     status=status.HTTP_409_CONFLICT)
-        return super().update(request, *args, **kwargs)
+        self._consent_text = False
+        return self._with_consent_text(super().update(request, *args, **kwargs))
 
     PRESENCE_TTL = 30  # seconds a heartbeat stays visible
 
@@ -333,6 +352,8 @@ class ChildViewSet(viewsets.ModelViewSet):
         log_activity(request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type="Child", entity_label=child.fullname, entity_id=child.id,
                      recipient=previous if taking_over else child.assigned_psychologist)
+        if taking_over and previous is not None:
+            email_notifications.case_taken_over(child, previous, by=request.user)
         return Response({"status": child.status, "case_status": child.case_status,
                          "social_worker": child.social_worker_id})
 
@@ -498,64 +519,3 @@ def _intake_match(first, last, birth):
     if birth:
         return Q(last_name__iexact=last, birth_date=birth)
     return None
-
-
-class CustodianContactCodeView(APIView):
-    """The one-time code that confirms a custodian's number (children/custodian.py).
-
-    POST {number}: text a code to it. PUT {number, code}: check what the
-    custodian read back. Confirming changes no record by itself - the record
-    form's save puts the confirmed number on the child, and only for whoever
-    confirmed it, within the hour.
-
-    The ISA and social workers only: they are the ones with the custodian in
-    front of them, and every code is a paid text to a number somebody typed.
-    """
-    permission_classes = [IsAuthenticated]
-
-    def _refuse(self, request):
-        if role_of(request) not in (Role.ADMINISTRATOR, Role.STAFF):
-            return Response({"detail": "Only the social worker or the ISA confirms a custodian's number."},
-                            status=status.HTTP_403_FORBIDDEN)
-        return None
-
-    def _number(self, request):
-        try:
-            number = custodian.normalise(request.data.get("number"))
-        except ValueError as exc:
-            return None, Response({"number": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
-        if not number:
-            return None, Response({"number": "Enter the custodian's mobile number."},
-                                  status=status.HTTP_400_BAD_REQUEST)
-        return number, None
-
-    def post(self, request):
-        refused = self._refuse(request)
-        if refused:
-            return refused
-        number, bad = self._number(request)
-        if bad:
-            return bad
-        try:
-            result = custodian.send_code(request.user, number)
-        except custodian.TooManyCodes as exc:
-            return Response({"detail": str(exc)}, status=status.HTTP_429_TOO_MANY_REQUESTS)
-        if not result.ok:
-            # The gateway's own words: a code that never arrives with no
-            # explanation is the failure that costs an afternoon.
-            return Response({"detail": result.detail}, status=status.HTTP_502_BAD_GATEWAY)
-        return Response({"detail": f"A code was sent to {phone_as_typed(number)}. "
-                                   f"Ask the custodian to read it back. It expires in 10 minutes.",
-                         "number": number})
-
-    def put(self, request):
-        refused = self._refuse(request)
-        if refused:
-            return refused
-        number, bad = self._number(request)
-        if bad:
-            return bad
-        ok, message = custodian.confirm_code(request.user, number, request.data.get("code"))
-        if not ok:
-            return Response({"code": message}, status=status.HTTP_400_BAD_REQUEST)
-        return Response({"detail": message, "number": number, "verified": True})

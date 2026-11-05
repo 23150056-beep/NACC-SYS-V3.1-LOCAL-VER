@@ -5,6 +5,12 @@ import api from './client';
 export const polishRemark = (text) =>
   api.post('/assistant/polish-remark/', { text }).then((r) => r.data);
 
+// The free text of a child's record (referral reason, medical notes,
+// recommendation, closing summary). A separate door from polishRemark because
+// the people who write the record are not the people who write case notes.
+export const polishRecordText = (text) =>
+  api.post('/assistant/polish-record/', { text }).then((r) => r.data);
+
 /* Whether a draft was accepted or discarded, for the usage metrics.
  *
  * Every caller deliberately ignores a failure - `catch(() => {})` at six
@@ -40,14 +46,19 @@ export const prefetchBriefs = () =>
 const SUMMARIZE = { report: 'summarize-report', 'case-referral': 'summarize-case-referral' };
 const CONFIRM = { report: 'confirm-summary', 'case-referral': 'confirm-case-referral-summary' };
 
-export const summarizeDocument = (kind, id) =>
-  api.post(`/assistant/${SUMMARIZE[kind]}/${id}/`).then((r) => r.data);
+// `signal` lets the screen stop waiting (Cancel). It ends the request on this
+// side only: the server has already been asked, finishes the summary and logs
+// the job whether or not anybody is still listening.
+export const summarizeDocument = (kind, id, { signal } = {}) =>
+  api.post(`/assistant/${SUMMARIZE[kind]}/${id}/`, undefined, { signal }).then((r) => r.data);
 
 export const confirmSummary = (kind, id, text) =>
   api.post(`/assistant/${CONFIRM[kind]}/${id}/`, { text }).then((r) => r.data);
 
-export const censusNarrative = (figures) =>
-  api.post('/assistant/census-narrative/', { figures }).then((r) => r.data);
+// `signal` ends the wait on this side only (a new period was chosen); the
+// server finishes the draft and logs the job regardless.
+export const censusNarrative = (figures, { signal } = {}) =>
+  api.post('/assistant/census-narrative/', { figures }, { signal }).then((r) => r.data);
 
 export const getAssistantMetrics = () =>
   api.get('/assistant/metrics/').then((r) => r.data);

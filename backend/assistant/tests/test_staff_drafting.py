@@ -18,6 +18,7 @@ Each exercise returns what it OBSERVED: "refused", "guarded", "tool_only", or
 "open" - model text reached Staff unchecked - which no entry can ever be.
 """
 import json
+import re
 from datetime import timedelta
 from unittest.mock import patch
 
@@ -40,15 +41,25 @@ User = get_user_model()
 # does not see one that begins it), a date and a number, none of which any
 # source here holds.
 INVENTED = "it was reported by Villanueva on 14 March that 77 children were seen"
-TELLTALES = ("Villanueva", "14 March", "77")
+# "77 children", not "77": a bare "77" also matched a response's timestamps
+# (created_at ...25.592077), so the self-report entry read as "open" whenever
+# the clock's microseconds held a 77 - about one full run in twenty.
+TELLTALES = ("Villanueva", "14 March", "77 children")
 
 REFERRAL_TEXT = "Maria was found at the barangay hall with her aunt in San Juan."
 
 
 def leaked(body):
-    """The telltale pieces of INVENTED found anywhere in `body`."""
+    """The telltale pieces of INVENTED found anywhere in `body`.
+
+    Each is looked for as a piece of its own: "77" inside a timestamp's
+    microseconds ("...:52.477123+08:00", which a serialised flag carries) is
+    not the invented number, and read as one it failed this suite about one run
+    in fourteen.
+    """
     text = body if isinstance(body, str) else json.dumps(body, default=str)
-    return [t for t in TELLTALES if t in text]
+    return [t for t in TELLTALES
+            if re.search(rf"(?<![\w.]){re.escape(t)}(?![\w.])", text)]
 
 
 class StaffDraftingFixture(APITestCase):
@@ -169,6 +180,20 @@ def exercise_remark_polish(t):
     return guards.REFUSED
 
 
+def exercise_record_polish(t):
+    """A social worker may polish the text of a record, so the draft is checked
+    against what they typed: an invented name, date or number is not shown."""
+    with t.model_writes():
+        res = t.client.post("/api/assistant/polish-record/",
+                            {"text": "Maria was found at the hall."}, format="json")
+    if res.status_code == 200 or leaked(res.data):
+        return "open"
+    t.assertEqual(422, res.status_code)
+    t.assertEqual({"detail": guards.REFUSAL_SENTENCE}, res.data)
+    t.assertEqual([False], [j.ok for j in AssistantJob.objects.all()])
+    return guards.GUARDED
+
+
 def exercise_doc_intelligence(t):
     with t.model_writes():
         res = t.client.post(f"/api/assistant/summarize-case-referral/{t.referral.id}/")
@@ -256,6 +281,7 @@ EXERCISES = {
     "brief": exercise_brief,
     "case_brief": exercise_case_brief,
     "remark_polish": exercise_remark_polish,
+    "record_polish": exercise_record_polish,
     "doc_intelligence": exercise_doc_intelligence,
     "census_narrative": exercise_census_narrative,
     "chat": exercise_chat,

@@ -340,7 +340,7 @@ class WhoIsAskedTest(AssignmentBase):
 
     def test_resending_the_psychologist_already_asked_changes_nothing(self):
         req = self._ask(self.psy)
-        with patch("children.assignment.send_assignment_notification") as mail:
+        with patch("accounts.email_notifications.case_request") as mail:
             again = self._ask(self.psy)
         self.assertEqual(req.pk, again.pk)
         mail.assert_not_called()
@@ -462,10 +462,10 @@ class QueueScopingTest(AssignmentBase):
 
 class NoticesTest(AssignmentBase):
     def test_asking_mails_and_texts_the_psychologist_asked(self):
-        with patch("children.assignment.send_assignment_notification") as mail, \
+        with patch("accounts.email_notifications.case_request") as mail, \
              patch("children.assignment.notify_new_assignment") as sms:
             self._ask(self.psy)
-        mail.assert_called_once_with(self.child, self.psy)
+        mail.assert_called_once_with(self.child, self.psy, by=self.sw)
         sms.assert_called_once_with(self.child, self.psy)
 
     def test_the_text_is_a_question_and_still_one_plain_segment(self):
@@ -474,7 +474,7 @@ class NoticesTest(AssignmentBase):
         self.psy.save()
         sent = []
         with patch.object(sms_notifications, "queue_sms",
-                          side_effect=lambda n, text, d: sent.append(text) or True):
+                          side_effect=lambda n, text, k, **kw: sent.append(text) or True):
             sms_notifications.notify_new_assignment(self.child, self.psy)
         self.assertEqual(1, len(sent))
         self.assertIn("accept or decline", sent[0])

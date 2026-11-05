@@ -1,3 +1,4 @@
+import re
 from datetime import date
 
 from django.contrib.auth import get_user_model
@@ -16,12 +17,17 @@ from activity.models import ActivityLog
 from activity.services import log_activity
 from children.models import Child
 from scheduling import booking
-from scheduling.models import AvailabilityBlock, Appointment, Unavailability
+from scheduling.models import (
+    AvailabilityBlock, Appointment, CustodianReminder, Unavailability,
+)
 from scheduling.serializers import (
     AvailabilityBlockSerializer, AppointmentSerializer, UnavailabilitySerializer,
 )
+from scheduling.session_mail import BOOKED, CANCELLED, MOVED, session_changed
 
 
+# How far ahead a month can be asked for: a year, this month included.
+MONTHS_AHEAD = 12
 
 
 class AvailabilityBlockViewSet(viewsets.ModelViewSet):
@@ -163,16 +169,80 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
         # on the grid offering to move it.
         exclude = request.query_params.get("exclude")
         exclude = int(exclude) if (exclude or "").isdigit() else None
+        diary = booking.Diary.load(psych, child, day, day,
+                                   duration_minutes=duration, exclude_id=exclude)
         found = booking.bookable_slots(psych, child, day,
-                                       duration_minutes=duration,
-                                       exclude_id=exclude)
+                                       duration_minutes=duration, diary=diary)
         return Response({
             "psychologist": display_name(psych),
             "date": day.isoformat(),
             "duration": duration,
             "slots": found,
             "reason": "" if found else booking.why_empty(
-                psych, day, duration, child=child, exclude_id=exclude),
+                psych, day, duration, child=child, exclude_id=exclude, diary=diary),
+        })
+
+    @action(detail=False, methods=["get"], url_path="month")
+    def month(self, request):
+        """Every day of one month for one psychologist, with the bookable
+        start times of each - the booking drawer's calendar.
+
+        The same question as `slots`, asked for a month at once: the month is
+        read in a handful of queries and every candidate time goes through the
+        same rule (booking.Diary), so a day shown open has times that book.
+        Access follows `slots`: a psychologist asks about themselves only, a
+        child must be one the asker can see, and times are returned without
+        any child's name or case reference.
+        """
+        psy_id = request.query_params.get("psychologist")
+        if not (psy_id or "").isdigit():
+            return Response({"detail": "Which psychologist?"}, status=400)
+        psy_id = int(psy_id)
+        if _role(request) == Role.PSYCHOLOGIST and psy_id != request.user.id:
+            return Response({"detail": "Not found."}, status=404)
+        psych = get_user_model().objects.filter(pk=psy_id).first()
+        if psych is None:
+            return Response({"detail": "Not found."}, status=404)
+
+        asked = request.query_params.get("month", "")
+        match = re.fullmatch(r"(\d{4})-(\d{2})", asked)
+        if not match or not 1 <= int(match.group(2)) <= 12 or int(match.group(1)) < 1:
+            return Response({"detail": "A month in YYYY-MM, please."}, status=400)
+        year, month = int(match.group(1)), int(match.group(2))
+        today = timezone.localdate()
+        ahead = (year - today.year) * 12 + (month - today.month)
+        if ahead < 0:
+            # `today` is the agency's date, so a browser on another clock can
+            # find the month the server will take instead of getting stuck.
+            return Response({"detail": "That month has already passed.",
+                             "today": today.isoformat()}, status=400)
+        if ahead > MONTHS_AHEAD:
+            return Response({"detail": f"Months can be booked up to {MONTHS_AHEAD} "
+                                       f"months ahead.",
+                             "today": today.isoformat()}, status=400)
+
+        child = None
+        child_id = request.query_params.get("child")
+        if child_id and str(child_id).isdigit():
+            child = scope_to_visible(Child.objects.filter(pk=child_id), request,
+                                     path=None).first()
+            if child is None:
+                return Response({"detail": "Not found."}, status=404)
+        try:
+            duration = int(request.query_params.get("duration") or 60)
+        except ValueError:
+            duration = 60
+        duration = max(15, min(duration, 8 * 60))
+        exclude = request.query_params.get("exclude")
+        exclude = int(exclude) if (exclude or "").isdigit() else None
+
+        found = booking.month_view(psych, child, year, month,
+                                   duration_minutes=duration, exclude_id=exclude)
+        return Response({
+            "psychologist": display_name(psych),
+            "month": f"{year:04d}-{month:02d}",
+            "duration": duration,
+            **found,
         })
 
     @action(detail=False, methods=["get"], url_path="next-slots")
@@ -316,6 +386,24 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     # the wrong verb should be told the verb is wrong.
     http_method_names = ["get", "post", "put", "patch", "head", "options"]
 
+    # What became of the custodian's text for this request ("queued", "off",
+    # "unchanged", "limit"), or None where none was considered. queue_sms runs
+    # after the response, so this is the only way the screen learns that a text
+    # was held back by a limit. Set by the perform_* methods and the status
+    # actions, added to the answer by finalize_response.
+    custodian_text = None
+
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        if (request.method in ("POST", "PUT", "PATCH")
+                and 200 <= response.status_code < 300
+                and isinstance(response.data, dict)):
+            response.data["custodian_text"] = self.custodian_text
+            if self.custodian_text == "limit":
+                response.data["custodian_text_detail"] = getattr(
+                    self.custodian_text, "detail", "")
+        return response
+
     def get_queryset(self):
         qs = Appointment.objects.select_related(
             "child", "child__social_worker", "psychologist", "booked_by")
@@ -383,7 +471,10 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         # they agreed to texts and the number was confirmed
         # (children/custodian.py). Queued for after the save commits.
         if obj.status == Appointment.SCHEDULED and obj.start > timezone.now():
-            notify_custodian(obj, "booked")
+            self.custodian_text = notify_custodian(obj, "booked")
+        # The psychologist whose calendar it is, and the social worker whose
+        # child it is, unless either made the booking (scheduling/session_mail.py).
+        session_changed(obj, BOOKED, by=self.request.user)
 
     def perform_update(self, serializer):
         """Moving an appointment is booking it again, and checked as such.
@@ -410,14 +501,30 @@ class AppointmentViewSet(viewsets.ModelViewSet):
             data.get("duration_minutes", instance.duration_minutes),
             exclude_id=instance.pk,
         )
-        was_at = instance.start
+        was_at, was_for, was_with = (instance.start, instance.duration_minutes,
+                                     instance.psychologist)
         obj = serializer.save(psychologist=psychologist)
+        if timezone.localtime(obj.start).date() != timezone.localtime(was_at).date():
+            # The day-before reminder is one row per appointment. One already
+            # sent was for the OLD day; left in place it would stop the new
+            # day ever getting its own.
+            CustodianReminder.objects.filter(appointment=obj).delete()
         log_activity(self.request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type="Appointment", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.psychologist)
         if (obj.start != was_at and obj.status == Appointment.SCHEDULED
                 and obj.start > timezone.now()):
-            notify_custodian(obj, "moved")
+            self.custodian_text = notify_custodian(obj, "moved")
+        # A change to the plan is a new time, a different length or a different
+        # psychologist; notes and purpose are nobody's business by email. Only
+        # for a session still to come, like the custodian's text above: one
+        # that was never marked completed stays "scheduled" in the past, and an
+        # invite for last week's date helps nobody.
+        if obj.status == Appointment.SCHEDULED and obj.start > timezone.now() and (
+                obj.start != was_at or obj.duration_minutes != was_for
+                or obj.psychologist_id != was_with.pk):
+            session_changed(obj, MOVED, by=self.request.user, was_start=was_at,
+                            was_duration=was_for, was_psychologist=was_with)
 
     def _set_status(self, request, pk, new_status):
         obj = self.get_object()
@@ -453,10 +560,11 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         # up a week late would be wrong, so a late one sends nothing.
         if was == Appointment.SCHEDULED:
             if new_status == Appointment.CANCELLED and obj.start > timezone.now():
-                notify_custodian(obj, "cancelled")
+                self.custodian_text = notify_custodian(obj, "cancelled")
+                session_changed(obj, CANCELLED, by=request.user)
             elif (new_status == Appointment.NO_SHOW
                   and timezone.localtime(obj.start).date() == timezone.localdate()):
-                notify_custodian(obj, "missed")
+                self.custodian_text = notify_custodian(obj, "missed")
         return Response(AppointmentSerializer(obj, context={"request": request}).data)
 
     @action(detail=True, methods=["post"])

@@ -12,6 +12,7 @@ Safe to run twice: whoever has already been told about a given day is skipped.
 """
 from django.core.management.base import BaseCommand, CommandError
 
+from accounts import email_notifications
 from scheduling.reminders import send_session_reminders
 
 
@@ -28,6 +29,9 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         report = send_session_reminders(today=options["today"],
                                         dry_run=options["dry_run"])
+        # Emails are handed to Brevo on daemon threads, which die with this
+        # process: wait for the ones just queued before it exits.
+        email_notifications.wait_for_queued()
         for line in report["lines"]:
             self.stdout.write("  " + line)
 
@@ -35,11 +39,20 @@ class Command(BaseCommand):
             self.stdout.write(self.style.WARNING("Dry run — nothing was sent."))
             return
         summary = (f"{report['sent']} reminder(s) sent, {report['skipped']} "
-                   f"skipped, {report['failed']} failed, for {report['date']}.")
+                   f"skipped, {report['failed']} failed, "
+                   f"{report['unconfirmed']} unconfirmed, for {report['date']}.")
         if report["failed"]:
             # Not recorded as told, so running this again retries them. A
             # non-zero exit, so whatever schedules this sees the failure.
             raise CommandError(summary + " Run it again once the gateway is "
                                          "fixed; only the failed ones are "
                                          "retried.")
+        if report["unconfirmed"]:
+            # Not an error and not retried: the gateway's answer was lost, so
+            # the text may be on the handset already. Check Semaphore's
+            # dashboard rather than sending it again.
+            self.stdout.write(self.style.WARNING(
+                summary + " Unconfirmed ones may have been delivered; they "
+                          "are not sent again."))
+            return
         self.stdout.write(self.style.SUCCESS(summary))

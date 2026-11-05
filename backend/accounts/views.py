@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework_simplejwt.views import TokenObtainPairView
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import DatabaseError
+from django.db import DatabaseError, transaction
 from django.db.models import Count, Q
 
 from accounts.google_auth import (
@@ -17,10 +17,10 @@ from accounts.google_auth import (
     resolve_google_user, verify_google_credential,
 )
 from accounts.display import display_name
-from accounts import email_verification
+from accounts import email_notifications, email_verification
 from accounts.lockout import (ADDRESS_LOCK_LABEL, client_ip, clear_failures, is_locked,
                               readable_sign_in_name, register_failure)
-from accounts.models import AgencyProfile, Role, UserProfile
+from accounts.models import AgencyProfile, EmailOptOut, Role, UserProfile
 from accounts import signup_limit
 from accounts.permissions import IsAdministrator, IsAdminOrStaff
 from children.models import Child
@@ -36,7 +36,8 @@ from children.notifications import send_temporary_password_notification
 from accounts.sms_notifications import (
     TooManyCodes, notify_temporary_password, start_phone_verification,
     confirm_phone_verification)
-from accounts.sms import check_gateway, send_sms
+from accounts import sms_catalogue
+from accounts.sms import UNKNOWN, check_gateway, send_sms
 from accounts.phone import (normalise_ph_mobile, InvalidPhilippineMobile,
                             as_typed as phone_as_typed)
 
@@ -456,11 +457,25 @@ class MyPhoneView(generics.GenericAPIView):
             return Response({"phone": "Enter your mobile number."},
                             status=status.HTTP_400_BAD_REQUEST)
 
+        if request.user.phone_verified and request.user.phone == number:
+            # Nothing to prove: a code here is two paid credits to confirm
+            # what is already confirmed.
+            return Response({"detail": "This number is already verified.",
+                             "already_verified": True},
+                            status=status.HTTP_200_OK)
         try:
             result = start_phone_verification(request.user, number)
         except TooManyCodes as exc:
             return Response({"detail": str(exc)},
                             status=status.HTTP_429_TOO_MANY_REQUESTS)
+        if result.outcome == UNKNOWN:
+            # The gateway's answer was lost: the code may be on the handset
+            # and it is kept, so the person types it if it comes.
+            return Response({"detail": "We could not confirm that the code was "
+                                       "sent. It may still arrive; if it does "
+                                       "not within a minute or two, ask again.",
+                             "unconfirmed": True},
+                            status=status.HTTP_200_OK)
         if not result.ok:
             # The gateway's own words. A code that never arrives with no
             # explanation is how the mail integration cost a day.
@@ -493,6 +508,60 @@ class MyPhoneView(generics.GenericAPIView):
         return Response({"detail": "Number removed. You will not get text "
                                    "notifications.", "phone": "",
                          "phone_verified": False}, status=status.HTTP_200_OK)
+
+
+class MyEmailNotificationsView(generics.GenericAPIView):
+    """Which emails you get: one switch per email, for your own role.
+
+    Bound to request.user and taking no id, like the phone endpoint beside it.
+    Only the caller's role's emails are listed (an administrator has none), and
+    only those can be changed: a psychologist cannot switch off, or on, a
+    social worker's email, and a key outside the catalogue is refused rather
+    than stored. A row in EmailOptOut means OFF, so an account that never
+    opened the card is on for everything (accounts/email_notifications.py).
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = None
+
+    def _state(self, user):
+        off = set(EmailOptOut.objects.filter(user=user).values_list("kind", flat=True))
+        return {
+            "address": user.email,
+            "sending": email_notifications.sending(),
+            "kinds": [{"key": k.key, "label": k.label, "description": k.description,
+                       "enabled": k.key not in off}
+                      for k in email_notifications.kinds_for(user)],
+        }
+
+    def get(self, request):
+        return Response(self._state(request.user))
+
+    def put(self, request):
+        """Change only the emails named. Everything is checked before anything
+        is written, so a request with one bad entry changes none of them."""
+        user = request.user
+        wanted = request.data.get("enabled") if hasattr(request.data, "get") else None
+        if not isinstance(wanted, dict):
+            return Response({"enabled": "Send which emails to turn on or off, like "
+                                        '{"enabled": {"case_request": false}}.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        yours = {k.key for k in email_notifications.kinds_for(user)}
+        for key, value in wanted.items():
+            if key not in yours:
+                return Response({"enabled": f'"{key}" is not one of your email '
+                                            "notifications."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            if not isinstance(value, bool):
+                return Response({"enabled": f'"{key}" must be true or false.'},
+                                status=status.HTTP_400_BAD_REQUEST)
+        with transaction.atomic():
+            for key, value in wanted.items():
+                if value:
+                    EmailOptOut.objects.filter(user=user, kind=key).delete()
+                else:
+                    EmailOptOut.objects.get_or_create(user=user, kind=key)
+        return Response(self._state(user))
 
 
 class SmsConfigTestView(generics.GenericAPIView):
@@ -548,9 +617,9 @@ class SmsConfigTestView(generics.GenericAPIView):
         reference = f"{secrets.randbelow(1_000_000):06d}"
         result = send_sms(
             user.phone,
-            f"NACC SYS: test message {reference}. If you can read this, text "
-            f"notifications are working.",
-            "configuration test")
+            sms_catalogue.render("config_test", reference=reference),
+            "config_test",
+            requested_by=user)
         return Response({
             "ok": result.ok,
             "detail": result.detail,

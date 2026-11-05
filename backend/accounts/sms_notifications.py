@@ -20,8 +20,9 @@ from datetime import timedelta
 from django.db import transaction
 from django.utils import timezone
 
+from accounts import sms_catalogue
 from accounts.models import PhoneVerification
-from accounts.sms import SmsResult, queue_sms, send_sms
+from accounts.sms import SmsResult, limit_reason, queue_sms, send_sms
 from config.clock import clock
 
 logger = logging.getLogger(__name__)
@@ -71,9 +72,9 @@ def notify_temporary_password(user):
         return False
     return queue_sms(
         number,
-        "NACC SYS: an administrator has issued you a temporary password. "
-        "Check your email to sign in. Do not share it.",
-        "temporary password notice",
+        sms_catalogue.render("temporary_password"),
+        "temporary_password",
+        subject=f"user:{user.pk}",
     )
 
 
@@ -101,10 +102,87 @@ def notify_new_assignment(child, psychologist=None):
     # A question since 28 Sep 2026: the case is theirs once they accept it.
     return queue_sms(
         number,
-        f"NACC SYS: a case is waiting for you to accept or decline (case "
-        f"{case_ref(child)}). Sign in to answer.",
-        "assignment notice",
+        sms_catalogue.render("assignment", case_ref=case_ref(child)),
+        "assignment",
+        subject=f"child:{child.pk}",
     )
+
+
+def notify_case_answer(req, kind, when=None):
+    """Tell the social worker a psychologist answered a request (owner, 28 Oct
+    2026): `kind` is "case_declined", "case_accepted" or "case_accepted_booked"
+    (which also takes `when`, the first session's start).
+
+    The same recipient the answer email goes to - the child's social worker, or
+    whoever asked where it has none - and only an active Staff account, as the
+    email is. Never the psychologist's own phone. The text carries the case
+    reference alone: no child, no psychologist, no decline reason.
+
+    Called by whoever won the `answer_mailed_at` claim, so it goes once per
+    answer; it does not depend on the email being switched on or sent. Never
+    raises."""
+    from scheduling.visibility import case_ref
+    try:
+        child = req.child
+        recipient = child.social_worker or req.requested_by
+        if (recipient is None or not recipient.is_active
+                or recipient.pk == req.psychologist_id
+                or getattr(getattr(recipient, "role", None), "role_name", None) != "Staff"):
+            return False
+        number = _deliverable(recipient)
+        if not number:
+            return False
+        ref = case_ref(child)
+        # Per ANSWER, not per child: a child declined by one psychologist and,
+        # asked again, by the next within the hour is two answers, and the
+        # second must not be swallowed by the first's hourly allowance.
+        subject = f"answer:{req.pk}"
+        by = req.psychologist
+        if kind == "case_declined":
+            return queue_sms(number, sms_catalogue.render("case_declined", case_ref=ref),
+                             "case_declined", subject=subject, requested_by=by)
+        if kind == "case_accepted":
+            return queue_sms(number, sms_catalogue.render("case_accepted", case_ref=ref),
+                             "case_accepted", subject=subject, requested_by=by)
+        if kind == "case_accepted_booked" and when is not None:
+            return queue_sms(
+                number,
+                sms_catalogue.render("case_accepted_booked", case_ref=ref,
+                                     when=custodian_when(when)),
+                "case_accepted_booked", subject=subject, requested_by=by)
+        return False
+    except Exception:                                            # noqa: BLE001
+        logger.exception("Could not queue the %s text", kind)
+        return False
+
+
+def notify_session_booked(appointment, by):
+    """Text the child's social worker that a session was booked (owner, 28 Oct
+    2026), for a booking that is NOT folded into the acceptance text. Only an
+    active Staff account with a verified number, never the person who made the
+    booking and never the psychologist. Case reference and time only. Independent
+    of the email switch and limit. Never raises."""
+    from scheduling.visibility import case_ref
+    try:
+        worker = appointment.child.social_worker
+        if (worker is None or not worker.is_active
+                or (by is not None and worker.pk == by.pk)
+                or worker.pk == appointment.psychologist_id
+                or getattr(getattr(worker, "role", None), "role_name", None) != "Staff"):
+            return False
+        number = _deliverable(worker)
+        if not number:
+            return False
+        return queue_sms(
+            number,
+            sms_catalogue.render("session_booked_sw",
+                                 case_ref=case_ref(appointment.child_id),
+                                 when=custodian_when(appointment.start)),
+            "session_booked_sw", subject=f"appointment:{appointment.pk}",
+            requested_by=by)
+    except Exception:                                            # noqa: BLE001
+        logger.exception("Could not queue the session booked text")
+        return False
 
 
 # --------------------------------------------------------------------------
@@ -134,9 +212,10 @@ def notify_session_reminder(psychologist, count, when="tomorrow"):
     sessions = "session" if count == 1 else "sessions"
     return send_sms(
         number,
-        f"NACC SYS: you have {count} {sessions} scheduled {when}. "
-        f"Sign in to see the schedule.",
-        "session reminder",
+        sms_catalogue.render("session_reminder", count=count,
+                             sessions=sessions, when=when),
+        "session_reminder",
+        subject=f"user:{psychologist.pk}",
     )
 
 
@@ -148,25 +227,19 @@ def notify_session_reminder(psychologist, count, when="tomorrow"):
 # of this file apply hardest here. No child's name, no case detail, nothing
 # clinical - a date, a time and a place. "The child in your care" is who it is
 # about; the custodian knows. Only when children/custodian.texts_allowed()
-# says so: consent recorded, number confirmed with a code, case open.
+# says so: a number, consent recorded, case open.
 #
-# The wording lives in this one table so it can be changed in one place (the
-# owner means to revise it). Every entry must stay ONE plain GSM-7 segment -
-# test_custodian_texts.py measures each with fits_one_segment - and must not
-# begin with TEST, which Semaphore silently discards.
+# The wording lives in accounts/sms_catalogue.py, one entry per text, so it can
+# be changed in one place (the owner means to revise it). Every entry must stay
+# ONE plain GSM-7 segment - test_sms_catalogue.py measures each at its longest -
+# and must not begin with TEST, which Semaphore silently discards.
 
-CUSTODIAN_OFFICE = "the RACCO I office"
+CUSTODIAN_OFFICE = sms_catalogue.CUSTODIAN_OFFICE
+# The wording by event, as a view onto the catalogue ("reminder" is the
+# day-before text; the others are the appointment's events).
 CUSTODIAN_TEXTS = {
-    "booked": ("NACC RACCO I: An appointment is set for the child in your care on "
-               "{when} at {office}. Please arrive 10 minutes early."),
-    "reminder": ("NACC RACCO I reminder: the child in your care has an appointment "
-                 "{day}, {when} at {office}."),
-    "moved": ("NACC RACCO I: The appointment of the child in your care is moved to "
-              "{when} at {office}."),
-    "cancelled": ("NACC RACCO I: The appointment of the child in your care on {when} "
-                  "is cancelled. The office will contact you to rebook."),
-    "missed": ("NACC RACCO I: We missed you at today's appointment. Please contact "
-               "the office to rebook."),
+    event: sms_catalogue.template(f"custodian_{event}")
+    for event in (*sms_catalogue.CUSTODIAN_EVENTS, "reminder")
 }
 
 
@@ -178,8 +251,11 @@ def custodian_when(start):
 
 
 def custodian_text(event, appointment, day="tomorrow"):
-    return CUSTODIAN_TEXTS[event].format(
-        when=custodian_when(appointment.start), day=day, office=CUSTODIAN_OFFICE)
+    kind = ("custodian_reminder" if event == "reminder"
+            else sms_catalogue.custodian_event_kind(event))
+    return sms_catalogue.render(
+        kind, when=custodian_when(appointment.start), day=day,
+        office=CUSTODIAN_OFFICE)
 
 
 def _custodian_number(child):
@@ -187,24 +263,132 @@ def _custodian_number(child):
     return child.custodian_contact if texts_allowed(child) else ""
 
 
+class TextOutcome(str):
+    """What became of a custodian's text: the plain word, plus the server's
+    own sentence where there is one (`detail`, set for "limit")."""
+    detail = ""
+
+    def __new__(cls, word, detail=""):
+        obj = super().__new__(cls, word)
+        obj.detail = detail
+        return obj
+
+
 def notify_custodian(appointment, event):
     """Booked, moved, cancelled or missed: queued for after the save commits.
-    Returns whether a text was queued."""
+
+    Returns what became of the text, for the screen to act on:
+    "queued", "off" (texts to this custodian are not allowed, or no number),
+    "unchanged" (a move to the start the custodian was last told) or "limit"
+    (one of the limits - per appointment, per number or the agency's day - has
+    been reached, so the SW is told to phone instead; `.detail` is the
+    server's sentence saying which).
+
+    "Moved" is sent only when the start differs from what the custodian was
+    last told (`custodian_told_start`; none counts as different). After a
+    booked or moved text is queued both "told" fields are set by a queryset
+    update - bookkeeping, not an edit, so updated_at is left alone and no
+    signal fires. The day-before reminder reads them.
+    """
     number = _custodian_number(appointment.child)
     if not number:
+        return "off"
+    if event == "moved" and appointment.start == appointment.custodian_told_start:
+        return "unchanged"
+    subject = f"appointment:{appointment.pk}"
+    # queue_sms answers nothing about the limits, and the request is over by
+    # the time they bite; ask now so the screen can say so.
+    held = limit_reason(number, sms_catalogue.custodian_event_kind(event),
+                        subject=subject)
+    if held:
+        return TextOutcome("limit", held)
+    queue_sms(number, custodian_text(event, appointment),
+              sms_catalogue.custodian_event_kind(event), subject=subject)
+    if event in ("booked", "moved"):
+        told_at = timezone.now()
+        type(appointment).objects.filter(pk=appointment.pk).update(
+            custodian_told_start=appointment.start, custodian_told_at=told_at)
+        appointment.custodian_told_start = appointment.start
+        appointment.custodian_told_at = told_at
+    return "queued"
+
+
+def notify_custodian_consent(child, by):
+    """Tell the custodian's number that it will now get appointment texts
+    (owner, 2 Nov 2026): the social worker has recorded, after the custodian
+    agreed in person, that this person wants them at this number. It replaced
+    the one-time code - nobody reads anything back; a wrong handset reads
+    "Not you?".
+
+    Queued for after the save commits, only when texts to this custodian are
+    allowed (a number, consent, an open case). The caller decides that this is
+    a FRESH agreement (children/custodian.is_fresh_agreement); this function
+    does not guess. One a day per number and child (the catalogue's rule).
+    Returns True when a text was queued, False when it was off or the limit
+    held it - the record form says so in its end dialog.
+    """
+    number = _custodian_number(child)
+    if not number:
         return False
-    return queue_sms(number, custodian_text(event, appointment),
-                     f"custodian {event} notice")
+    subject = f"child:{child.pk}"
+    if limit_reason(number, "custodian_consent", requested_by=by, subject=subject):
+        return False
+    return queue_sms(number, sms_catalogue.render("custodian_consent"),
+                     "custodian_consent", requested_by=by, subject=subject)
 
 
 def remind_custodian(appointment, day="tomorrow"):
     """The day-before reminder, sent now and the SmsResult returned - it runs
     from the reminder job, which records who was told (scheduling/reminders)."""
-    number = _custodian_number(appointment.child)
+    return remind_custodian_group([appointment], day=day)
+
+
+# Up to this many times are listed in a sibling reminder; past it the text
+# gives the count and the first time (the catalogue's longest sample).
+GROUP_TIMES_LISTED = 4
+
+
+def _times_in_words(times):
+    """"9:00 AM", "9:00 AM and 10:30 AM", "9:00 AM, 10:30 AM and 1:00 PM"."""
+    if len(times) == 1:
+        return times[0]
+    return ", ".join(times[:-1]) + " and " + times[-1]
+
+
+def remind_custodian_group(appointments, day="tomorrow"):
+    """One day-before text for every appointment of one custodian's children
+    on the same day, in time order: the single-child wording for one, the
+    sibling wording for two to four, and a count and the first time beyond.
+
+    Sent now and the SmsResult returned, like remind_custodian. The kinds are
+    written out in three calls rather than computed, because the catalogue
+    guard test reads them from the source.
+    """
+    appointments = sorted(appointments, key=lambda a: (a.start, a.pk))
+    first = appointments[0]
+    number = _custodian_number(first.child)
     if not number:
         return SmsResult(False, "Texts to this custodian are off.")
-    return send_sms(number, custodian_text("reminder", appointment, day=day),
-                    "custodian reminder")
+    subject = f"appointment:{first.pk}"
+    local = timezone.localtime(first.start)
+    date = f"{local:%a} {local.day} {local:%b}"
+    if len(appointments) == 1:
+        return send_sms(number, custodian_text("reminder", first, day=day),
+                        "custodian_reminder", subject=subject)
+    if len(appointments) <= GROUP_TIMES_LISTED:
+        times = _times_in_words(
+            [clock(timezone.localtime(a.start)) for a in appointments])
+        return send_sms(
+            number,
+            sms_catalogue.render("custodian_reminder_group", day=day, date=date,
+                                 times=times, office=CUSTODIAN_OFFICE),
+            "custodian_reminder_group", subject=subject)
+    return send_sms(
+        number,
+        sms_catalogue.render("custodian_reminder_group_many", count=len(appointments),
+                             day=day, date=date, time=clock(local),
+                             office=CUSTODIAN_OFFICE),
+        "custodian_reminder_group_many", subject=subject)
 
 
 # --------------------------------------------------------------------------
@@ -254,13 +438,21 @@ def start_phone_verification(user, number):
     # database for a write, and a gateway can take twenty seconds to answer.
     result = send_sms(
         number,
-        "NACC SYS: your verification code is {otp}. It expires in 10 minutes.",
-        "phone verification",
+        sms_catalogue.render("phone_code"),
+        "phone_code",
         otp_code=code,
+        requested_by=user,
+        subject=f"user:{user.pk}",
     )
     mine = PhoneVerification.objects.filter(pk=row.pk, code=code)
-    if not result.ok:
+    if result.refused:
         mine.update(code="", **before)
+        return result
+    if not result.ok:
+        # "unknown": the request may have reached the gateway and the code may
+        # be on the handset. Keep the code, the counters and last_sent_at, so
+        # a retry is held by the one-minute limit instead of being a free
+        # second paid text; the caller tells the person it may have gone.
         return result
     if result.code and result.code != code:
         # The gateway put a different code on the handset. That one is what

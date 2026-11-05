@@ -24,6 +24,7 @@ the username step - a refusal reading "p2 is on leave that day" is worse than
 the generic one. And `Child.fullname` is not a person's account name at all.
 Both are left as they are on purpose.
 """
+import unicodedata
 
 
 def display_name(person, fallback=""):
@@ -35,3 +36,50 @@ def display_name(person, fallback=""):
     return (getattr(person, "fullname", "")
             or getattr(person, "username", "")
             or fallback)
+
+
+# The longest a name is printed in an email. A real name of any length people
+# use fits; what it stops is a sentence typed into a name field.
+NAME_LIMIT = 60
+
+
+def one_line(text, limit=NAME_LIMIT):
+    """`text` as a single plain line of at most `limit` characters.
+
+    Control characters (other than the spaces among them) and invisible
+    formatting ones - right-to-left overrides, zero-width spaces - are dropped,
+    every run of whitespace, newlines included, becomes one space, and a
+    longer text is cut with an ellipsis."""
+    kept = "".join(ch for ch in str(text)
+                   if ch.isspace() or unicodedata.category(ch) not in ("Cc", "Cf"))
+    line = " ".join(kept.split())
+    return line if len(line) <= limit else line[:limit - 1].rstrip() + "\u2026"
+
+
+def entered_name(person, fallback=""):
+    """The name somebody typed into their account, and NOTHING else: not the
+    username, which on this model is their email address.
+
+    `display_name` is right for a screen behind the sign-in and wrong for an
+    email, whose subject, text part and calendar invite are kept by Brevo and
+    Google. A member of staff with no first or last name (the ISA may create
+    one with just an address, and Google may send no given name) would read as
+    their address in a colleague's subject line, "sw@agency.ph booked a session
+    on your calendar". The emails to psychologists and social workers
+    (accounts/email_notifications.py, scheduling/session_mail.py,
+    scheduling/calendar_invite.py) name people through this and say `fallback`
+    when there is no name.
+
+    **The name comes back as one plain line** (`one_line`). Anyone can ask for
+    an account under any name, an administrator approves what they see in a
+    queue, and the name is then printed inside an email that really does come
+    from the agency: in a subject, a lead sentence, a log line. A name with a
+    newline in it would start a new line of all three, one with a right-to-left
+    override would reverse the rest of the sentence including the case
+    reference, and a name of three hundred characters is a paragraph of the
+    sender's choosing. A name made only of such characters is no name, and
+    reads as `fallback`."""
+    name = getattr(person, "fullname", "")
+    if isinstance(name, str):
+        name = one_line(name)
+    return name or fallback

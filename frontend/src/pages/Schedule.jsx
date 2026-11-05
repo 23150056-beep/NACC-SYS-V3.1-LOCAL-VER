@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Calendar, dateFnsLocalizer } from 'react-big-calendar';
 import { format, parse, startOfWeek, getDay } from 'date-fns';
 import { enUS } from 'date-fns/locale';
@@ -18,6 +18,8 @@ import { useAssistant } from '../context/AssistantContext';
 import { useOpenFromLink } from '../utils/links';
 import { firstError } from '../utils/errors';
 import { useSingleFlight } from '../utils/singleFlight';
+import BookingMonth from './schedule/MonthSlots';
+import { spokenDays, useMonthSlots } from './schedule/monthSlots';
 
 const localizer = dateFnsLocalizer({ format, parse, startOfWeek, getDay, locales: { 'en-US': enUS } });
 // Every time the calendar draws, on the 12-hour clock. The localizer's own
@@ -114,8 +116,6 @@ function patternsOf(blocks) {
     .sort((a, b) => a.start.localeCompare(b.start));
 }
 
-const DAY_ABBR = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-
 /* Which weekdays this psychologist actually works, read off their own blocks.
    The date field accepts any day, and a native <input type="date"> cannot grey
    out a weekday — so rather than let somebody wander onto a dead day and find
@@ -126,38 +126,6 @@ function workingWeekdays(blocks, psychologistId) {
     .filter((b) => String(b.psychologist) === String(psychologistId)
                    && b.active !== false && b.weekday != null)
     .map((b) => b.weekday))].sort((a, b) => a - b);
-}
-
-function spokenDays(weekdays) {
-  if (!weekdays.length) return '';
-  const run = weekdays.every((d, i) => i === 0 || d === weekdays[i - 1] + 1);
-  return run && weekdays.length > 2
-    ? `${DAY_ABBR[weekdays[0]]}–${DAY_ABBR[weekdays[weekdays.length - 1]]}`
-    : weekdays.map((d) => DAY_ABBR[d]).join(', ');
-}
-
-/* The next few dates this person can actually be booked on: a weekday they
-   work, not covered by leave, today or later. The slot grid still has the
-   final say — this only saves the guessing. */
-function nextWorkingDates(blocks, leave, psychologistId, count = 5) {
-  const weekdays = workingWeekdays(blocks, psychologistId);
-  const dated = new Set(blocks
-    .filter((b) => String(b.psychologist) === String(psychologistId) && b.date)
-    .map((b) => b.date));
-  if (!weekdays.length && !dated.size) return [];
-  const away = leave.filter((l) => String(l.psychologist) === String(psychologistId));
-  const out = [];
-  const cursor = new Date();
-  cursor.setHours(0, 0, 0, 0);
-  for (let i = 0; i < 60 && out.length < count; i += 1) {
-    const iso = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, '0')}-${String(cursor.getDate()).padStart(2, '0')}`;
-    const weekday = (cursor.getDay() + 6) % 7;   // JS Sunday=0 -> Monday=0
-    const works = weekdays.includes(weekday) || dated.has(iso);
-    const onLeave = away.some((l) => iso >= l.starts_on && iso <= l.ends_on);
-    if (works && !onLeave) out.push({ iso, label: `${DAY_ABBR[weekday]} ${cursor.getDate()}` });
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return out;
 }
 
 // Local date. toISOString() converts to UTC and hands back yesterday for
@@ -199,6 +167,15 @@ export default function Schedule() {
   const { user } = useAuth();
   const toast = useToast();
   const confirm = useConfirm();
+  /* The server queues the custodian's text after answering, so "limit" in the
+     answer is the only way to learn it was held back (a limit on texts: the
+     detail is the server's sentence saying which): the SW is told to phone
+     instead. */
+  const tellIfNoText = (answer) => {
+    if (answer?.custodian_text === 'limit') {
+      toast.warning(`No text was sent to the custodian: ${answer.custodian_text_detail || 'a limit on texts was reached.'} Phone them instead.`);
+    }
+  };
   // Booking, availability and leave are written one at a time: the drawer stays
   // open behind the confirmation and the request, and a second press added the
   // row again (9 Oct 2026).
@@ -214,8 +191,6 @@ export default function Schedule() {
   const [blockForm, setBlockForm] = useState(null);
   const [sel, setSel] = useState(null);
   const [error, setError] = useState('');
-  const [daySlots, setDaySlots] = useState(null);   // { slots, reason, psychologist } for the chosen day
-  const [slotsBusy, setSlotsBusy] = useState(false);
   const [openPsy, setOpenPsy] = useState(null); // { id, name } — full-page availability view (admin/staff)
   const [removing, setRemoving] = useState(null);  // the weekly pattern awaiting confirmation
   const [calPsy, setCalPsy] = useState('');        // '' = everyone
@@ -314,31 +289,65 @@ export default function Schedule() {
     () => (bookingPsy ? workingWeekdays(blocks, bookingPsy) : []),
     [blocks, bookingPsy],
   );
-  const bookingNextDays = useMemo(
-    () => (bookingPsy ? nextWorkingDates(blocks, leave, bookingPsy) : []),
-    [blocks, leave, bookingPsy],
-  );
   const bookingDate = booking?.date;
   const bookingDuration = booking?.duration;
   const bookingChild = booking?.child;
   const movingId = booking?.id;
+  const month = useMonthSlots({
+    psychologist: bookingPsy, child: bookingChild, duration: bookingDuration || 60,
+    exclude: movingId, date: bookingDate, open: !!booking,
+  });
+  const monthData = month.data;
+  // The chosen day's times, kept when somebody pages to another month and
+  // back (or just peeks), so a look at December does not lose the pick.
+  const [pickedDay, setPickedDay] = useState(null);
+  const dayInThisMonth = monthData?.days?.find((d) => d.date === bookingDate) || null;
+  const askedFor = `${bookingPsy}|${bookingChild || ''}|${bookingDuration || 60}|${movingId || ''}`;
   useEffect(() => {
-    if (!bookingPsy || !bookingDate) { setDaySlots(null); return; }
-    let live = true;
-    setSlotsBusy(true);
-    const q = new URLSearchParams({
-      psychologist: bookingPsy, date: bookingDate, duration: bookingDuration || 60,
+    if (dayInThisMonth) setPickedDay({ askedFor, day: dayInThisMonth });
+  }, [dayInThisMonth, askedFor]);
+  // Only what was read for the same psychologist, child and length.
+  const dayInfo = dayInThisMonth
+    || (pickedDay?.askedFor === askedFor && pickedDay.day.date === bookingDate ? pickedDay.day : null);
+  const [droppedDay, setDroppedDay] = useState('');   // a day that came with the drawer and was not open
+  const bookingError = useRef(null);
+  // A different psychologist, child, length or moved appointment is a new
+  // question: the old time was offered for the old one, and the old "not open"
+  // note was about it. The day stays - the effect below judges it once the new
+  // answer arrives. Every way of opening the drawer starts with no time.
+  const lastAsked = useRef(askedFor);
+  useEffect(() => {
+    if (lastAsked.current === askedFor) return;
+    lastAsked.current = askedFor;
+    setDroppedDay('');
+    setBooking((b) => (b && b.time ? { ...b, time: '' } : b));
+  }, [askedFor]);
+  // A chosen day that is no longer open, or a time no longer offered, is
+  // cleared as soon as the month answers again (a different child, length or
+  // psychologist, or a refused booking), so the form never keeps a pick the
+  // server would turn down.
+  useEffect(() => {
+    // Only the month the chosen day belongs to can say it is no longer open.
+    if (!monthData || !bookingDate || monthData.month !== bookingDate.slice(0, 7)) return;
+    const day = monthData.days.find((d) => d.date === bookingDate);
+    if (!day || day.state !== 'open') {
+      setDroppedDay(`${format(parse(bookingDate, 'yyyy-MM-dd', new Date()), 'MMM d')} is not open for ${monthData.psychologist}.`);
+    }
+    setBooking((b) => {
+      if (!b || b.date !== bookingDate) return b;
+      if (!day || day.state !== 'open') {
+        return { ...b, date: '', time: '' };
+      }
+      if (b.time && !day.slots.some((s) => s.start === b.time)) return { ...b, time: '' };
+      return b;
     });
-    if (bookingChild) q.set('child', bookingChild);
-    // When moving one, it must not be counted as a clash with itself, or the
-    // time it currently holds vanishes from the grid offering to move it.
-    if (movingId) q.set('exclude', movingId);
-    api.get(`/availability/slots/?${q}`)
-      .then((r) => { if (live) setDaySlots(r.data); })
-      .catch(() => { if (live) setDaySlots(null); })
-      .finally(() => { if (live) setSlotsBusy(false); });
-    return () => { live = false; };
-  }, [bookingPsy, bookingDate, bookingDuration, bookingChild, movingId]);
+  }, [monthData, bookingDate]);
+  // A refusal sits at the foot of a drawer the month has made tall: bring it
+  // into view, or pressing Book seems to do nothing.
+  useEffect(() => {
+    if (error && booking) bookingError.current?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  }, [error, booking]);
+  useEffect(() => { if (!booking) setDroppedDay(''); }, [booking]);
   // Quietly warms today's brief cache in the background. prefetchBriefs()
   // already swallows its own errors (including a 503 when the assistant is
   // off) — this screen must never know or care whether it succeeded.
@@ -356,11 +365,11 @@ export default function Schedule() {
 
   const openBooking = (childId = '') => {
     setError('');
-    // No default time. A prefilled 09:00 was the reason everybody booked
+    // No default day or time: the month is shown and somebody picks. A prefilled 09:00 was the reason everybody booked
     // 09:00 and the second one was refused.
     setBooking({
       child: childId ? String(childId) : '', psychologist: '',
-      date: todayIso(), time: '', purpose: 'session', duration: 60, notes: '',
+      date: '', time: '', purpose: 'session', duration: 60, notes: '',
     });
   };
   // `?book=1&child=12` — opening the drawer from a child's record should not
@@ -466,16 +475,20 @@ export default function Schedule() {
       // Moving one is the same form and the same rules, so it is the same
       // handler — only the verb differs. Cancel-and-rebook was the previous
       // answer, and it threw away who booked it and when.
+      let answer;
       if (booking.id) {
-        await api.patch(`/appointments/${booking.id}/`, payload);
+        answer = await api.patch(`/appointments/${booking.id}/`, payload);
         toast.success('Appointment moved');
       } else {
-        await api.post('/appointments/', payload);
+        answer = await api.post('/appointments/', payload);
         toast.success('Appointment booked');
       }
+      tellIfNoText(answer.data);
       setBooking(null); setSel(null); load();
     } catch (err) {
       setError(firstError(err.response?.data));
+      // Whatever was just refused must stop being offered.
+      if ([400, 409].includes(err.response?.status)) month.refresh();
     }
   };
 
@@ -487,8 +500,14 @@ export default function Schedule() {
     // The card the button was on closes: it used to stay open over the drawer,
     // so the first click anywhere only dismissed it.
     setSel(null);
+    // The API writes the start with the agency's own offset (+08:00), so its
+    // first ten characters are the agency's day. Going through the browser's
+    // Date read an early appointment as the previous day on any other clock.
     const at = new Date(appt.start);
     const pad = (n) => String(n).padStart(2, '0');
+    const day = /^\d{4}-\d{2}-\d{2}/.test(appt.start || '')
+      ? appt.start.slice(0, 10)
+      : `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
     setBooking({
       id: appt.id,
       // Moving keeps the child, so it is shown the way the calendar shows it
@@ -496,7 +515,7 @@ export default function Schedule() {
       label: scheduleName(appt),
       child: String(appt.child),
       psychologist: String(appt.psychologist),
-      date: `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`,
+      date: day,
       time: '',
       purpose: appt.purpose,
       duration: appt.duration_minutes || 60,
@@ -691,7 +710,8 @@ export default function Schedule() {
     const { appointment: a, action: actionName } = confirmStatus;
     setStatusBusy(true);
     try {
-      await api.post(`/appointments/${a.id}/${actionName}/`);
+      const answer = await api.post(`/appointments/${a.id}/${actionName}/`);
+      tellIfNoText(answer.data);
       toast.success(`Appointment ${{ complete: 'completed', cancel: 'cancelled', no_show: 'marked no-show' }[actionName]}`);
       setConfirmStatus(null); setSel(null); load();
     } catch (err) {
@@ -1104,18 +1124,19 @@ export default function Schedule() {
             // Says what is still missing rather than sitting there grey.
             <Button
               type="submit" variant="primary" fullWidth
-              disabled={saving || !booking.child || !booking.date || !booking.time || (!isPsych && !booking.psychologist)}
+              disabled={saving || !booking.child || !booking.date || !booking.time || !dayInfo || (!isPsych && !booking.psychologist)}
               title={!booking.child ? 'Choose a child'
                 : (!isPsych && !booking.psychologist) ? 'Choose a psychologist'
                   : !booking.date ? 'Choose a day'
-                    : !booking.time ? 'Choose a time' : booking.id ? 'Move it' : 'Book it'}
+                    : !dayInfo ? 'Checking that day…'
+                      : !booking.time ? 'Choose a time' : booking.id ? 'Move it' : 'Book it'}
               iconLeft={<Icon name="calendar" size={16} />}
             >
               {booking.time ? `${booking.id ? 'Move to' : 'Book'} ${clock(booking.time)}` : (booking.id ? 'Move' : 'Book')}
             </Button>
           )}
         >
-          {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{String(error)}</Alert>}
+          <div ref={bookingError}>{error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{String(error)}</Alert>}</div>
           {booking.id ? (
             <FormField label="Child">
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 13px', borderRadius: 'var(--radius-md)', background: 'var(--ink-50)', border: '1px solid var(--border)', color: 'var(--text-strong)', fontWeight: 700, fontSize: 14 }}>
@@ -1163,57 +1184,39 @@ export default function Schedule() {
             </FormField>
           </div>
           <FormField
-            label="Day" required htmlFor="booking-day"
-            hint={bookingPsy && bookingWorkingDays.length
-              ? `Works ${spokenDays(bookingWorkingDays)}. Any other day has nothing to offer.`
+            label="Day" required
+            hint={bookingPsy && (monthData?.works || bookingWorkingDays).length
+              ? `Works ${spokenDays(monthData?.works || bookingWorkingDays)}. Pick a day with open times.`
               : undefined}
           >
-            <Input
-              id="booking-day" type="date" value={booking.date} min={todayIso()}
-              onChange={(e) => setBooking({ ...booking, date: e.target.value, time: '' })}
-            />
-            {/* The days they can actually be booked on. A native date input
-                cannot grey out a weekday, so the alternative was letting
-                somebody try days one at a time and read an empty panel
-                each time. Leave is excluded here too. */}
-            {bookingNextDays.length > 0 && (
-              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
-                {bookingNextDays.map((d) => {
-                  const on = booking.date === d.iso;
-                  return (
-                    <button
-                      key={d.iso} type="button" aria-pressed={on}
-                      onClick={() => setBooking({ ...booking, date: d.iso, time: '' })}
-                      style={{
-                        padding: '5px 10px', borderRadius: 'var(--radius-pill)',
-                        border: `1px solid ${on ? 'var(--blue-600)' : 'var(--border)'}`,
-                        background: on ? 'var(--blue-600)' : 'var(--surface)',
-                        color: on ? '#fff' : 'var(--text-body)',
-                        fontFamily: 'var(--font-sans)', fontWeight: 700,
-                        fontSize: 11.5, cursor: 'pointer',
-                      }}
-                    >
-                      {d.label}
-                    </button>
-                  );
-                })}
-              </div>
+            {!bookingPsy ? (
+              <div style={SLOT_EMPTY}>Choose a psychologist to see their open days.</div>
+            ) : (
+              <BookingMonth
+                month={month.month} first={month.first} last={month.last}
+                onMonth={(m) => { setDroppedDay(''); month.setMonth(m); }}
+                data={monthData} busy={month.busy} error={month.error} onRetry={month.refresh}
+                date={booking.date}
+                onPick={(iso) => { setDroppedDay(''); setBooking((b) => ({ ...b, date: iso, time: '' })); }}
+              />
             )}
+            {/* Always in the page, so a sentence put into it is announced. */}
+            <div role="status" style={{ marginTop: droppedDay ? 8 : 0, fontSize: 12, color: 'var(--text-muted)' }}>{droppedDay}</div>
           </FormField>
 
-          {/* The time is chosen, not typed. Every option here has been put
-              through the same check the booking endpoint runs, so a slot
-              on this grid cannot come back refused. */}
+          {/* The time is chosen, not typed. Every option here comes from the
+              month answer, which runs the same check the booking endpoint
+              runs, so a slot on this grid cannot come back refused. */}
           <FormField label="Time" required>
             {(!bookingPsy || !booking.date) ? (
               <div style={SLOT_EMPTY}>
                 Choose {isPsych ? 'a day' : 'a psychologist and a day'} to see open times.
               </div>
-            ) : slotsBusy ? (
+            ) : !dayInfo ? (
               <div style={SLOT_EMPTY}>Checking that day&hellip;</div>
-            ) : daySlots?.slots?.length ? (
+            ) : dayInfo.slots.length ? (
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                {daySlots.slots.map((s) => {
+                {dayInfo.slots.map((s) => {
                   const on = booking.time === s.start;
                   return (
                     <button
@@ -1235,11 +1238,8 @@ export default function Schedule() {
                 })}
               </div>
             ) : (
-              /* Never a blank panel. "They do not work Wednesdays", "the
-                 day is full" and "that length does not fit" send somebody
-                 to three different next actions. */
-              <Alert tone="amber" icon={<Icon name="calendar" size={17} />}>
-                {daySlots?.reason || 'No open times that day.'}
+              <Alert tone="warning" icon={<Icon name="calendar" size={17} />}>
+                No open times that day.
               </Alert>
             )}
           </FormField>

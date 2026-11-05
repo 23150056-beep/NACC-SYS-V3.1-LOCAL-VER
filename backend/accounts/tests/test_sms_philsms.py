@@ -14,7 +14,7 @@ them fails as a 200 with nothing sent rather than as an exception.
 import json
 from unittest.mock import patch
 
-from django.test import SimpleTestCase, override_settings
+from django.test import TestCase, override_settings
 
 from accounts.sms import PROVIDERS, send_sms
 
@@ -23,7 +23,7 @@ class FakeResponse:
     def __init__(self, body):
         self._body = body.encode("utf-8")
 
-    def read(self):
+    def read(self, size=-1):
         return self._body
 
     def __enter__(self):
@@ -39,11 +39,11 @@ OK_BODY = json.dumps({"status": "success", "data": {"uid": "abc123"}})
 @override_settings(SMS_PROVIDER="philsms", SMS_API_KEY="test-token",
                    SMS_ENDPOINT="https://app.philsms.com/api/v3/sms/send",
                    SMS_SENDER_NAME="NACC")
-class PhilSmsRequestShapeTest(SimpleTestCase):
+class PhilSmsRequestShapeTest(TestCase):
     def _send(self, body=OK_BODY):
         with patch("accounts.sms.urllib.request.urlopen") as opened:
             opened.return_value = FakeResponse(body)
-            result = send_sms("09171234567", "NACC SYS: probe", "probe")
+            result = send_sms("09171234567", "NACC SYS: probe", "session_reminder")
             request = opened.call_args[0][0] if opened.call_args else None
         return result, request
 
@@ -83,11 +83,11 @@ class PhilSmsRequestShapeTest(SimpleTestCase):
 
 @override_settings(SMS_PROVIDER="philsms", SMS_API_KEY="test-token",
                    SMS_ENDPOINT="https://app.philsms.com/api/v3/sms/send")
-class PhilSmsFailureTest(SimpleTestCase):
+class PhilSmsFailureTest(TestCase):
     def _send(self, body):
         with patch("accounts.sms.urllib.request.urlopen") as opened:
             opened.return_value = FakeResponse(body)
-            return send_sms("09171234567", "NACC SYS: probe", "probe")
+            return send_sms("09171234567", "NACC SYS: probe", "session_reminder")
 
     def test_an_error_inside_a_200_is_a_failure(self):
         # The whole reason this provider needs its own parser: PhilSMS answers
@@ -110,17 +110,17 @@ class PhilSmsFailureTest(SimpleTestCase):
     def test_no_key_is_refused_before_the_network(self):
         with override_settings(SMS_API_KEY=""):
             with patch("accounts.sms.urllib.request.urlopen") as opened:
-                result = send_sms("09171234567", "probe", "probe")
+                result = send_sms("09171234567", "session_reminder", "session_reminder")
                 opened.assert_not_called()
         self.assertFalse(result.ok)
 
 
 @override_settings(SMS_PROVIDER="philsms", SMS_API_KEY="test-token")
-class TheProviderSettingStillChoosesTest(SimpleTestCase):
+class TheProviderSettingStillChoosesTest(TestCase):
     def _request_made(self):
         with patch("accounts.sms.urllib.request.urlopen") as opened:
             opened.return_value = FakeResponse(OK_BODY)
-            send_sms("09171234567", "probe", "probe")
+            send_sms("09171234567", "session_reminder", "session_reminder")
             return opened.call_args[0][0]
 
     def test_switching_provider_switches_gateway(self):
@@ -151,4 +151,4 @@ class TheProviderSettingStillChoosesTest(SimpleTestCase):
         # Never a crash and never a silent no-op: a typo in SMS_PROVIDER writes
         # the message to the log rather than losing it.
         with override_settings(SMS_PROVIDER="typo"):
-            self.assertTrue(send_sms("09171234567", "probe", "probe").ok)
+            self.assertTrue(send_sms("09171234567", "session_reminder", "session_reminder").ok)

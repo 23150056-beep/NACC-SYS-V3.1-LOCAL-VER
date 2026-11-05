@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import api from '../api/client';
+import { mailAssignmentAnswer, mailAssignmentAnswerOnExit } from '../api/assignment';
 import { useAuth } from '../context/AuthContext';
 import { useActivity } from '../context/ActivityContext';
 import { useCensus } from '../context/CensusContext';
@@ -23,6 +24,11 @@ import { clock, clockRange, timeAgo } from '../utils/time';
  * social worker reads -> an end dialog. Every path ends by saying what
  * happened, because "it joins your records" and "they see your reason" are
  * the sentences somebody needs to have read.
+ *
+ * The social worker's acceptance email waits for the scheduling dialog to end
+ * (design note, "Round three"): a booking made in it goes out as ONE email
+ * with the acceptance, and a dialog that ends without a booking tells the
+ * server so (api/assignment.js) and the acceptance goes then.
  */
 
 const localIsoDay = (d = new Date()) => (
@@ -55,11 +61,36 @@ export default function AssignmentRequests({ onChanged }) {
   const [busyId, setBusyId] = useState(null);
   const [declining, setDeclining] = useState(null);
   const [scheduling, setScheduling] = useState(null);
+  // The acceptances whose dialog has ended, one way or another. Closing the
+  // dialog, the tab's pagehide and a double click on "Book later" can all say
+  // "ended" for the same acceptance; only the first does anything.
+  const dialogEnded = useRef(new Set());
+  const endDialogOnce = useCallback((id) => {
+    if (dialogEnded.current.has(id)) return false;
+    dialogEnded.current.add(id);
+    return true;
+  }, []);
 
   const load = useCallback(() => api.get('/assignment-requests/', { params: { status: 'pending' } })
     .then((r) => { setRequests(r.data || []); setFailed(false); })
     .catch(() => setFailed(true)), []);
   useEffect(() => { load(); }, [load]);
+
+  // The acceptance email waits for the scheduling dialog, so closing the tab
+  // (or reloading, or following a link out) with it open must not leave the
+  // social worker to the server's ten-minute sweep. A page that is going away
+  // cannot wait for a request, hence keepalive. Only while the dialog is open,
+  // and only if it has not already ended. Unmounting does NOT send it: a
+  // route change with the dialog open is the sweep's, and development's
+  // StrictMode unmounts every effect once on purpose, which would mail the
+  // acceptance the moment the dialog opened.
+  const schedulingId = scheduling?.id;
+  useEffect(() => {
+    if (schedulingId == null) return undefined;
+    const leaving = () => { if (endDialogOnce(schedulingId)) mailAssignmentAnswerOnExit(schedulingId); };
+    window.addEventListener('pagehide', leaving);
+    return () => window.removeEventListener('pagehide', leaving);
+  }, [schedulingId, endDialogOnce]);
 
   const settled = () => {
     load();
@@ -114,6 +145,14 @@ export default function AssignmentRequests({ onChanged }) {
   const doneScheduling = async (booked) => {
     const req = scheduling;
     setScheduling(null);
+    // A booking made in the dialog is mailed by the server itself, as one
+    // email with the acceptance (or, if this psychologist already had a session
+    // with the child, the acceptance follows from the server's sweep), so only
+    // the ways out WITHOUT a booking ask for the acceptance now (Book later,
+    // Finish, the close button, Escape). Fire and forget: the dialog never
+    // waits for it and a failure shows nothing - the server's sweep sends it a
+    // few minutes later.
+    if (endDialogOnce(req.id) && !booked) mailAssignmentAnswer(req.id).catch(() => {});
     if (booked) {
       refreshCensus();
       refreshActivity();
@@ -317,6 +356,12 @@ function ScheduleFirstSession({ request, psychologistId, onDone }) {
     }
   };
 
+  // Not while the booking request is out. Escape, the close button or "Book
+  // later" would end the dialog with no booking, and the acceptance would be
+  // mailed on its own; the booking landing a moment later then sends the social
+  // worker a second email for the same session. A request is a second or two.
+  const leave = () => { if (!busy) onDone(null); };
+
   const option = (value, icon, title, body, disabled = false) => {
     const on = mode === value;
     return (
@@ -339,13 +384,13 @@ function ScheduleFirstSession({ request, psychologistId, onDone }) {
 
   return (
     <Modal
-      open onClose={() => onDone(null)} tone="success" icon={<Icon name="calendar-plus" size={19} />} width={620}
+      open onClose={leave} dismissible={!busy} tone="success" icon={<Icon name="calendar-plus" size={19} />} width={620}
       title={`${request.child_name} is now in your records`}
       subtitle={`${request.child_ref} · When will you see them first?`}
       footer={mode === 'later' ? (
-        <Button variant="primary" onClick={() => onDone(null)}>Finish</Button>
+        <Button variant="primary" onClick={leave} aria-disabled={busy || undefined}>Finish</Button>
       ) : (<>
-        <Button variant="ghost" onClick={() => onDone(null)}>Book later</Button>
+        <Button variant="ghost" onClick={leave} aria-disabled={busy || undefined}>Book later</Button>
         <Button variant="primary" onClick={book} disabled={!when || busy} iconLeft={<Icon name="calendar-check" size={16} />}>
           {busy ? 'Booking…' : 'Book this time'}
         </Button>

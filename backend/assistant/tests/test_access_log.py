@@ -329,6 +329,8 @@ NOT_A_CHILD_READ = {
     "chat",
     # Polishing reads only the words being typed into the remark box.
     "remark_polish",
+    # The same, for the free text of a child's record: no child is passed.
+    "record_polish",
     # Narrates agency-wide figures the caller already computed.
     "census_narrative",
 }
@@ -381,6 +383,10 @@ class TheLogCoversEveryJobTypeTest(AccessLogBase):
         with patch.object(services.OllamaClient, "generate", return_value="Polished."):
             self.assertEqual(200, self.client.post(
                 "/api/assistant/polish-remark/", {"text": "Maria slept well."},
+                format="json").status_code)
+        with patch.object(services.OllamaClient, "generate", return_value="Polished."):
+            self.assertEqual(200, self.client.post(
+                "/api/assistant/polish-record/", {"text": "Maria slept well."},
                 format="json").status_code)
         self.client.force_authenticate(self.admin)
         with patch.object(services.OllamaClient, "generate", return_value="Narrative."):

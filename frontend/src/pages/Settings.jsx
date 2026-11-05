@@ -4,6 +4,7 @@ import {
 } from '../ui';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
+import { useAssistant } from '../context/AssistantContext';
 import {
   getAssistantSettings, saveAssistantSettings, getAssistantMetrics, checkAssistant,
   getUnansweredQuestions,
@@ -12,6 +13,7 @@ import { getAgencyProfile, saveAgencyProfile } from '../api/agency';
 import { testEmailDelivery } from '../api/email';
 import { checkSmsGateway, testSmsDelivery } from '../api/sms';
 import { assistantSwitchConfirm } from '../utils/assistantSwitch';
+import { smsTestConfirm } from '../utils/smsTestConfirm';
 import { useOpenFromLink } from '../utils/links';
 
 const FEATURE_LABELS = {
@@ -19,6 +21,7 @@ const FEATURE_LABELS = {
   case_brief: 'Case briefs',
   doc_intelligence: 'Document summaries',
   remark_polish: 'Remark polishing',
+  record_polish: 'Record text polishing',
   census_narrative: 'Census narrative',
   // Both ran unlabelled — the table printed the raw job type.
   chat: 'Chatbot',
@@ -52,6 +55,7 @@ const textarea = {
 
 export default function Settings() {
   const toast = useToast();
+  const hostedModel = !useAssistant().drafting;
   const confirm = useConfirm();
   // What the server holds, and what is being typed. The draft is its own state
   // so an unsaved edit never reads as the agency's details.
@@ -300,10 +304,7 @@ export default function Settings() {
               <Button variant="secondary" disabled={smsTesting || smsChecking}
                       iconLeft={<Icon name="message-square" size={16} />}
                       onClick={async () => {
-                        if (!(await confirm({
-                          description: 'This sends a real text message to your own confirmed number, through the SMS provider.',
-                          confirmLabel: 'Yes, send it',
-                        }))) return;
+                        if (!(await confirm(smsTestConfirm()))) return;
                         setSmsTesting(true);
                         setSmsResult(null);
                         try {
@@ -342,9 +343,27 @@ export default function Settings() {
           {cfg && cfg !== 'error' && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <Alert tone="info">
-                Drafts are produced by a model running on this machine. Case text
-                is never sent to an outside service. Every draft is reviewed and
-                approved by a person before it becomes clinical text.
+                {/* The sentence has to be true where it is read. On a hosted
+                    deployment the chat panel's typed question is the one thing
+                    that leaves, so it is said here, and drafting (which would
+                    read case text) is off. */}
+                {hostedModel ? (
+                  <>
+                    Case records, notes and reports are never sent to an outside
+                    service, and drafting from them is off on this deployment.
+                    The chat panel runs on a hosted model: the question a person
+                    types goes to that service, with the names of children in
+                    their own records, phone numbers and email addresses masked
+                    first.
+                  </>
+                ) : (
+                  <>
+                    Drafts are produced by a model running on this machine. Case
+                    records, notes and reports are never sent to an outside
+                    service. Every draft is reviewed and approved by a person
+                    before it becomes clinical text.
+                  </>
+                )}
               </Alert>
               {/* One switch, not one per feature. It is on by default, so the
                   assistant works as soon as the runtime is running; the switch

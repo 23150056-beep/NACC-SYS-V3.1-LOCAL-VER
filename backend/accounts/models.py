@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from django.utils import timezone
 
 from accounts.managers import UserManager
 
@@ -284,3 +285,125 @@ class EmailVerification(models.Model):
 
     def __str__(self):
         return f"Email verification for {self.user.email}"
+
+
+class SmsSend(models.Model):
+    """One line for every text the system tried to send (accounts/sms.py).
+
+    The limits are counted from this table rather than from the cache: the
+    cache is per process, so under gunicorn each worker would keep its own
+    count and the allowance would multiply by the worker count, and a restart
+    would forget it. It is also the spend record the console reads.
+
+    The number is kept as a keyed hash plus its last four digits - enough to
+    count sends per number without a second table of custodians' phone numbers
+    - and the text is not kept at all. `credits` is an estimate (what the
+    gateway bills for the route and length), not a statement from the gateway.
+    """
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    # A key of accounts/sms_catalogue.
+    kind = models.CharField(max_length=40)
+    # "normal" or "otp": which gateway route carried it.
+    route = models.CharField(max_length=10)
+    credits = models.PositiveSmallIntegerField(default=0)
+    # "sent", "refused", "unknown" or "limited" - see accounts/sms.SmsResult.
+    outcome = models.CharField(max_length=10)
+    message_id = models.CharField(max_length=40, blank=True, default="")
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="+")
+    # What the text was about, as a reference: "child:42", "appointment:7",
+    # "user:5". Never a name.
+    subject = models.CharField(max_length=40, blank=True, default="")
+    number_hash = models.CharField(max_length=64, db_index=True)
+    number_tail = models.CharField(max_length=4)
+
+    class Meta:
+        db_table = "tbl_sms_send"
+
+    def __str__(self):
+        return f"{self.kind} ...{self.number_tail} {self.outcome}"
+
+
+class EmailOptOut(models.Model):
+    """One email a person has switched off (accounts/email_notifications.py).
+
+    **A row means OFF.** No row means on, so a kind added to the catalogue
+    later starts on for everybody, and an account that never opened the
+    profile card gets every email its role is sent. Storing the "on" ones
+    instead would leave all of them silently off until each person found the
+    card.
+
+    A table of its own rather than a column on User, so the release still
+    serving while a deploy migrates is untouched: it never asks for this
+    table, and the new one never asks for a column the old one lacks. `kind`
+    is a catalogue key, kept as text and not checked against the catalogue
+    here, because a key that was retired must not make an old row unreadable.
+    Unique on (user, kind), so switching the same email off twice is one row.
+    """
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="email_opt_outs")
+    kind = models.CharField(max_length=40)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "tbl_email_opt_out"
+        constraints = [
+            models.UniqueConstraint(fields=["user", "kind"],
+                                    name="one_email_opt_out_per_user_and_kind"),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} opted out of {self.kind}"
+
+
+class EmailSendRecord(models.Model):
+    """One notification email NACC SYS queued, and whose action caused it
+    (accounts/email_notifications.py; the limit in "Round four" of the design
+    note).
+
+    A row is the sum of what the limit needs and no more: WHO caused it
+    (`actor`), who it went to (`recipient`), which email of the catalogue it
+    was (`kind`, or "overflow" for the notice that says more are being held)
+    and when. It holds no case, no child, no subject and no text, so a copy of
+    this table says how often colleagues were emailed and nothing about why.
+
+    **Rows are kept 25 hours.** The widest window the limit looks at is the
+    last 24 hours, and the extra hour is slack for a clock that ran a little
+    behind. `email_notifications.prune_send_records` deletes older ones, from
+    the once-a-minute sweep and from the reminder run, so the table stays as
+    small as a day of mail.
+
+    In the database and not in the cache, for the reason the SMS limits are
+    rows (PhoneVerification): the cache is per process, so under gunicorn each
+    worker would count only the emails it queued, and a limit of 60 would
+    really be 60 times the number of workers.
+
+    `created_at` has a default and not `auto_now_add`, so a test can place a
+    row in the past; `actor` is SET_NULL so deleting an account never takes
+    its colleagues' accounting with it (the row ages out on its own).
+    """
+
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True,
+        on_delete=models.SET_NULL, related_name="emails_caused")
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.CASCADE,
+        related_name="emails_received")
+    kind = models.CharField(max_length=40)
+    created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    class Meta:
+        db_table = "tbl_email_send_record"
+        indexes = [
+            models.Index(fields=["actor", "created_at"],
+                         name="email_send_actor_time"),
+            models.Index(fields=["actor", "recipient", "created_at"],
+                         name="email_send_pair_time"),
+        ]
+
+    def __str__(self):
+        return f"{self.kind} from {self.actor_id} to {self.recipient_id}"

@@ -202,6 +202,45 @@ anything in Google.
 Comment the variable out of `backend/.env` and restart the API. The button
 disappears again; nothing else changes.
 
+## Emails (Brevo)
+
+Off by default. With no `BREVO_API_KEY` in `backend/.env` nothing is sent: each
+email is written to the **API window** as one line starting `EMAIL (console)`,
+and the sign-up code is written there too, so the flows work without a mail
+service. Real emails, from the same Brevo account the hosted copies use, need
+the key (see `backend/.env.example`).
+
+The button in an email opens the address in the `SITE_URL` setting, and the
+emails about cases and sessions also print it in words under the button:
+
+```
+SITE_URL=https://nacc.example.gov.ph
+```
+
+- **Without it the links point at `localhost`**, which opens nowhere but the PC
+  running the copy. A psychologist reading the email on a phone gets a dead
+  button. `SITE_URL` is the address colleagues really open NACC SYS at, so set
+  it whenever the copy is reached from another device, and leave it unset for
+  a copy only you use.
+- **Serve a copy that others reach over https.** On plain `http` a password
+  typed into the sign-in page crosses the network readable by anyone on it.
+  The setting is refused with `http` when `DJANGO_DEBUG` is `False`; on a local
+  copy (`DJANGO_DEBUG=True`) it is accepted, but https is still the right
+  address for anyone else.
+- It must be the bare site: no path, no query, no user name. A value that is
+  not is ignored, with a warning in the API window saying why, and the links
+  fall back to the first non-localhost entry of `CORS_ALLOWED_ORIGINS`.
+- It only changes the links in emails. It does not make the copy reachable
+  from other devices; that is the network's and the frontend's business.
+
+One account can cause only so many of these emails: 20 an hour to any one
+colleague, 60 an hour in all and 150 a day (`EMAIL_LIMIT_PER_RECIPIENT_HOUR`,
+`EMAIL_LIMIT_PER_HOUR` and `EMAIL_LIMIT_PER_DAY` in `backend/.env`; `0` turns
+one off). Past a limit the email is held, written to the API window as
+`EMAIL (held: limit)` instead of `EMAIL (console)`, and the colleague gets a
+notice that more updates are waiting (at most one an hour, three a day); the
+ISA's security log shows the account.
+
 ## Text messages (Semaphore)
 
 Off by default. Every text is written to the **API window** instead —
@@ -253,11 +292,11 @@ with an error, and running it again retries only those.
 A child's custodian is texted about the child's appointments: when one is
 booked, the day before, when it is moved, when it is cancelled, and when a
 no-show is recorded the same day. Only once the record holds the custodian's
-consent **and** a number confirmed with a code. To see every one on your own
+consent **and** a number. To see every one on your own
 phone, make yourself the custodian of one demo child.
 
-With `SMS_PROVIDER` unset all of this still works, free: each text, the code
-included, appears in the API window as a line starting `SMS (console)`.
+With `SMS_PROVIDER` unset all of this still works, free: each text
+appears in the API window as a line starting `SMS (console)`.
 
 1. **Sign in as a social worker**: `e.pascua@racco1.gov.ph` / `demo1234`
    after `seed_demo_data`. Only a social worker or the ISA can set a
@@ -265,13 +304,13 @@ included, appears in the API window as a line starting `SMS (console)`.
 2. **Records → one of your Adoption, Foster Care, Kinship Care or Family
    Tracing children → Edit → Present Environment.** The other case types do
    not ask for a custodian, so the fields are not there.
-3. **Contact Number**: type your own mobile, then **Send a code to confirm
-   this number**. Type in the six digits that arrive (or from the
-   `your code is` line in the API window) and press **Confirm**. The code
-   lasts ten minutes; the confirmation counts only for you, for an hour.
+3. **Contact Number**: type your own mobile. No code is sent or read back:
+   the custodian agrees in person.
 4. **Tick "The custodian agreed to receive appointment texts".** The line below
-   should read *Appointment texts on*. **Save Record.** The record's drawer
-   now shows the number with "Texts on".
+   should read *Appointment texts on*. **Save Record.** A confirmation text
+   ("This number will now get appointment texts...") goes to the number once -
+   in the API window as a line starting `SMS (console)` - and the record's
+   drawer shows the number with "Texts on".
 5. **Schedule**, for that child:
 
    | Text | How to make it go |
@@ -288,7 +327,7 @@ included, appears in the API window as a line starting `SMS (console)`.
    clears the consent with it.
 
 A text that should have gone and did not usually means the record is not
-ready: the drawer says whether the consent or the confirmation is missing,
+ready: the drawer says whether the consent or the number is missing,
 and a closed case is never texted. What each text costs is below.
 
 ### What it costs, and what it refuses

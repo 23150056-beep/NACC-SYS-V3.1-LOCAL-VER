@@ -34,9 +34,9 @@ from django.test import TestCase, override_settings
 from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APIClient
 
-from accounts import admin_overview
+from accounts import admin_overview, email_notifications
 from accounts.lockout import ADDRESS_LOCK_LABEL, NOT_AN_EMAIL, readable_sign_in_name
-from accounts.models import Role, User
+from accounts.models import Role, SmsSend, User
 from activity.models import ActivityLog
 from activity.services import log_activity
 from assistant.models import AssistantJob, AssistantSetting
@@ -896,23 +896,62 @@ class SmsHealthTest(ConsoleCase):
         self.assertEqual(line["status"], "bad")
         self.assertIn("SMS_API_KEY is not set", line["detail"])
 
-    @override_settings(SMS_PROVIDER="semaphore", SMS_API_KEY="k")
-    def test_counts_the_last_day_of_reminders(self):
-        self.reminder(date(2026, 10, 13), sent=at(hours=1))
-        self.custodian(sent=at(hours=3))
-        self.reminder(date(2026, 10, 12), sent=at(hours=30))     # too old to count
+    def spend(self, outcome="sent", credits=1, **fields):
+        row = SmsSend.objects.create(
+            kind="session_reminder", route="normal", credits=credits, outcome=outcome,
+            number_hash="h" * 64, number_tail="0000")
+        restamp(SmsSend, row.pk, **fields)
+        return row
+
+    @override_settings(SMS_PROVIDER="semaphore", SMS_API_KEY="k", SMS_DAILY_CREDIT_LIMIT=300)
+    def test_quiet_day_says_so(self):
         line = self.health("sms")
         self.assertEqual((line["status"], line["detail"]),
-                         ("ok", "Semaphore · last 24 h: 2 sent"))
+                         ("ok", "Semaphore · 0 texts, about 0 credits in the last "
+                                "24 hours (limit 300 a day)"))
 
-    @override_settings(SMS_PROVIDER="semaphore", SMS_API_KEY="k")
+    @override_settings(SMS_PROVIDER="semaphore", SMS_API_KEY="k", SMS_DAILY_CREDIT_LIMIT=300)
+    def test_counts_texts_and_credits_in_the_last_day(self):
+        self.spend(credits=1, created_at=at(hours=1))
+        self.spend(credits=2, created_at=at(hours=3))
+        self.spend(credits=1, created_at=at(hours=30))           # too old to count
+        line = self.health("sms")
+        self.assertEqual((line["status"], line["detail"]),
+                         ("ok", "Semaphore · 2 texts, about 3 credits in the last "
+                                "24 hours (limit 300 a day)"))
+
+    @override_settings(SMS_PROVIDER="semaphore", SMS_API_KEY="k", SMS_DAILY_CREDIT_LIMIT=300)
+    def test_unconfirmed_and_stopped_texts_are_counted_apart(self):
+        self.spend("sent", 1, created_at=at(hours=1))
+        self.spend("unknown", 1, created_at=at(hours=2))
+        self.spend("limited", 0, created_at=at(hours=2))
+        self.spend("limited", 0, created_at=at(hours=2))
+        self.spend("refused", 0, created_at=at(hours=2))         # went nowhere
+        line = self.health("sms")
+        self.assertEqual(line["detail"],
+                         "Semaphore · 2 texts, about 2 credits in the last 24 hours "
+                         "(limit 300 a day); 1 unconfirmed; 2 stopped by a limit")
+        self.assertEqual(line["status"], "ok")
+
+    @override_settings(SMS_PROVIDER="semaphore", SMS_API_KEY="k", SMS_DAILY_CREDIT_LIMIT=10)
+    def test_amber_from_eighty_percent_red_at_the_limit(self):
+        self.spend(credits=7, created_at=at(hours=1))
+        self.assertEqual(self.health("sms")["status"], "ok")
+        self.spend(credits=1, created_at=at(hours=1))
+        self.assertEqual(self.health("sms")["status"], "warn")   # 8 of 10
+        self.spend(credits=2, created_at=at(hours=1))
+        line = self.health("sms")
+        self.assertEqual(line["status"], "bad")                  # 10 of 10
+        self.assertIn("daily limit is reached", line["detail"])
+
+    @override_settings(SMS_PROVIDER="semaphore", SMS_API_KEY="k", SMS_DAILY_CREDIT_LIMIT=300)
     def test_a_claim_never_stamped_sent_is_a_warning(self):
         self.reminder(date(2026, 10, 13), sent=at(hours=1))
         self.reminder(date(2026, 10, 14), claimed=at(minutes=20))   # stopped partway
         self.custodian(claimed=at(minutes=5))                       # still sending
         line = self.health("sms")
-        self.assertEqual((line["status"], line["detail"]),
-                         ("warn", "Semaphore · last 24 h: 1 sent, 1 unconfirmed"))
+        self.assertEqual(line["status"], "warn")
+        self.assertIn("1 reminder not confirmed sent", line["detail"])
 
     @override_settings(SMS_PROVIDER="philsms", SMS_API_KEY="k")
     def test_other_gateways_are_named(self):
@@ -1612,6 +1651,98 @@ class BulkLinesTest(ConsoleCase):
         self.assertEqual(kinds["reset"], 12)
 
 
+class EmailLimitInTheLogTest(ConsoleCase):
+    """An account that reaches the limit on the emails its actions cause
+    (accounts/email_notifications.py) writes one SECURITY line, and the log says
+    so in words of its own. Like every line a signed-in account can cause, it is
+    picked out by the `kind` its writer set, never by what its label says, and
+    it is capped so a stolen account cannot fill the log."""
+
+    SENTENCE = "Editha Pascua reached the email limit; further emails are held for up to a day"
+
+    def reach_the_limit(self, by=None, times=2):
+        """The real thing: `by` withdraws requests to one psychologist until the
+        second email is over the limit of one."""
+        child = self.child()
+        with override_settings(BREVO_API_KEY="test-key", EMAIL_LIMIT_PER_RECIPIENT_HOUR=1,
+                               EMAIL_LIMIT_PER_HOUR=0, EMAIL_LIMIT_PER_DAY=0), \
+                patch("accounts.email_notifications._queue"):
+            for _ in range(times):
+                email_notifications.request_withdrawn(self.bulan, child, by=by or self.editha)
+
+    def lines(self):
+        return [e for e in self.overview()["security_log"] if e["kind"] == "email_limit"]
+
+    def test_the_line_an_account_writes_is_in_the_log_with_its_own_words(self):
+        self.reach_the_limit()
+        (line,) = self.lines()
+        self.assertEqual(self.SENTENCE, line["text"])
+        self.assertEqual("Editha Pascua", line["actor"])
+        self.assertEqual(admin_overview._iso(NOW), line["at"])
+        self.assertEqual([], self.overview()["security_log_more"])
+
+    def test_it_names_the_account_and_nobody_else(self):
+        self.reach_the_limit()
+        (line,) = self.lines()
+        for leak in ("Marivic", "Bulan", "bulan@", "C-0", "withdr"):
+            self.assertNotIn(leak, line["text"])
+        self.assertNotIn("Marivic", str(self.overview()["security_log"]))
+
+    def test_one_line_an_hour_however_long_it_goes_on(self):
+        self.reach_the_limit(times=6)
+        self.assertEqual(1, len(self.lines()))
+
+    def test_the_words_are_not_read_out_of_the_label(self):
+        """Without the kind it is an ordinary security line, whatever it says."""
+        ActivityLog.objects.create(
+            actor=self.rosa, actor_label="Rosa Santos", action=ActivityLog.UPDATED,
+            category=ActivityLog.SECURITY, entity_type="User", entity_id=self.rosa.pk,
+            entity_label="Rosa Santos reached the email limit")
+        (line,) = self.overview()["security_log"]
+        self.assertEqual("other", line["kind"])
+        self.assertNotIn("held for up to a day", line["text"])
+
+    def test_a_flood_shows_the_newest_five_and_says_how_many_are_left(self):
+        for _ in range(8):
+            log_activity(self.editha, ActivityLog.UPDATED, ActivityLog.SECURITY,
+                         entity_type="User", entity_id=self.editha.pk,
+                         entity_label="Editha Pascua reached the email limit",
+                         kind=ActivityLog.KIND_EMAIL_LIMIT)
+        for n, pk in enumerate(ActivityLog.objects.order_by("pk").values_list("pk", flat=True)):
+            restamp(ActivityLog, pk, created_at=at(hours=8 - n))
+        self.client.post(f"/api/users/{self.rosa.pk}/reset-password/")
+        data = self.overview()
+        kinds = Counter(e["kind"] for e in data["security_log"])
+        self.assertEqual((kinds["email_limit"], kinds["reset"]), (5, 1))
+        self.assertEqual(
+            [{"kind": "email_limit", "count": 3, "text": "and 3 more email limits not shown"}],
+            data["security_log_more"])
+        # The five shown are the newest five.
+        self.assertEqual(
+            [at(hours=h).isoformat() for h in (1, 2, 3, 4, 5)],
+            [e["at"] for e in data["security_log"] if e["kind"] == "email_limit"])
+
+    def test_one_left_out_is_singular(self):
+        for _ in range(6):
+            log_activity(self.editha, ActivityLog.UPDATED, ActivityLog.SECURITY,
+                         entity_type="User", entity_id=self.editha.pk,
+                         entity_label="Editha Pascua reached the email limit",
+                         kind=ActivityLog.KIND_EMAIL_LIMIT)
+        self.assertEqual("and 1 more email limit not shown",
+                         self.overview()["security_log_more"][0]["text"])
+
+    def test_the_line_stays_readable_when_the_account_is_gone(self):
+        self.reach_the_limit()
+        self.editha.delete()
+        (line,) = self.lines()
+        self.assertEqual(self.SENTENCE, line["text"])
+
+    def test_only_an_administrator_reads_it(self):
+        self.reach_the_limit()
+        for who in (self.rosa, self.bulan):
+            self.assertEqual(403, self.as_user(who).get(URL).status_code)
+
+
 class AssistantReadsInTheLogTest(ConsoleCase):
     def read(self, job_type, ref, user=None, child=None, when=None, ok=True):
         job = AssistantJob.objects.create(job_type=job_type, input_ref=ref, created_by=user,
@@ -1682,6 +1813,7 @@ class AssistantReadsInTheLogTest(ConsoleCase):
 
 
 class PrivacyTest(ConsoleCase):
+    @override_settings(SMS_PROVIDER="semaphore", SMS_API_KEY="k")
     def test_no_text_from_a_case_a_child_or_the_assistant_comes_back(self):
         """Every sentinel is planted in a place the endpoint could be tempted
         to read, on children who ARE in the queues (no social worker, a
@@ -1731,6 +1863,12 @@ class PrivacyTest(ConsoleCase):
             google_sub=sentinel["google"], phone=sentinel["phone"])
         # A lockout line, whose text is whatever a stranger typed.
         self.lockout_row("someone@t.ph")
+        # The spend record: its number's last digits, message id and subject
+        # are not for the console, only counts and credits.
+        SmsSend.objects.create(
+            kind="custodian_booked", route="normal", credits=1, outcome="sent",
+            message_id="ZZMSGID-9", subject="appointment:ZZSUBJ", number_hash="h" * 64,
+            number_tail="Q7Zk", requested_by=self.editha)
 
         response = self.client.get(URL)
         self.assertEqual(response.status_code, 200)
@@ -1741,6 +1879,8 @@ class PrivacyTest(ConsoleCase):
         self.assertGreater(self.need("no_social_worker", response.data)["count"], 0)
         for name, text in sentinel.items():
             self.assertNotIn(text, body, f"{name} reached the response")
+        for text in ("Q7Zk", "ZZMSGID-9", "ZZSUBJ", "number_tail", "number_hash"):
+            self.assertNotIn(text, body, f"the spend record leaked {text}")
 
     def test_no_password_or_token_comes_back(self):
         self.client.post(f"/api/users/{self.editha.pk}/reset-password/")
