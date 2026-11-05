@@ -14,9 +14,9 @@ import PdfFrame from '../components/PdfFrame';
 import TemplateUpload from '../components/TemplateUpload';
 import { pdfObjectUrl } from '../utils/pdf';
 import { useSingleFlight } from '../utils/singleFlight';
-import { stepKeyFor, stepIndexFor, paProgressLabel, PA_STEPS, stepSummary, stepRailLine, stepEntry } from '../utils/preAssessment';
+import { stepKeyFor, stepIndexFor, paProgressLabel, PA_STEPS, stepSummary, stepRailLine, stepEntry, formatDuration, shortMoment, formatStepMoment } from '../utils/preAssessment';
 
-const STEPS = ['Child', 'Consent', 'Interview', 'Instruments', 'Problems', 'Complete'];
+const STEPS = ['Child', 'Consent', 'Interview', 'Instruments', 'Problems', 'Review'];
 
 const textarea = { width: '100%', resize: 'vertical', padding: '11px 13px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', fontFamily: 'var(--font-sans)', fontSize: 14, lineHeight: 1.55 };
 
@@ -33,6 +33,16 @@ function FormBody({ body }) {
     </div>
   );
 }
+
+// Time-on-step line for the Review timeline: stepSummary without "Today, ".
+const timelineLine = (e) => {
+  if (!e) return 'Not started';
+  const m = (iso) => formatStepMoment(iso).replace(/^Today, /, '');
+  if (e.done_at) return `Done ${m(e.done_at)}${e.seconds != null ? ` · ${formatDuration(e.seconds)}` : ''}`;
+  if (e.last_edited_at) return `Edited ${m(e.last_edited_at)}`;
+  if (e.started_at) return `Started ${m(e.started_at)}`;
+  return 'Not started';
+};
 
 export default function PreAssessment() {
   const toast = useToast();
@@ -299,7 +309,7 @@ export default function PreAssessment() {
   };
 
   return (
-    <div style={{ ...PAGE, maxWidth: 880 }}>
+    <div style={{ ...PAGE, maxWidth: 880, paddingBottom: 96 }}>
       {/* Who this is, and how far through. A wizard's worst failure is the
           person losing track of which child they are recording — so the name
           sits above the stepper on every step, not only the first. */}
@@ -324,33 +334,43 @@ export default function PreAssessment() {
           </div>
         )}
 
-        {/* Step rail — click any visited step to look back at it. */}
-        <div style={{ display: 'flex', alignItems: 'center' }}>
+        {/* Step rail — click any visited step to look back at it. Every cell has
+            the same three rows (a fixed-height circle row, the label, the note),
+            top-aligned, so the connector is one straight line whatever text sits
+            under a step. Review is rail position 5; 6 means everything is done. */}
+        <div className="racco-pa-rail-scroll">
+        <ol className="racco-pa-rail" style={{ display: 'flex', alignItems: 'flex-start', listStyle: 'none', margin: 0, padding: 0 }}>
           {STEPS.map((s, i) => {
-            const done = i < step;
-            const now = i === step;
-            const reachable = i <= maxStep && i < 5;
-            const barBefore = i === 0 ? 'transparent' : i <= step ? 'var(--blue-600)' : 'var(--divider)';
-            const barAfter = i === STEPS.length - 1 ? 'transparent' : i < step ? 'var(--blue-600)' : 'var(--divider)';
-            // Rail positions 1-5 are the tracker's five steps (Complete = Review).
+            const railPos = step === 4.5 ? 5 : step >= 5 ? 6 : step;
+            const done = i < railPos;
+            const now = i === railPos;
+            const reachable = i <= maxStep && i < 5 && !now;
+            const barBefore = i === 0 ? 'transparent' : i <= railPos ? 'var(--blue-600)' : 'var(--divider)';
+            const barAfter = i === STEPS.length - 1 ? 'transparent' : i < railPos ? 'var(--blue-600)' : 'var(--divider)';
+            // Rail positions 1-5 are the tracker's five steps (Review is the last).
             const trackKey = i >= 1 ? PA_STEPS[i - 1].key : null;
             const entry = trackKey && pa ? stepEntry(pa.step_times, trackKey) : null;
-            const note = trackKey && pa ? stepRailLine(entry) : '';
             const full = trackKey && pa ? stepSummary(entry) : '';
+            let note = '';
+            if (i === 0) note = child ? (child.fullname.split(' ')[0] || 'Chosen') : 'Pick a child';
+            else if (trackKey && pa) note = entry && entry.done_at ? `${shortMoment(entry.done_at)}${entry.seconds != null ? ` · ${formatDuration(entry.seconds)}` : ''}` : stepRailLine(entry);
             return (
-              <div key={s} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 0, overflow: 'hidden' }}>
-                <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
+              <li key={s} className="racco-pa-rail-cell" style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5 }}>
+                <div className="racco-pa-rail-line" style={{ display: 'flex', alignItems: 'center', width: '100%', height: 28 }}>
                   <span style={{ flex: 1, height: 3, background: barBefore }} />
                   <button
-                    type="button" onClick={() => reachable && goToStep(i)} disabled={!reachable}
-                    title={reachable ? `Go to ${s}` : `${s} — not reached yet`} aria-current={now ? 'step' : undefined}
+                    className="racco-pa-rail-dot"
+                    type="button" onClick={() => reachable && goToStep(i)} aria-disabled={!reachable && !now}
+                    tabIndex={reachable || now ? 0 : -1}
+                    title={now ? `${s} — current step` : reachable ? `Go to ${s}` : `${s} — not reached yet`}
+                    aria-current={now ? 'step' : undefined} aria-label={`${s}${done ? ', done' : now ? ', current step' : reachable ? '' : ', not reached yet'}`}
                     style={{
-                      width: 28, height: 28, flex: 'none', borderRadius: '50%',
+                      width: 28, height: 28, flex: 'none', borderRadius: '50%', boxSizing: 'border-box',
                       display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                       background: done ? 'var(--success-500)' : now ? 'var(--blue-600)' : 'var(--surface)',
                       color: done || now ? '#fff' : 'var(--text-faint)',
                       border: `2px solid ${done ? 'var(--success-500)' : now ? 'var(--blue-600)' : 'var(--border-strong)'}`,
-                      fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 11.5,
+                      fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: 11.5, lineHeight: 1,
                       cursor: reachable ? 'pointer' : 'default', padding: 0,
                     }}
                   >
@@ -358,14 +378,13 @@ export default function PreAssessment() {
                   </button>
                   <span style={{ flex: 1, height: 3, background: barAfter }} />
                 </div>
-                <span style={{ fontWeight: now ? 800 : 600, fontSize: 11.5, color: now ? 'var(--text-strong)' : 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{s}</span>
-                {note && (
-                  <span className="racco-pa-rail-note" title={`${s}: ${full}`}
-                    style={{ fontWeight: 500, fontSize: 10.5, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', boxSizing: 'border-box', padding: '0 4px', marginTop: -3 }}>{note}</span>
-                )}
-              </div>
+                <span className="racco-pa-rail-label" style={{ fontWeight: now ? 800 : 600, fontSize: 11.5, lineHeight: '15px', color: now ? 'var(--text-strong)' : 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{s}</span>
+                <span className="racco-pa-rail-note" title={full ? `${s}: ${full}` : undefined}
+                  style={{ fontWeight: 500, fontSize: 10.5, lineHeight: '14px', minHeight: 28, color: 'var(--text-muted)', textAlign: 'center', overflow: 'hidden', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box', padding: '0 4px', marginTop: -2 }}>{note}</span>
+              </li>
             );
           })}
+        </ol>
         </div>
       </div>
 
@@ -497,8 +516,11 @@ export default function PreAssessment() {
               ))}
             </div>
           )}
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <div className="racco-pa-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, paddingTop: 14, borderTop: '1px solid var(--divider-row)' }}>
+            <span style={{ flex: '1 1 200px', fontSize: 12.5, color: 'var(--text-muted)' }}>{selectedInstruments.length === 0 ? 'Tick at least one instrument to continue.' : `${selectedInstruments.length} selected.`}</span>
+            <span className="racco-pa-actions" style={{ display: 'flex', justifyContent: 'flex-end' }}>
             <Button variant="primary" onClick={saveInstruments} disabled={selectedInstruments.length === 0} iconLeft={<Icon name="check" size={16} />}>Save & continue</Button>
+            </span>
           </div>
         </Card>
       )}
@@ -506,45 +528,67 @@ export default function PreAssessment() {
       {step === 4 && (
         <ProblemsStep child={child} problems={problems} setProblems={setProblems} setError={setError} onNext={() => advanceTo(4.5)} onChanged={() => pa && refreshTracker(pa.id)} />
       )}
-      {step === 4.5 && (
+      {step === 4.5 && (() => {
+        const rows = [['Child', child?.fullname],
+          ['Consent', pa?.consent ? `Linked (${pa.consent_status || 'signed'})` : 'Missing'],
+          ['Clinical interview', pa?.interview ? 'Recorded' : 'Skipped'],
+          ['Instruments', (pa?.instrument_titles || []).join(', ') || `${selectedInstruments.length} selected`],
+          ['Problems logged', String(problems.length)]];
+        const entries = PA_STEPS.map((ps) => ({ ps, e: stepEntry(pa?.step_times, ps.key) }));
+        const known = entries.filter(({ e }) => e && e.seconds != null);
+        const totalSeconds = known.reduce((n, { e }) => n + Number(e.seconds), 0);
+        const missingStart = entries.some(({ e }) => e && e.done_at && e.seconds == null);
+        return (
         <Card eyebrow="Step 6" title="Review & complete" padding="16px">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
-            {[['Child', child?.fullname],
-              ['Consent', pa?.consent ? `Linked (${pa.consent_status || 'signed'})` : 'Missing'],
-              ['Clinical interview', pa?.interview ? 'Recorded' : 'Skipped'],
-              ['Instruments', (pa?.instrument_titles || []).join(', ') || selectedInstruments.length + ' selected'],
-              ['Problems logged', String(problems.length)]].map(([k, v]) => (
-              <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 16, paddingBottom: 10, borderBottom: '1px solid var(--divider-row)' }}>
-                <span style={{ fontSize: 13, color: 'var(--text-muted)', fontWeight: 600 }}>{k}</span>
-                <span style={{ fontSize: 13.5, color: 'var(--text-strong)', fontWeight: 700, textAlign: 'right' }}>{v}</span>
-              </div>
-            ))}
-          </div>
+          <dl className="racco-pa-summary" style={{ display: 'grid', margin: '0 0 18px', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', overflow: 'hidden' }}>
+            {rows.map(([k, v], idx) => {
+              const line = idx < rows.length - 1 ? '1px solid var(--divider-row)' : 'none';
+              return (
+                <div key={k} style={{ display: 'contents' }}>
+                  <dt style={{ margin: 0, padding: '10px 14px', fontSize: 12.5, fontWeight: 600, color: 'var(--text-muted)', background: 'var(--ink-50)', borderBottom: line }}>{k}</dt>
+                  <dd style={{ margin: 0, padding: '10px 14px', fontSize: 13.5, fontWeight: 700, lineHeight: 1.45, color: 'var(--text-strong)', overflowWrap: 'anywhere', borderBottom: line }}>{v}</dd>
+                </div>
+              );
+            })}
+          </dl>
           {pa?.step_times && (
-            <div style={{ marginBottom: 16 }}>
-              <div className="racco-eyebrow" style={{ marginBottom: 6 }}>Time on each step</div>
-              {PA_STEPS.map((ps) => {
-                const e = stepEntry(pa.step_times, ps.key);
-                return (
-                  <div key={ps.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', padding: '5px 0', borderBottom: '1px solid var(--divider-row)' }}>
-                    <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontWeight: 600 }}>{ps.label}</span>
-                    <span style={{ fontSize: 12.5, color: 'var(--text-strong)', fontWeight: 600, textAlign: 'right' }}>
-                      {stepSummary(e)}
-                    </span>
-                  </div>
-                );
-              })}
+            <div style={{ marginBottom: 18 }}>
+              <div className="racco-eyebrow" style={{ marginBottom: 8 }}>Time on each step</div>
+              <ol style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                {entries.map(({ ps, e }, idx) => {
+                  const isDone = !!e?.done_at;
+                  const isNow = ps.key === 'review';
+                  return (
+                    <li key={ps.key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '6px 0', position: 'relative' }}>
+                      {idx < entries.length - 1 && <span aria-hidden="true" style={{ position: 'absolute', left: 5, top: 20, bottom: -6, width: 2, background: isDone && entries[idx + 1].e?.done_at ? 'var(--success-500)' : 'var(--divider)' }} />}
+                      <span aria-hidden="true" style={{ width: 12, height: 12, flex: 'none', marginTop: 3, boxSizing: 'border-box', borderRadius: '50%', position: 'relative', background: isDone ? 'var(--success-500)' : isNow ? 'var(--blue-600)' : 'var(--surface)', border: `2px solid ${isDone ? 'var(--success-500)' : isNow ? 'var(--blue-600)' : 'var(--border-strong)'}` }} />
+                      <span className="racco-pa-tl-row" style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-strong)' }}>{ps.label}</span>
+                        <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text-muted)' }}>{timelineLine(e)}</span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ol>
+              <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '2px 12px', marginTop: 8, paddingTop: 10, borderTop: '1px solid var(--divider-row)', fontSize: 13, fontWeight: 700, color: 'var(--text-strong)' }}>
+                <span>Total so far: {known.length ? formatDuration(totalSeconds) : '—'}</span>
+                {missingStart && <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-muted)' }}>(some steps have no start time)</span>}
+              </div>
             </div>
           )}
           <FormField label="Session notes (optional)">
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} style={textarea} placeholder="Observations during the session…" />
           </FormField>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 14 }}>
-            <Button variant="secondary" onClick={() => onceFinish(saveAndQuit)} disabled={finishing} iconLeft={<Icon name="save" size={16} />}>Not yet — save and quit for now</Button>
-            <Button variant="primary" onClick={() => onceFinish(complete)} disabled={finishing} iconLeft={<Icon name="check-circle-2" size={16} />}>Mark as completed</Button>
+          <div className="racco-pa-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginTop: 16, paddingTop: 14, borderTop: '1px solid var(--divider-row)' }}>
+            <span style={{ flex: '1 1 200px', fontSize: 12.5, color: 'var(--text-muted)' }}>You can come back to finish later.</span>
+            <span className="racco-pa-actions" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <Button variant="secondary" onClick={() => onceFinish(saveAndQuit)} disabled={finishing} iconLeft={<Icon name="save" size={16} />}>Not yet — save and quit for now</Button>
+              <Button variant="primary" onClick={() => onceFinish(complete)} disabled={finishing} iconLeft={<Icon name="check-circle-2" size={16} />}>Mark as completed</Button>
+            </span>
           </div>
         </Card>
-      )}
+        );
+      })()}
 
       {step === 5 && (
         <Card padding="28px">

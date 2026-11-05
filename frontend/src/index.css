@@ -1114,6 +1114,31 @@ input::-ms-clear {
 @media (max-width: 479px) {
   .racco-pa-rail-note { display: none !important; }
 }
+/* Wizard rail: fits its card, never scrolls sideways. */
+.racco-pa-rail-scroll { margin: 0; }
+.racco-pa-rail-cell { min-width: 0; }
+@media (max-width: 479px) {
+  .racco-pa-rail-cell { min-width: 52px; }
+  .racco-pa-rail-line { height: 24px !important; }
+  .racco-pa-rail-dot { width: 24px !important; height: 24px !important; font-size: 10.5px !important; }
+  .racco-pa-rail-label { font-size: 10.5px !important; max-width: 100%; }
+  .racco-pa-rail-note { display: none !important; }
+}
+/* Review summary: label column narrows on a phone. */
+.racco-pa-summary { grid-template-columns: minmax(110px, 170px) minmax(0, 1fr); }
+@media (max-width: 479px) {
+  .racco-pa-summary { grid-template-columns: minmax(90px, 110px) minmax(0, 1fr); }
+}
+/* Review timeline: the time sits right after the step name; wraps under it on a phone. */
+.racco-pa-tl-row { display: grid; grid-template-columns: minmax(0, 220px) auto; column-gap: 16px; row-gap: 2px; align-items: baseline; justify-content: start; }
+@media (max-width: 479px) {
+  .racco-pa-tl-row { grid-template-columns: minmax(0, 1fr); }
+}
+/* Wizard footers: helper text left, actions right; stacked full width on a phone. */
+@media (max-width: 519px) {
+  .racco-pa-actions { width: 100%; flex-direction: column-reverse; }
+  .racco-pa-actions > * { width: 100%; justify-content: center; }
+}
 
 /* Pre-assessment tracker card: the same four columns on every row; two by two
    on a narrow card. */
