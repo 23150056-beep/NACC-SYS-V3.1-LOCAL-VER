@@ -128,4 +128,5 @@ def visible_pre_assessments(request):
     # By relation rather than by import: children never imports clinical.
     pre_assessment = Child._meta.get_field("pre_assessments").related_model
     return Prefetch("pre_assessments", queryset=hide_earlier_history(
-        pre_assessment.objects.prefetch_related("instruments"), request, "psychologist"))
+        pre_assessment.objects.prefetch_related("instruments", "step_times"),
+        request, "psychologist"))

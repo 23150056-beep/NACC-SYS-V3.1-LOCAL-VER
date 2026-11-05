@@ -14,6 +14,7 @@ import { SPECIAL_NEEDS, caseDate, reportTypeLabel } from '../config/caseData';
 import { loadAll } from '../utils/load';
 import { useOpenFromLink } from '../utils/links';
 import { clock } from '../utils/time';
+import PreAssessmentTracker from '../components/PreAssessmentTracker';
 import { paProgressLabel, paProgressTone, paProgressDetail } from '../utils/preAssessment';
 import { polishRemark, sendFeedback, getLatestBrief, generateBrief, getBriefFacts, summarizeDocument, confirmSummary } from '../api/assistant';
 import AssistantAccessLog from '../components/AssistantAccessLog';
@@ -813,6 +814,8 @@ export default function ChildProgressReport() {
             </div>
           )}
         </Card>
+
+        <PreAssessmentTracker progress={child.pre_assessment_progress} />
 
       {/* The child's own words, flagged as worth reading.
 

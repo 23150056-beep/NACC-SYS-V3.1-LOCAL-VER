@@ -1108,3 +1108,9 @@ input::-ms-clear {
    is about 40px wide there. */
 .racco-month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
 @media (max-width: 359px) { .racco-month-word { display: none; } .racco-month-grid { gap: 2px; } }
+
+/* Pre-assessment wizard: the tracker line under each step label. Too wide for
+   a phone's rail, where the title attribute carries it. */
+@media (max-width: 479px) {
+  .racco-pa-rail-note { display: none !important; }
+}

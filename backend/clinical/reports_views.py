@@ -42,7 +42,8 @@ class ChildReportView(generics.GenericAPIView):
         except Child.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        pas = child.pre_assessments.all().select_related("consent", "interview", "psychologist")
+        pas = (child.pre_assessments.all().select_related("consent", "interview", "psychologist")
+               .prefetch_related("step_times"))
         results = child.result_entries.select_related("instrument", "entered_by")
         remarks = child.remarks.select_related("author")
         plans = child.treatment_plans.select_related("author")

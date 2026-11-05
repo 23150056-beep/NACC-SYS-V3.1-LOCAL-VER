@@ -1644,6 +1644,45 @@ button: "Pre-Assessment" with Not started / Started · Consent / In progress ·
   per role (not yet traced to its question). Within noise, so it stands. The
   "3/87" figure under "The chatbot" is from 30 Aug, on an older question set.
 
+## The pre-assessment tracker: times on each step
+
+Owner's request, 5 Nov 2026: "transform it into a tracker - an automatic time
+track on each step where he/she edited". The owner chose start, last edit and
+done for every step, shown on the child's page, in the wizard and in
+Monitoring.
+
+- **`PreAssessmentStepTime`** (clinical 0014, one row per pre-assessment and
+  step, unique) holds `started_at`, `last_edited_at` and `done_at`, stamped by
+  the server's clock. Every write goes through `clinical/step_times.py`
+  (`entered`, `edited`, `moved_past`, `finished`); started is never
+  overwritten (Coalesce), done is set only on a FORWARD move (the most recent
+  one) or by Mark as completed. Time spent is done minus started, elapsed not
+  active.
+- **What counts as an edit**: linking consent or the interview, a changed set
+  of instruments, changed notes (Review), and a problem added while the
+  requester's open pre-assessment sits on Presenting problems (the resume
+  rule: the newest open row newer than the last completion). An unchanged
+  value the wizard re-sends stamps nothing; nothing is stamped on a completed
+  pre-assessment.
+- **Nothing is invented.** Clinical 0015 backfilled only what was known: a
+  consent start at `created_at`, and a Review done at `completed_at` with NO
+  start. A step left before it had a row gets a done time and no start. With
+  no start there is no time spent.
+- **A step change is conditional on the step it was read at**
+  (`perform_update` filters on `current_step`): a second tab's stale move is
+  a 409, and the wizard re-reads the pre-assessment.
+- **Shown**: `step_times` on the pre-assessment API; `steps` and
+  `step_edited_at` in `Child.pre_assessment_progress()` (from the
+  `visible_pre_assessments` prefetch, which now includes `step_times`, so the
+  carry-history rule covers the times too); the "Pre-assessment tracker" card
+  on the child's Overview tab (`components/PreAssessmentTracker.jsx`); a line
+  under each wizard rail step (hidden under 480px, kept in the title) and a
+  "Time on each step" list on Review; Monitoring's cell gets "edited ..." on a
+  second line. Times through `formatStepMoment` / `formatDuration` in
+  `utils/preAssessment.js`, 12-hour via `clock()`.
+- Demo seeding creates no step times, so seeded pre-assessments show only the
+  backfilled facts. `clinical/tests/test_pre_assessment_step_times.py`.
+
 ## Interview templates by upload
 
 The Clinical interview step (pre-assessment step 3) has **Upload a template**:

@@ -14,7 +14,7 @@ import PdfFrame from '../components/PdfFrame';
 import TemplateUpload from '../components/TemplateUpload';
 import { pdfObjectUrl } from '../utils/pdf';
 import { useSingleFlight } from '../utils/singleFlight';
-import { stepKeyFor, stepIndexFor, paProgressLabel } from '../utils/preAssessment';
+import { stepKeyFor, stepIndexFor, paProgressLabel, PA_STEPS, stepSummary, stepEntry } from '../utils/preAssessment';
 
 const STEPS = ['Child', 'Consent', 'Interview', 'Instruments', 'Problems', 'Complete'];
 
@@ -86,6 +86,18 @@ export default function PreAssessment() {
   // another goes out only if the step the psychologist now WANTS (not merely
   // the one the server last confirmed) differs from what the server holds. Two
   // PATCHes in flight can be applied out of order and leave an old step.
+  // Re-read the stored pre-assessment and merge only the tracker's fields
+  // (same guards as the step save: same id, not completed). Silent.
+  const refreshTracker = async (id) => {
+    try {
+      const r = await api.get(`/pre-assessments/${id}/`);
+      const latest = paRef.current;
+      if (latest && latest.id === r.data.id && latest.status !== 'completed') {
+        setPa({ ...latest, current_step: r.data.current_step, updated_at: r.data.updated_at, step_times: r.data.step_times });
+      }
+      return r.data;
+    } catch { return null; }
+  };
   const wantedStep = useRef(null); // { id, key } - the latest step asked for
   const savedStep = useRef(null);  // { id, key } - what the server last confirmed
   const stepFlight = useRef(null); // the promise of the running save loop
@@ -104,10 +116,19 @@ export default function PreAssessment() {
           savedStep.current = { id: r.data.id, key: r.data.current_step };
           const latest = paRef.current;
           if (latest && latest.id === r.data.id && latest.status !== 'completed') {
-            setPa({ ...latest, current_step: r.data.current_step, updated_at: r.data.updated_at });
+            setPa({ ...latest, current_step: r.data.current_step, updated_at: r.data.updated_at, step_times: r.data.step_times });
           }
-        } catch {
-          toast.error('Could not save where you are in the pre-assessment.');
+        } catch (err) {
+          if (err.response?.status === 409) {
+            // Another tab moved it on: say so once, adopt the stored step and
+            // stop (the wanted step was based on a stale read).
+            toast.error(err.response.data?.detail || 'This pre-assessment was moved to another step in another tab. Reload to continue.');
+            const fresh = await refreshTracker(current.id);
+            if (fresh) savedStep.current = { id: fresh.id, key: fresh.current_step };
+            wantedStep.current = null;
+          } else {
+            toast.error('Could not save where you are in the pre-assessment.');
+          }
           return;
         }
       }
@@ -311,6 +332,9 @@ export default function PreAssessment() {
             const reachable = i <= maxStep && i < 5;
             const barBefore = i === 0 ? 'transparent' : i <= step ? 'var(--blue-600)' : 'var(--divider)';
             const barAfter = i === STEPS.length - 1 ? 'transparent' : i < step ? 'var(--blue-600)' : 'var(--divider)';
+            // Rail positions 1-5 are the tracker's five steps (Complete = Review).
+            const trackKey = i >= 1 ? PA_STEPS[i - 1].key : null;
+            const note = trackKey && pa ? stepSummary(stepEntry(pa.step_times, trackKey)) : '';
             return (
               <div key={s} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
@@ -333,6 +357,10 @@ export default function PreAssessment() {
                   <span style={{ flex: 1, height: 3, background: barAfter }} />
                 </div>
                 <span style={{ fontWeight: now ? 800 : 600, fontSize: 11.5, color: now ? 'var(--text-strong)' : 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{s}</span>
+                {note && (
+                  <span className="racco-pa-rail-note" title={`${s}: ${note}`}
+                    style={{ fontWeight: 500, fontSize: 10.5, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%', marginTop: -3 }}>{note}</span>
+                )}
               </div>
             );
           })}
@@ -474,7 +502,7 @@ export default function PreAssessment() {
       )}
 
       {step === 4 && (
-        <ProblemsStep child={child} problems={problems} setProblems={setProblems} setError={setError} onNext={() => advanceTo(4.5)} />
+        <ProblemsStep child={child} problems={problems} setProblems={setProblems} setError={setError} onNext={() => advanceTo(4.5)} onChanged={() => pa && refreshTracker(pa.id)} />
       )}
       {step === 4.5 && (
         <Card eyebrow="Step 6" title="Review & complete" padding="16px">
@@ -490,6 +518,22 @@ export default function PreAssessment() {
               </div>
             ))}
           </div>
+          {pa?.step_times && (
+            <div style={{ marginBottom: 16 }}>
+              <div className="racco-eyebrow" style={{ marginBottom: 6 }}>Time on each step</div>
+              {PA_STEPS.map((ps) => {
+                const e = stepEntry(pa.step_times, ps.key);
+                return (
+                  <div key={ps.key} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', padding: '5px 0', borderBottom: '1px solid var(--divider-row)' }}>
+                    <span style={{ fontSize: 12.5, color: 'var(--text-muted)', fontWeight: 600 }}>{ps.label}</span>
+                    <span style={{ fontSize: 12.5, color: 'var(--text-strong)', fontWeight: 600, textAlign: 'right' }}>
+                      {stepSummary(e)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <FormField label="Session notes (optional)">
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={4} style={textarea} placeholder="Observations during the session…" />
           </FormField>
@@ -839,7 +883,7 @@ function InterviewStep({ child, templates, onDone, setError, onTemplateAdded }) 
   );
 }
 
-function ProblemsStep({ child, problems, setProblems, setError, onNext }) {
+function ProblemsStep({ child, problems, setProblems, setError, onNext, onChanged }) {
   const confirm = useConfirm();
   const [once, adding] = useSingleFlight();
   const [desc, setDesc] = useState('');
@@ -857,6 +901,7 @@ function ProblemsStep({ child, problems, setProblems, setError, onNext }) {
       const { data } = await api.post('/problems/', { child: child.id, description: desc.trim(), category: cat.trim() });
       setProblems([...problems, data]);
       setDesc(''); setCat('');
+      if (onChanged) onChanged();
     } catch (err) {
       setError(JSON.stringify(err.response?.data || 'Could not log the problem.'));
     }
