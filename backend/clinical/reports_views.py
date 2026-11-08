@@ -1,6 +1,7 @@
 """V2 report endpoints: per-child chart view, cross-child monitoring, agency
 summary, and the (interim) dashboard — all sourced from clinical records."""
 
+from django.db.models import Max
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -70,6 +71,23 @@ class ChildReportView(generics.GenericAPIView):
         files = hide_earlier_history(files, request, "author")
         interviews = hide_earlier_history(interviews, request, "interviewer")
 
+        # Last in, first out on the child's page: the most recently edited
+        # record first (updated_at where the model keeps one, else when it was
+        # filed), id as the tie-break. Applied AFTER the carry-history control
+        # above, which only filters. Screens that read best oldest-first (the
+        # printed report) sort for themselves rather than lean on this order.
+        pas = pas.order_by("-updated_at", "-id")
+        interviews = interviews.order_by("-updated_at", "-id")
+        results = results.order_by("-created_at", "-id")
+        remarks = remarks.order_by("-updated_at", "-id")
+        plans = plans.order_by("-updated_at", "-id")
+        files = files.order_by("-created_at", "-id")
+        # Open problems stay above resolved ones, newest edit first within each.
+        problems = problems.order_by("resolved", "-updated_at", "-id")
+        case_referrals = case_referrals.order_by("-created_at", "-id")
+        opinionnaires = opinionnaires.order_by("-created_at", "-id")
+        self_report_flags = self_report_flags.order_by("-created_at", "-id")
+
         return Response({
             "child": ChildSerializer(child).data,
             "pre_assessments": PreAssessmentSerializer(pas, many=True).data,
@@ -108,6 +126,20 @@ class MonitoringListView(generics.GenericAPIView):
                   .order_by("start")):
             next_appt.setdefault(a.child_id, a.start)
 
+        # When each case was last touched, for the list's order (newest edit
+        # first). Folded into the queries below rather than asked again, and
+        # the records a reader may not see never count: a hidden note must not
+        # lift its child to the top.
+        touched = {}
+
+        def touch(child_id, stamp):
+            if stamp and (child_id not in touched or stamp > touched[child_id]):
+                touched[child_id] = stamp
+
+        for child_id, stamp in (Appointment.objects.filter(child_id__in=ids)
+                                .values_list("child_id").annotate(Max("updated_at"))):
+            touch(child_id, stamp)
+
         # The latest remark and classification are opinions, and the report
         # count stands for a list: each goes through the carry-history
         # control, so a newly assigned psychologist is not quoted the previous
@@ -116,16 +148,20 @@ class MonitoringListView(generics.GenericAPIView):
         for r in hide_earlier_history(ResultEntry.objects.filter(child_id__in=ids),
                                       request, "entered_by").order_by("date", "id"):
             latest_result[r.child_id] = r
+            # Result entries and report files record only when they were filed.
+            touch(r.child_id, r.created_at)
         # The note itself, not just its date: monitoring shows the psychologist's
         # most recent remark, and re-querying per row would be N+1.
         last_remark = {}
         for r in hide_earlier_history(RemarkNote.objects.filter(child_id__in=ids),
                                       request, "author").order_by("date", "id"):
             last_remark[r.child_id] = r
+            touch(r.child_id, r.updated_at)
         report_counts = {}
         for r in hide_earlier_history(PsychologicalReport.objects.filter(child_id__in=ids),
                                       request, "author"):
             report_counts[r.child_id] = report_counts.get(r.child_id, 0) + 1
+            touch(r.child_id, r.created_at)
 
         rows = []
         for c in children:
@@ -138,6 +174,10 @@ class MonitoringListView(generics.GenericAPIView):
                                       res.date if res else None) if d]
             last_activity = max(candidates) if candidates else None
             psy = c.assigned_psychologist
+            touch(c.id, c.updated_at)
+            for p in c.pre_assessments.all():
+                touch(c.id, p.updated_at)
+            last_updated = touched.get(c.id)
             rows.append({
                 "child_id": c.id,
                 "child_name": c.fullname,
@@ -149,13 +189,17 @@ class MonitoringListView(generics.GenericAPIView):
                 "latest_classification": (res.classification or None) if res else None,
                 "latest_remark": (remark.text or None) if remark else None,
                 "last_activity": last_activity.isoformat() if last_activity else None,
+                "last_updated": last_updated.isoformat() if last_updated else None,
                 "next_session": (f"{tz.localtime(next_appt[c.id]):%Y-%m-%d} "
                                  f"{clock(tz.localtime(next_appt[c.id]))}"
                                  if c.id in next_appt else None),
                 "report_count": report_counts.get(c.id, 0),
                 "pre_assessment_count": len(completed),
             })
-        rows.sort(key=lambda r: (r["child_name"] or "").lower())
+        # Last in, first out: the case edited most recently comes first; a case
+        # with nothing recorded goes last. Ties fall back to name, then id.
+        rows.sort(key=lambda r: ((r["child_name"] or "").lower(), r["child_id"]))
+        rows.sort(key=lambda r: r["last_updated"] or "", reverse=True)
         return Response(rows)
 
 

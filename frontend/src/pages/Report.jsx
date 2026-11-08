@@ -16,6 +16,10 @@ import { hasCheckNote } from '../utils/reportCheck';
 import { loadAll } from '../utils/load';
 
 
+// Files and referrals carry created_at only, so "newest" is newest filed.
+const stamped = (e) => e.updated_at || e.created_at || e.date || '';
+const newestFirst = (a, b) => stamped(b).localeCompare(stamped(a)) || b.id - a.id;
+
 export default function Report() {
   const { user } = useAuth();
   const toast = useToast();
@@ -55,9 +59,11 @@ export default function Report() {
     .filter((e) => (e.child_name || '').toLowerCase().includes(q.toLowerCase()))
     .sort((a, b) => (b.date || '').localeCompare(a.date || '')), [entries, q]);
   const visibleFiles = useMemo(() => files
-    .filter((f) => (f.child_name || '').toLowerCase().includes(q.toLowerCase())), [files, q]);
+    .filter((f) => (f.child_name || '').toLowerCase().includes(q.toLowerCase()))
+    .sort(newestFirst), [files, q]);
   const visibleCaseReferrals = useMemo(() => caseReferrals
-    .filter((f) => (f.child_name || '').toLowerCase().includes(q.toLowerCase())), [caseReferrals, q]);
+    .filter((f) => (f.child_name || '').toLowerCase().includes(q.toLowerCase()))
+    .sort(newestFirst), [caseReferrals, q]);
 
   const grouped = useMemo(() => {
     const map = new Map();
@@ -65,7 +71,14 @@ export default function Report() {
       if (!map.has(e.child)) map.set(e.child, { child: e.child, child_name: e.child_name, entries: [] });
       map.get(e.child).entries.push(e);
     }
-    return [...map.values()].sort((a, b) => (a.child_name || '').localeCompare(b.child_name || ''));
+    // Last in, first out: the child with the most recently filed or edited
+    // entry first. Entries carry created_at only (no updated_at), then date.
+    const stamp = (g) => g.entries.reduce((m, e) => {
+      const t = stamped(e);
+      return t > m ? t : m;
+    }, '');
+    return [...map.values()].sort((a, b) => stamp(b).localeCompare(stamp(a))
+      || (a.child_name || '').localeCompare(b.child_name || ''));
   }, [visibleEntries]);
 
   const download = async (f) => {

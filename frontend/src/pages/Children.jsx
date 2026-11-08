@@ -258,7 +258,9 @@ export default function Children() {
     .filter((c) => !isAdmin || !swFilter
       || (swFilter === 'none' ? !c.social_worker : String(c.social_worker) === swFilter))
     .sort((a, b) => sortMode === 'newest'
-      ? b.id - a.id  // LIFO: newest record first
+      // LIFO: the record edited most recently first (ISO text orders as time),
+      // newest created breaking a tie.
+      ? String(b.updated_at || '').localeCompare(String(a.updated_at || '')) || b.id - a.id
       : a.fullname.localeCompare(b.fullname, undefined, { sensitivity: 'base' }));
 
   const STATUS_FILTERS = [
@@ -930,7 +932,7 @@ export default function Children() {
           <Segmented
             label="Sort"
             value={sortMode} onChange={setSortMode}
-            options={[{ value: 'newest', label: 'Newest' }, { value: 'az', label: 'A–Z' }]}
+            options={[{ value: 'newest', label: 'Recently updated' }, { value: 'az', label: 'A–Z' }]}
           />
         </div>
 

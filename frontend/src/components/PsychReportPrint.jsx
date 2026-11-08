@@ -68,7 +68,10 @@ export default function PsychReportPrint({ data, className = 'racco-print-only' 
   const address = [[child.house_number, child.street].filter(Boolean).join(' '),
     child.barangay, child.municipality, child.province].filter(Boolean).join(', ');
 
-  const completed = (data.pre_assessments || []).filter((p) => p.status === 'completed');
+  // The server lists newest first; the printed instrument list reads in the
+  // order they were given, so put the pre-assessments back oldest first.
+  const completed = (data.pre_assessments || []).filter((p) => p.status === 'completed')
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)) || a.id - b.id);
   const instruments = [];
   const seen = new Set();
   for (const title of [
