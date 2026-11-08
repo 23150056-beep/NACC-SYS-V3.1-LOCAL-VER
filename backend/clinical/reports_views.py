@@ -70,6 +70,23 @@ class ChildReportView(generics.GenericAPIView):
         files = hide_earlier_history(files, request, "author")
         interviews = hide_earlier_history(interviews, request, "interviewer")
 
+        # Last in, first out on the child's page: the most recently edited
+        # record first (updated_at where the model keeps one, else when it was
+        # filed), id as the tie-break. Applied AFTER the carry-history control
+        # above, which only filters. Screens that read best oldest-first (the
+        # printed report) sort for themselves rather than lean on this order.
+        pas = pas.order_by("-updated_at", "-id")
+        interviews = interviews.order_by("-updated_at", "-id")
+        results = results.order_by("-created_at", "-id")
+        remarks = remarks.order_by("-updated_at", "-id")
+        plans = plans.order_by("-updated_at", "-id")
+        files = files.order_by("-created_at", "-id")
+        # Open problems stay above resolved ones, newest edit first within each.
+        problems = problems.order_by("resolved", "-updated_at", "-id")
+        case_referrals = case_referrals.order_by("-created_at", "-id")
+        opinionnaires = opinionnaires.order_by("-created_at", "-id")
+        self_report_flags = self_report_flags.order_by("-created_at", "-id")
+
         return Response({
             "child": ChildSerializer(child).data,
             "pre_assessments": PreAssessmentSerializer(pas, many=True).data,
