@@ -248,6 +248,8 @@ export default function AccessRequests({ onChange }) {
                       disabled={!pick}
                       aria-disabled={unconfirmed(u) || undefined}
                       title={unconfirmed(u) ? 'Waiting for them to confirm their address.' : undefined}
+                      aria-describedby={unconfirmed(u) ? `unconfirmed-note-${u.id}` : undefined}
+                      style={unconfirmed(u) ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
                       onClick={() => { if (!unconfirmed(u)) openApprove(u, pick); }}
                     >
                       {grantName ? `Approve as ${grantName}` : 'Approve'}
@@ -255,7 +257,7 @@ export default function AccessRequests({ onChange }) {
                   </div>
                 </div>
                 {unconfirmed(u) && (
-                  <div role="note" style={{ padding: '8px 14px', borderTop: '1px solid var(--warning-100)', background: 'var(--warning-50)', fontSize: 12, color: 'var(--text-body)' }}>
+                  <div id={`unconfirmed-note-${u.id}`} role="note" style={{ padding: '8px 14px', borderTop: '1px solid var(--warning-100)', background: 'var(--warning-50)', fontSize: 12, color: 'var(--text-body)' }}>
                     Cannot be approved yet: they must confirm their address with the code mailed to it, from the
                     sign-up page. You can still decline.
                   </div>

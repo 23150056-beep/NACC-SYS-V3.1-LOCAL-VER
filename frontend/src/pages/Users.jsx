@@ -449,8 +449,9 @@ export default function Users() {
       refreshActivity();
     } catch (err) {
       const body = err.response?.data;
-      setError(firstError(body, 'Save failed.'));
-      toast.error('Could not save the user. Please try again.');
+      const message = firstError(body, 'Could not save the user. Please try again.');
+      setError(message);
+      toast.error(message);
     } finally {
       setSaving(false);
     }
