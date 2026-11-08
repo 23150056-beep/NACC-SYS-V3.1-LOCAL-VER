@@ -272,8 +272,10 @@ def link_google_account(user, claims):
         newly_linked = True
 
     # A Google user has no password to rotate, so leaving this flag set would
-    # trap them in the change-password gate with nothing to change.
-    if user.must_change_password:
+    # trap them in the change-password gate with nothing to change. An account
+    # that still holds a live temporary password keeps it: signing in with
+    # Google must not waive the change the administrator required of it.
+    if user.must_change_password and not user.has_usable_password():
         user.must_change_password = False
         updates.append("must_change_password")
 

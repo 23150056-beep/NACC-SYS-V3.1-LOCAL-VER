@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import api from '../api/client';
 import { exactDate, timeAgo } from '../utils/time';
+import { firstError } from '../utils/errors';
 import { useActivity } from '../context/ActivityContext';
 import { useToast } from '../context/ToastContext';
 import {
@@ -25,15 +26,18 @@ const nameOf = (u) => (u.fullname || u.username || u.email || '');
 /* Which door, and what it is worth.
  *
  * Google verified the address it handed over (the flow rejects an unverified
- * one). The sign-up form verifies nothing — no confirmation mail is sent, so
- * the address is only what someone typed. An approver deciding whether they
- * recognise this person should not have to guess which of the two they are
- * looking at. */
-function DoorChip({ google }) {
+ * one). The sign-up form mails a six-digit code, and the address counts only
+ * once the applicant has typed it back (email_verified). An approver deciding
+ * whether they recognise this person should not have to guess which of the
+ * two they are looking at, or whether the address is proven. */
+function DoorChip({ google, verified }) {
   const [label, hint, icon, color] = google
     ? ['Google', 'Address verified by Google.', 'badge-check', 'var(--blue-600)']
-    : ['Typed in', 'Signed up with the form. Nobody has verified this address.',
-       'keyboard', 'var(--text-muted)'];
+    : verified
+      ? ['Typed in - address confirmed with a code', 'Signed up with the form and confirmed the address with a code mailed to it.',
+         'keyboard', 'var(--text-muted)']
+      : ['Typed in - address not confirmed yet', 'Signed up with the form. The code mailed to this address has not been entered.',
+         'keyboard', 'var(--warning-700)'];
   return (
     <span title={hint}
           style={{ display: 'inline-flex', alignItems: 'center', gap: 4, marginTop: 3,
@@ -109,9 +113,10 @@ export default function AccessRequests({ onChange }) {
     setBusy(true);
     try {
       if (kind === 'approve') {
-        await api.post(`/users/${u.id}/approve/`, { role: grantRole });
+        const { data: approved } = await api.post(`/users/${u.id}/approve/`, { role: grantRole });
         const granted = roles.find((r) => String(r.id) === String(grantRole))?.role_name;
-        toast.success(`${nameOf(u)} approved as ${roleLabel(granted)}`);
+        toast.success(`${nameOf(u)} approved as ${roleLabel(granted)}`
+          + (approved?.email_queued ? ' — an email telling them was queued.' : ''));
       } else {
         await api.post(`/users/${u.id}/decline/`);
         toast.success(`Request from ${nameOf(u)} declined`);
@@ -122,7 +127,14 @@ export default function AccessRequests({ onChange }) {
       onChange?.();
     } catch (err) {
       const body = err.response?.data;
-      toast.error(body?.role || body?.detail || 'That did not go through. Please try again.');
+      toast.error(firstError(body, 'That did not go through. Please try again.'));
+      // The row is stale (someone else answered it, or the address changed):
+      // close the dialog and reload so it goes rather than failing again.
+      if (err.response?.status === 400 || err.response?.status === 409) {
+        setConfirm(null);
+        await load();
+        onChange?.();
+      }
     } finally {
       setBusy(false);
     }
@@ -132,6 +144,9 @@ export default function AccessRequests({ onChange }) {
     ? roles.find((r) => String(r.id) === String(grantRole))
     : null;
   const claimed = confirm?.user?.requested_role_name || null;
+  // The server refuses to approve an address nobody has proved; say so here
+  // rather than sending the ISA into a dialog that ends in a refusal.
+  const unconfirmed = (u) => !u.google_linked && !u.email_verified;
 
   // Pre-filled from the claim so the queue moves quickly, but it is a form
   // field the administrator has to look at rather than a default that acts on
@@ -193,7 +208,7 @@ export default function AccessRequests({ onChange }) {
                     <span style={{ display: 'block', fontWeight: 800, fontSize: 14, color: 'var(--text-strong)' }}>{nameOf(u)}</span>
                     <span style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2, flexWrap: 'wrap' }}>
                       <span className="racco-mono" style={{ fontSize: 12, color: 'var(--text-muted)' }}>{u.email}</span>
-                      <DoorChip google={!!u.google_linked} />
+                      <DoorChip google={!!u.google_linked} verified={!!u.email_verified} />
                     </span>
                   </span>
                   <ClaimChip role={u.requested_role_name} />
@@ -230,12 +245,23 @@ export default function AccessRequests({ onChange }) {
                         to child records a decision rather than a click. */}
                     <Button
                       variant="primary" size="sm" iconLeft={<Icon name="user-check" size={15} />}
-                      disabled={!pick} onClick={() => openApprove(u, pick)}
+                      disabled={!pick}
+                      aria-disabled={unconfirmed(u) || undefined}
+                      title={unconfirmed(u) ? 'Waiting for them to confirm their address.' : undefined}
+                      aria-describedby={unconfirmed(u) ? `unconfirmed-note-${u.id}` : undefined}
+                      style={unconfirmed(u) ? { opacity: 0.5, cursor: 'not-allowed' } : undefined}
+                      onClick={() => { if (!unconfirmed(u)) openApprove(u, pick); }}
                     >
                       {grantName ? `Approve as ${grantName}` : 'Approve'}
                     </Button>
                   </div>
                 </div>
+                {unconfirmed(u) && (
+                  <div id={`unconfirmed-note-${u.id}`} role="note" style={{ padding: '8px 14px', borderTop: '1px solid var(--warning-100)', background: 'var(--warning-50)', fontSize: 12, color: 'var(--text-body)' }}>
+                    Cannot be approved yet: they must confirm their address with the code mailed to it, from the
+                    sign-up page. You can still decline.
+                  </div>
+                )}
               </div>
             );
           })}

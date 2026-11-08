@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
+from django.db.models import Q
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from accounts.models import AgencyProfile, Role, UserProfile
@@ -26,6 +27,11 @@ class UserSerializer(serializers.ModelSerializer):
     # than the subject id itself: the directory needs to show *how* someone
     # gets in, and the raw identifier is of no use to any client.
     google_linked = serializers.SerializerMethodField()
+    # Whether there is a password to change. A Google-linked account can still
+    # hold one (it linked Google later, or the ISA reset it), and reactivating
+    # forces a change exactly where this is true, so the screen asks this
+    # rather than guessing from google_linked.
+    has_password = serializers.SerializerMethodField()
     # What the person claimed about themselves at sign-up. Exposed so the
     # approval queue can pre-fill the administrator's choice — and named
     # `requested_` throughout so no client mistakes it for a granted role.
@@ -41,7 +47,7 @@ class UserSerializer(serializers.ModelSerializer):
             "role", "role_name",
             "requested_role", "requested_role_name",
             "fullname", "status", "must_change_password", "admin_takeover_pending",
-            "google_linked", "last_login", "created_at",
+            "google_linked", "has_password", "last_login", "created_at",
         ]
         read_only_fields = [
             # Only the person holding the handset can change these, through
@@ -50,11 +56,14 @@ class UserSerializer(serializers.ModelSerializer):
             "phone", "phone_verified", "email_verified",
             "must_change_password", "admin_takeover_pending",
             "requested_role", "requested_role_name",
-            "google_linked", "last_login", "created_at",
+            "google_linked", "has_password", "last_login", "created_at",
         ]
 
     def get_google_linked(self, obj):
         return bool(obj.google_sub)
+
+    def get_has_password(self, obj):
+        return obj.has_usable_password()
 
 
 class UserWriteSerializer(serializers.ModelSerializer):
@@ -62,8 +71,10 @@ class UserWriteSerializer(serializers.ModelSerializer):
     another user's password. Creation issues a server-generated temporary
     password (see UserViewSet.create); later changes go through the
     reset-password action or the user's own change-password endpoint."""
-    # Email IS the username — the field is optional and derived from email.
-    username = serializers.CharField(required=False, allow_blank=True)
+    # Email IS the username, so it is never taken from the request: a client
+    # that chose its own could collide with another account's (a 500) or make
+    # the two differ, and sign-in looks accounts up by email.
+    username = serializers.CharField(read_only=True)
     role = serializers.PrimaryKeyRelatedField(
         queryset=Role.objects.all(), required=False, allow_null=True)
 
@@ -73,11 +84,50 @@ class UserWriteSerializer(serializers.ModelSerializer):
             "id", "email", "username", "first_name", "last_name",
             "middle_initial", "contact_details", "role", "status",
         ]
+        # The column's own unique validator answers an exact-case duplicate
+        # with the model's wording; validate_email is the one check, so the
+        # same fault reads the same whatever the letter case.
+        extra_kwargs = {"email": {"validators": []}}
 
     # Names are refused with a replacement character in them (accounts/names.py);
     # one the record already holds passes, so it can be edited around.
     def _name(self, field, value):
         return refuse_unreadable(value, getattr(self.instance, field, None))
+
+    def validate_email(self, value):
+        # One spelling per address: sign-in and every "is this address taken"
+        # check compare after lowercasing, and the column's own unique
+        # constraint is exact, so "Ana@x.ph" and "ana@x.ph" could both exist.
+        value = (value or "").strip().lower()
+        # Older rows could be given a username that is not their email; an
+        # address another row holds only as its username would pass the email
+        # check and then fail the username column's unique constraint (a 500).
+        taken = User.objects.filter(Q(email__iexact=value) | Q(username__iexact=value))
+        if self.instance is not None:
+            taken = taken.exclude(pk=self.instance.pk)
+        if taken.exists():
+            raise serializers.ValidationError("Another account already uses this address.")
+        return value
+
+    def validate_status(self, value):
+        # Status moves only through approve/, decline/, archive/ and
+        # reactivate/, each of which carries the checks that go with it
+        # (role, verified address, forced password change, the last
+        # administrator). An edit that could set it skipped all of them.
+        # Naming the status the account already has stays fine: the edit form
+        # resends every field.
+        if self.instance is None:
+            if value != User.ACTIVE:
+                raise serializers.ValidationError(
+                    "A new account starts active. Sign-ups arrive as requests "
+                    "and are answered from Access Requests.")
+            return value
+        if value != self.instance.status:
+            raise serializers.ValidationError(
+                "An account's status cannot be changed by editing it. Use "
+                "Approve or Decline in Access Requests, or Deactivate or "
+                "Reactivate in Users.")
+        return value
 
     def validate_first_name(self, value):
         return self._name("first_name", value)
@@ -142,8 +192,7 @@ class UserWriteSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
-        if not validated_data.get("username"):
-            validated_data["username"] = validated_data.get("email")
+        validated_data["username"] = validated_data.get("email")
         user = User(**validated_data)
         # The view sets the real temp password right after; the unusable
         # placeholder guarantees no login window exists before it does.
@@ -194,6 +243,8 @@ class UserWriteSerializer(serializers.ModelSerializer):
         address_changed = (
             instance.status == User.PENDING and bool(new_email)
             and new_email.strip().lower() != (instance.email or "").strip().lower())
+        # The same status is accepted (validate_status) and changes nothing.
+        validated_data.pop("status", None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         if address_changed:
