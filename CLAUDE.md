@@ -548,6 +548,13 @@ the only access control the system has.
   its own per-IP counter beside it (`resend_is_throttled`,
   `confirm_is_throttled`; 4 Oct 2026). Charging them to the creation counter
   would let a few resends use up a colleague's sign-up from the same office.
+- **Approving a Google request emails the person**
+  (`children.notifications.send_access_approved_notification`, called from
+  `UserViewSet.approve`; the response carries `email_queued`). It says the
+  access was approved and to use "Sign in with Google" - no password, no code,
+  no link that signs anyone in; its button goes to `/login`. Typed sign-ups
+  are not emailed: they already chose a password. With no Brevo key it is one
+  `EMAIL (console) access_approved` log line and `email_queued` is false.
 - **Declining archives rather than deletes.** An archived address cannot
   register again, so a refused applicant cannot loop until a distracted
   administrator approves them.

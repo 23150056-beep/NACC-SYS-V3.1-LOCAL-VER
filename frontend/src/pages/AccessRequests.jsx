@@ -109,9 +109,10 @@ export default function AccessRequests({ onChange }) {
     setBusy(true);
     try {
       if (kind === 'approve') {
-        await api.post(`/users/${u.id}/approve/`, { role: grantRole });
+        const { data: approved } = await api.post(`/users/${u.id}/approve/`, { role: grantRole });
         const granted = roles.find((r) => String(r.id) === String(grantRole))?.role_name;
-        toast.success(`${nameOf(u)} approved as ${roleLabel(granted)}`);
+        toast.success(`${nameOf(u)} approved as ${roleLabel(granted)}`
+          + (approved?.email_queued ? ' — an email telling them was queued.' : ''));
       } else {
         await api.post(`/users/${u.id}/decline/`);
         toast.success(`Request from ${nameOf(u)} declined`);

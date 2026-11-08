@@ -32,7 +32,8 @@ from accounts.serializers import (
 from activity.models import ActivityLog
 from activity.serializers import ActivityLogSerializer
 from activity.services import log_activity
-from children.notifications import send_temporary_password_notification
+from children.notifications import (
+    send_access_approved_notification, send_temporary_password_notification)
 from accounts.sms_notifications import (
     TooManyCodes, notify_temporary_password, start_phone_verification,
     confirm_phone_verification)
@@ -841,15 +842,17 @@ class UserViewSet(viewsets.ModelViewSet):
         if user.status != User.PENDING:
             return Response({"detail": "This account is not awaiting approval."},
                             status=status.HTTP_400_BAD_REQUEST)
-        # Approving emails a temporary password. An address nobody has proved
-        # exists is an address that credential may be handed to by mistake, so
-        # the check bites here rather than merely showing beside the row.
-        # Google requests arrive verified — Google checked the address.
+        # Approval does not mail a password, but it can mail the address (a
+        # Google applicant is told they may sign in), and the address then
+        # becomes an account. One nobody has proved belongs to the applicant
+        # may be a typo or someone else's, so the check bites here rather than
+        # merely showing beside the row. Google requests arrive verified:
+        # Google checked the address.
         if not user.email_verified:
             return Response(
                 {"detail": "This applicant has not confirmed their email "
-                           "address yet, and approving would send a temporary "
-                           "password to an address nobody has verified. Ask "
+                           "address yet, and approving would open an account on "
+                           "an address nobody has verified. Ask "
                            "them to confirm their address from the sign-up "
                            "page; they can ask for a new code there."},
                 status=status.HTTP_400_BAD_REQUEST)
@@ -883,7 +886,13 @@ class UserViewSet(viewsets.ModelViewSet):
             entity_label=(f"{user.fullname or user.email} — access approved as "
                           f"{role.role_name} (asked for: {asked})"),
             entity_id=user.id, kind=ActivityLog.KIND_APPROVAL)
-        return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
+        # Only the Google door: a typed sign-up chose a password already.
+        email_queued = False
+        if user.google_sub:
+            email_queued = send_access_approved_notification(user, role)
+        data = dict(UserSerializer(user).data)
+        data["email_queued"] = email_queued
+        return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
     def decline(self, request, pk=None):
