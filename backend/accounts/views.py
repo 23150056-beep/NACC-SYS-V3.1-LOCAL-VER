@@ -735,17 +735,29 @@ class UserViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"])
     def archive(self, request, pk=None):
-        user = self.get_object()
-        if user.is_last_active_administrator():
-            return Response(
-                {"detail": "This is the only administrator account. Create the "
-                           "replacement administrator first — that hands over "
-                           "properly — then deactivate this one."},
-                status=status.HTTP_400_BAD_REQUEST)
-        user.status = User.ARCHIVED
-        # is_active follows status automatically (User.save).
-        user.save(update_fields=["status", "updated_at"])
-        self._log(user, ActivityLog.ARCHIVED)
+        self.get_object()  # permission and 404, as for every detail route
+        with transaction.atomic():
+            # Locked and re-read like approve/decline: an archive racing an
+            # approval would otherwise overwrite it, leaving an archived
+            # account whose owner was told they were approved.
+            user = User.objects.select_for_update().get(pk=pk)
+            if user.status == User.PENDING:
+                # A request is answered from Access Requests, where the decline
+                # is logged as one; archiving it here would skip that line.
+                return Response(
+                    {"detail": "This is an access request. Decline it from "
+                               "Access Requests."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            if user.is_last_active_administrator():
+                return Response(
+                    {"detail": "This is the only administrator account. Create the "
+                               "replacement administrator first — that hands over "
+                               "properly — then deactivate this one."},
+                    status=status.HTTP_400_BAD_REQUEST)
+            user.status = User.ARCHIVED
+            # is_active follows status automatically (User.save).
+            user.save(update_fields=["status", "updated_at"])
+            self._log(user, ActivityLog.ARCHIVED)
         return Response({"status": "archived"}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
@@ -838,58 +850,63 @@ class UserViewSet(viewsets.ModelViewSet):
         field into self-assignment — which is the exact thing this whole flow
         exists to prevent.
         """
-        user = self.get_object()
-        if user.status != User.PENDING:
-            return Response({"detail": "This account is not awaiting approval."},
-                            status=status.HTTP_400_BAD_REQUEST)
-        # Approval does not mail a password, but it can mail the address (a
-        # Google applicant is told they may sign in), and the address then
-        # becomes an account. One nobody has proved belongs to the applicant
-        # may be a typo or someone else's, so the check bites here rather than
-        # merely showing beside the row. Google requests arrive verified:
-        # Google checked the address.
-        if not user.email_verified:
-            return Response(
-                {"detail": "This applicant has not confirmed their email "
-                           "address yet, and approving would open an account on "
-                           "an address nobody has verified. Ask "
-                           "them to confirm their address from the sign-up "
-                           "page; they can ask for a new code there."},
-                status=status.HTTP_400_BAD_REQUEST)
+        self.get_object()  # permission and 404, as for every detail route
+        with transaction.atomic():
+            # Locked and re-read: an approve and a decline arriving together
+            # would each see PENDING and both win, leaving the account active
+            # with a log line saying it was declined (or the reverse).
+            user = User.objects.select_for_update().get(pk=pk)
+            if user.status != User.PENDING:
+                return Response({"detail": "This account is not awaiting approval."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            # Approval does not mail a password, but it can mail the address (a
+            # Google applicant is told they may sign in), and the address then
+            # becomes an account. One nobody has proved belongs to the applicant
+            # may be a typo or someone else's, so the check bites here rather than
+            # merely showing beside the row. Google requests arrive verified:
+            # Google checked the address.
+            if not user.email_verified:
+                return Response(
+                    {"detail": "This applicant has not confirmed their email "
+                               "address yet, and approving would open an account on "
+                               "an address nobody has verified. Ask "
+                               "them to confirm their address from the sign-up "
+                               "page; they can ask for a new code there."},
+                    status=status.HTTP_400_BAD_REQUEST)
 
-        role_id = request.data.get("role")
-        if not role_id:
-            return Response({"role": "Choose the role this account should have."},
-                            status=status.HTTP_400_BAD_REQUEST)
-        role = Role.objects.filter(pk=role_id).first()
-        if role is None:
-            return Response({"role": "Unknown role."},
-                            status=status.HTTP_400_BAD_REQUEST)
-        # Approving cannot mint an administrator. That account is the agency's
-        # recovery path and carries the single-admin handover rule with it;
-        # reaching it through this door would route around both.
-        if role.role_name == Role.ADMINISTRATOR:
-            return Response(
-                {"role": "An administrator cannot be created by approving a "
-                         "request. Add the account from User Management instead."},
-                status=status.HTTP_400_BAD_REQUEST)
+            role_id = request.data.get("role")
+            if not role_id:
+                return Response({"role": "Choose the role this account should have."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            role = Role.objects.filter(pk=role_id).first()
+            if role is None:
+                return Response({"role": "Unknown role."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            # Approving cannot mint an administrator. That account is the agency's
+            # recovery path and carries the single-admin handover rule with it;
+            # reaching it through this door would route around both.
+            if role.role_name == Role.ADMINISTRATOR:
+                return Response(
+                    {"role": "An administrator cannot be created by approving a "
+                             "request. Add the account from User Management instead."},
+                    status=status.HTTP_400_BAD_REQUEST)
 
-        asked = user.requested_role.role_name if user.requested_role else "none stated"
-        user.role = role
-        user.status = User.ACTIVE
-        user.save(update_fields=["role", "status", "updated_at"])
-        # Both roles in the audit line: when someone asked for more than they
-        # were given, that should be legible a year later.
-        log_activity(
-            request.user, ActivityLog.UPDATED, ActivityLog.USER,
-            entity_type="User",
-            entity_label=(f"{user.fullname or user.email} — access approved as "
-                          f"{role.role_name} (asked for: {asked})"),
-            entity_id=user.id, kind=ActivityLog.KIND_APPROVAL)
-        # Only the Google door: a typed sign-up chose a password already.
-        email_queued = False
-        if user.google_sub:
-            email_queued = send_access_approved_notification(user, role)
+            asked = user.requested_role.role_name if user.requested_role else "none stated"
+            user.role = role
+            user.status = User.ACTIVE
+            user.save(update_fields=["role", "status", "updated_at"])
+            # Both roles in the audit line: when someone asked for more than they
+            # were given, that should be legible a year later.
+            log_activity(
+                request.user, ActivityLog.UPDATED, ActivityLog.USER,
+                entity_type="User",
+                entity_label=(f"{user.fullname or user.email} — access approved as "
+                              f"{role.role_name} (asked for: {asked})"),
+                entity_id=user.id, kind=ActivityLog.KIND_APPROVAL)
+            # Only the Google door: a typed sign-up chose a password already.
+            email_queued = False
+            if user.google_sub:
+                email_queued = send_access_approved_notification(user, role)
         data = dict(UserSerializer(user).data)
         data["email_queued"] = email_queued
         return Response(data, status=status.HTTP_200_OK)
@@ -903,19 +920,22 @@ class UserViewSet(viewsets.ModelViewSet):
         sign in again for a fresh request and wait for a distracted approval.
         Deleting the row would hand them exactly that loop.
         """
-        user = self.get_object()
-        if user.status != User.PENDING:
-            return Response({"detail": "This account is not awaiting approval."},
-                            status=status.HTTP_400_BAD_REQUEST)
-        asked = user.requested_role.role_name if user.requested_role else "none stated"
-        user.status = User.ARCHIVED
-        user.save(update_fields=["status", "updated_at"])
-        log_activity(
-            request.user, ActivityLog.ARCHIVED, ActivityLog.USER,
-            entity_type="User",
-            entity_label=(f"{user.fullname or user.email} — access request "
-                          f"declined (asked for: {asked})"),
-            entity_id=user.id, kind=ActivityLog.KIND_DECLINE)
+        self.get_object()  # permission and 404, as for every detail route
+        with transaction.atomic():
+            # See approve(): the answer is decided under the row lock.
+            user = User.objects.select_for_update().get(pk=pk)
+            if user.status != User.PENDING:
+                return Response({"detail": "This account is not awaiting approval."},
+                                status=status.HTTP_400_BAD_REQUEST)
+            asked = user.requested_role.role_name if user.requested_role else "none stated"
+            user.status = User.ARCHIVED
+            user.save(update_fields=["status", "updated_at"])
+            log_activity(
+                request.user, ActivityLog.ARCHIVED, ActivityLog.USER,
+                entity_type="User",
+                entity_label=(f"{user.fullname or user.email} — access request "
+                              f"declined (asked for: {asked})"),
+                entity_id=user.id, kind=ActivityLog.KIND_DECLINE)
         return Response({"status": user.status}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="reset-password")

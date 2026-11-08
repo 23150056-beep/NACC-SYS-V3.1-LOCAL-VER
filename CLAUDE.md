@@ -631,16 +631,26 @@ the only access control the system has.
   `must_change_password`: the gate asks for the CURRENT password and
   `check_password()` is False for an unusable one, so it locks them out with no
   way back. `reactivate` guards this with `has_usable_password()`.
-- **Approval requires `email_verified`**, because approving emails a temporary
-  password and a mistyped address sends it to whoever owns the typo. Google
-  requests arrive verified; typed ones confirm a six-digit code. Migration 0010
-  backfilled the Google accounts already in the queue.
-- **Approval is the only way in** (4 Oct 2026, `UserWriteSerializer.validate`):
-  an edit cannot move an account from PENDING to ACTIVE ("Approve it from
-  Access Requests"). An edit that changes a pending typed request's address
-  clears `email_verified`, so the new address must be proved too. A pending
-  Google request's address cannot be edited at all: it is the Google
-  account's, and with no code door it could never be proved again.
+- **Approval requires `email_verified`**, because approving opens an account on
+  that address (and, for Google, mails it), so an address nobody proved may be
+  a typo or someone else's. Google requests arrive verified; typed ones
+  confirm a six-digit code. Migration 0010 backfilled the Google accounts
+  already in the queue.
+- **Approval is the only way in** (4 Oct 2026, `UserWriteSerializer`): an edit
+  cannot change `status` at all - a different one is a 400 naming the right
+  door, the same one is accepted because the edit form resends it. The only
+  status doors are approve, decline, archive and reactivate; archive refuses a
+  pending request (decline it, so the audit line exists), and approve, decline
+  and archive lock the row and re-check its status, so two answers racing
+  cannot both win. Emails are stored lowercase and are unique
+  case-insensitively (also against another row's username); `username` is
+  never writable and always equals the email. An edit that changes a pending
+  typed request's address clears `email_verified`, so the new address must be
+  proved too. A pending Google request's address cannot be edited at all: it
+  is the Google account's, and with no code door it could never be proved
+  again. A Google sign-in clears `must_change_password` only when the account
+  has no usable password; the reactivate dialog reads `has_password`, not
+  `google_linked`.
 
 ## The assistant app
 

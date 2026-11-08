@@ -13,6 +13,7 @@ import CredentialHandoffs from './CredentialHandoffs';
 import AccessRequests from './AccessRequests';
 import { exactDate, shortDate, timeAgo } from '../utils/time';
 import { useOpenFromLink } from '../utils/links';
+import { firstError } from '../utils/errors';
 
 // No password field: the server generates a temporary password on create and
 // returns it exactly once — admins never choose another user's password.
@@ -254,11 +255,17 @@ export default function Users() {
   }, []);
 
   const openCreate = () => {
+    shownId.current = null;
     setError(''); setActivity(null); setPristine({ ...EMPTY }); setForm({ ...EMPTY });
   };
 
+  // The account the drawer is showing now. Replies are slow on the hosted
+  // database, and a history that arrives after the drawer moved on would be
+  // drawn under somebody else's name.
+  const shownId = useRef(null);
   const openEdit = (u, { toRole = false } = {}) => {
     setError('');
+    shownId.current = u.id;
     setPristine({ ...EMPTY, ...u });
     setForm({ ...EMPTY, ...u });
     setSeekRole(toRole);
@@ -266,8 +273,8 @@ export default function Users() {
     // and nobody opens every account.
     setActivity(null);
     api.get(`/users/${u.id}/activity/`)
-      .then((r) => setActivity(r.data))
-      .catch(() => setActivity([]));
+      .then((r) => { if (shownId.current === u.id) setActivity(r.data); })
+      .catch(() => { if (shownId.current === u.id) setActivity([]); });
   };
 
   /* Two links from the ISA's console on the Dashboard (see utils/links.js).
@@ -300,7 +307,8 @@ export default function Users() {
       setSearchParams(next, { replace: true });
     };
     if (editParam === '') { clear(); return; }
-    if (loading || form || handledEdit.current === editParam) return;
+    // A failed directory is not "not found": keep the link until Try again works.
+    if (loading || loadError || form || handledEdit.current === editParam) return;
     handledEdit.current = editParam;
     const target = users.find((u) => String(u.id) === editParam);
     clear();
@@ -309,7 +317,7 @@ export default function Users() {
     // One-shot, like Records' ?edit=: depending on the helpers would reopen
     // the drawer each time it was closed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editParam, loading, form, users]);
+  }, [editParam, loading, loadError, form, users]);
 
   // A dialog gives the focus back to whatever had it when it opened. Arriving by
   // a link, nothing has: the page was only just drawn, so closing the dialog
@@ -335,7 +343,7 @@ export default function Users() {
       setSearchParams(next, { replace: true });
     };
     if (resetParam === '') { clear(); return; }
-    if (loading || form || confirm || handledReset.current === resetParam) return;
+    if (loading || loadError || form || confirm || handledReset.current === resetParam) return;
     handledReset.current = resetParam;
     const target = users.find((u) => String(u.id) === resetParam);
     clear();
@@ -347,7 +355,7 @@ export default function Users() {
       : 'That account could not be found.');
     // One-shot, like ?edit= above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [resetParam, editParam, loading, form, confirm, users]);
+  }, [resetParam, editParam, loading, loadError, form, confirm, users]);
 
   const dirty = !!form && !!pristine && EDITABLE.some((k) => String(form[k] ?? '') !== String(pristine[k] ?? ''));
   const closeForm = () => { setForm(null); setPristine(null); setError(''); setSeekRole(false); };
@@ -421,7 +429,11 @@ export default function Users() {
       const payload = { ...form };
       delete payload.role_name; delete payload.fullname;
       delete payload.must_change_password; delete payload.admin_takeover_pending;
-      delete payload.google_linked; delete payload.last_login; delete payload.created_at;
+      delete payload.google_linked; delete payload.has_password; delete payload.last_login; delete payload.created_at;
+      // A drawer opened before somebody approved or deactivated the account
+      // would resend the old status; the server owns status now, and the
+      // username is always the email.
+      if (form.id) { delete payload.status; delete payload.username; }
       if (form.id) {
         await api.put(`/users/${form.id}/`, payload);
         toast.success(roleChange ? `${nameOf(form)}'s role is now ${roleLabel(roleChange.to)}` : 'User updated');
@@ -437,9 +449,7 @@ export default function Users() {
       refreshActivity();
     } catch (err) {
       const body = err.response?.data;
-      setError(typeof body === 'string' ? body
-        : body ? Object.entries(body).map(([k, v]) => `${k}: ${[].concat(v).join(' ')}`).join('\n')
-          : 'Save failed.');
+      setError(firstError(body, 'Save failed.'));
       toast.error('Could not save the user. Please try again.');
     } finally {
       setSaving(false);
@@ -448,7 +458,7 @@ export default function Users() {
 
   const runConfirmed = async () => {
     const { kind, user: u } = confirm;
-    if (kind === 'discard') { setConfirm(null); closeForm(); return; }
+    if (kind === 'discard') { const then = confirm.then; setConfirm(null); closeForm(); if (then) setTab(then); return; }
     // The drawer's own save path — the dialog was the confirmation, not a
     // separate action, so errors still land in the drawer where the form is.
     // Awaited before closing so the dialog carries the saving state; submitForm
@@ -542,6 +552,15 @@ export default function Users() {
       return [{ id: 'edit', label: 'View details', icon: 'eye', onSelect: () => openEdit(u) }];
     }
     const lock = roleLockOf(u);
+    // A pending request has no password to issue and nothing to deactivate:
+    // the decision belongs to the queue.
+    if (state === 'requested') {
+      return [
+        { id: 'edit', label: 'Edit details', icon: 'pencil', onSelect: () => openEdit(u) },
+        { separator: true },
+        { id: 'review', label: 'Approve or decline…', icon: 'user-check', onSelect: () => setTab('requests') },
+      ];
+    }
     return [
       { id: 'edit', label: 'Edit details', icon: 'pencil', onSelect: () => openEdit(u) },
       {
@@ -837,6 +856,15 @@ export default function Users() {
                     title={form.role_name === 'Administrator' ? 'A deactivated administrator can only return as a brand-new account.' : undefined}
                     onClick={() => setConfirm({ kind: 'reactivate', user: form })}
                   >Reactivate</Button>
+                ) : statusOf(form) === 'requested' ? (
+                  <Button
+                    variant="secondary" size="sm" iconLeft={<Icon name="user-check" size={15} />}
+                    onClick={() => {
+                      // Unsaved edits are asked about, as every other way out is.
+                      if (dirty) { setConfirm({ kind: 'discard', then: 'requests' }); return; }
+                      closeForm(); setTab('requests');
+                    }}
+                  >Approve or decline…</Button>
                 ) : (
                   <>
                     <Button variant="secondary" size="sm" iconLeft={<Icon name="key-round" size={15} />} onClick={() => setConfirm({ kind: 'reset', user: form })}>Temporary password</Button>
@@ -1014,7 +1042,9 @@ export default function Users() {
           onClose={() => setConfirm(null)} onConfirm={runConfirmed} busy={busy}
           tone="brand" icon={<Icon name="user-check" size={19} />}
           title={`Reactivate ${nameOf(confirm.user)}?`}
-          description="They can sign in again with their previous password, and will be required to set a new one before reaching any case data."
+          description={confirm.user.has_password === false
+            ? 'They can sign in again with Google as before. They have no password to change.'
+            : 'They can sign in again with their previous password, and will be required to set a new one before reaching any case data.'}
           confirmLabel="Reactivate" cancelLabel="Cancel"
         />
       )}

@@ -727,7 +727,7 @@ class ApprovingIsTheOnlyWayInTest(APITestCase):
             self._url(), {"status": User.ACTIVE, "role": self.staff_role.id},
             format="json")
         self.assertEqual(400, response.status_code)
-        self.assertIn("Approve it from Access Requests.", str(response.data))
+        self.assertIn("Approve or Decline in Access Requests", str(response.data))
         self.assertEqual(User.PENDING, User.objects.get(pk=self.applicant.pk).status)
 
     def test_a_put_cannot_either(self):
