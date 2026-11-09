@@ -1,20 +1,54 @@
 from django.utils import timezone
 from rest_framework import serializers
+from rest_framework.exceptions import APIException, PermissionDenied
 
+from accounts.models import Role
+from accounts.scoping import role_of
 from config.clock import clock
 from scheduling import visibility
 from scheduling.models import AvailabilityBlock, Appointment, Unavailability
+
+
+class DayAlreadyHasWindow(APIException):
+    """400 carrying the sentence AND the id of the window to edit instead.
+
+    A ValidationError would turn the id into a string and wrap every value in
+    a list, and the screen needs the id as a number to open that window. This
+    is not a ValidationError, so serializer.run_validation lets it through
+    untouched and the handler renders `detail` as given.
+    """
+    status_code = 400
+    default_detail = "That day already has availability."
+
+    def __init__(self, message, existing_id):
+        super().__init__(message)
+        self.detail = {"start_time": message, "existing_id": existing_id}
+
+
+def day_phrase(block):
+    """"Mondays" for a weekly window, "16 Nov" for a one-off date."""
+    if block.date is not None:
+        return f"{block.date.day} {block.date:%b}"
+    return f"{dict(AvailabilityBlock.WEEKDAYS).get(block.weekday, '')}s"
+
+
+def window_phrase(block):
+    """"8:00 AM-12:00 PM, 2 slots" - the existing window in words."""
+    slots = f"{block.capacity} slot{'' if block.capacity == 1 else 's'}"
+    return f"{clock(block.start_time)}-{clock(block.end_time)}, {slots}"
 
 
 class AvailabilityBlockSerializer(serializers.ModelSerializer):
     psychologist_name = serializers.CharField(
         source="psychologist.fullname", read_only=True, default=None)
     booked_ahead = serializers.SerializerMethodField()
+    outside_hours = serializers.SerializerMethodField()
 
     class Meta:
         model = AvailabilityBlock
         fields = ["id", "psychologist", "psychologist_name", "weekday", "date",
-                  "start_time", "end_time", "capacity", "active", "booked_ahead"]
+                  "start_time", "end_time", "capacity", "active", "booked_ahead",
+                  "outside_hours"]
         extra_kwargs = {"psychologist": {"required": False}}
 
     def get_booked_ahead(self, obj):
@@ -38,7 +72,44 @@ class AvailabilityBlockSerializer(serializers.ModelSerializer):
         elif obj.weekday is not None:
             # Django counts weekdays 1=Sunday..7=Saturday; Python 0=Monday.
             upcoming = upcoming.filter(start__week_day=(obj.weekday + 2) % 7 or 7)
+            # A one-off window replaces the weekly one on its own date, so
+            # sessions on those dates sit in the override, not in this window.
+            overridden = list(AvailabilityBlock.objects.filter(
+                psychologist_id=obj.psychologist_id, active=True,
+                date__isnull=False, date__gte=timezone.localdate())
+                .values_list("date", flat=True))
+            if overridden:
+                upcoming = upcoming.exclude(start__date__in=overridden)
         return upcoming.count()
+
+    def get_outside_hours(self, obj):
+        """Upcoming sessions on this window's day(s) that start OUTSIDE its
+        hours, so saving can say how many now sit beyond the posted time.
+
+        A one-off window replaces the weekly one on its date, and a change to
+        availability reports what is booked and changes nothing: those
+        sessions stay, as agreed with somebody. Cancelled and past sessions
+        are not counted.
+        """
+        upcoming = (Appointment.objects
+                    .filter(psychologist_id=obj.psychologist_id,
+                            start__gte=timezone.now())
+                    .exclude(status=Appointment.CANCELLED))
+        if obj.date is not None:
+            upcoming = upcoming.filter(start__date=obj.date)
+        elif obj.weekday is not None:
+            upcoming = upcoming.filter(start__week_day=(obj.weekday + 2) % 7 or 7)
+            overridden = list(AvailabilityBlock.objects.filter(
+                psychologist_id=obj.psychologist_id, active=True,
+                date__isnull=False, date__gte=timezone.localdate())
+                .values_list("date", flat=True))
+            if overridden:
+                upcoming = upcoming.exclude(start__date__in=overridden)
+        else:
+            return 0
+        inside = upcoming.filter(start__time__gte=obj.start_time,
+                                 start__time__lt=obj.end_time).count()
+        return upcoming.count() - inside
 
     def validate(self, attrs):
         start = attrs.get("start_time") or (self.instance.start_time if self.instance else None)
@@ -51,25 +122,57 @@ class AvailabilityBlockSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"weekday": "Pick a recurring weekday or a specific date."})
 
-        # One window per psychologist per day-slot: overlapping blocks make the
-        # booking capacity check double-count appointments, so reject them.
-        # Adjacent windows (e.g. 09:00-12:00 + 12:00-15:00) stay allowed.
+        # One window a day. A day holds a single window and its slot count is
+        # the day's limit; adding availability to a day that has one means
+        # EDITING that day. Weekly windows are unique per (psychologist,
+        # weekday), one-off windows per (psychologist, date).
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
         psy = attrs.get("psychologist") or (self.instance.psychologist if self.instance else None)
         if psy is None:
-            psy = getattr(self.context.get("request"), "user", None)
+            psy = user
+        if user is not None and getattr(user, "pk", None) is not None:
+            role = role_of(request)
+            # Checked against whose window this ends up on, not only whose it
+            # was (the view repeats it for the save): the sentence below
+            # describes a window, so it is not given to someone who may not
+            # touch that calendar.
+            if role != Role.ADMINISTRATOR and (
+                    role != Role.PSYCHOLOGIST or psy is None or psy.pk != user.pk):
+                if self.instance is None and role == Role.PSYCHOLOGIST:
+                    psy = user          # create files it under themselves
+                else:
+                    raise PermissionDenied("You can only manage your own availability.")
+        active = attrs.get("active", self.instance.active if self.instance else True)
         if psy is not None and getattr(psy, "pk", None) is not None and start and end:
             qs = AvailabilityBlock.objects.filter(psychologist=psy, active=True)
             qs = (qs.filter(date=date) if date is not None
                   else qs.filter(date__isnull=True, weekday=weekday))
             if self.instance is not None:
                 qs = qs.exclude(pk=self.instance.pk)
-            clash = qs.filter(start_time__lt=end, end_time__gt=start).first()
-            if clash:
-                day = clash.date or f"{dict(AvailabilityBlock.WEEKDAYS).get(clash.weekday, '')}s"
-                raise serializers.ValidationError({
-                    "start_time": f"Overlaps an existing block ({day} "
-                                  f"{clock(clash.start_time)}–{clock(clash.end_time)}) — "
-                                  "edit that block instead."})
+            held = self.instance
+            same_day = (held is not None and held.active and held.psychologist_id == psy.pk
+                        and held.date == date and (date is not None or held.weekday == weekday))
+            if active and not same_day:
+                taken = qs.order_by("id").first()
+                if taken is not None:
+                    raise DayAlreadyHasWindow(
+                        f"{day_phrase(taken)} already have availability "
+                        f"({window_phrase(taken)}). Edit that day instead."
+                        if taken.date is None else
+                        f"{day_phrase(taken)} already has availability "
+                        f"({window_phrase(taken)}). Edit that day instead.",
+                        taken.pk)
+            elif active:
+                # A day that already held two windows before this rule keeps
+                # working and stays editable, but may not be stretched over
+                # its twin: capacity would double-count across the pair.
+                clash = qs.filter(start_time__lt=end, end_time__gt=start).first()
+                if clash:
+                    raise serializers.ValidationError({
+                        "start_time": f"Overlaps an existing block ({day_phrase(clash)} "
+                                      f"{clock(clash.start_time)}\u2013{clock(clash.end_time)}) "
+                                      "\u2014 edit that block instead."})
         return attrs
 
 

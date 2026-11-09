@@ -8,7 +8,7 @@ import { useConfirm, useNotice } from '../context/ConfirmContext';
 import { Alert, Badge, Button, FormField, Icon, IconChip, Input, Modal, Select, TimeInput } from '../ui';
 import { DURATIONS, PURPOSE_LABEL, initialsOf } from '../utils/child';
 import { firstError } from '../utils/errors';
-import { clock, clockRange, timeAgo } from '../utils/time';
+import { clock, clockRange, timeAgo, weekdayDate, weekdayDateTime } from '../utils/time';
 
 /* "Waiting for your answer" - the children a psychologist has been asked to
  * take (owner's request, 28 Sep 2026).
@@ -225,7 +225,13 @@ export default function AssignmentRequests({ onChanged }) {
                     <Badge tone="neutral" size="sm">Moving from {r.previous_psychologist_name}</Badge>
                   )}
                   <span style={{ fontSize: 11.5, color: 'var(--text-faint)', alignSelf: 'center' }}>
-                    Asked by {r.requested_by_name || 'someone'} · {timeAgo(r.created_at)}
+                    Asked by {r.requested_by_name || 'someone'}
+                    {weekdayDateTime(r.created_at) && (
+                      <> on <time dateTime={r.created_at}>{weekdayDateTime(r.created_at)}</time></>
+                    )}
+                    {(!weekdayDateTime(r.created_at) || Date.now() - new Date(r.created_at).getTime() < 604800000) && (
+                      <>{' · '}{timeAgo(r.created_at)}</>
+                    )}
                   </span>
                 </div>
               </div>
@@ -268,7 +274,8 @@ function DeclineDialog({ request, onDecline, onClose }) {
     <Modal
       open onClose={onClose} tone="danger" icon={<Icon name="user-x" size={19} />}
       title={`Decline ${request.child_name}'s case?`}
-      subtitle={`${request.child_ref} · asked by ${request.requested_by_name || 'someone'}`}
+      subtitle={`${request.child_ref} · asked by ${request.requested_by_name || 'someone'}`
+        + (weekdayDate(request.created_at) ? ` on ${weekdayDate(request.created_at)}` : '')}
       footer={<>
         <Button variant="ghost" onClick={onClose}>Go back</Button>
         <Button variant="danger" onClick={submit} disabled={busy || !reason.trim()}>Decline the case</Button>

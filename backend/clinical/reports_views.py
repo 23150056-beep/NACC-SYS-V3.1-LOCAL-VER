@@ -434,13 +434,21 @@ class DashboardView(generics.GenericAPIView):
             {"bucket": m, "intake": intake.get(m, 0), "terminations": term.get(m, 0)}
             for m in months]
 
-        today_weekday = tz.localdate().weekday()
+        from scheduling.availability import blocks_for_day
+
+        def _todays_blocks(all_blocks, day):
+            # A dated window replaces the weekly one for that date, per person.
+            by_person = {}
+            for b in all_blocks:
+                by_person.setdefault(b.psychologist_id, []).append(b)
+            return [b for person in by_person.values()
+                    for b in blocks_for_day(person, day)]
+
         availability_today = [{
             "psychologist": display_name(b.psychologist),
             "start": str(b.start_time)[:5], "end": str(b.end_time)[:5],
             "capacity": b.capacity,
-        } for b in blocks
-            if (b.date == tz.localdate()) or (b.date is None and b.weekday == today_weekday)]
+        } for b in _todays_blocks(blocks, tz.localdate())]
 
         today = tz.localdate()
 

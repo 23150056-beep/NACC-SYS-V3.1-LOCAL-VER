@@ -26,29 +26,30 @@ from datetime import datetime, time, timedelta
 
 from django.utils import timezone
 
+from scheduling.availability import blocks_for_day
 from scheduling.models import Appointment, AvailabilityBlock
 
 # Monday to Friday. A government office, not a hotline.
 CLINIC_WEEKDAYS = (0, 1, 2, 3, 4)
 
-# Morning and afternoon with a lunch gap between them. Two blocks rather than
-# one long one because the gap is real, and because adjacent-but-not-
-# overlapping is exactly what the availability serializer allows.
+# One window a day, which is the rule the availability form enforces (a day
+# holds a single window and its slot count is the day's limit). The lunch hour
+# is inside it: a session is simply not offered a window of its own for it.
 CLINIC_WINDOWS = (
-    (time(8, 0), time(12, 0)),
-    (time(13, 0), time(17, 0)),
+    (time(8, 0), time(17, 0)),
 )
 
-# Per window per day. Eight half-hour slots exist in a four-hour window; six
-# leaves the demo with real openings to book into rather than a full diary.
-DEFAULT_CAPACITY = 6
+# The day's limit. Nine sixty-minute sessions fit between 8:00 AM and 5:00 PM;
+# eight keeps the diary honest, and MAX_SESSIONS_PER_DAY below stays under it
+# so a respread day can always take one more.
+DEFAULT_CAPACITY = 8
 
 # How far either side of its original date an appointment may be moved to find
 # a free weekday slot. Two working weeks is plenty and keeps the history
 # roughly where the seeder meant it.
 SEARCH_DAYS = 12
 
-# Eight sixty-minute sessions fit in the two windows. Stopping at five leaves
+# Eight sessions are the day's limit. Stopping at five leaves
 # every clinic day with something to book into, which is the entire point of
 # repairing the demo: the seeder puts every child on the same few dates, so
 # without a ceiling the repair produces days that are perfectly correct and
@@ -59,30 +60,26 @@ MAX_SESSIONS_PER_DAY = 5
 def install_availability(psychologists, capacity=DEFAULT_CAPACITY):
     """A Monday-to-Friday working week for each psychologist.
 
-    `get_or_create`, so re-running fills gaps and never overwrites: a capacity
-    somebody corrected in the form survives.
+    One window a day, and a day that already has one is left alone - a
+    capacity or hours somebody corrected in the form survive, and a second
+    window would break the rule the endpoint enforces (one per psychologist
+    per weekday). Re-running fills gaps and never overwrites.
 
     Returns the number of blocks created.
     """
     made = 0
     for person in psychologists:
         for weekday in CLINIC_WEEKDAYS:
-            for start, end in CLINIC_WINDOWS:
-                # Never straddle a window this person already posted. The
-                # availability form refuses overlapping blocks outright -
-                # capacity would double-count across the pair and the slot grid
-                # would offer the shared hours twice - so writing one here
-                # produces data the UI itself calls invalid.
-                clash = AvailabilityBlock.objects.filter(
-                    psychologist=person, weekday=weekday, date=None, active=True,
-                    start_time__lt=end, end_time__gt=start).exists()
-                if clash:
-                    continue
-                AvailabilityBlock.objects.create(
+            if AvailabilityBlock.objects.filter(
                     psychologist=person, weekday=weekday, date=None,
-                    start_time=start, end_time=end,
-                    capacity=capacity, active=True)
-                made += 1
+                    active=True).exists():
+                continue
+            start, end = CLINIC_WINDOWS[0]
+            AvailabilityBlock.objects.create(
+                psychologist=person, weekday=weekday, date=None,
+                start_time=start, end_time=end,
+                capacity=capacity, active=True)
+            made += 1
     return made
 
 
@@ -121,10 +118,10 @@ def prune_overlapping_blocks():
     return removed
 
 
-def clinic_slots(step_minutes=30, duration_minutes=60):
-    """Every start time a session of `duration_minutes` can take in a day."""
+def _grid(windows, step_minutes=30, duration_minutes=60):
+    """Every start time a session of `duration_minutes` can take in `windows`."""
     slots = []
-    for start, end in CLINIC_WINDOWS:
+    for start, end in windows:
         cursor = datetime.combine(datetime.min.date(), start)
         closes = datetime.combine(datetime.min.date(), end)
         while cursor + timedelta(minutes=duration_minutes) <= closes:
@@ -133,14 +130,49 @@ def clinic_slots(step_minutes=30, duration_minutes=60):
     return slots
 
 
-def _is_clinic_time(local_dt, duration_minutes):
+def clinic_slots(step_minutes=30, duration_minutes=60):
+    """Every start time a session of `duration_minutes` can take in a clinic day."""
+    return _grid(CLINIC_WINDOWS, step_minutes, duration_minutes)
+
+
+class _Hours:
+    """Where each psychologist's sessions may sit: their own posted windows.
+
+    The windows a database really holds, not the constant the seeder writes -
+    a demo database seeded before the one-window rule still has a lunch gap,
+    and a session placed in it is one the booking rule refuses to move. A
+    psychologist with no window at all falls back to the clinic day.
+    """
+
+    def __init__(self):
+        self._blocks = {}
+
+    def windows(self, psychologist_id, day):
+        if psychologist_id not in self._blocks:
+            self._blocks[psychologist_id] = list(AvailabilityBlock.objects.filter(
+                psychologist_id=psychologist_id, active=True))
+        blocks = self._blocks[psychologist_id]
+        if not blocks:
+            return list(CLINIC_WINDOWS), MAX_SESSIONS_PER_DAY
+        today = blocks_for_day(blocks, day)
+        return ([(b.start_time, b.end_time) for b in today],
+                min(MAX_SESSIONS_PER_DAY, sum(b.capacity for b in today)))
+
+    def slots(self, psychologist_id, day, duration_minutes):
+        windows, _ = self.windows(psychologist_id, day)
+        return _grid(windows, duration_minutes=duration_minutes)
+
+    def limit(self, psychologist_id, day):
+        return self.windows(psychologist_id, day)[1]
+
+
+def _is_clinic_time(local_dt, duration_minutes, psychologist_id=None, hours=None):
     if local_dt.weekday() not in CLINIC_WEEKDAYS:
         return False
-    ends = (local_dt + timedelta(minutes=duration_minutes)).time()
-    for start, end in CLINIC_WINDOWS:
-        if start <= local_dt.time() and ends <= end:
-            return local_dt.time() in clinic_slots(duration_minutes=duration_minutes)
-    return False
+    if hours is not None:
+        return local_dt.time() in hours.slots(
+            psychologist_id, local_dt.date(), duration_minutes)
+    return local_dt.time() in clinic_slots(duration_minutes=duration_minutes)
 
 
 def _span(slot, minutes, step_minutes=30):
@@ -193,6 +225,7 @@ def realign_appointments(duration_minutes=60, respread=False):
 
     Returns (moved, left_alone).
     """
+    hours = _Hours()
     taken = {}          # (psychologist_id, date) -> set of occupied grid times
     counts = {}         # (psychologist_id, date) -> sessions placed that day
     for appt in (Appointment.objects
@@ -201,30 +234,30 @@ def realign_appointments(duration_minutes=60, respread=False):
                  .order_by("start", "id")):
         local = timezone.localtime(appt.start)
         minutes = appt.duration_minutes or duration_minutes
-        if not respread and _is_clinic_time(local, minutes):
+        if not respread and _is_clinic_time(local, minutes, appt.psychologist_id, hours):
             key = (appt.psychologist_id, local.date())
             taken.setdefault(key, set()).update(_span(local.time(), minutes))
             counts[key] = counts.get(key, 0) + 1
 
     moved = 0
     kept = 0
-    slots = clinic_slots(duration_minutes=duration_minutes)
     for appt in (Appointment.objects
                  .exclude(status=Appointment.CANCELLED)
                  .select_related("psychologist")
                  .order_by("start", "id")):
         local = timezone.localtime(appt.start)
         minutes = appt.duration_minutes or duration_minutes
-        if not respread and _is_clinic_time(local, minutes):
+        if not respread and _is_clinic_time(local, minutes, appt.psychologist_id, hours):
             kept += 1
             continue
 
         placed = None
         for day in _candidate_days(local.date()):
             used = taken.setdefault((appt.psychologist_id, day), set())
-            if counts.get((appt.psychologist_id, day), 0) >= MAX_SESSIONS_PER_DAY:
+            if counts.get((appt.psychologist_id, day), 0) >= hours.limit(
+                    appt.psychologist_id, day):
                 continue
-            for slot in slots:
+            for slot in hours.slots(appt.psychologist_id, day, minutes):
                 span = _span(slot, minutes)
                 if used.isdisjoint(span):
                     used.update(span)
