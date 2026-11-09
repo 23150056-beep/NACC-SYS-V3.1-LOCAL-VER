@@ -62,25 +62,28 @@ services:
         value: "2"
 
       # ---- Uploaded files -----------------------------------------------
-      # OFF, deliberately, and this is the demo's whole file story.
+      # ON, in the demo's OWN R2 bucket, nacc-v3-demo-media (as set on the
+      # service in the dashboard, checked 9 Nov 2026). This file used to say
+      # "false" while the service ran with "true": a Blueprint sync offered to
+      # switch storage off, which would have sent uploads to the container's
+      # disk (lost on every deploy or wake) and stopped reading the files
+      # already in the bucket. The file now matches the service.
       #
-      # The demo has no files. Its caseload comes from a fixture that carries
-      # no reports, no consent scans and no photographs, and no object is ever
-      # copied from the live bucket. So there is nothing to store, and setting
-      # up object storage would be configuring a bucket to hold nothing.
+      # Never point the demo at nacc-v3-media: that is the LIVE bucket, and a
+      # demo visitor's upload would land among real case files.
       #
-      # With USE_S3=false, anything a visitor does upload lands on the
-      # container's own disk and disappears on the next deploy or wake. For a
-      # system holding real case files that would be unacceptable — it is
-      # exactly why the LIVE deployment sets this to true. For a demo whose
-      # records are fictional it is correct: nothing of value can be lost,
-      # because nothing of value is there.
-      #
-      # If this demo ever needs to keep an upload, create a SEPARATE bucket.
-      # Never point it at nacc-v3-media: a demo visitor's upload would land
-      # among real case files.
+      # The AWS_ values are set in the dashboard and never written here;
+      # sync: false only declares them, so a sync can never blank them.
       - key: USE_S3
-        value: "false"
+        value: "true"
+      - key: AWS_STORAGE_BUCKET_NAME
+        sync: false
+      - key: AWS_S3_ENDPOINT_URL
+        sync: false
+      - key: AWS_ACCESS_KEY_ID
+        sync: false
+      - key: AWS_SECRET_ACCESS_KEY
+        sync: false
 
       # ---- Google Sign-In (optional; staff and psychologists only) -------
       # Leave unset to deploy with the password form only. When set, the

@@ -2597,8 +2597,10 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   sent uploads to the container disk. **Never approve a Blueprint sync without
   reading every line it lists.** So `render.yaml` changes do NOT reach the
   demo by a push: the cache headers and `RUN_SEED=false` were set by hand in
-  the dashboard on 9 Nov. Settle it by making the file's `USE_S3` match the
-  dashboard and pointing the Blueprint at `cloud-setup` - not done yet.
+  the dashboard on 9 Nov. The file now matches the service (`USE_S3: "true"`,
+  the demo's own bucket `nacc-v3-demo-media`, the four `AWS_` keys declared
+  `sync: false`); what is left is pointing the Blueprint at `cloud-setup` in
+  its settings, then reading the sync it offers before approving it.
 - **This sandbox cannot measure the demo API**: Cloudflare in front of
   Render answers a cloud session with a bot challenge (429,
   `cf-mitigated: challenge`) or holds the request, so a curl timeout from a
