@@ -163,3 +163,96 @@ class PendingCountQueryTest(_World):
             self.assertEqual(self.client.get("/api/users/pending-count/").status_code, 403)
         self.client.force_authenticate(None)
         self.assertEqual(self.client.get("/api/users/pending-count/").status_code, 401)
+
+
+class ChildListQueryCountTest(_World):
+    """GET /api/children/: the most-fetched endpoint. One query for the rows
+    and one per prefetched relation, however many children there are."""
+    CEILING = {"admin": 10, "staff": 10, "psychologist": 10}
+
+    def test_the_list_costs_the_same_for_three_children_and_nine(self):
+        self.add_children(3)
+        url = "/api/children/"
+        who = {"admin": self.admin, "staff": self.staff,
+               "psychologist": Child.objects.first().assigned_psychologist}
+        few = {k: self.count(u, url)[0] for k, u in who.items()}
+        self.add_children(6)
+        for role, user in who.items():
+            many, response = self.count(user, url)
+            self.assertEqual(few[role], many, f"{role}: grew with the children")
+            self.assertLessEqual(many, self.CEILING[role], role)
+        _, response = self.count(self.admin, url)
+        self.assertEqual(len(response.data), 9)
+
+
+class SignedInRequestQueryCountTest(_World):
+    """A real token costs one query for the user, with the role joined in; the
+    role used to be a second query on every authenticated request."""
+
+    def test_the_token_lookup_reads_the_role_with_the_user(self):
+        from rest_framework.test import APIClient
+        from rest_framework_simplejwt.tokens import RefreshToken
+        from accounts.token_claims import CLAIM
+        refresh = RefreshToken.for_user(self.admin)
+        refresh[CLAIM] = self.admin.get_session_auth_hash()
+        client = APIClient()
+        client.credentials(HTTP_AUTHORIZATION=f"Bearer {refresh.access_token}")
+        client.get("/api/auth/me/")
+        with CaptureQueriesContext(connection) as queries:
+            response = client.get("/api/auth/me/")
+        self.assertEqual(response.status_code, 200, response.content[:200])
+        roles = [q["sql"] for q in queries if 'FROM "tbl_role"' in q["sql"]
+                 and 'JOIN' not in q["sql"]]
+        self.assertEqual(roles, [], "the role was read in a query of its own")
+
+
+class AdminOverviewQueryCountTest(_World):
+    """GET /api/admin/overview/: the security log is one query, whatever the
+    kinds and numbers of lines in it, and no queue costs a count of its own."""
+    CEILING = 26
+
+    def fill_the_log(self, n):
+        from datetime import timedelta
+        from django.utils import timezone
+        from activity.models import ActivityLog as Log
+        from assistant.models import AssistantJob
+        now = timezone.now()
+        for i in range(n):
+            Log.objects.create(actor=self.staff, action=Log.EXPORTED, category=Log.RECORD,
+                               entity_type="Child", entity_label="Exported rows")
+            Log.objects.create(actor=None, action=Log.UPDATED, category=Log.SECURITY,
+                               entity_type="User",
+                               entity_label=f"Login locked for p{i}@x.ph after repeated failures")
+            Log.objects.create(actor=None, action=Log.CREATED, category=Log.SECURITY,
+                               entity_type="User",
+                               entity_label=f"Name{i} — access request (asked for: Staff)")
+            Log.objects.create(actor=self.admin, action=Log.UPDATED, category=Log.USER,
+                               entity_type="User", entity_id=self.staff.pk,
+                               kind=Log.KIND_RESET,
+                               entity_label=f"Person {i} — password reset")
+            User.objects.create(username=f"pend{self.made}{i}@x.ph",
+                                email=f"pend{self.made}{i}@x.ph", status=User.PENDING,
+                                is_active=False, first_name=f"Pen{i}", last_name="Ding")
+        self.made += n
+        Log.objects.filter(category__in=[Log.SECURITY, Log.USER, Log.RECORD]).update(
+            created_at=now - timedelta(hours=1))
+        for child in Child.objects.all():
+            AssistantJob.objects.create(job_type="brief", input_ref=f"child:{child.pk}",
+                                        child=child, created_by=self.admin, ok=True)
+
+    def test_the_console_does_not_grow_with_the_log_or_the_queues(self):
+        self.add_children(2)
+        self.fill_the_log(2)
+        url = "/api/admin/overview/"
+        few, _ = self.count(self.admin, url)
+        self.add_children(4)
+        self.fill_the_log(8)
+        many, response = self.count(self.admin, url)
+        self.assertEqual(few, many, "grew with the rows")
+        self.assertLessEqual(many, self.CEILING)
+        # The caps still hold with the log full: five of a kind, the rest told.
+        log = response.data["security_log"]
+        self.assertEqual(sum(1 for e in log if e["kind"] == "lockout"), 5)
+        more = {m["kind"]: m["count"] for m in response.data["security_log_more"]}
+        self.assertEqual(more["lockout"], 5)
+        self.assertEqual(more["request"], 5)

@@ -14,6 +14,7 @@ import ReportCheckNote from '../components/ReportCheckNote';
 import UploadDrawer from '../components/UploadDrawer';
 import { hasCheckNote } from '../utils/reportCheck';
 import { loadAll } from '../utils/load';
+import { useChildren } from '../context/ChildrenContext';
 
 
 // Files and referrals carry created_at only, so "newest" is newest filed.
@@ -32,7 +33,8 @@ export default function Report() {
   const [files, setFiles] = useState([]);
   const [viewing, setViewing] = useState(null); // the report being read on screen
   const [caseReferrals, setCaseReferrals] = useState([]);
-  const [children, setChildren] = useState([]);
+  const { children: allChildren, revalidate: revalidateChildren } = useChildren();
+  const children = useMemo(() => allChildren.filter((c) => c.status === 'active'), [allChildren]);
   const [q, setQ] = useState('');
   const [upload, setUpload] = useState(null); // { kind: 'report' | 'case_referral', child }
   const [openChild, setOpenChild] = useState(null);
@@ -51,8 +53,8 @@ export default function Report() {
     () => api.get('/result-entries/').then((r) => setEntries(r.data)),
     () => api.get('/report-files/').then((r) => setFiles(r.data)),
     () => api.get('/case-referrals/').then((r) => setCaseReferrals(r.data)),
-    () => api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))),
-  ], 'Could not load the results. Check your connection and refresh.'), [toast]);
+    () => revalidateChildren(),
+  ], 'Could not load the results. Check your connection and refresh.'), [toast, revalidateChildren]);
   useEffect(() => { load(); }, [load]);
 
   const visibleEntries = useMemo(() => entries

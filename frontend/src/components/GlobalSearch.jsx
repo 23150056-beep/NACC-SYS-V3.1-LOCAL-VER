@@ -11,6 +11,7 @@ import { useToast } from '../context/ToastContext';
 import { Icon, roleLabel } from '../ui';
 import { ageFrom, caseRef, initialsOf } from '../utils/child';
 import { loadAll } from '../utils/load';
+import { useChildren } from '../context/ChildrenContext';
 import { matchChildren, matchesCommand, matchStaff, recentChildIds, rememberChild } from '../utils/search';
 import './header-phone.css';
 
@@ -142,9 +143,13 @@ export default function GlobalSearch({ open, onOpenChange }) {
   const isPsych = role === 'Psychologist';
 
   const [q, setQ] = useState('');
-  const [children, setChildren] = useState([]);
+  // The shared list (context/ChildrenContext): cached rows show at once and the
+  // answer asked for as the box opens replaces them, so a child added since is
+  // found as soon as it lands.
+  const { children, loaded: childrenLoaded, revalidate: revalidateChildren } = useChildren();
   const [staff, setStaff] = useState([]);
-  const [loaded, setLoaded] = useState(false);
+  const [answered, setAnswered] = useState(false);
+  const loaded = childrenLoaded || answered;
   const [cursor, setCursor] = useState(0);
   // The child whose quick actions are showing, and where to return to.
   const [focus, setFocus] = useState(null);
@@ -215,12 +220,12 @@ export default function GlobalSearch({ open, onOpenChange }) {
     // Silence here is worse than elsewhere: search would simply find
     // nothing, which reads as "no such child" rather than "not loaded".
     loadAll(toast, [
-      () => api.get('/children/?include_archived=true').then((r) => { if (live) setChildren(r.data || []); }),
+      () => revalidateChildren(),
       isAdmin && (() => api.get('/users/').then((r) => { if (live) setStaff(r.data || []); })),
     ], 'Search could not load. Results will be incomplete until you refresh.')
-      .then(() => { if (live) setLoaded(true); });
+      .then(() => { if (live) setAnswered(true); });
     return () => { live = false; };
-  }, [open, isAdmin, toast, refreshPendingAccess, refreshPendingAssignments]);
+  }, [open, isAdmin, toast, refreshPendingAccess, refreshPendingAssignments, revalidateChildren]);
 
   useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
 

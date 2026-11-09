@@ -1,5 +1,8 @@
+from django.utils.translation import gettext_lazy as _
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.authentication import JWTAuthentication
+from rest_framework_simplejwt.exceptions import InvalidToken
+from rest_framework_simplejwt.settings import api_settings
 
 from accounts.token_claims import CLAIM, STALE, matches
 
@@ -18,6 +21,27 @@ class ForcePasswordChangeJWTAuthentication(JWTAuthentication):
     """JWTAuthentication with three server-side gates the client cannot skip:
     a token minted under a password that has since changed, an outstanding
     forced password change, and an account with no role."""
+
+    def get_user(self, validated_token):
+        """SimpleJWT's lookup, with the role joined in. Every request reads
+        `user.role` (role_of, the no-role gate below, every permission class),
+        so a plain get() cost a second query on each authenticated request.
+
+        A copy of SimpleJWT 5.3.1's get_user without its CHECK_REVOKE_TOKEN
+        branch, which settings.py does not turn on. Turning that setting on,
+        or upgrading SimpleJWT, means bringing this copy up to date."""
+        try:
+            user_id = validated_token[api_settings.USER_ID_CLAIM]
+        except KeyError:
+            raise InvalidToken(_("Token contained no recognizable user identification"))
+        try:
+            user = self.user_model.objects.select_related("role").get(
+                **{api_settings.USER_ID_FIELD: user_id})
+        except self.user_model.DoesNotExist:
+            raise AuthenticationFailed(_("User not found"), code="user_not_found")
+        if not user.is_active:
+            raise AuthenticationFailed(_("User is inactive"), code="user_inactive")
+        return user
 
     def authenticate(self, request):
         result = super().authenticate(request)

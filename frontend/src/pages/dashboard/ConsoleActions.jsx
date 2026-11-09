@@ -6,6 +6,7 @@ import { testSmsDelivery } from '../../api/sms';
 import { useActivity } from '../../context/ActivityContext';
 import { useAuth } from '../../context/AuthContext';
 import { useConfirm, useNotice } from '../../context/ConfirmContext';
+import { useChildren } from '../../context/ChildrenContext';
 import { useToast } from '../../context/ToastContext';
 import {
   Alert, Avatar, Button, Drawer, FormField, Icon, Input, Modal, Select, Skeleton, roleLabel,
@@ -193,6 +194,9 @@ const firstBatch = (rows) => rows.slice(0, MAX_RECORDS);
 
 function TransferDrawer({ onClose, onMoved }) {
   const confirm = useConfirm();
+  // The drawer reads its own list on purpose; this only tells the shared copy
+  // that holders changed.
+  const { refresh: refreshChildren } = useChildren();
   // `once` stops a second press from starting a second confirmation and a second
   // request; `saving` is only what the screen shows, and is true from the moment
   // the request goes out - not while the confirmation is up, when it would read
@@ -343,6 +347,7 @@ function TransferDrawer({ onClose, onMoved }) {
     } finally {
       setSaving(false);
     }
+    refreshChildren().catch(() => {});
     await onMoved(done, nameOf(fromUser));
   });
 

@@ -6,6 +6,7 @@ import { AssistantProvider } from './context/AssistantContext';
 import { ToastProvider } from './context/ToastContext';
 import { LayoutProvider, useLayout } from './context/LayoutContext';
 import { CensusProvider } from './context/CensusContext';
+import { ChildrenProvider } from './context/ChildrenContext';
 import { ConfirmProvider } from './context/ConfirmContext';
 import { INSTRUMENT_MANAGER_ROLES } from './config/roles';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -94,6 +95,7 @@ export default function App() {
               route would re-fetch it on every click. */}
           <LayoutProvider>
           <CensusProvider>
+          <ChildrenProvider>
           <Suspense fallback={<RouteLoading />}>
           <Routes>
           <Route path="/login" element={<Login />} />
@@ -124,6 +126,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
           </Suspense>
+          </ChildrenProvider>
           </CensusProvider>
           </LayoutProvider>
         </BrowserRouter>

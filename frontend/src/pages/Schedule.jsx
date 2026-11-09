@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { loadAll } from '../utils/load';
+import { useChildren } from '../context/ChildrenContext';
 import { clock, clockRange, exactDate } from '../utils/time';
 import { DURATIONS, scheduleName, shortName } from '../utils/child';
 import {
@@ -185,7 +186,8 @@ export default function Schedule() {
   const canBook = ['Administrator', 'Staff', 'Psychologist'].includes(role);
   const [appointments, setAppointments] = useState([]);
   const [blocks, setBlocks] = useState([]);
-  const [children, setChildren] = useState([]);
+  const { children: allChildren, revalidate: revalidateChildren } = useChildren();
+  const children = useMemo(() => allChildren.filter((c) => c.status === 'active'), [allChildren]);
   const [psychologists, setPsychologists] = useState([]);
   const [booking, setBooking] = useState(null);
   const [blockForm, setBlockForm] = useState(null);
@@ -269,10 +271,10 @@ export default function Schedule() {
     () => api.get(`/appointments/?from=${range.from}&to=${range.to}`).then((r) => setAppointments(r.data)),
     () => api.get('/availability/').then((r) => setBlocks(r.data)),
     () => api.get('/unavailability/?upcoming=true').then((r) => setLeave(r.data)),
-    () => api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))),
+    () => revalidateChildren(),
     !isPsych && (() => api.get('/psychologists/').then((r) => setPsychologists(r.data))),
   ], 'Could not load the calendar. Check your connection and refresh.'),
-  [isPsych, range.from, range.to, toast]);
+  [isPsych, range.from, range.to, toast, revalidateChildren]);
   useEffect(() => { load(); }, [load]);
   // The openings for the psychologist actually chosen, on the day actually
   // chosen, at the duration actually chosen. The old version asked about the

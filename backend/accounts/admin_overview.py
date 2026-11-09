@@ -28,8 +28,9 @@ from urllib.parse import quote
 
 from django.conf import settings
 from django.db import DatabaseError, connection
-from django.db.models import Count, Exists, F, Max, Min, OuterRef, Q, Subquery, Sum
-from django.db.models.functions import Lower
+from django.db.models import (Case, Count, Exists, F, Max, Min, OuterRef, Q, Subquery, Sum,
+                              Value, When, Window)
+from django.db.models.functions import Lower, RowNumber
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -183,10 +184,17 @@ def _queue(key, group, count, hint, link, items):
 
 
 def _access_requests(now):
+    # The ten rows carry the whole queue's figures as window values, so the
+    # count, the oldest wait and the unconfirmed addresses cost no query of
+    # their own.
     pending = User.objects.filter(status=User.PENDING)
-    stats = pending.aggregate(
-        n=Count("id"), oldest=Min("created_at"),
-        unconfirmed=Count("id", filter=Q(email_verified=False)))
+    shown = list(pending.select_related("requested_role")
+                 .annotate(w_n=Window(Count("id")), w_oldest=Window(Min("created_at")),
+                           w_unconfirmed=Window(Count("id", filter=Q(email_verified=False))))
+                 .order_by("created_at", "id")[:QUEUE_ITEMS])
+    stats = ({"n": shown[0].w_n, "oldest": shown[0].w_oldest,
+              "unconfirmed": shown[0].w_unconfirmed} if shown
+             else {"n": 0, "oldest": None, "unconfirmed": 0})
     count = stats["n"]
     if not count:
         hint = "No one is waiting for access"
@@ -196,7 +204,7 @@ def _access_requests(now):
             hint += f" · {_plural(stats['unconfirmed'], 'email', 'emails')} unconfirmed"
     items = []
     # Longest wait first: a request is a person who cannot work yet.
-    for user in pending.select_related("requested_role").order_by("created_at", "id")[:QUEUE_ITEMS]:
+    for user in shown:
         asked = (f"Asked for {user.requested_role.role_name}"
                  if user.requested_role else "No role stated")
         if user.google_sub:
@@ -220,8 +228,9 @@ def _lockouts(now):
     """
     since = now - timedelta(hours=LOCKOUT_HOURS)
     rows = ActivityLog.objects.filter(_ANY_LOCKOUT, created_at__gte=since)
-    count = rows.count()
-    recent = list(rows.order_by("-created_at", "-id")[:QUEUE_ITEMS])
+    recent = list(rows.annotate(w_n=Window(Count("id")))
+                  .order_by("-created_at", "-id")[:QUEUE_ITEMS])
+    count = recent[0].w_n if recent else 0
     names = [None if r.entity_label == ADDRESS_LOCK_LABEL else _locked_name(r.entity_label)
              for r in recent]
     wanted = {n.lower() for n in names if n and n != NOT_AN_EMAIL}
@@ -324,7 +333,6 @@ def _stuck_requests(now):
     cutoff = now - timedelta(days=ASSIGNMENT_ANSWER_DAYS)
     silent = AssignmentRequest.objects.filter(
         status=AssignmentRequest.PENDING, created_at__lte=cutoff, child__status=Child.ACTIVE)
-    silent_count = silent.count()
 
     latest = AssignmentRequest.objects.filter(child=OuterRef("pk")).order_by("-created_at", "-id")
     still_open = AssignmentRequest.objects.filter(
@@ -336,18 +344,23 @@ def _stuck_requests(now):
                           last_decided=Subquery(latest.values("decided_at")[:1]))
                 .filter(last_status=AssignmentRequest.DECLINED)
                 .filter(~Exists(still_open)))
-    declined_count = declined.count()
 
     rows = []
-    for req in (silent.select_related("child", "psychologist")
-                .order_by("created_at", "id")[:QUEUE_ITEMS]):
+    silent_rows = list(silent.select_related("child", "psychologist")
+                       .annotate(w_n=Window(Count("id")))
+                       .order_by("created_at", "id")[:QUEUE_ITEMS])
+    silent_count = silent_rows[0].w_n if silent_rows else 0
+    for req in silent_rows:
         rows.append((req.created_at, _item(
             _child_label(req.child),
             f"Asked {_short(req.psychologist)} {_ago(req.created_at, now)}",
             _child_link(req.child_id))))
     # The longest-declined first, so the ten shown are the ten most overdue.
-    ids = list(declined.order_by("last_decided", "pk")
-               .values_list("last_request", flat=True)[:QUEUE_ITEMS])
+    overdue = list(declined.annotate(w_n=Window(Count("pk")))
+                   .order_by("last_decided", "pk")
+                   .values_list("last_request", "w_n")[:QUEUE_ITEMS])
+    ids = [request_id for request_id, _n in overdue]
+    declined_count = overdue[0][1] if overdue else 0
     if ids:
         for req in (AssignmentRequest.objects.filter(pk__in=ids)
                     .select_related("child", "psychologist")):
@@ -437,11 +450,11 @@ def _names_to_fix(now):
              .filter(Q(first_name__contains=REPLACEMENT)
                      | Q(middle_initial__contains=REPLACEMENT)
                      | Q(last_name__contains=REPLACEMENT)))
-    count = users.count()
+    shown = list(users.annotate(w_n=Window(Count("id"))).order_by("id")[:QUEUE_ITEMS])
+    count = shown[0].w_n if shown else 0
     hint = (f"{_plural(count, 'account', 'accounts')} with a letter that did not save; "
             f"retype the name" if count else "No account name has an unreadable letter")
-    items = [_item(_person(u), "Account", f"/users?edit={u.pk}")
-             for u in users.order_by("id")[:QUEUE_ITEMS]]
+    items = [_item(_person(u), "Account", f"/users?edit={u.pk}") for u in shown]
     return _queue("names_to_fix", "records", count, hint, None, items)
 
 
@@ -917,8 +930,10 @@ def _assistant_reads(since, cap):
 
     jobs = AssistantJob.objects.filter(created_at__gte=since, child__isnull=False,
                                        job_type__in=ACCESS_LOGGED_JOB_TYPES)
-    total = (jobs.exclude(job_type="self_report").count()
-             + jobs.filter(job_type="self_report").values("input_ref").distinct().count())
+    counted = jobs.aggregate(
+        plain=Count("id", filter=~Q(job_type="self_report")),
+        surveys=Count("input_ref", distinct=True, filter=Q(job_type="self_report")))
+    total = counted["plain"] + counted["surveys"]
     rows = (jobs.order_by("-created_at", "-id")
             .values_list("job_type", "input_ref", "child_id", "created_at", "ok",
                          "created_by__first_name", "created_by__middle_initial",
@@ -956,21 +971,37 @@ def _security_log(now):
             .exclude(category=ActivityLog.SECURITY, entity_label=NOT_A_SECURITY_EVENT))
     entries, totals = [], {}
 
-    bulk = Q()
-    for kind, picked, _one, _many in _BULK:
-        bulk |= picked
-        rows = week.filter(picked).order_by("-created_at", "-id")
-        totals[kind] = rows.count()
-        for row in rows[:BULK_CAP]:
+    # One query for every lane of the log. A row's lane is the first bulk kind
+    # it matches (they cannot overlap: each is told apart by action, actor or
+    # entity id), else "rest". Within a lane the rows are numbered newest first
+    # and counted, so the database hands back only the lines each lane may show
+    # (BULK_CAP, or LOG_ROWS for the rest) together with how many it holds.
+    lane = Case(*[When(picked, then=Value(key)) for key, picked, _o, _m in _BULK],
+                default=Value("rest"))
+    newest_first = [F("created_at").desc(), F("id").desc()]
+    shown_rows = (week.annotate(lane=lane)
+                  .annotate(place=Window(RowNumber(), partition_by=[F("lane")],
+                                         order_by=newest_first),
+                            lane_total=Window(Count("id"), partition_by=[F("lane")]))
+                  .filter(place__lte=Case(When(lane="rest", then=Value(LOG_ROWS)),
+                                          default=Value(BULK_CAP)))
+                  .order_by("lane", "place"))
+    by_lane = {}
+    for row in shown_rows:
+        by_lane.setdefault(row.lane, []).append(row)
+        totals[row.lane] = row.lane_total
+    for kind, _picked, _one, _many in _BULK:
+        totals.setdefault(kind, 0)
+        for row in by_lane.get(kind, ()):
             entries.append((row.created_at, {"at": _iso(row.created_at), "kind": kind,
                                              "actor": row.actor_label or "System",
                                              "text": _bulk_text(kind, row)}))
     reads, totals[_READS[0]] = _assistant_reads(since, BULK_CAP)
     entries += reads
 
-    rest = week.exclude(bulk)
-    rest_total = rest.count()
-    for row in rest.order_by("-created_at", "-id")[:LOG_ROWS]:
+    rest_rows = by_lane.get("rest", ())
+    rest_total = totals.pop("rest", 0)
+    for row in rest_rows:
         kind, text = _security_text(row)
         entries.append((row.created_at, {"at": _iso(row.created_at), "kind": kind,
                                          "actor": row.actor_label or "System", "text": text}))

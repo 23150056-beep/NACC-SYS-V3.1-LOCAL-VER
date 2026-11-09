@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
+import { useChildren } from '../context/ChildrenContext';
 import {
   Card, Button, Badge, Input, FormField, Avatar, RoleBadge, Icon,
   RoleAccessPanel, Skeleton, EmptyState, Note, Switch, PAGE, hoverLift,
@@ -110,7 +111,12 @@ export default function MyProfile() {
   const [phoneCode, setPhoneCode] = useState('');
   const [phoneError, setPhoneError] = useState('');
   const [phoneBusy, setPhoneBusy] = useState(false);
-  const [children, setChildren] = useState(null);
+  const { children: allChildren, loaded: childrenLoaded, revalidate: revalidateChildren } = useChildren();
+  // null until the first answer, as before; the server's plain list leaves closed cases out.
+  const [childrenFailed, setChildrenFailed] = useState(false);
+  const children = useMemo(
+    () => (childrenLoaded ? allChildren.filter((c) => c.status !== 'inactive') : (childrenFailed ? [] : null)),
+    [childrenLoaded, childrenFailed, allChildren]);
   const [appointments, setAppointments] = useState(null);
   const [activity, setActivity] = useState(null);
 
@@ -135,10 +141,10 @@ export default function MyProfile() {
     if (isAdmin) return;
     // Each fails independently: a psychologist with no caseload yet should
     // still get their activity, and vice versa.
-    api.get('/children/').then((r) => setChildren(r.data)).catch(() => setChildren([]));
+    revalidateChildren().catch(() => setChildrenFailed(true));
     api.get('/appointments/').then((r) => setAppointments(r.data)).catch(() => setAppointments([]));
     api.get('/activity/').then((r) => setActivity(r.data)).catch(() => setActivity([]));
-  }, [isAdmin]);
+  }, [isAdmin, revalidateChildren]);
 
   const dirty = useMemo(
     () => !!saved && FIELDS.some(([k]) => (form[k] || '') !== (saved[k] || '')),

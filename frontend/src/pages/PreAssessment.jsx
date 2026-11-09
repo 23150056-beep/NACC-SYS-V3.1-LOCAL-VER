@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../api/client';
 import { useToast } from '../context/ToastContext';
@@ -8,6 +8,7 @@ import { caseRef } from '../utils/child';
 import { Card, Button, Badge, Input, Select, FormField, FileUpload, Alert, EmptyState, Avatar, Icon, iconBtn, hoverLift, PAGE } from '../ui';
 import { PA_STATUSES, PA_STATUS_TONES } from '../config/caseData';
 import { loadAll } from '../utils/load';
+import { useChildren } from '../context/ChildrenContext';
 import { printBlankForm } from '../utils/printForm';
 import InstrumentFormDrawer, { EMPTY_INSTRUMENT } from '../components/InstrumentFormDrawer';
 import PdfFrame from '../components/PdfFrame';
@@ -54,7 +55,8 @@ export default function PreAssessment() {
   const { user } = useAuth();
   const [step, setStep] = useState(0);
   const [maxStep, setMaxStep] = useState(0);
-  const [children, setChildren] = useState([]);
+  const { children: allChildren, revalidate: revalidateChildren, refresh: refreshChildren } = useChildren();
+  const children = useMemo(() => allChildren.filter((c) => c.status === 'active'), [allChildren]);
   const [statusFilter, setStatusFilter] = useState('all'); // pipeline-status chip
   const [child, setChild] = useState(null);
   const [pa, setPaState] = useState(null); // the in-progress PreAssessment
@@ -75,7 +77,7 @@ export default function PreAssessment() {
 
   useEffect(() => {
     loadAll(toast, [
-      () => api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))),
+      () => revalidateChildren(),
       // One request, split here: the rows already carry form_type, so asking
       // the server twice for the same table was a round trip spent on a
       // filter the payload answers.
@@ -85,7 +87,7 @@ export default function PreAssessment() {
       }),
       () => api.get('/instruments/').then((r) => setInstruments(r.data)),
     ], 'Could not load the pre-assessment workspace. Check your connection and refresh.');
-  }, [toast]);
+  }, [toast, revalidateChildren]);
 
   // Remember where the psychologist is, so the child's page and Monitoring
   // can say so. Navigation never waits on it. Only current_step and
@@ -265,7 +267,7 @@ export default function PreAssessment() {
 
   const reset = () => {
     setStep(0); setMaxStep(0); setPa(null); setChild(null); setSelectedInstruments([]); setProblems([]); setNotes('');
-    api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))).catch(() => toast.error('Could not reload the children.'));
+    refreshChildren().catch(() => toast.error('Could not reload the children.'));
   };
 
   // "Not yet": keep what is on the tracker, leave it In progress at Review.

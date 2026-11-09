@@ -12,6 +12,7 @@ import { useConfirm, useNotice } from '../context/ConfirmContext';
 import { useLayout } from '../context/LayoutContext';
 import { ALL_CLOSURE_REASONS, unaskedAnswers } from '../config/caseData';
 import { loadAll } from '../utils/load';
+import { useChildren } from '../context/ChildrenContext';
 import { firstError } from '../utils/errors';
 import ChildForm from './children/ChildForm';
 import { EMPTY, NOT_AN_ANSWER, formFromRecord, newIntakeToken } from './children/recordForm';
@@ -154,7 +155,9 @@ export default function Children() {
   const canManage = ['Administrator', 'Staff'].includes(user?.role_name);
   const isAdmin = user?.role_name === 'Administrator';
   const isPsych = user?.role_name === 'Psychologist';
-  const [children, setChildren] = useState([]);
+  // The shared list (context/ChildrenContext), closed cases included. Every
+  // `load()` below asks the server again, so a write is shown as it lands.
+  const { children, revalidate: revalidateChildren, refresh: refreshChildren } = useChildren();
   const [psychologists, setPsychologists] = useState([]);
   // Social worker accounts, for the ISA's filter and the form's owner field.
   // Each SW sees only the records they hold (accounts/scoping.py), so only
@@ -199,12 +202,14 @@ export default function Children() {
 
   useEffect(() => { if (status !== 'inactive') setReasonFilter(''); }, [status]);
 
-  const load = useCallback(() => {
+  // `fresh` is true after a write (the list is asked for again outright) and
+  // false as the screen opens (a request already out is joined).
+  const loadWith = useCallback((fresh) => {
     const today = new Date();
     const weekAhead = new Date(today); weekAhead.setDate(today.getDate() + 7);
     return loadAll(toast, [
       // Include inactive (terminated) cases — the V2 roster shows them with chips.
-      () => api.get('/children/?include_archived=true').then((r) => setChildren(r.data)),
+      () => (fresh ? refreshChildren() : revalidateChildren()),
       // Active psychologists + current caseload. Admin/staff only, at both
       // ends: the endpoint is IsAdminOrStaff, and the list is only rendered
       // behind canManage. Asking as a psychologist earned a guaranteed 403.
@@ -231,8 +236,9 @@ export default function Children() {
         // still reports the failure once, with everything else.
         .catch((e) => { setApptsByChild({}); throw e; }),
     ], 'Could not load the records. Check your connection and refresh.');
-  }, [canManage, isAdmin, toast]);
-  useEffect(() => { load(); }, [load]);
+  }, [canManage, isAdmin, toast, refreshChildren, revalidateChildren]);
+  const load = useCallback(() => loadWith(true), [loadWith]);
+  useEffect(() => { loadWith(false); }, [loadWith]);
 
   const setQ = (v) => setSearchParams(v ? { q: v } : {}, { replace: true });
 
