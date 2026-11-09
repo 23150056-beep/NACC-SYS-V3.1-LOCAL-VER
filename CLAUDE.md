@@ -2599,8 +2599,24 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   demo by a push: the cache headers and `RUN_SEED=false` were set by hand in
   the dashboard on 9 Nov. The file now matches the service (`USE_S3: "true"`,
   the demo's own bucket `nacc-v3-demo-media`, the four `AWS_` keys declared
-  `sync: false`); what is left is pointing the Blueprint at `cloud-setup` in
-  its settings, then reading the sync it offers before approving it.
+  `sync: false`), and **since 9 Nov the Blueprint follows `cloud-setup`**: its
+  first sync (`b51af17`) listed only the web service's headers and was
+  approved. A `render.yaml` change now reaches the demo as a sync to approve,
+  still read line by line first. This Blueprint manages the demo services
+  only; live is `NACC-SYS-V3` and not connected to it.
+- **A keep-awake pinger runs on cron-job.org** (owner's account, job "NACC
+  demo keep-awake", 9 Nov 2026): `*/10 7-18 * * 1-6`, Asia/Shanghai (the same
+  clock as Manila), so the API stays up 7 AM-7 PM Monday to Saturday and
+  sleeps outside that. It fetches
+  `/static/admin/css/base.css` from the API: WhiteNoise answers 200 from the
+  Django process with no query. Not `/healthz/` (a `SELECT 1` keeps the Neon
+  compute awake, and the demo is a branch of the production project), not a
+  401 route (cron-job.org counts non-2xx as failures and can disable the
+  job). Round the clock was rejected: ~744 h a month against the workspace's
+  750 free instance hours (24 used by 9 Nov without it), and running out
+  suspends every free service in the workspace. Office hours is ~310 h. A
+  healthy run takes under a second; a run of 15-60 s mid-day means the
+  instance restarted or slept.
 - **This sandbox cannot measure the demo API**: Cloudflare in front of
   Render answers a cloud session with a bot challenge (429,
   `cf-mitigated: challenge`) or holds the request, so a curl timeout from a
@@ -2611,10 +2627,10 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
 
 The owner: "too much time of waiting to load the site". Diagnosed live and in
 code; the free API's sleep (20-60 s on the first visit after ~15 min idle) is
-most of it, and no code removes that - only a keep-warm pinger on `/healthz/`
-every ~10 min or a paid instance. Check the workspace's free instance hours
-first: one service kept awake uses ~744 of the 750 a month, shared by every
-free web service in the workspace (the live API too, if it is free).
+most of it, and no code removes that - only a keep-warm pinger or a paid
+instance. The pinger now runs in office hours only (the bullet above says
+what it fetches and why not `/healthz/`). The Render log measured our own
+boot at about 4 s of the wake; the rest is Render starting the container.
 What was cut, commit `c016312`:
 
 - **Start-up is one process**: `entrypoint.sh` runs `manage.py boot_tasks`
