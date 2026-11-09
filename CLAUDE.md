@@ -2588,6 +2588,108 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   `==>` line says which step is too slow.
 - **Cloudflare retires models** — `llama-3.1-8b` returns 410. Check
   `/api/assistant/model-health/` before assuming the code broke.
+- **The Blueprint follows `main`; the services deploy `cloud-setup`**
+  (found 9 Nov 2026). The Blueprint "NACC-SYS-V3.1" is linked to this repo's
+  `main`, which stopped at `ab447f2` (5 Nov) and is BEHIND `cloud-setup`.
+  Its sync offered to "Update web service nacc-v3-demo-api / -web branch to
+  main" and to set `USE_S3` from the file: approving it would have rolled the
+  demo back 11 commits, stopped `cloud-setup` pushes deploying, and possibly
+  sent uploads to the container disk. **Never approve a Blueprint sync without
+  reading every line it lists.** So `render.yaml` changes do NOT reach the
+  demo by a push: the cache headers and `RUN_SEED=false` were set by hand in
+  the dashboard on 9 Nov. Settle it by making the file's `USE_S3` match the
+  dashboard and pointing the Blueprint at `cloud-setup` - not done yet.
+- **This sandbox cannot measure the demo API**: Cloudflare in front of
+  Render answers a cloud session with a bot challenge (429,
+  `cf-mitigated: challenge`) or holds the request, so a curl timeout from a
+  sandbox says nothing about the API. The web host answers normally. Judge the
+  API from the owner's browser or the Render log.
+
+### Making it load faster (9 Nov 2026)
+
+The owner: "too much time of waiting to load the site". Diagnosed live and in
+code; the free API's sleep (20-60 s on the first visit after ~15 min idle) is
+most of it, and no code removes that - only a keep-warm pinger on `/healthz/`
+every ~10 min or a paid instance. Check the workspace's free instance hours
+first: one service kept awake uses ~744 of the 750 a month, shared by every
+free web service in the workspace (the live API too, if it is free).
+What was cut, commit `c016312`:
+
+- **Start-up is one process**: `entrypoint.sh` runs `manage.py boot_tasks`
+  (`accounts/management/commands/boot_tasks.py`): migrate, `seed_initial_data`
+  only when `RUN_SEED=true`, `seed_psgc`, `backfill_psgc --apply`, the same
+  order and the same `==>` lines, each followed by its seconds
+  (`==> Loading PSGC addresses (0.4 s)`) so the Render log says where a wake
+  goes. A failure still exits non-zero before Gunicorn. Locally the no-op boot
+  a wake hits went 2.5 s -> 0.9 s; four Django imports were nearly all of it.
+- **Gunicorn has `--threads ${GUNICORN_THREADS:-4}`** (gthread) beside the 2
+  workers: a page fires 5-9 requests at once and sync workers served two at a
+  time. Audited for module-level state first: the assistant lock, retention
+  and prefetch throttles were already locked; the cache-counted rate limits can
+  undercount by one under a race, as multiple workers already allowed. A new
+  per-process global mutated in a request needs a lock.
+- **The web build is split**: every page but sign-in and the shell is
+  `React.lazy` in `App.jsx`, under `Suspense`; `manualChunks` in
+  `vite.config.js` makes `react`, `vendor`, `calendar` (react-big-calendar)
+  and `qrcode`. First download 472 KB -> ~155 KB gzip. A page with a named
+  export another module imports cannot be lazy - none has one today.
+- **Icons are an explicit map**, `ui/icons.js` (129). `import * as Lucide`
+  defeated tree-shaking. An unknown name draws a circle (and warns in dev), so
+  **`npm run lint` runs `scripts/check-icons.mjs`**: every string literal that
+  is a lucide name must be in the map or in its `NOT_ICONS` list with a reason.
+  The first version only looked at lines that said "icon" and missed six
+  (brand icons on My Profile among them); a browser count of
+  `svg.lucide-circle` found them.
+- **The seal is `racco-seal.webp`**, 7 KB at 160x160 (was a 518 KB JPEG).
+- **`wakeServer()` runs at start-up** in `main.jsx`, so every entry route
+  wakes the API while the bundle loads, not only `/login` and `/signup`. It
+  has a once-guard.
+- **Google Fonts load without blocking** (`media="print"` + onload, with a
+  noscript copy); Baloo 2 500 and Plex Mono 500 were unused and dropped.
+- **Queries cut, each pinned in `clinical/tests/test_endpoint_query_counts.py`**:
+  availability 31 -> 2 (`BookedAhead`, one grouped query for the list), a
+  child's page 22 -> 15 (one pre-assessment prefetch, sorted in Python), the
+  census 18-20 -> 13-16, the console 42 -> 40. The ISA's pending-access badge
+  reads `GET /api/users/pending-count/` (one COUNT, admin only) instead of the
+  whole `/users/` list.
+- **Hashed assets are cached for a year** (`/assets/*`
+  `public, max-age=31536000, immutable`; `/index.html` `no-cache`), set in the
+  web service's Headers page; also in `render.yaml`, which the demo does not
+  read (above).
+- Left: the full child list is fetched again per screen; the console is ~40
+  queries; whether API answers are compressed is unknown (see the sandbox
+  bullet above).
+
+## List order: newest edited first
+
+Owner's request, 8 Nov 2026: "last in first out - the latest edited will be
+shown first". Work lists open on the record touched most recently.
+
+- **Progress Monitoring** sorts by `last_updated` (`MonitoringListView`): the
+  newest of the child's own `updated_at`, its appointments, remarks, result
+  entries, report files and pre-assessments - counting only what
+  `hide_earlier_history` / `visible_pre_assessments` let the reader see, so a
+  note hidden from a new psychologist cannot lift its child. Appointments
+  count for everyone: the calendar shows every session anyway. A "Sort:
+  Recently updated / A-Z" switch keeps alphabetical one click away.
+- **Records'** sort is "Recently updated" (`updated_at`, then newest id); it
+  was newest CREATED. **Results & Reports** orders children's result groups,
+  report files and referrals newest first.
+- **The child's page** (`ChildReportView`) lists every tab newest edited first:
+  `-updated_at` where a model has it, else `-created_at`, then `-id`, applied
+  after the carry-history filter. **Open problems stay above resolved ones**
+  (`resolved` first in the order), or resolving one would put it on top.
+- `ResultEntry`, `PsychologicalReport`, `CaseReferral`, `OpinionnaireInvite`
+  and `SelfReportFlag` have no `updated_at`: for them "edited" is "filed", and
+  a result backdated by its `date` sorts by when it was filed.
+- **The printed report keeps its own order** (owner): results by date
+  oldest first, instruments in the order given (pre-assessments sorted
+  oldest first in `PsychReportPrint.jsx`); interviews and problems follow the
+  page.
+- Left alphabetical on purpose: pickers (reset password, transfer records),
+  the pre-assessment child picker (pipeline stage), Users (its own column
+  sort). `clinical/tests/test_monitoring_order.py`,
+  `test_child_page_order.py`.
 
 ## Accessibility
 
@@ -2650,7 +2752,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 3,662 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 3,879 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 
