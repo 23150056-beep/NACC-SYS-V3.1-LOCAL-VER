@@ -1,7 +1,7 @@
 """V2 report endpoints: per-child chart view, cross-child monitoring, agency
 summary, and the (interim) dashboard — all sourced from clinical records."""
 
-from django.db.models import Max
+from django.db.models import Max, Prefetch
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -15,7 +15,7 @@ from children.models import Child, TerminationRecord
 from children.serializers import ChildSerializer
 from clinical import reports
 from clinical.models import (
-    PreAssessment, ResultEntry, RemarkNote, PsychologicalReport,
+    CaseReferral, PreAssessment, ResultEntry, RemarkNote, PsychologicalReport,
 )
 from clinical.serializers import (
     PreAssessmentSerializer, ResultEntrySerializer, RemarkNoteSerializer,
@@ -38,19 +38,32 @@ class ChildReportView(generics.GenericAPIView):
         # its own: this checked only psychologists, which was the whole rule
         # while staff saw every child and was a side door once they did not.
         try:
+            # One read of the pre-assessments serves both the child's own
+            # fields (status, progress, instruments used) and the list below:
+            # the same carry-history rule, with the joins the list needs added
+            # to the prefetch instead of the whole set being read a second time.
+            # The model's own order is kept for the child's fields; the list
+            # is put in its page order in Python.
             child = (scope_to_visible(Child.objects.all(), request, path=None)
-                     .prefetch_related(visible_pre_assessments(request)).get(pk=child_id))
+                     .select_related("assigned_psychologist", "social_worker")
+                     .prefetch_related(Prefetch("pre_assessments", queryset=hide_earlier_history(
+                         PreAssessment.objects
+                         .select_related("consent", "interview", "psychologist")
+                         .prefetch_related("instruments", "step_times"),
+                         request, "psychologist")),
+                         # Also answers the child's has_case_referral chip.
+                         Prefetch("case_referrals", queryset=CaseReferral.objects.select_related("uploaded_by")))
+                     .get(pk=child_id))
         except Child.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        pas = (child.pre_assessments.all().select_related("consent", "interview", "psychologist")
-               .prefetch_related("step_times"))
+        pas = child.pre_assessments.all()
         results = child.result_entries.select_related("instrument", "entered_by")
         remarks = child.remarks.select_related("author")
         plans = child.treatment_plans.select_related("author")
         files = child.psych_reports.select_related("author")
-        problems = child.problems.all()
-        case_referrals = child.case_referrals.select_related("uploaded_by")
+        problems = child.problems.select_related("logged_by")
+        case_referrals = child.case_referrals.all()
         opinionnaires = child.opinionnaire_invites.select_related("template")
         interviews = child.clinical_interviews.select_related("template", "interviewer")
         self_report_flags = child.self_report_flags.select_related("reviewed_by")
@@ -64,7 +77,6 @@ class ChildReportView(generics.GenericAPIView):
         # are the child's own words, not a colleague's prior opinions, and the
         # person responsible for her now must see them. Problems and case
         # referrals likewise. The omissions are decisions, not oversights.
-        pas = hide_earlier_history(pas, request, "psychologist")
         results = hide_earlier_history(results, request, "entered_by")
         remarks = hide_earlier_history(remarks, request, "author")
         plans = hide_earlier_history(plans, request, "author")
@@ -76,7 +88,7 @@ class ChildReportView(generics.GenericAPIView):
         # filed), id as the tie-break. Applied AFTER the carry-history control
         # above, which only filters. Screens that read best oldest-first (the
         # printed report) sort for themselves rather than lean on this order.
-        pas = pas.order_by("-updated_at", "-id")
+        pas = sorted(pas, key=lambda p: (p.updated_at, p.id), reverse=True)
         interviews = interviews.order_by("-updated_at", "-id")
         results = results.order_by("-created_at", "-id")
         remarks = remarks.order_by("-updated_at", "-id")
@@ -84,7 +96,7 @@ class ChildReportView(generics.GenericAPIView):
         files = files.order_by("-created_at", "-id")
         # Open problems stay above resolved ones, newest edit first within each.
         problems = problems.order_by("resolved", "-updated_at", "-id")
-        case_referrals = case_referrals.order_by("-created_at", "-id")
+        case_referrals = sorted(case_referrals, key=lambda r: (r.created_at, r.id), reverse=True)
         opinionnaires = opinionnaires.order_by("-created_at", "-id")
         self_report_flags = self_report_flags.order_by("-created_at", "-id")
 
@@ -436,11 +448,17 @@ class DashboardView(generics.GenericAPIView):
         # queryset that got iterated for the census below AND counted three
         # separate times in the response - four trips for one set of rows,
         # each of them a hop to another region on the hosted deployment.
+        #
+        # The pre-assessments are prefetched through the same carry-history
+        # rule as everywhere else, but without their instruments and step
+        # times: the census reads only each row's status.
         active_rows = list(scoped_children.filter(status=Child.ACTIVE)
                            .select_related("assigned_psychologist")
-                           .prefetch_related(visible_pre_assessments(request), "consents"))
+                           .prefetch_related(
+                               Prefetch("pre_assessments", queryset=hide_earlier_history(
+                                   PreAssessment.objects.all(), request, "psychologist")),
+                               "consents"))
         active_count = len(active_rows)
-        inactive_count = scoped_children.filter(status=Child.INACTIVE).count()
 
         # Census: ACTIVE children per case type (the interview's
         # "active/adoption, active/foster care" view) + where each child is in
@@ -465,14 +483,18 @@ class DashboardView(generics.GenericAPIView):
                 pre_assessed_per_psy[name] = pre_assessed_per_psy.get(name, 0) + 1
 
         # Intake vs termination trend (follows the range selector, last 6 buckets).
+        # Dates only: whole rows were loaded to read one column. The same
+        # pass counts the closed records, which used to be a query of its own.
         intake, term = {}, {}
-        for c in scoped_children:
-            b = reports.bucket(c.created_at.date(), rng)
+        inactive_count = 0
+        for created_at, child_status in scoped_children.values_list("created_at", "status"):
+            b = reports.bucket(created_at.date(), rng)
             intake[b] = intake.get(b, 0) + 1
-        term_qs = TerminationRecord.objects.all()
-        term_qs = scope_to_visible(term_qs, request)
-        for t in term_qs:
-            b = reports.bucket(t.date, rng)
+            if child_status == Child.INACTIVE:
+                inactive_count += 1
+        term_qs = scope_to_visible(TerminationRecord.objects.all(), request)
+        for t_date in term_qs.values_list("date", flat=True):
+            b = reports.bucket(t_date, rng)
             term[b] = term.get(b, 0) + 1
         months = sorted(set(intake) | set(term))[-6:]
         intake_vs_termination = [
@@ -529,5 +551,5 @@ class DashboardView(generics.GenericAPIView):
             "trend": agg["trend"][-6:],
             "per_psychologist": agg["per_psychologist"],
             "by_case_type": agg["by_case_type"],
-            "care_gaps": alerts_for(request, scoped_children),
+            "care_gaps": alerts_for(request, scoped_children, active_children=active_rows),
         })

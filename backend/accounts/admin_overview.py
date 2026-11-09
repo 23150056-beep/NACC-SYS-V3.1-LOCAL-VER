@@ -371,9 +371,25 @@ def _stuck_requests(now):
                   "/children", [item for _at, item in rows])
 
 
-def _no_social_worker(now):
+# Who holds a record, for the active ones: the three counts below read the same
+# rows, so they are taken in one query.
+_SOCIAL_GONE = Q(social_worker__isnull=False) & ~Q(social_worker__status=User.ACTIVE)
+_PSYCH_GONE = Q(assigned_psychologist__isnull=False) & ~Q(
+    assigned_psychologist__status=User.ACTIVE)
+
+
+def _active_children_tally():
+    return Child.objects.filter(status=Child.ACTIVE).aggregate(
+        no_social_worker=Count("id", filter=Q(social_worker__isnull=True)),
+        no_psychologist=Count("id", filter=Q(assigned_psychologist__isnull=True)),
+        stranded=Count("id", distinct=True, filter=_SOCIAL_GONE | _PSYCH_GONE),
+        social_gone=Count("social_worker", distinct=True, filter=_SOCIAL_GONE),
+        psych_gone=Count("assigned_psychologist", distinct=True, filter=_PSYCH_GONE))
+
+
+def _no_social_worker(now, tally):
     orphans = Child.objects.filter(status=Child.ACTIVE, social_worker__isnull=True)
-    count = orphans.count()
+    count = tally["no_social_worker"]
     hint = ("Only you can open them until a social worker is assigned" if count
             else "Every active record has a social worker")
     items = [_item(_child_label(c),
@@ -383,22 +399,15 @@ def _no_social_worker(now):
     return _queue("no_social_worker", "records", count, hint, "/children", items)
 
 
-def _archived_holder(now):
+def _archived_holder(now, tally):
     """Records whose social worker or psychologist can no longer sign in.
     Archiving an account moves nothing (CLAUDE.md, "Each social worker's own
     records"), so these sit with a holder nobody can reach until the ISA
     transfers them. A psychologist's caseload is the same case: the child
     stays "assigned" to an account that cannot open a single page."""
-    social_gone = Q(social_worker__isnull=False) & ~Q(social_worker__status=User.ACTIVE)
-    psych_gone = Q(assigned_psychologist__isnull=False) & ~Q(
-        assigned_psychologist__status=User.ACTIVE)
-    stranded = Child.objects.filter(status=Child.ACTIVE).filter(social_gone | psych_gone)
-    stats = stranded.aggregate(
-        n=Count("id", distinct=True),
-        social=Count("social_worker", filter=social_gone, distinct=True),
-        psych=Count("assigned_psychologist", filter=psych_gone, distinct=True))
-    count = stats["n"]
-    holders = stats["social"] + stats["psych"]
+    stranded = Child.objects.filter(status=Child.ACTIVE).filter(_SOCIAL_GONE | _PSYCH_GONE)
+    count = tally["stranded"]
+    holders = tally["social_gone"] + tally["psych_gone"]
     hint = (f"Held by {_plural(holders, 'deactivated account', 'deactivated accounts')}"
             if count else "No record is held by a deactivated account")
     items = []
@@ -720,7 +729,7 @@ def _people(now, holders):
 # --- workload: where the caseload sits -------------------------------------
 
 
-def _workload(now):
+def _workload(now, tally):
     today = timezone.localdate(now)
 
     # A deactivated psychologist stays in the list for as long as children are
@@ -769,8 +778,7 @@ def _workload(now):
         "social_workers": [{"id": u.pk, "name": _person(u), "active": u.active,
                             "inactive_account": u.status != User.ACTIVE}
                            for u in social_worker_rows],
-        "unassigned": Child.objects.filter(status=Child.ACTIVE,
-                                           assigned_psychologist__isnull=True).count(),
+        "unassigned": tally["no_psychologist"],
         "no_availability": [{"id": u.pk, "name": _person(u)} for u in unbookable],
         "on_leave": [{"id": r.psychologist_id, "name": _person(r.psychologist),
                       "start": r.starts_on.isoformat(), "end": r.ends_on.isoformat()}
@@ -1001,13 +1009,14 @@ class AdminOverviewView(APIView):
     def get(self, request):
         now = timezone.now()
         holders = _temp_password_holders(now)
+        tally = _active_children_tally()
         needs = {
             "access_requests": _access_requests(now),
             "lockouts": _lockouts(now),
             "temp_passwords": _temp_passwords(now, holders),
             "stuck_requests": _stuck_requests(now),
-            "no_social_worker": _no_social_worker(now),
-            "archived_holder": _archived_holder(now),
+            "no_social_worker": _no_social_worker(now, tally),
+            "archived_holder": _archived_holder(now, tally),
             "names_to_fix": _names_to_fix(now),
             "duplicates": _duplicates(now),
         }
@@ -1026,7 +1035,7 @@ class AdminOverviewView(APIView):
             ],
             "version": version,
             "people": _people(now, holders),
-            "workload": _workload(now),
+            "workload": _workload(now, tally),
             "security_log": log,
             "security_log_more": log_more,
         })

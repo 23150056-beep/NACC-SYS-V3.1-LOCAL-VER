@@ -2,20 +2,22 @@
 // Token-driven inline styles; one import surface for every screen.
 import { cloneElement, isValidElement, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import * as Lucide from 'lucide-react';
 import { initialsOf } from '../utils/child';
 import { useDialogBehaviour } from './useDialogBehaviour';
+import { FALLBACK_ICON, ICONS } from './icons';
 import { finishTime, timeValue, typeTime } from '../utils/time';
 
 /* ----------------------------- Icon ----------------------------- */
-function toPascal(name) {
-  return String(name)
-    .split(/[-_]/)
-    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
-    .join('');
-}
+const warnedIcons = new Set();
 export function Icon({ name, size = 20, strokeWidth = 2, style = {}, ...rest }) {
-  const Cmp = Lucide[toPascal(name)] || Lucide.Circle;
+  let Cmp = ICONS[String(name).replace(/_/g, '-')];
+  if (!Cmp) {
+    Cmp = FALLBACK_ICON;
+    if (import.meta.env.DEV && !warnedIcons.has(name)) {
+      warnedIcons.add(name);
+      console.warn(`Icon "${name}" is not in src/ui/icons.js; drawing the fallback.`);
+    }
+  }
   return <Cmp size={size} strokeWidth={strokeWidth} style={{ display: 'inline-flex', flex: 'none', ...style }} {...rest} />;
 }
 

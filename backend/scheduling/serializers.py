@@ -6,6 +6,40 @@ from scheduling import visibility
 from scheduling.models import AvailabilityBlock, Appointment, Unavailability
 
 
+class BookedAhead:
+    """`booked_ahead` for many availability windows from ONE query.
+
+    The rule is the one the per-window query used to state: a session of the
+    window's psychologist, from now on, not cancelled, starting inside the
+    window's hours, and on its date or (for a weekly window) its weekday.
+    Times, dates and weekdays are read in the current time zone, as the
+    database lookups did.
+    """
+
+    def __init__(self, blocks):
+        ids = {b.psychologist_id for b in blocks}
+        self._starts = {}
+        for psychologist_id, start in (
+                Appointment.objects
+                .filter(psychologist_id__in=ids, start__gte=timezone.now())
+                .exclude(status=Appointment.CANCELLED)
+                .values_list("psychologist_id", "start")):
+            self._starts.setdefault(psychologist_id, []).append(timezone.localtime(start))
+
+    def count(self, block):
+        n = 0
+        for local in self._starts.get(block.psychologist_id, ()):
+            if not (block.start_time <= local.time() < block.end_time):
+                continue
+            if block.date is not None:
+                if local.date() != block.date:
+                    continue
+            elif block.weekday is not None and local.weekday() != block.weekday:
+                continue
+            n += 1
+        return n
+
+
 class AvailabilityBlockSerializer(serializers.ModelSerializer):
     psychologist_name = serializers.CharField(
         source="psychologist.fullname", read_only=True, default=None)
@@ -26,19 +60,14 @@ class AvailabilityBlockSerializer(serializers.ModelSerializer):
 
         Past and cancelled sessions are excluded: neither is a reason to
         hesitate, and counting them would train people to ignore the number.
+
+        A list hands in `BookedAhead` (one query for every window on it); a
+        single window, as after a save, asks for itself.
         """
-        upcoming = (Appointment.objects
-                    .filter(psychologist_id=obj.psychologist_id,
-                            start__gte=timezone.now())
-                    .exclude(status=Appointment.CANCELLED)
-                    .filter(start__time__gte=obj.start_time,
-                            start__time__lt=obj.end_time))
-        if obj.date is not None:
-            upcoming = upcoming.filter(start__date=obj.date)
-        elif obj.weekday is not None:
-            # Django counts weekdays 1=Sunday..7=Saturday; Python 0=Monday.
-            upcoming = upcoming.filter(start__week_day=(obj.weekday + 2) % 7 or 7)
-        return upcoming.count()
+        index = self.context.get("booked_ahead")
+        if index is None:
+            index = BookedAhead([obj])
+        return index.count(obj)
 
     def validate(self, attrs):
         start = attrs.get("start_time") or (self.instance.start_time if self.instance else None)

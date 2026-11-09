@@ -836,6 +836,13 @@ class UserViewSet(viewsets.ModelViewSet):
             row["by_them"] = entry.actor_id == user.id
         return Response(data)
 
+    @action(detail=False, methods=["get"], url_path="pending-count")
+    def pending_count(self, request):
+        """How many accounts are waiting to be let in: one COUNT, for the badge
+        on every screen, so it does not download the whole directory. Counts
+        the same rows the directory's own "pending" filter does."""
+        return Response({"pending": User.objects.filter(status=User.PENDING).count()})
+
     @action(detail=True, methods=["post"])
     def approve(self, request, pk=None):
         """Grant a pending sign-up its role and let it in.

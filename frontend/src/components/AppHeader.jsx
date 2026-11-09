@@ -315,7 +315,7 @@ export default function AppHeader() {
           but it must not reserve a 234px column once the rail is gone. */}
       <div style={{ width: layout.brandWidth, flex: 'none', display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
         <img
-          src="/racco-seal.jpg" alt="" aria-hidden="true"
+          src="/racco-seal.webp" alt="" aria-hidden="true" width="34" height="34"
           style={{ width: 34, height: 34, borderRadius: '50%', objectFit: 'cover', flex: 'none', boxShadow: '0 0 0 2px rgba(255,255,255,0.18)' }}
         />
         {layout.brandTextOn && (

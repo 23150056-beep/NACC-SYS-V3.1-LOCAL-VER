@@ -49,7 +49,7 @@ export default function AuthLayout({ heading, subheading, children, footer = nul
             into the building rather than arriving somewhere else. */}
         <div className="racco-login-brand" style={{ background: 'var(--chrome)', color: '#fff' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-            <img src="/racco-seal.jpg" alt="NACC seal" className="racco-auth-seal"
+            <img src="/racco-seal.webp" alt="NACC seal" width="72" height="72" className="racco-auth-seal"
                  style={{ borderRadius: '50%', objectFit: 'cover',
                           boxShadow: '0 6px 18px rgba(0,0,0,0.28)', flex: 'none' }} />
             <div style={{ minWidth: 0 }}>

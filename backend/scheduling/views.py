@@ -21,7 +21,7 @@ from scheduling.models import (
     AvailabilityBlock, Appointment, CustodianReminder, Unavailability,
 )
 from scheduling.serializers import (
-    AvailabilityBlockSerializer, AppointmentSerializer, UnavailabilitySerializer,
+    AvailabilityBlockSerializer, AppointmentSerializer, BookedAhead, UnavailabilitySerializer,
 )
 from scheduling.session_mail import BOOKED, CANCELLED, MOVED, session_changed
 
@@ -45,6 +45,14 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
         if psy and str(psy).isdigit():
             qs = qs.filter(psychologist_id=psy)
         return qs
+
+    def list(self, request, *args, **kwargs):
+        # Read once so the "already booked" counts for every window come from
+        # one query rather than one each.
+        blocks = list(self.filter_queryset(self.get_queryset()))
+        context = {**self.get_serializer_context(), "booked_ahead": BookedAhead(blocks)}
+        serializer = self.get_serializer_class()(blocks, many=True, context=context)
+        return Response(serializer.data)
 
     def _assert_can_write(self, psychologist_id):
         role = _role(self.request)
