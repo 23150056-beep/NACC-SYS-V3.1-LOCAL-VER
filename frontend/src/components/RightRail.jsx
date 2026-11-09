@@ -182,7 +182,7 @@ export function TodayCard({ wide = false }) {
         const t = STATUS_TONE[a.status] || STATUS_TONE.scheduled;
         return (
           <button
-            key={a.id} type="button" onClick={() => navigate('/schedule')}
+            key={a.id} type="button" onClick={() => navigate(`/schedule?appointment=${a.id}`)}
             style={{ width: '100%', display: 'flex', gap: 11, padding: wide ? '10px 14px' : '9px 13px', borderBottom: '1px solid var(--divider-row)', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-sans)' }}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--blue-50)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}

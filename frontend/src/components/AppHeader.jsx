@@ -224,7 +224,30 @@ export default function AppHeader() {
    * gaps cost; each tab may shrink to 32px, and More is one more of them. */
   const phoneTabs = layout.phone
     ? Math.max(1, Math.floor((layout.width - 206 - 32) / 34)) : tabs.length;
-  const shownTabs = tabs.slice(0, phoneTabs);
+  /* From 480 to 899 (the rail is gone, "More" exists) the strip has what is left
+   * after the logo, the search pill, the bell and the avatar - and at 480-~700
+   * that is less than six tabs at their 36px minimum, so they drew over the
+   * pill and the bell. Whatever does not fit goes to "More", as under 480.
+   * When everything fits (with More as wide as it has always been) nothing here
+   * changes. The strip is centred and may spill `SPILL`px in all before it
+   * touches a neighbour (the two 16px gaps, 4px kept clear each side), which is
+   * how six tabs have always sat at 640 for a Social Worker. Once tabs are
+   * dropped, More shrinks to a tab's 36px to leave the room to them. */
+  const SPILL = 24;
+  const hasRoomFor = (n, moreW) => {
+    const more = screensFor(role).length > n;
+    const cluster = 90; // bell 38 + gap 8 + avatar 44, below 1024px
+    const avail = layout.width - 32 - 34 - layout.searchWidth - cluster - 3 * 16;
+    return n * 36 + Math.max(0, n - 1) * 4 + (more ? 4 + moreW : 0) <= avail + SPILL;
+  };
+  let tabCount = phoneTabs;
+  let moreWidth = layout.phone ? 32 : layout.tabWidth;
+  if (!layout.phone && !layout.leftRailOn && !hasRoomFor(tabs.length, layout.tabWidth)) {
+    moreWidth = 36;
+    tabCount = tabs.length;
+    while (tabCount > 1 && !hasRoomFor(tabCount, 36)) tabCount -= 1;
+  }
+  const shownTabs = tabs.slice(0, tabCount);
   const overflow = screensFor(role).filter((s) => !shownTabs.some((t) => t.id === s.id));
 
   const [searchOpen, setSearchOpen] = useState(false);
@@ -301,6 +324,7 @@ export default function AppHeader() {
 
   // Records carries the psychologist's unanswered assignment requests.
   const badgeFor = (id) => (id === 'users' ? pendingAccess : id === 'records' ? pendingAssignments : 0);
+  const overflowWaiting = overflow.reduce((n, s) => n + badgeFor(s.id), 0);
   const roleDot = (ROLE_META[role] || ROLE_META.Staff).color;
 
   return (
@@ -374,16 +398,21 @@ export default function AppHeader() {
         {!layout.leftRailOn && overflow.length > 0 && (
           <Popover open={moreOpen} onClose={() => setMoreOpen(false)} width={272} label="More destinations">
             <button
-              type="button" title="More" aria-label="More destinations" aria-expanded={moreOpen}
+              type="button" title="More" aria-label={overflowWaiting > 0 ? `More destinations, ${overflowWaiting} waiting` : 'More destinations'} aria-expanded={moreOpen}
               onClick={() => openOnly(moreOpen ? null : 'more')}
               style={{
-                width: layout.phone ? 32 : layout.tabWidth, height: 44, border: 'none', borderRadius: 'var(--radius-sm)',
+                position: 'relative', width: moreWidth, height: 44, border: 'none', borderRadius: 'var(--radius-sm)',
                 background: moreOpen ? 'rgba(255,255,255,0.12)' : 'transparent', cursor: 'pointer',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
                 color: moreOpen ? 'var(--chrome-ink)' : 'var(--chrome-ink-soft)', flex: 'none',
               }}
             >
               <Icon name="more-horizontal" size={21} />
+              {overflowWaiting > 0 && (
+                <span aria-hidden="true" className="racco-mono" data-testid="more-badge" style={{ position: 'absolute', top: 4, right: 'max(2px, calc(50% - 23px))', minWidth: 16, height: 16, padding: '0 4px', borderRadius: 'var(--radius-pill)', background: 'var(--red-500)', color: '#fff', fontSize: 9.5, fontWeight: 800, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', border: '2px solid var(--chrome)' }}>
+                  {overflowWaiting}
+                </span>
+              )}
             </button>
             <div style={{ padding: 6 }}>
               {overflow.map((s) => (

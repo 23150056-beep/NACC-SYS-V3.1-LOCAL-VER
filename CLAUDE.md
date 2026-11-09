@@ -1294,8 +1294,11 @@ the owner picked the plan. Presentation only - no server rule changed.
   `brief_facts.next_steps`. Hints explain the agency's words (owner); "Completed" is a finished
   pre-assessment, read from `pre_assessment_status` ("Answered" and the
   Counseling stage were retired on 2 Nov 2026).
-  Upcoming appointments open `/schedule`, which cannot open one appointment
-  from a link yet.
+  Upcoming appointments open `/schedule?appointment=<id>`, which opens that
+  one appointment's card (the id is taken into state and the parameter removed
+  at once; found in the loaded range or fetched from the detail endpoint, whose
+  scoping decides; unavailable or non-numeric ids give one toast). The Today
+  card, the rail and an appointment's activity line link the same way.
 - **The record form**: each step says how many answers it still needs, and
   "N answers still needed - Show me" jumps to each field. Next still moves on
   freely and Save is held exactly as before (the existing blockers, not a
@@ -1304,9 +1307,15 @@ the owner picked the plan. Presentation only - no server rule changed.
   Full screen under 640px.
 - **The header under 480px** (owner's choice): the search pill becomes a
   magnifier that opens the same field and panel, and tabs that do not fit go
-  under More. At 480 and wider nothing changed. Known: at exactly 480-~520 six
-  tabs at 36px still crowd the bell; moving the breakpoint changes the search
-  sizes, so it is the owner's call.
+  under More. **From 480 to 899** (no rail, More exists) the header counts how
+  many tabs fit (`AppHeader.jsx`: logo 34, `layout.searchWidth`, bell and
+  avatar 90, padding and gaps, at most 24 px spilled into the two gaps) and
+  folds the rest under More (owner, 9 Nov 2026). Six or seven tabs at 36px used
+  to run under the search pill and the bell from 480 to ~700 for the ISA and
+  psychologists (to ~540 for a SW). Under 480 and from 900 nothing changed. A
+  tab under More keeps its count: More carries the hidden tabs' summed badge
+  and says "More destinations, N waiting". The More popover has no arrow-key
+  handling (Tab and Escape work).
 - Styles for these live in their own files (`children/records.css`,
   `drawer.css`, `form.css`, `components/header-phone.css`), mostly scoped
   `!important` phone overrides because the shared controls size themselves
@@ -2674,9 +2683,26 @@ What was cut, commit `c016312`:
   `public, max-age=31536000, immutable`; `/index.html` `no-cache`), set in the
   web service's Headers page; also in `render.yaml`, which the demo does not
   read (above).
-- Left: the full child list is fetched again per screen; the console is ~40
-  queries; whether API answers are compressed is unknown (see the sandbox
-  bullet above).
+- **One child list for every screen** (commit `021c199`,
+  `context/ChildrenContext.jsx`, `useChildren()`): Records, the calendar,
+  Results & Reports, the pre-assessment picker, My Profile and the header
+  search read one copy of `/children/?include_archived=true`, each filtering
+  for itself. Stale-while-revalidate: a screen shows the copy at once and
+  `revalidate()`s as it opens (joining a request already out); a write that
+  changes the list calls `refresh()`, which never joins an earlier request.
+  Memory only, owned by the account that fetched it, dropped when the account
+  changes; a reply for a previous account is discarded. `loaded` is false
+  until the first answer - an empty list before it is not "no children".
+  Transfer records still reads its own list on open (its counts must match
+  the list it ticks). Measured: a repeat Records visit drew rows in ~60 ms.
+- **The console is 25 queries** (was 40): the security log's kinds counted and
+  rowed in one window-function query, counts read with their rows. Every
+  signed-in request loads the user's role with the user
+  (`ForcePasswordChangeJWTAuthentication.get_user`, a copy of SimpleJWT
+  5.3.1's without `CHECK_REVOKE_TOKEN`). `/children/` was already flat at 8-9
+  queries. Pinned in `test_endpoint_query_counts.py`. Measured on SQLite only.
+- Left: whether API answers are compressed is unknown (see the sandbox bullet
+  above).
 
 ## List order: newest edited first
 
@@ -2754,8 +2780,11 @@ rule is `!important`, the one thing that outranks an inline style, and is kept
 to the Button's own class so the inset rings of `.racco-queue-tile` and
 `.racco-pick-row`, which are plain buttons, are not overruled. The Dashboard's
 quick-action row is hand-built with the same inline shadow and carries the class
-by hand. Other hand-built `<button>`s that set `boxShadow` inline have the same
-fault and have not been swept: give them `racco-btn`, do not drop the shadow. A computed-style
+by hand. **Swept 9 Nov 2026**: the assistant launcher, the sidebar rail links,
+the psychologist picker rows, the sign-up role choices and the calendar's
+psychologist rows carry `racco-btn` too, each checked for a ring and an
+unchanged size. A new hand-built control that sets `boxShadow` inline needs the
+class: give it `racco-btn`, do not drop the shadow. A computed-style
 check needs a wait after focusing: the shadow transitions in, and a read straight
 away says `none`.
 

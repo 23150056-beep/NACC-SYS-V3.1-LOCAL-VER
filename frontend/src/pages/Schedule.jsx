@@ -17,6 +17,7 @@ import {
 import { prefetchBriefs } from '../api/assistant';
 import { useAssistant } from '../context/AssistantContext';
 import { useOpenFromLink } from '../utils/links';
+import { useSearchParams } from 'react-router-dom';
 import { firstError } from '../utils/errors';
 import { useSingleFlight } from '../utils/singleFlight';
 import BookingMonth from './schedule/MonthSlots';
@@ -210,6 +211,9 @@ export default function Schedule() {
   // can fetch that range rather than the entire history.
   const [calDate, setCalDate] = useState(() => new Date());
   const [calView, setCalView] = useState('month');
+  const [firstLoaded, setFirstLoaded] = useState(false);
+  const [wantAppt, setWantAppt] = useState(null);   // an appointment a link asked for
+  const [linkParams, setLinkParams] = useSearchParams();
 
   // Which appointments to hold in memory. The page used to ask for EVERY
   // appointment ever booked on every load - the endpoint is unpaginated, and
@@ -273,7 +277,7 @@ export default function Schedule() {
     () => api.get('/unavailability/?upcoming=true').then((r) => setLeave(r.data)),
     () => revalidateChildren(),
     !isPsych && (() => api.get('/psychologists/').then((r) => setPsychologists(r.data))),
-  ], 'Could not load the calendar. Check your connection and refresh.'),
+  ], 'Could not load the calendar. Check your connection and refresh.').then(() => setFirstLoaded(true)),
   [isPsych, range.from, range.to, toast, revalidateChildren]);
   useEffect(() => { load(); }, [load]);
   // The openings for the psychologist actually chosen, on the day actually
@@ -378,6 +382,37 @@ export default function Schedule() {
   // then ask which child. Both parameters are cleared afterwards so a refresh
   // does not reopen it.
   useOpenFromLink('book', '1', (params) => openBooking(params?.get('child')), !!booking, ['child']);
+
+  /* `?appointment=<id>` opens that one appointment's card. The parameter is
+     taken into state and removed from the address at once (as useOpenFromLink
+     does), so a reload does not reopen it. The appointment comes from what is
+     already loaded or, failing that, from the detail endpoint, whose scoping
+     decides; the calendar then moves to its day. */
+  const appointmentParam = linkParams.get('appointment');
+  useEffect(() => {
+    if (appointmentParam === null) return;
+    if (/^\d+$/.test(appointmentParam)) setWantAppt(appointmentParam);
+    else toast.warning('That appointment is not available to you.');
+    const next = new URLSearchParams(linkParams);
+    next.delete('appointment');
+    setLinkParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointmentParam]);
+  useEffect(() => {
+    if (!wantAppt || !firstLoaded) return;
+    const show = (a) => {
+      const at = new Date(a.start);
+      setCalDate(at);
+      setSel(a);
+    };
+    const found = appointments.find((a) => String(a.id) === wantAppt);
+    setWantAppt(null);
+    if (found) { show(found); return; }
+    api.get(`/appointments/${wantAppt}/`)
+      .then((r) => show(r.data))
+      .catch(() => toast.warning('That appointment is not available to you.'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantAppt, firstLoaded]);
 
   const events = useMemo(() => appointments
     .filter((a) => !calPsy || String(a.psychologist) === String(calPsy))
@@ -983,7 +1018,7 @@ export default function Schedule() {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
               {psyGroups.map((g) => (
-                <div key={g.id} role="button" tabIndex={0}
+                <div key={g.id} role="button" tabIndex={0} className="racco-btn"
                   onClick={() => setOpenPsy({ id: g.id, name: g.name })}
                   onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); setOpenPsy({ id: g.id, name: g.name }); } }}
                   {...hoverLift()}

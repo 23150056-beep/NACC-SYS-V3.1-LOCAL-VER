@@ -88,7 +88,8 @@ export function eventDestination(e, role) {
   // The id is the child's; the page opens on its Case study tab.
   if (type === 'casestudy') return e.entity_id ? `/report/child/${e.entity_id}?tab=casestudy` : '/children';
   if (type === 'guardian') return '/children';
-  if (type === 'appointment' || type === 'availabilityblock') return '/schedule';
+  if (type === 'appointment') return e.entity_id ? `/schedule?appointment=${e.entity_id}` : '/schedule';
+  if (type === 'availabilityblock') return '/schedule';
   if (['instrumentcatalog', 'instrument', 'agencyformtemplate', 'questionnaire'].includes(type)) return '/instruments';
   if (e.category === 'user' || e.category === 'security' || type === 'user') {
     return role === 'Administrator' ? '/users' : '/';

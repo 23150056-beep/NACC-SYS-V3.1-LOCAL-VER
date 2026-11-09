@@ -432,10 +432,8 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
                   {upcoming.slice(0, UPCOMING_SHOWN).map((a) => {
                     const isToday = a.start.slice(0, 10) === today;
                     return (
-                      // The calendar does not open a single appointment from a
-                      // link, so this goes to the calendar itself.
-                      <button key={a.id} type="button" className="racco-cd-appt" onClick={() => navigate('/schedule')}
-                        title="Open the calendar"
+                      <button key={a.id} type="button" className="racco-cd-appt" onClick={() => navigate(`/schedule?appointment=${a.id}`)}
+                        title="Open this appointment"
                         style={{ background: isToday ? 'var(--amber-50)' : 'var(--ink-50)', border: `1px solid ${isToday ? 'var(--amber-200)' : 'var(--border)'}` }}>
                         <Icon name="calendar" size={15} style={{ color: isToday ? 'var(--amber-600)' : 'var(--blue-600)', flex: 'none' }} />
                         <span style={{ minWidth: 0, flex: 1 }}>

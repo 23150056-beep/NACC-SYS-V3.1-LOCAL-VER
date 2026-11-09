@@ -62,7 +62,7 @@ export default function PsychologistPicker({ psychologists, blocks, value, onPic
             const busy = p.caseload >= 5;
             return (
               <button
-                type="button" key={p.id} aria-pressed={on} onClick={() => onPick(p.id)}
+                type="button" className="racco-btn" key={p.id} aria-pressed={on} onClick={() => onPick(p.id)}
                 style={{ display: 'grid', gridTemplateColumns: cols, gap: 4, alignItems: 'stretch', width: '100%', textAlign: 'left', padding: '9px 11px', borderRadius: 'var(--radius-md)', cursor: 'pointer', fontFamily: 'var(--font-sans)', border: `1px solid ${on ? 'var(--blue-500)' : 'var(--border)'}`, background: on ? 'var(--blue-50)' : 'var(--surface)', boxShadow: on ? '0 0 0 1px var(--blue-500)' : 'none', transition: 'var(--transition-base)' }}
               >
                 <span style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 3, minWidth: 0 }}>
