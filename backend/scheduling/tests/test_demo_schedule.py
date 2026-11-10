@@ -26,7 +26,7 @@ from django.utils import timezone
 
 from scheduling import booking, demo_schedule
 from scheduling.models import Appointment, AvailabilityBlock
-from scheduling.tests.test_api import SchedulingBase, child_with_referral
+from scheduling.tests.test_api import SchedulingBase, child_with_referral, next_weekday
 
 User = get_user_model()
 
@@ -58,12 +58,39 @@ class AvailabilityForEveryPsychologistTest(SchedulingBase):
             for earlier, later in zip(blocks, blocks[1:]):
                 self.assertLessEqual(earlier.end_time, later.start_time)
 
-    def test_there_is_a_lunch_gap(self):
+    def test_it_installs_one_window_a_day(self):
+        """A day holds one window and its slot count is the day's limit - the
+        rule the availability form enforces."""
         demo_schedule.install_availability([self.psy])
-        monday = AvailabilityBlock.objects.filter(
-            psychologist=self.psy, weekday=0).order_by("start_time")
-        self.assertEqual(2, monday.count(), "a morning and an afternoon")
-        self.assertLess(monday[0].end_time, monday[1].start_time)
+        for weekday in range(5):
+            blocks = AvailabilityBlock.objects.filter(
+                psychologist=self.psy, weekday=weekday, active=True)
+            self.assertEqual(1, blocks.count())
+            block = blocks.get()
+            self.assertEqual((time(8, 0), time(17, 0)),
+                             (block.start_time, block.end_time))
+            self.assertEqual(demo_schedule.DEFAULT_CAPACITY, block.capacity)
+
+    def test_a_day_that_has_a_window_gets_no_second_one(self):
+        AvailabilityBlock.objects.create(
+            psychologist=self.psy, weekday=0, start_time=time(13, 0),
+            end_time=time(15, 0), capacity=2)
+        demo_schedule.install_availability([self.psy])
+        monday = AvailabilityBlock.objects.filter(psychologist=self.psy, weekday=0)
+        self.assertEqual(1, monday.count())
+        self.assertEqual(time(13, 0), monday.get().start_time)
+
+    def test_everything_the_installed_week_offers_books(self):
+        """Through the real rule: the slot grid of an installed day is
+        non-empty and every start it offers is accepted by the endpoint."""
+        demo_schedule.install_availability([self.psy])
+        day = next_weekday(1, 9).date()
+        offered = booking.bookable_slots(self.psy, self.child, day)
+        self.assertTrue(offered)
+        for slot in offered:
+            start = timezone.make_aware(datetime.combine(
+                day, time.fromisoformat(slot["start"])))
+            self.assertEqual({}, booking.errors_for(self.psy, self.child, start, 60))
 
     def test_it_does_not_overlap_a_window_that_already_exists(self):
         """The availability form refuses overlapping blocks outright.
@@ -250,3 +277,30 @@ class AppointmentsLandInClinicHoursTest(SchedulingBase):
             self.assertEqual({}, errors,
                              f"{appt.child.fullname} at "
                              f"{timezone.localtime(appt.start)} would be refused")
+
+
+class LegacyTwoWindowDaysTest(SchedulingBase):
+    """A demo database seeded before the one-window rule still has a lunch
+    gap. Respreading must place sessions in the hours it really has."""
+
+    def test_respread_never_uses_the_lunch_gap_of_a_legacy_day(self):
+        AvailabilityBlock.objects.all().delete()
+        for wd in range(5):
+            for s, e in ((time(8, 0), time(12, 0)), (time(13, 0), time(17, 0))):
+                AvailabilityBlock.objects.create(
+                    psychologist=self.psy, weekday=wd, start_time=s, end_time=e,
+                    capacity=6)
+        day = next_weekday(0, 9).date()
+        for n in range(5):
+            kid = child_with_referral(f"Kid{n}", self.psy)
+            Appointment.objects.create(
+                child=kid, psychologist=self.psy,
+                start=timezone.make_aware(datetime.combine(day, time(9, 22))),
+                duration_minutes=60)
+        demo_schedule.realign_appointments(respread=True)
+        for appt in Appointment.objects.filter(psychologist=self.psy):
+            local = timezone.localtime(appt.start)
+            self.assertNotEqual(12, local.hour, local)
+            self.assertEqual({}, booking.errors_for(
+                self.psy, appt.child, local, 60, own_calendar=False,
+                exclude_id=appt.id), local)

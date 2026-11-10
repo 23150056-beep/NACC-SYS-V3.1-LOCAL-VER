@@ -36,8 +36,10 @@ from datetime import date, datetime, time, timedelta
 
 from django.utils import timezone
 
+from accounts.display import display_name
 from clinical.models import CaseReferral
 from config.clock import clock
+from scheduling.availability import blocks_for_day
 from scheduling.models import Appointment, Unavailability
 
 # How far either side of the new appointment to look for clashes. Comfortably
@@ -177,11 +179,10 @@ class Diary:
         return None
 
     def blocks_on(self, day):
-        """The active windows for one date: the dated ones for that date, else
-        the weekly ones for its weekday."""
-        return [b for b in self.blocks
-                if (b.date == day if b.date is not None
-                    else b.weekday is not None and b.weekday == day.weekday())]
+        """The active windows for one date: the dated ones for that date if
+        there are any (a one-off REPLACES the weekly window for that date),
+        else the weekly ones for its weekday."""
+        return blocks_for_day(self.blocks, day)
 
     def works_on(self):
         """Weekdays (Monday = 0) the psychologist has a weekly window for."""
@@ -194,7 +195,7 @@ class Diary:
         """The first active block that FULLY contains [start, end), not merely
         the start: a 60-minute session at 11:30 in a window closing at 12:00
         was once accepted."""
-        for block in self.blocks:
+        for block in self.blocks_on(local_start.date()):
             if not block.covers(local_start):
                 continue
             if local_end.date() == local_start.date() and local_end.time() <= block.end_time:
@@ -202,7 +203,9 @@ class Diary:
         return None
 
     def _capacity_left(self, block, local_start):
-        """Places left in `block` that date, counted by start time within it."""
+        """Places left in `block` that date, counted by start time within it.
+        `block` comes from blocks_on(), so a dated override's capacity is the
+        one that applies and the weekly window it replaces is not added."""
         taken = sum(1 for s in self._psych_by_day.get(local_start.date(), ())
                     if block.start_time <= s.local_start.time() < block.end_time)
         return block.capacity - taken
@@ -496,3 +499,106 @@ def _month_reason(psychologist, child, diary, days, first, duration_minutes):
     if any(d["state"] == "full" for d in ahead):
         return "full", f"{name} is fully booked for the rest of {month_name}."
     return "none", f"{name} has no open time in {month_name}."
+
+
+# How far ahead a booking can be made: a year, this month included. The month
+# endpoint, the picker's day check and the picker's range all read this.
+MONTHS_AHEAD = 12
+
+
+def last_bookable_day(today=None):
+    """The last day a booking may be made for: the end of the month
+    MONTHS_AHEAD months from today's. The month endpoint accepts exactly the
+    months up to this one, so every range check derives from here."""
+    today = today or timezone.localdate()
+    index = today.year * 12 + (today.month - 1) + MONTHS_AHEAD
+    year, month = divmod(index, 12)
+    return date(year, month + 1, calendar.monthrange(year, month + 1)[1])
+
+
+def _long_date(day):
+    """"Thursday, November 12" - the picker's wording."""
+    return f"{day:%A}, {day:%B} {day.day}"
+
+
+def _unavailable_label(diary, day, duration_minutes):
+    """(state, sentence) for a day with nothing to offer. The same order as
+    why_empty: leave first (it outranks a missing window), then no window,
+    then a length no window fits, then a full day."""
+    spoken = _long_date(day)
+    if diary.leave_on(day) is not None:
+        return "away", f"Away on leave on {spoken}"
+    blocks = diary.blocks_on(day)
+    if not blocks:
+        return "off", f"No hours posted on {spoken}"
+    if duration_minutes > _longest_window(blocks):
+        return "full", f"No window fits a {duration_minutes}-minute session on {spoken}"
+    if day == timezone.localdate():
+        return "full", f"No open time left on {spoken}"
+    return "full", f"Fully booked on {spoken}"
+
+
+def psychologist_picker(psychologists, child, *, duration_minutes=60, day=None,
+                        exclude_id=None):
+    """Which psychologists the booking drawer may still offer.
+
+    A psychologist who cannot take this booking must not be selectable. The
+    answer is NOT a count of free places: each person's diary is read once
+    (one Diary.load) for the day asked about, or - when no day is chosen - for
+    the whole booking window, today to last_bookable_day(), and every
+    candidate goes through slots_on, the rule the booking endpoint applies, so
+    "open" here means a time on that day books. The walk starts today and
+    stops at the first open day, which is `next_open`, so an open psychologist
+    is cheap; only one with nothing open all year reads every day.
+
+    States: open, full (a window applies and nothing is bookable), away (leave
+    covers the day, or every working day of the range) and off (no window). A
+    child with no case referral (and no appointment being moved) cannot be
+    booked with ANYBODY, which is true of everyone alike, so nobody is judged:
+    the state is "unknown" and `blocked` is true. The labels carry dates only.
+    """
+    today = timezone.localdate()
+    first, last = (day, day) if day else (today, last_bookable_day(today))
+    blocked = (child is not None and exclude_id is None
+               and not referral_on_file(child))
+    rows = []
+    for psych in psychologists:
+        row = {"id": psych.id, "name": display_name(psych),
+               "state": "unknown", "next_open": None, "label": ""}
+        rows.append(row)
+        if blocked:
+            continue
+        diary = Diary.load(psych, child, first, last,
+                           duration_minutes=duration_minutes, exclude_id=exclude_id)
+        if day:
+            if slots_on(diary, day, duration_minutes):
+                row["state"] = "open"
+            else:
+                row["state"], row["label"] = _unavailable_label(diary, day, duration_minutes)
+            continue
+        states = set()
+        for n in range((last - first).days + 1):
+            this = first + timedelta(days=n)
+            if slots_on(diary, this, duration_minutes):
+                row.update(state="open", next_open=this.isoformat())
+                break
+            # Why nothing is offered, without building the sentence per day.
+            if diary.leave_on(this) is not None:
+                states.add("away")
+            elif not diary.blocks_on(this):
+                states.add("off")
+            else:
+                states.add("full")
+        if row["state"] != "open":
+            # Away only when every working day is leave; "off" when no window
+            # applies at all (the old order: full, then away, then off).
+            row["state"] = ("full" if "full" in states
+                            else "away" if "away" in states else "off")
+            row["label"] = {
+                "full": "No open time in the next 12 months",
+                "away": "Away on leave for the next 12 months",
+                "off": "No hours posted in the next 12 months",
+            }[row["state"]]
+    return {"day": day.isoformat() if day else None,
+            "first": first.isoformat(), "last": last.isoformat(),
+            "blocked": blocked, "psychologists": rows}

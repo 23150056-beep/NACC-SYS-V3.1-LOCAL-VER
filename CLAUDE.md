@@ -424,6 +424,32 @@ stay put as windows, leave and sessions are added.
 for every role. Moving an appointment that already exists is exempt, so
 children booked before the rule are not stranded by it.
 
+**One availability window a day** (9 Nov 2026, owner). Adjacent windows were
+allowed, so Mon 8-12 (2) + Mon 1-5 (2) meant four sessions for a psychologist
+who meant two. Now a day holds one window and its slot count ("Sessions that
+day") is the day's limit: `AvailabilityBlockSerializer.validate` refuses a
+second ACTIVE weekly window for a (psychologist, weekday) or a second ACTIVE
+one-off for a (psychologist, date), on create, on a PATCH that moves a window
+onto a taken day and on switching an inactive one back on. The 400 carries a
+sentence AND `existing_id` (an integer; `DayAlreadyHasWindow` is not a
+`ValidationError` precisely so DRF does not stringify it), and the Schedule
+form PATCHes that window instead of POSTing (days already held are "updated",
+old -> new, in the confirmation; one picked day that exists prefills the form
+and the title says Edit). The target owner is checked in the serializer too,
+so a colleague's day is never described to someone who may not touch it.
+**A one-off window REPLACES that weekday's weekly window for that date only**
+(`availability.blocks_for_day`, used by `Diary.blocks_on`, `_window_for`, the
+slot grid, the month, `free_windows` and the Dashboard's "today"; a weekly
+window's `booked_ahead` skips dates with an override). Capacity is read from
+that one block, so the two never add up. **Databases that already hold two
+windows on a day keep working and are never merged on their own**: they stay
+editable (an edit that keeps the day is not refused) and the Schedule screen
+offers "Combine into one" - `POST /api/availability/combine/ {ids}` keeps the
+lowest id, takes the earliest start and latest end and SUMS the capacities,
+under `select_for_update`; bookings are untouched. The demo installs one
+8:00 AM-5:00 PM window a day with 8 slots (`demo_schedule`), and leaves a day
+that already has a window alone.
+
 Declaring leave never cancels what is booked inside it, and removing an
 availability window never does either. Those sessions were agreed with
 somebody; both screens report the count and change nothing.
@@ -472,6 +498,27 @@ psychologist and the ISA on 2 Oct 2026):
   refusal is scrolled into view, since it sits at the top of a tall drawer. After a refused booking (400 or
   409) the month is asked again. Under 360px the word "open" goes and the count
   stands alone. Measured locally, the month answer takes 70-350 ms.
+- **A fully loaded psychologist cannot be picked** (9 Nov 2026,
+  `GET /api/availability/psychologists/`, `booking.psychologist_picker`,
+  `pages/schedule/psychologistPicker.js`). The drawer's Psychologist select asks
+  which active psychologists have a bookable time on the chosen day (or a day
+  that came with the drawer), else in the WHOLE booking window (10 Nov 2026):
+  today to the last day of the month 12 months ahead, `booking.last_bookable_day`,
+  the same `MONTHS_AHEAD` the month endpoint and the day check use. It reads one
+  `Diary` per psychologist for that whole range and puts every candidate through `slots_on`, the booking
+  rule itself, never a count of places: states open / full / away / off, with
+  `next_open` and a short date-only `label` ("Fully booked on Thursday,
+  November 12"; "No open time in the next 12 months" for a range). With no day
+  the walk starts today and STOPS at the first open day, which is `next_open`,
+  so an open psychologist is cheap; `open_days` was dropped because it forced a
+  full scan. Five psychologists full all year measured 0.3 s locally. Staff and the ISA only (a psychologist 403, nobody
+  signed in 401); a child the asker cannot see, or an `exclude` that is not an
+  appointment of that child, is 404; a missing referral answers `blocked: true`
+  and judges nobody (state "unknown"). The select greys non-open names with
+  their reason in BOTH modes (it used to grey nobody in range mode, when the
+  range was shorter than the window), never the chosen one, and fails open on an error or `blocked`;
+  the booking refusal stays the authority, and a refused booking asks again.
+  The Calendar's "Show one psychologist" filter is unchanged.
 - **The drawers and the appointment card are the shared `Drawer` and `Modal`**
   from `ui`, so Escape, a close button, a focus trap and focus return come
   with them. Hand-built overlays had none of those. The card closes when

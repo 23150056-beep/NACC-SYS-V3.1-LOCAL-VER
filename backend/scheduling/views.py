@@ -2,6 +2,7 @@ import re
 from datetime import date
 
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.utils import timezone
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
@@ -27,7 +28,7 @@ from scheduling.session_mail import BOOKED, CANCELLED, MOVED, session_changed
 
 
 # How far ahead a month can be asked for: a year, this month included.
-MONTHS_AHEAD = 12
+MONTHS_AHEAD = booking.MONTHS_AHEAD
 
 
 class AvailabilityBlockViewSet(viewsets.ModelViewSet):
@@ -48,9 +49,11 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
 
     def list(self, request, *args, **kwargs):
         # Read once so the "already booked" counts for every window come from
-        # one query rather than one each.
+        # one query rather than one each. The list holds every active window
+        # of each psychologist on it (only `active` and `psychologist` narrow
+        # it), so the one-off overrides are read from it, not asked for.
         blocks = list(self.filter_queryset(self.get_queryset()))
-        context = {**self.get_serializer_context(), "booked_ahead": BookedAhead(blocks)}
+        context = {**self.get_serializer_context(), "booked_ahead": BookedAhead(blocks, blocks_complete=True)}
         serializer = self.get_serializer_class()(blocks, many=True, context=context)
         return Response(serializer.data)
 
@@ -87,6 +90,61 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
     def perform_destroy(self, instance):
         self._assert_can_write(instance.psychologist_id)
         instance.delete()
+
+    @action(detail=False, methods=["post"], url_path="combine")
+    def combine(self, request):
+        """Fold the several windows a day may still hold into one.
+
+        Databases from before the one-window rule can hold two or more active
+        windows on one day; they keep working and are never merged on their
+        own. This is the person's way to do it: the lowest id is kept, spans
+        the earliest start to the latest end, and carries the SUM of the
+        capacities, so the day's total is what it was. Sessions already booked
+        are untouched - removing a window never cancels what is agreed.
+        """
+        role = _role(request)
+        if role not in (Role.ADMINISTRATOR, Role.PSYCHOLOGIST):
+            raise PermissionDenied("You can only manage your own availability.")
+        ids = request.data.get("ids") if hasattr(request.data, "get") else None
+        if (not isinstance(ids, list) or len(ids) < 2
+                or any(isinstance(i, bool) or not isinstance(i, int) for i in ids)):
+            raise ValidationError({"ids": "Pick at least two windows to combine."})
+        if len(set(ids)) != len(ids):
+            raise ValidationError({"ids": "The same window was picked twice."})
+
+        with transaction.atomic():
+            blocks = list(AvailabilityBlock.objects.select_for_update()
+                          .filter(pk__in=ids).order_by("id"))
+            if len(blocks) != len(ids):
+                raise ValidationError({"ids": "One of those windows no longer exists. "
+                                              "Reload and try again."})
+            for owner_id in {b.psychologist_id for b in blocks}:
+                self._assert_can_write(owner_id)
+            if len({b.psychologist_id for b in blocks}) != 1:
+                raise ValidationError({"ids": "Those windows belong to different "
+                                              "psychologists."})
+            if not all(b.active for b in blocks):
+                raise ValidationError({"ids": "Only active windows can be combined."})
+            if len({(b.date, None if b.date else b.weekday) for b in blocks}) != 1:
+                raise ValidationError({"ids": "Those windows are not on the same day."})
+            keep, rest = blocks[0], blocks[1:]
+            keep.start_time = min(b.start_time for b in blocks)
+            keep.end_time = max(b.end_time for b in blocks)
+            # The span must not swallow a window that was left out: capacity
+            # would be counted twice across the pair.
+            others = AvailabilityBlock.objects.filter(
+                psychologist_id=keep.psychologist_id, active=True,
+                date=keep.date, weekday=keep.weekday,
+                start_time__lt=keep.end_time, end_time__gt=keep.start_time,
+            ).exclude(pk__in=ids)
+            if others.exists():
+                raise ValidationError({"ids": "Another window on that day lies between "
+                                              "them. Combine every window on the day."})
+            keep.capacity = sum(b.capacity for b in blocks)
+            keep.save()
+            AvailabilityBlock.objects.filter(pk__in=[b.pk for b in rest]).delete()
+        keep.refresh_from_db()
+        return Response(self.get_serializer(keep).data)
 
     @action(detail=False, methods=["get"], url_path="openings")
     def openings(self, request):
@@ -252,6 +310,68 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
             "duration": duration,
             **found,
         })
+
+    @action(detail=False, methods=["get"], url_path="psychologists")
+    def psychologists(self, request):
+        """Which psychologists the booking drawer may offer, for this child,
+        length and (optionally) day - see booking.psychologist_picker.
+
+        Staff and the administrator only: a psychologist books on their own
+        calendar and has no picker. A child the asker cannot see is a 404 and
+        so is an `exclude` that is not an appointment of that child; without a
+        child `exclude` is ignored. Explicitly routed (`/psychologists/`), so
+        the router's detail route cannot swallow it as a pk.
+        """
+        if _role(request) not in (Role.STAFF, Role.ADMINISTRATOR):
+            return Response({"detail": "You do not have permission to do this."},
+                            status=403)
+        today = timezone.localdate()
+        day = None
+        asked = request.query_params.get("day")
+        if asked:
+            try:
+                day = date.fromisoformat(asked)
+            except ValueError:
+                return Response({"detail": "A day in YYYY-MM-DD, please."}, status=400)
+            if day < today:
+                return Response({"detail": "That day has already passed.",
+                                 "today": today.isoformat()}, status=400)
+            if day > booking.last_bookable_day(today):   # the month endpoint's own window
+                return Response({"detail": f"Days can be booked up to {MONTHS_AHEAD} "
+                                           f"months ahead.",
+                                 "today": today.isoformat()}, status=400)
+
+        child = None
+        child_id = request.query_params.get("child")
+        if child_id:
+            if not str(child_id).isdigit():
+                return Response({"detail": "Which child?"}, status=400)
+            child = scope_to_visible(Child.objects.filter(pk=child_id), request,
+                                     path=None).first()
+            if child is None:
+                return Response({"detail": "Not found."}, status=404)
+        try:
+            duration = int(request.query_params.get("duration") or 60)
+        except ValueError:
+            duration = 60
+        duration = max(15, min(duration, 8 * 60))
+
+        exclude = request.query_params.get("exclude")
+        if (exclude or "") and child is not None:
+            if not exclude.isdigit() or not Appointment.objects.filter(
+                    pk=exclude, child=child).exists():
+                return Response({"detail": "Not found."}, status=404)
+            exclude = int(exclude)
+        else:
+            exclude = None
+
+        # The same list /api/psychologists/ gives the assign picker.
+        User = get_user_model()
+        people = (User.objects
+                  .filter(role__role_name=Role.PSYCHOLOGIST, status=User.ACTIVE)
+                  .order_by("last_name", "first_name", "id"))
+        return Response(booking.psychologist_picker(
+            people, child, duration_minutes=duration, day=day, exclude_id=exclude))
 
     @action(detail=False, methods=["get"], url_path="next-slots")
     def next_slots(self, request):
