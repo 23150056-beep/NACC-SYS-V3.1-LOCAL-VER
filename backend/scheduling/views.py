@@ -28,7 +28,7 @@ from scheduling.session_mail import BOOKED, CANCELLED, MOVED, session_changed
 
 
 # How far ahead a month can be asked for: a year, this month included.
-MONTHS_AHEAD = 12
+MONTHS_AHEAD = booking.MONTHS_AHEAD
 
 
 class AvailabilityBlockViewSet(viewsets.ModelViewSet):
@@ -326,8 +326,7 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
             if day < today:
                 return Response({"detail": "That day has already passed.",
                                  "today": today.isoformat()}, status=400)
-            ahead = (day.year - today.year) * 12 + (day.month - today.month)
-            if ahead > MONTHS_AHEAD:           # the month endpoint's own window
+            if day > booking.last_bookable_day(today):   # the month endpoint's own window
                 return Response({"detail": f"Days can be booked up to {MONTHS_AHEAD} "
                                            f"months ahead.",
                                  "today": today.isoformat()}, status=400)

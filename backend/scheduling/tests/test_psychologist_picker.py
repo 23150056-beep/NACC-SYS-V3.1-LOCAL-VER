@@ -7,7 +7,7 @@ that matters: someone is "open" on a day exactly when the slot grid has a time.
 
 The clock is pinned to Monday 2 Nov 2026, 10:00 (see test_month.py).
 """
-from datetime import date
+from datetime import date, timedelta
 
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
@@ -16,7 +16,7 @@ from django.utils import timezone
 from accounts.models import User
 from clinical.models import CaseReferral
 from scheduling import booking
-from scheduling.models import Appointment, AvailabilityBlock
+from scheduling.models import Appointment, AvailabilityBlock, Unavailability
 from scheduling.tests.test_month import MonthBase, at
 from scheduling.tests.test_api import child_with_referral
 
@@ -178,21 +178,29 @@ class PickerDayTest(PickerBase):
 
 
 class PickerRangeTest(PickerBase):
+    """No day chosen: the whole booking window, today (Mon 2 Nov 2026) to the
+    end of the month twelve months on (Tue 30 Nov 2027)."""
+
     def setUp(self):
         super().setUp()
         self._auth("s@racco1.gov.ph")
 
-    def test_the_range_is_today_and_27_days_on(self):
+    def away(self, person, first, last):
+        return Unavailability.objects.create(
+            psychologist=person, starts_on=first, ends_on=last, reason="Training")
+
+    def test_the_range_is_the_booking_window(self):
         response = self.ask()
         self.assertIsNone(response.data["day"])
         self.assertEqual("2026-11-02", response.data["first"])
-        self.assertEqual("2026-11-29", response.data["last"])
+        self.assertEqual("2027-11-30", response.data["last"])
+        self.assertEqual(booking.last_bookable_day().isoformat(), response.data["last"])
 
-    def test_next_open_and_open_days(self):
+    def test_next_open_is_the_first_open_day_and_open_days_is_gone(self):
         row = self.row(self.ask(), self.psy)
         self.assertEqual("open", row["state"])
         self.assertEqual("2026-11-04", row["next_open"])
-        self.assertEqual(4, row["open_days"])          # Nov 4, 11, 18, 25
+        self.assertNotIn("open_days", row)
 
     def test_next_open_skips_a_full_day(self):
         for hh in (9, 10):
@@ -200,31 +208,60 @@ class PickerRangeTest(PickerBase):
                 child=child_with_referral(f"K{hh}", self.psy), psychologist=self.psy,
                 start=timezone.make_aware(timezone.datetime(2026, 11, 4, hh, 0)),
                 duration_minutes=60)
-        row = self.row(self.ask(), self.psy)
-        self.assertEqual("2026-11-11", row["next_open"])
-        self.assertEqual(3, row["open_days"])
+        self.assertEqual("2026-11-11", self.row(self.ask(), self.psy)["next_open"])
 
-    def test_a_psychologist_full_every_day_is_full(self):
-        for d in (4, 11, 18, 25):
-            for hh in (9, 10):
-                Appointment.objects.create(
-                    child=child_with_referral(f"K{d}{hh}", self.psy), psychologist=self.psy,
-                    start=timezone.make_aware(timezone.datetime(2026, 11, d, hh, 0)),
-                    duration_minutes=60)
+    def test_a_first_opening_six_months_out_is_open(self):
+        self.away(self.psy, date(2026, 11, 2), date(2027, 4, 30))
+        row = self.row(self.ask(), self.psy)
+        self.assertEqual("open", row["state"])
+        self.assertEqual("2027-05-05", row["next_open"])        # first Wednesday after
+        self.assertEqual("", row["label"])
+        self.assertEqual("open", self.row(self.ask(day="2027-05-05"), self.psy)["state"])
+
+    def test_closed_for_the_whole_window_is_full_and_not_open(self):
+        d = date(2026, 11, 4)
+        while d <= date(2027, 11, 30):
+            if d.weekday() == 2:
+                for hh in (9, 10):
+                    Appointment.objects.create(
+                        child=child_with_referral(f"K{d:%y%m%d}{hh}", self.psy),
+                        psychologist=self.psy, duration_minutes=60,
+                        start=timezone.make_aware(timezone.datetime(d.year, d.month, d.day, hh)))
+            d += timedelta(days=1)
         row = self.row(self.ask(), self.psy)
         self.assertEqual("full", row["state"])
         self.assertIsNone(row["next_open"])
-        self.assertEqual("No open time in the next 4 weeks", row["label"])
+        self.assertEqual("No open time in the next 12 months", row["label"])
 
-    def test_no_hours_and_away_all_range(self):
-        self.assertEqual("No hours posted in the next 4 weeks",
+    def test_no_hours_and_away_all_window(self):
+        self.assertEqual("off", self.row(self.ask(), self.other)["state"])
+        self.assertEqual("No hours posted in the next 12 months",
                          self.row(self.ask(), self.other)["label"])
-        from scheduling.models import Unavailability
-        Unavailability.objects.create(psychologist=self.psy, starts_on=date(2026, 11, 2),
-                                      ends_on=date(2026, 11, 29), reason="Training")
+        self.away(self.psy, date(2026, 11, 2), date(2027, 11, 30))
         row = self.row(self.ask(), self.psy)
         self.assertEqual("away", row["state"])
-        self.assertEqual("Away on leave for the next 4 weeks", row["label"])
+        self.assertEqual("Away on leave for the next 12 months", row["label"])
+
+    def test_the_last_day_of_the_window_counts_and_the_day_after_does_not(self):
+        AvailabilityBlock.objects.filter(psychologist=self.psy).delete()
+        AvailabilityBlock.objects.create(
+            psychologist=self.psy, date=date(2027, 11, 30), start_time="09:00",
+            end_time="12:00", capacity=1)
+        row = self.row(self.ask(), self.psy)
+        self.assertEqual(("open", "2027-11-30"), (row["state"], row["next_open"]))
+        AvailabilityBlock.objects.filter(psychologist=self.psy).delete()
+        AvailabilityBlock.objects.create(
+            psychologist=self.psy, date=date(2027, 12, 1), start_time="09:00",
+            end_time="12:00", capacity=1)
+        row = self.row(self.ask(), self.psy)
+        self.assertEqual("off", row["state"])
+        self.assertIsNone(row["next_open"])
+
+    def test_the_window_end_is_the_month_endpoints(self):
+        self.assertEqual(200, self.month(month="2027-11").status_code)
+        self.assertEqual(400, self.month(month="2027-12").status_code)
+        self.assertEqual(200, self.ask(day="2027-11-30").status_code)
+        self.assertEqual(400, self.ask(day="2027-12-01").status_code)
 
     def test_no_referral_blocks_the_range_too(self):
         CaseReferral.objects.filter(child=self.child).delete()
@@ -272,6 +309,7 @@ class PickerQueryCountTest(PickerBase):
         # Two psychologists: about five reads each plus the fixed overhead.
         self.assertLessEqual(base_day, 20)
         self.assertLessEqual(base_range, 20)
+        # A year-long range is still one Diary.load per psychologist.
 
     def test_queries_grow_by_a_fixed_amount_per_psychologist(self):
         two = self.count(day=WED)

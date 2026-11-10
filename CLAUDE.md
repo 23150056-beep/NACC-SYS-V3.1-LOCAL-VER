@@ -502,15 +502,21 @@ psychologist and the ISA on 2 Oct 2026):
   `GET /api/availability/psychologists/`, `booking.psychologist_picker`,
   `pages/schedule/psychologistPicker.js`). The drawer's Psychologist select asks
   which active psychologists have a bookable time on the chosen day (or a day
-  that came with the drawer), else in the next 28 days. It reads one `Diary`
-  per psychologist and puts every candidate through `slots_on`, the booking
+  that came with the drawer), else in the WHOLE booking window (10 Nov 2026):
+  today to the last day of the month 12 months ahead, `booking.last_bookable_day`,
+  the same `MONTHS_AHEAD` the month endpoint and the day check use. It reads one
+  `Diary` per psychologist for that whole range and puts every candidate through `slots_on`, the booking
   rule itself, never a count of places: states open / full / away / off, with
-  `next_open`, `open_days` and a short date-only `label` ("Fully booked on
-  Thursday, November 12"). Staff and the ISA only (a psychologist 403, nobody
+  `next_open` and a short date-only `label` ("Fully booked on Thursday,
+  November 12"; "No open time in the next 12 months" for a range). With no day
+  the walk starts today and STOPS at the first open day, which is `next_open`,
+  so an open psychologist is cheap; `open_days` was dropped because it forced a
+  full scan. Five psychologists full all year measured 0.3 s locally. Staff and the ISA only (a psychologist 403, nobody
   signed in 401); a child the asker cannot see, or an `exclude` that is not an
   appointment of that child, is 404; a missing referral answers `blocked: true`
   and judges nobody (state "unknown"). The select greys non-open names with
-  their reason, never the chosen one, and fails open on an error or `blocked`;
+  their reason in BOTH modes (it used to grey nobody in range mode, when the
+  range was shorter than the window), never the chosen one, and fails open on an error or `blocked`;
   the booking refusal stays the authority, and a refused booking asks again.
   The Calendar's "Show one psychologist" filter is unchanged.
 - **The drawers and the appointment card are the shared `Drawer` and `Modal`**

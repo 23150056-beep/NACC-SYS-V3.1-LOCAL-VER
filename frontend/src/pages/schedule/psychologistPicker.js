@@ -16,7 +16,7 @@ export function usePsychologistPicker({ child, duration, day, exclude, open }) {
   const [state, setState] = useState({ key: '', data: null });
   const [tick, setTick] = useState(0);
   // A day already behind us (moving an old appointment) is not a day the
-  // server will judge; fall back to the next four weeks.
+  // server will judge; fall back to the whole booking window.
   const askedDay = day && day >= localToday() ? day : '';
   const key = `${child || ''}|${duration || 60}|${askedDay}|${exclude || ''}`;
   const asking = open;
@@ -48,18 +48,19 @@ export function usePsychologistPicker({ child, duration, day, exclude, open }) {
   };
 }
 
-/* The option text and whether it is greyed. Greyed only once a day is chosen:
-   with no day the server judges four weeks, but a booking may be made up to a
-   year ahead, so a name with nothing open soon is labelled and still pickable
-   (the month calendar then shows its later days). The chosen psychologist is never
-   disabled: moving an appointment keeps its own, and taking the pick away
-   silently would be worse than saying why it no longer fits. */
-export function pickerOption(person, rows, selected, onDay) {
+/* The option text and whether it is greyed. Greyed in both modes: with a day
+   chosen the server judges that day, with none it judges the whole booking
+   window (today to the end of the month twelve months ahead, the month
+   calendar's own range), so a greyed name has no time that books anywhere
+   the drawer can reach. The chosen psychologist is never disabled: moving an
+   appointment keeps its own, and taking the pick away silently would be
+   worse than saying why it no longer fits. */
+export function pickerOption(person, rows, selected) {
   const row = rows.get(String(person.id));
   const closed = !!row && row.state !== 'open';
   return {
     closed,
-    disabled: closed && onDay && String(person.id) !== String(selected || ''),
+    disabled: closed && String(person.id) !== String(selected || ''),
     text: closed ? `${person.name} — ${row.label}` : person.name,
   };
 }

@@ -1356,17 +1356,19 @@ export default function Schedule() {
                 const chosen = picker.rows.get(String(booking.psychologist));
                 if (chosen && chosen.state !== 'open') return picker.onDay
                   ? `${chosen.label}. Pick another psychologist or another day.`
-                  : `${chosen.label}. Look further ahead in the calendar, or pick another psychologist.`;
-                const greyed = psychologists.some((p) => pickerOption(p, picker.rows, booking.psychologist, picker.onDay).disabled);
+                  : `${chosen.label}. Pick another psychologist.`;
+                const greyed = psychologists.some((p) => pickerOption(p, picker.rows, booking.psychologist).disabled);
                 return greyed
-                  ? 'Greyed out: no open time on that day. Bookings must fall inside their availability.'
+                  ? (picker.onDay
+                    ? 'Greyed out: no open time on that day. Bookings must fall inside their availability.'
+                    : 'Greyed out: no open time in the next 12 months. Bookings must fall inside their availability.')
                   : 'Bookings must fall inside their availability.';
               })()}
             >
               <Select value={booking.psychologist} onChange={(e) => setBooking({ ...booking, psychologist: e.target.value })}>
                 <option value="">— Select psychologist —</option>
                 {psychologists.map((p) => {
-                  const opt = pickerOption(p, picker.rows, booking.psychologist, picker.onDay);
+                  const opt = pickerOption(p, picker.rows, booking.psychologist);
                   return <option key={p.id} value={p.id} disabled={opt.disabled}>{opt.text}</option>;
                 })}
               </Select>
