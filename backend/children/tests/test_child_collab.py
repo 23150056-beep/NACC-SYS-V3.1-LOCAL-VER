@@ -295,10 +295,14 @@ class IdentifyingInformationFieldsTests(APITestCase):
         # type - see children/tests/test_intake.py.
         r = self.client.post("/api/children/", self._payload(legal_status=""), format="json")
         self.assertEqual(r.status_code, 201, r.data)
-        for f in ("place_of_birth_or_found", "birth_status"):
-            r = self.client.post("/api/children/", self._payload(**{f: ""}), format="json")
-            self.assertEqual(r.status_code, 400, f)
-            self.assertIn(f, r.data)
+        # Birth status stopped being required on 14 Nov 2026 (owner).
+        r = self.client.post("/api/children/", self._payload(birth_status="", last_name="NoBS"),
+                             format="json")
+        self.assertEqual(r.status_code, 201, r.data)
+        r = self.client.post("/api/children/", self._payload(place_of_birth_or_found=""),
+                             format="json")
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("place_of_birth_or_found", r.data)
 
     def test_category_rejects_a_removed_samd_value(self):
         r = self.client.post("/api/children/", self._payload(case_category="Trafficked"), format="json")

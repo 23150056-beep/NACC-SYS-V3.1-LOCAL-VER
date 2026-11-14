@@ -16,6 +16,14 @@ export const CASE_TYPES = [
   'Foster Care',
   'Kinship Care',
   'Residential Care',
+];
+
+/* Retired 14 Nov 2026 (owner): not offered for a new record or as a new pick
+ * on an edit. A record that already holds one keeps it through any edit
+ * (shown "(no longer offered)", the same change-only rule as the categories),
+ * so every rule map below keeps their entries. Mirrors RETIRED_CASE_TYPES in
+ * backend/children/intake.py. */
+export const RETIRED_CASE_TYPES = [
   'Family Tracing & Reunification',
   'Independent Living',
 ];
@@ -121,15 +129,15 @@ export const caseDate = (child) => {
   return [field === PLACEMENT ? 'Date of placement' : 'Date of admission', child[field] || null];
 };
 
-/* What the Add Record form will not save without (since 24 Sep 2026). Middle
- * name, legal status, landmark and date found are left out on purpose: a
+/* What the Add Record form will not save without (since 24 Sep 2026). Birth
+ * status (14 Nov 2026, owner), middle name, legal status, landmark and date found are left out on purpose: a
  * foundling may have no middle name, a child new to care may have no legal
  * status yet, and most addresses have no landmark. Mirrors required_fields in
  * backend/children/intake.py, which refuses the same blanks. */
 export const ALWAYS_REQUIRED = [
   'case_category', 'case_type',
   'first_name', 'last_name', 'birth_date', 'gender',
-  'place_of_birth_or_found', 'birth_status', 'health_condition',
+  'place_of_birth_or_found', 'health_condition',
   'education_level', 'current_placement',
   'house_number', 'street', 'province', 'municipality', 'barangay',
 ];

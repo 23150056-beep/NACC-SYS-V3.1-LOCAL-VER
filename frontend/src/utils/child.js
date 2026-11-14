@@ -93,12 +93,16 @@ export const PURPOSE_LABEL = {
   follow_up: 'Follow-up',
 };
 
-/* The session lengths a booking offers - the Calendar's booking drawer and the
- * dialog after a psychologist accepts a case. */
-export const DURATIONS = [
-  { v: 30, label: '30 min' }, { v: 45, label: '45 min' }, { v: 60, label: '1 hour' },
-  { v: 90, label: '1 hr 30' }, { v: 120, label: '2 hours' },
-];
+/* A new session is always the standard hour (owner, 14 Nov 2026: the Length
+ * field is gone from every booking screen). Moving an existing appointment
+ * keeps its own stored length, which may be 30 or 90 from before. */
+export const SESSION_MINUTES = 60;
+
+/* " · 90 min" for an appointment whose length is not the standard hour, else
+ * nothing - an ordinary session mentions no length, a legacy one still shows. */
+export const lengthNote = (minutes) => (
+  minutes && minutes !== SESSION_MINUTES ? ` · ${minutes} min` : ''
+);
 
 /* How a schedule names a child (owner's decision, 24 Sep 2026).
  *

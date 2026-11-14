@@ -6,7 +6,7 @@ import { useActivity } from '../context/ActivityContext';
 import { useCensus } from '../context/CensusContext';
 import { useConfirm, useNotice } from '../context/ConfirmContext';
 import { Alert, Badge, Button, FormField, Icon, IconChip, Input, Modal, Select, TimeInput } from '../ui';
-import { DURATIONS, PURPOSE_LABEL, initialsOf } from '../utils/child';
+import { SESSION_MINUTES, PURPOSE_LABEL, initialsOf } from '../utils/child';
 import { firstError } from '../utils/errors';
 import { clock, clockRange, timeAgo, weekdayDate, weekdayDateTime } from '../utils/time';
 
@@ -161,7 +161,6 @@ export default function AssignmentRequests({ onChanged }) {
         description: `${req.child_name} is now in your records, and the first session is booked.`,
         details: [['Child', `${req.child_name} (${req.child_ref})`],
           ['First session', `${dayLabel(booked.date)}, ${clock(booked.time)}`],
-          ['Length', DURATIONS.find((d) => d.v === booked.duration)?.label],
           ['Purpose', PURPOSE_LABEL[booked.purpose]]],
       });
       return;
@@ -314,7 +313,6 @@ function ScheduleFirstSession({ request, psychologistId, onDone }) {
   const [mode, setMode] = useState(canBook ? 'availability' : 'later');
   const [date, setDate] = useState(localIsoDay());
   const [time, setTime] = useState('');
-  const [duration, setDuration] = useState(60);
   const [purpose, setPurpose] = useState(request.pre_assessment_status === 'Completed' ? 'session' : 'pre_assessment');
   const [openings, setOpenings] = useState(null);
   const [openingsNote, setOpeningsNote] = useState('');
@@ -325,10 +323,10 @@ function ScheduleFirstSession({ request, psychologistId, onDone }) {
   const loadOpenings = useCallback(() => {
     setOpenings(null);
     setPicked(null);
-    api.get('/availability/openings/', { params: { child: request.child, duration } })
+    api.get('/availability/openings/', { params: { child: request.child, duration: SESSION_MINUTES } })
       .then((r) => { setOpenings(r.data.openings || []); setOpeningsNote(r.data.reason || ''); })
       .catch((err) => { setOpenings([]); setOpeningsNote(firstError(err.response?.data, 'Your open times could not be loaded.')); });
-  }, [request.child, duration]);
+  }, [request.child]);
 
   useEffect(() => {
     if (mode === 'availability' && canBook) loadOpenings();
@@ -344,16 +342,16 @@ function ScheduleFirstSession({ request, psychologistId, onDone }) {
       description: `This books ${request.child_name}'s first session on your calendar.`,
       confirmLabel: 'Yes, book it',
       details: [['Child', `${request.child_name} (${request.child_ref})`], ['Date', dayLabel(when.date)],
-        ['Time', clock(when.time)], ['Length', DURATIONS.find((d) => d.v === duration)?.label],
+        ['Time', clock(when.time)],
         ['Purpose', PURPOSE_LABEL[purpose]]],
     }))) return;
     setBusy(true);
     try {
       await api.post('/appointments/', {
         child: request.child, psychologist: psychologistId, start: `${when.date}T${when.time}:00`,
-        duration_minutes: duration, purpose, notes: '',
+        duration_minutes: SESSION_MINUTES, purpose, notes: '',
       });
-      onDone({ ...when, duration, purpose });
+      onDone({ ...when, purpose });
     } catch (err) {
       setError(firstError(err.response?.data, 'Could not book the session. Try another time.'));
       // What was offered a moment ago may have just been taken.
@@ -416,15 +414,10 @@ function ScheduleFirstSession({ request, psychologistId, onDone }) {
       </div>
 
       {mode !== 'later' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
+        <div style={{ marginTop: 14 }}>
           <FormField label="Purpose">
             <Select value={purpose} onChange={(e) => setPurpose(e.target.value)}>
               {Object.entries(PURPOSE_LABEL).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-            </Select>
-          </FormField>
-          <FormField label="Length">
-            <Select value={duration} onChange={(e) => setDuration(Number(e.target.value))}>
-              {DURATIONS.map((d) => <option key={d.v} value={d.v}>{d.label}</option>)}
             </Select>
           </FormField>
         </div>

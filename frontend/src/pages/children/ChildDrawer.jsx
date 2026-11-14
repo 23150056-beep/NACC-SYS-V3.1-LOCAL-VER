@@ -13,6 +13,7 @@ import { ADMISSION, CASE_TYPE_FIELDS, PLACEMENT, SPECIAL_NEEDS, dateFieldFor } f
 import { PURPOSE_LABEL, fmtDay, fmtTime, localDate } from './shared';
 import { clock, clockRange } from '../../utils/time';
 import { firstError } from '../../utils/errors';
+import { SESSION_MINUTES } from '../../utils/child';
 import './drawer.css';
 
 /* Text typed into the record's boxes, shown as typed: its line breaks kept,
@@ -168,7 +169,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
       await api.post('/appointments/', {
         child: child.id, psychologist: child.psychologist,
         start: `${pendingSlot.date}T${pendingSlot.start}:00`,
-        duration_minutes: 60, purpose, notes: '',
+        duration_minutes: SESSION_MINUTES, purpose, notes: '',
       });
       toast.success(`Booked — ${pendingSlot.weekday} ${pendingSlot.date} at ${clock(pendingSlot.start)}`);
       setPendingSlot(null);

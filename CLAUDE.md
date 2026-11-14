@@ -474,7 +474,7 @@ psychologist and the ISA on 2 Oct 2026):
   `monthSlots.js`). It replaced a native date box and five "next working day"
   chips worked out from the weekly pattern, which gave a fully booked day a chip
   and showed about a week. One `GET /availability/month/` per psychologist,
-  child, length, moved appointment and month (stale answers are never drawn:
+  child, length (the standard hour, or the moved appointment's own), moved appointment and month (stale answers are never drawn:
   the answer carries the key it was asked for); the Time grid reads the chosen
   day from that same answer, so no second request, and a day or time the answer
   no longer offers is cleared. Sunday-first like the Calendar. Only an "open"
@@ -498,6 +498,7 @@ psychologist and the ISA on 2 Oct 2026):
   refusal is scrolled into view, since it sits at the top of a tall drawer. After a refused booking (400 or
   409) the month is asked again. Under 360px the word "open" goes and the count
   stands alone. Measured locally, the month answer takes 70-350 ms.
+- **The booking Length field is gone** (owner's notes, 14 Nov 2026, Social Workers and Psychologist columns). Every door that books (the Calendar drawer, the record drawer's next slots, the dialog after accepting a case) sends `SESSION_MINUTES` (60, `utils/child.js`), and `DURATIONS` is deleted. **A move keeps the appointment's own stored `duration_minutes`**: the drawer still asks the month endpoint and the psychologist picker with it and sends it back unchanged, since a 30 or 90 minute session from before would otherwise be judged and saved as 60. The card subtitle and agenda rows show minutes only when not 60 (`lengthNote`). The API is unchanged (`duration_minutes` still accepted, default 60; `BookingWithoutALengthTests`).
 - **A fully loaded psychologist cannot be picked** (9 Nov 2026,
   `GET /api/availability/psychologists/`, `booking.psychologist_picker`,
   `pages/schedule/psychologistPicker.js`). The drawer's Psychologist select asks
@@ -1301,6 +1302,24 @@ middle name, a date found, and every question that applies made mandatory.
   - Children 0029 is additive. `children/demo_profiles.py` gives demo
     children a health condition and whereabouts, from `seed_demo_data` and
     `import_demo_data` only.
+- **Birth Status is optional, and two case types are retired** (owner, 14 Nov
+  2026). `birth_status` left `ALWAYS_REQUIRED` and its caseData.js mirror: it
+  stays on the form marked "(optional)", a blank saves on create and can be
+  blanked on an edit; the list and its retired values are unchanged, and a
+  blank prints "—" on Part I and the psychological report. Part I is read from
+  the record and `missing_sections()` never asked for it. "Family Tracing &
+  Reunification" and "Independent Living" are in `intake.RETIRED_CASE_TYPES`
+  and `RETIRED_CASE_TYPES` in caseData.js (test_intake.py pins both). They
+  went the way of the old categories: not in `CASE_TYPES`, so not offered, and
+  `validate_case_type` refuses them as a NEW pick only (the record's own value
+  passes, so an unrelated edit keeps it; the form lists it "(no longer
+  offered)" and `form._record.case_type` keeps it selectable back). Their
+  rule entries (`CASE_TYPE_FIELDS`, dates, category pairing) stay for the
+  records that hold them, and `Child.CASE_TYPE_CHOICES` keeps them - no
+  migration. Every category still has four case types on offer. The seeder
+  draws from the four current ones (a seed therefore gives a different
+  caseload than before the change); readers and filters keep seeing the two.
+  A test that needs a legacy record makes it with the ORM.
 - **A rename cannot ride along with a deploy the old release survives.** On
   24 Sep the demo API's first deploy of 0020 failed on Render's side after the
   web had gone live; had the migration run first, the old API - still serving

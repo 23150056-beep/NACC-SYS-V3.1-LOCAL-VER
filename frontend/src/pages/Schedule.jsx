@@ -10,7 +10,7 @@ import { useConfirm } from '../context/ConfirmContext';
 import { loadAll } from '../utils/load';
 import { useChildren } from '../context/ChildrenContext';
 import { clock, clockRange, exactDate } from '../utils/time';
-import { DURATIONS, scheduleName, shortName } from '../utils/child';
+import { SESSION_MINUTES, lengthNote, scheduleName, shortName } from '../utils/child';
 import {
   Alert, Avatar, Badge, Button, Card, ConfirmDialog, Drawer, FormField, hoverLift, Icon, iconBtn, Input, Modal, PAGE, PageHeader, Select, TimeInput,
 } from '../ui';
@@ -344,7 +344,8 @@ export default function Schedule() {
   [isPsych, range.from, range.to, toast, revalidateChildren]);
   useEffect(() => { load(); }, [load]);
   // The openings for the psychologist actually chosen, on the day actually
-  // chosen, at the duration actually chosen. The old version asked about the
+  // chosen, at the length the booking carries (an hour, or the moved
+  // appointment's own). The old version asked about the
   // child's ASSIGNED psychologist regardless of who was picked in the form,
   // so booking anyone else showed somebody else's free time.
   useEffect(() => {
@@ -363,12 +364,12 @@ export default function Schedule() {
   const bookingChild = booking?.child;
   const movingId = booking?.id;
   const month = useMonthSlots({
-    psychologist: bookingPsy, child: bookingChild, duration: bookingDuration || 60,
+    psychologist: bookingPsy, child: bookingChild, duration: bookingDuration || SESSION_MINUTES,
     exclude: movingId, date: bookingDate, open: !!booking,
   });
   const monthData = month.data;
   const picker = usePsychologistPicker({
-    child: bookingChild, duration: bookingDuration || 60, day: bookingDate,
+    child: bookingChild, duration: bookingDuration || SESSION_MINUTES, day: bookingDate,
     exclude: movingId, open: !!booking && !isPsych,
   });
   // The chosen day's times, kept when somebody pages to another month and
@@ -442,7 +443,7 @@ export default function Schedule() {
     // 09:00 and the second one was refused.
     setBooking({
       child: childId ? String(childId) : '', psychologist: '',
-      date: '', time: '', purpose: 'session', duration: 60, notes: '',
+      date: '', time: '', purpose: 'session', duration: SESSION_MINUTES, notes: '',
     });
   };
   // `?book=1&child=12` — opening the drawer from a child's record should not
@@ -491,7 +492,7 @@ export default function Schedule() {
       // read "C-0042 · Ref. E. Pascua" (utils/child.js scheduleName).
       title: `${scheduleName(a)} · ${PURPOSES.find((p) => p.v === a.purpose)?.label || a.purpose}`,
       start,
-      end: new Date(start.getTime() + (a.duration_minutes || 60) * 60000),
+      end: new Date(start.getTime() + (a.duration_minutes || SESSION_MINUTES) * 60000),
       resource: a,
     };
   }), [appointments, calPsy]);
@@ -562,7 +563,7 @@ export default function Schedule() {
     const payload = {
       child: booking.child, psychologist: booking.psychologist || undefined,
       start: `${booking.date}T${booking.time}:00`,
-      duration_minutes: booking.duration || 60,
+      duration_minutes: booking.duration || SESSION_MINUTES,
       purpose: booking.purpose, notes: booking.notes || '',
     };
     const who = booking.id ? booking.label
@@ -622,7 +623,7 @@ export default function Schedule() {
       date: day,
       time: '',
       purpose: appt.purpose,
-      duration: appt.duration_minutes || 60,
+      duration: appt.duration_minutes || SESSION_MINUTES,
       notes: appt.notes || '',
     });
   };
@@ -1164,7 +1165,7 @@ export default function Schedule() {
               setBooking({
                 child: '', psychologist: '',
                 date: format(slot.start, 'yyyy-MM-dd'), time: '',
-                purpose: 'session', duration: 60, notes: '',
+                purpose: 'session', duration: SESSION_MINUTES, notes: '',
               });
             }}
             style={{ fontFamily: 'var(--font-sans)', fontSize: 13, height: '100%' }}
@@ -1302,7 +1303,7 @@ export default function Schedule() {
             <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--ink-50)', border: '1px solid var(--border)' }}>
               <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{scheduleName(a)}</div>
               <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
-                {exactDate(a.start)} · {a.duration_minutes} min
+                {exactDate(a.start)}{lengthNote(a.duration_minutes)}
                 {a.psychologist_name ? ` · ${a.psychologist_name}` : ''}
               </div>
             </div>
@@ -1411,25 +1412,13 @@ export default function Schedule() {
               </Select>
             </FormField>
           )}
-          {/* Purpose and length come BEFORE the day, because both change
-              which times are free. Asking for a time first and letting the
-              length invalidate it afterwards is how the old form produced
-              a refusal only once you pressed Book. */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <FormField label="Purpose">
-              <Select value={booking.purpose} onChange={(e) => setBooking({ ...booking, purpose: e.target.value })}>
-                {PURPOSES.map((p) => <option key={p.v} value={p.v}>{p.label}</option>)}
-              </Select>
-            </FormField>
-            <FormField label="Length">
-              <Select
-                value={booking.duration}
-                onChange={(e) => setBooking({ ...booking, duration: Number(e.target.value), time: '' })}
-              >
-                {DURATIONS.map((d) => <option key={d.v} value={d.v}>{d.label}</option>)}
-              </Select>
-            </FormField>
-          </div>
+          {/* No length to pick: a new session is the standard hour, and a
+              moved one keeps its own (booking.duration). */}
+          <FormField label="Purpose">
+            <Select value={booking.purpose} onChange={(e) => setBooking({ ...booking, purpose: e.target.value })}>
+              {PURPOSES.map((p) => <option key={p.v} value={p.v}>{p.label}</option>)}
+            </Select>
+          </FormField>
           <FormField
             label="Day" required
             hint={bookingPsy && (monthData?.works || bookingWorkingDays).length
@@ -1619,7 +1608,7 @@ export default function Schedule() {
           <Modal
             onClose={() => setSel(null)} width={420}
             title={sel.child_name || `Case ${sel.case_ref}`}
-            subtitle={`${exactDate(sel.start)} · ${sel.duration_minutes} min`}
+            subtitle={`${exactDate(sel.start)}${lengthNote(sel.duration_minutes)}`}
             footer={scheduled && !sel.name_hidden ? (
               <>
                 {(isPsych || role === 'Administrator') && (

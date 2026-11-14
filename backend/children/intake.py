@@ -52,6 +52,22 @@ CATEGORY_OPTIONS = {
     "Independent Living": _LEAVING_CARE,
 }
 
+# Retired 14 Nov 2026 (owner): no longer offered for a new record or as a new
+# pick on an edit. A record that already holds one keeps it through any edit,
+# so every rule entry below stays for them; only the OFFER went. Both pair only
+# with the four leaving-care categories, all of which still have four other
+# case types on offer, so no category is left without one.
+RETIRED_CASE_TYPES = ["Family Tracing & Reunification", "Independent Living"]
+
+
+def offered_case_types(category=""):
+    """The case types a new record may pick, narrowed by the category when it
+    is one the pairing knows."""
+    return [t for t in CATEGORY_OPTIONS
+            if t not in RETIRED_CASE_TYPES
+            and (category not in ALL_CATEGORIES or category in CATEGORY_OPTIONS[t])]
+
+
 # The case-specific questions besides the date, per track.
 CASE_TYPE_FIELDS = {
     "Adoption": ["custodian_name", "type_of_adoption"],
@@ -101,15 +117,15 @@ def intake_date(child):
     return getattr(child, intake_date_field(child))
 
 
-# Always asked. Middle name, legal status, landmark and date found are not
-# here on purpose: a foundling or a non-marital child may have no middle name,
+# Always asked. Birth status (14 Nov 2026, owner), middle name, legal status,
+# landmark and date found are not here on purpose: a foundling or a non-marital child may have no middle name,
 # a child newly in care may not have a legal status yet, and most addresses
 # have no landmark. Asking for something that does not exist gets "N/A" typed
 # into it, which is worse than a blank.
 ALWAYS_REQUIRED = [
     "case_category", "case_type",
     "first_name", "last_name", "birth_date", "gender",
-    "place_of_birth_or_found", "birth_status", "health_condition",
+    "place_of_birth_or_found", "health_condition",
     "education_level", "current_placement",
     # In the form's order, which is what the "Still needed" line lists them in:
     # province first, because the municipality and barangay lists follow it.

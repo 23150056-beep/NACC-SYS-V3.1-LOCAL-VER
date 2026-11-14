@@ -6,7 +6,7 @@ import {
 import { PROCEED, useConfirm } from '../../context/ConfirmContext';
 import {
   ADMISSION, ALIAS_CATEGORY, BIRTH_STATUSES, CASE_CATEGORIES, CASE_CATEGORY_OPTIONS, CASE_TYPES, CASE_TYPE_FIELDS,
-  DYNAMIC, HEALTH_CONDITIONS, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, SPECIAL_NEEDS, TYPES_OF_ADOPTION, ageRange, ageRefusal, caseChanged, caseTypesFor,
+  DYNAMIC, HEALTH_CONDITIONS, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, RETIRED_CASE_TYPES, SPECIAL_NEEDS, TYPES_OF_ADOPTION, ageRange, ageRefusal, caseChanged, caseTypesFor,
   dateFieldFor, requiredFields, unaskedAnswers,
 } from '../../config/caseData';
 import { clock, shortDate, timeAgo } from '../../utils/time';
@@ -363,7 +363,8 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   const categoryOptions = form.case_type ? (CASE_CATEGORY_OPTIONS[form.case_type] || CASE_CATEGORIES) : CASE_CATEGORIES;
   const caseTypeOptions = caseTypesFor(form.case_category);
   // What each list leaves out, said in its hint: a list that silently lacks
-  // Family Tracing reads as a form that cannot do it.
+  // a case type reads as a form that cannot do it. (Two were retired on 14 Nov 2026;
+  // they come back only as the value a record already holds.)
   const hiddenCategories = form.case_type ? CASE_CATEGORIES.filter((c) => !categoryOptions.includes(c)) : [];
   const hiddenCaseTypes = form.case_category ? CASE_TYPES.filter((t) => !caseTypeOptions.includes(t)) : [];
   // "(no longer offered)" is for a retired value only. A current category the
@@ -438,6 +439,12 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
     else if (wholeDate(form.birth_date) && form.legal_status_date < form.birth_date) {
       problems.legal_status_date = 'The date issued cannot be before the date of birth.';
     }
+  }
+  // A retired case type is refused as a new pick (the server's
+  // validate_case_type); a restored draft can still hold one, so say so here
+  // rather than after the save.
+  if (RETIRED_CASE_TYPES.includes(form.case_type) && changed('case_type')) {
+    problems.case_type = `${form.case_type} is no longer offered as a case type.`;
   }
   const bornMoved = isEdit && changed('birth_date');
   for (const [f, label] of [['date_found', 'The date found'], [ADMISSION, 'The date of admission'],
@@ -661,7 +668,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   : undefined}>
                 <Select value={form.case_type || ''} onChange={(e) => setForm({ ...form, case_type: e.target.value })}>
                   <option value="">— Select case type —</option>
-                  {withRetired(caseTypeOptions, form.case_type).map((t) => <option key={t} value={t}>{caseTypeLabel(t)}</option>)}
+                  {withRetired(caseTypeOptions, form.case_type, form._record?.case_type).map((t) => <option key={t} value={t}>{caseTypeLabel(t)}</option>)}
                 </Select>
               </F>
 
@@ -762,7 +769,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
               <F name="place_of_birth_or_found" label="Place of Birth or Place Found" required error={shown('place_of_birth_or_found')}>
                 <Input value={form.place_of_birth_or_found || ''} maxLength={150} onChange={(e) => setForm({ ...form, place_of_birth_or_found: e.target.value })} />
               </F>
-              <F name="birth_status" label="Birth Status" required error={shown('birth_status')}>
+              <F name="birth_status" label={optional('Birth Status')} error={shown('birth_status')}>
                 <Select value={form.birth_status || ''} onChange={(e) => setForm({ ...form, birth_status: e.target.value })}>
                   <option value="">— Select —</option>
                   {withRetired(BIRTH_STATUSES, form.birth_status, form._record?.birth_status).map((v) => <option key={v} value={v}>{optionLabel(BIRTH_STATUSES, v)}</option>)}

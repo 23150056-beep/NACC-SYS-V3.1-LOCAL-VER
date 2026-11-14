@@ -73,6 +73,9 @@ class Child(models.Model):
     # NACC-SAMD-GF-000 KRA III (transition strategies: adoption, kinship/foster
     # care, family reunification, independent living); final wording still
     # pending RACCO I confirmation.
+    # "Family Tracing & Reunification" and "Independent Living" were retired on
+    # 14 Nov 2026 (children/intake.py RETIRED_CASE_TYPES): they stay here so an
+    # older record keeps a valid value; the serializer refuses them as a new pick.
     CASE_TYPE_CHOICES = [
         ("Adoption", "Adoption"),
         ("Foster Care", "Foster Care"),

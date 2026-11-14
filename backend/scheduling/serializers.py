@@ -163,6 +163,15 @@ class AvailabilityBlockSerializer(serializers.ModelSerializer):
         end = attrs.get("end_time") or (self.instance.end_time if self.instance else None)
         if start and end and start >= end:
             raise serializers.ValidationError({"end_time": "End must be after start."})
+        # Every booking is the standard hour (the screens no longer ask for a
+        # length), so a window shorter than one could never be booked. Checked
+        # only when the times are being set, so an older short window still
+        # saves an unrelated edit.
+        times_set = ("start_time" in attrs or "end_time" in attrs or self.instance is None)
+        if (times_set and start and end
+                and (end.hour * 60 + end.minute) - (start.hour * 60 + start.minute) < 60):
+            raise serializers.ValidationError(
+                {"end_time": "A window must be at least an hour long: every session is an hour."})
         weekday = attrs.get("weekday", self.instance.weekday if self.instance else None)
         date = attrs.get("date", self.instance.date if self.instance else None)
         if weekday is None and date is None:

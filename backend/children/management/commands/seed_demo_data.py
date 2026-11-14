@@ -68,8 +68,8 @@ LAST_NAMES = [
     "Castañeda", "Duque", "Estrada", "Fariñas", "Guillermo", "Hufana",
 ]
 
-CASE_TYPES = ["Adoption", "Foster Care", "Kinship Care", "Residential Care",
-              "Family Tracing & Reunification", "Independent Living"]
+# The two retired on 14 Nov 2026 are not seeded (children/intake.py).
+CASE_TYPES = ["Adoption", "Foster Care", "Kinship Care", "Residential Care"]
 CATEGORIES = ["Surrendered", "Abandoned", "Dependent", "Neglected",
               "Without Known Parents", "Orphaned"]
 # Street addresses as a field office writes them: a numbered street in town,
