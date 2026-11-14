@@ -53,7 +53,7 @@ ADOPTION_ONLY_BLOCKS = ("B", "C")
 # Child.case_category and Child.type_of_adoption, as stored
 # (children/models.py).
 SURRENDERED = ("Surrendered",)
-ABANDONED = ("Abandoned", "Without Known Parents")
+ABANDONED = ("Abandoned", "Foundling")
 # The template's preamble: supervised trial custody is for a regular, an IP
 # and a foster adoption.
 STC_TYPES = ("Regular", "IP", "Foster-Adopt")
@@ -106,7 +106,7 @@ SCSR_SECTIONS = (
             "The anthropometric measurements.",
             "Overall appearance: whether the child was properly cared for, the clothing "
             "and the hygiene. Leave out graphic details.",
-            "For a child without known parents: the condition and appearance when found "
+            "For a foundling: the condition and appearance when found "
             "(no graphic details), behavior when found, who named the child and what "
             "the name means.",
             "Developmental achievements, such as fine and gross motor skills and speech "

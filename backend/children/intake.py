@@ -10,8 +10,8 @@ children/tests/test_intake.py pins the two together.
 
 HEALTH_CONDITIONS = ["Healthy", "With special needs"]
 SPECIAL_NEEDS = "With special needs"
-# Alias is asked of a child without known parents only (the SCSR, Part I).
-ALIAS_CATEGORY = "Without Known Parents"
+# Alias is asked of a Foundling only (the SCSR, Part I).
+ALIAS_CATEGORY = "Foundling"
 
 # The age the agency serves. A child is 5-17; an Adult adoption (the SCSR
 # covers it) is for a person of 18 or older, with no upper limit.
@@ -41,8 +41,8 @@ PLACEMENT = "date_of_placement_to_custodian"
 # independent living are about leaving it, so "Surrendered" and "Abandoned"
 # are not offered there.
 ALL_CATEGORIES = ["Surrendered", "Abandoned", "Dependent", "Neglected",
-                  "Without Known Parents", "Orphaned"]
-_LEAVING_CARE = ["Dependent", "Neglected", "Without Known Parents", "Orphaned"]
+                  "Foundling", "Orphaned"]
+_LEAVING_CARE = ["Dependent", "Neglected", "Foundling", "Orphaned"]
 CATEGORY_OPTIONS = {
     "Adoption": ALL_CATEGORIES,
     "Foster Care": ALL_CATEGORIES,
@@ -117,7 +117,8 @@ def intake_date(child):
     return getattr(child, intake_date_field(child))
 
 
-# Always asked. Birth status (14 Nov 2026, owner), middle name, legal status,
+# Always asked. House number and the Date of Admission to the Agency (14 Nov
+# 2026, owner) are optional too, as are birth status, middle name, legal status,
 # landmark and date found are not here on purpose: a foundling or a non-marital child may have no middle name,
 # a child newly in care may not have a legal status yet, and most addresses
 # have no landmark. Asking for something that does not exist gets "N/A" typed
@@ -129,7 +130,7 @@ ALWAYS_REQUIRED = [
     "education_level", "current_placement",
     # In the form's order, which is what the "Still needed" line lists them in:
     # province first, because the municipality and barangay lists follow it.
-    "house_number", "street", "province", "municipality", "barangay",
+    "street", "province", "municipality", "barangay",
 ]
 
 # Answered by the case type, so asked again whenever the case type (or the
@@ -142,7 +143,9 @@ def required_fields(case_type, type_of_adoption="", health_condition=""):
     # What the special needs are, once "With special needs" is the answer.
     if health_condition == SPECIAL_NEEDS:
         fields.append("special_needs")
+    # The Date of Admission to the Agency is asked but optional (14 Nov 2026,
+    # owner); the Date of Placement to Custodian stays required where it is asked.
     date = date_field_for(case_type, type_of_adoption)
-    if date:
+    if date and date != ADMISSION:
         fields.append(date)
     return fields

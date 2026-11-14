@@ -236,8 +236,8 @@ def _boxes(child, today, turn):
              "note": "No one at the last known address"},
         ],
     }
-    # A child without known parents has no family to describe.
-    if child.case_category == "Without Known Parents":
+    # A foundling has no family to describe.
+    if child.case_category == "Foundling":
         boxes["a4_family_composition"] = None
         boxes["a4_family_description"] = None
     return boxes

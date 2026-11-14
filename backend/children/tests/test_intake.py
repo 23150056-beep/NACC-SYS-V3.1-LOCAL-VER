@@ -121,6 +121,16 @@ class TheFormAndTheServerAgreeTest(SimpleTestCase):
         self.assertIn("special_needs", re.search(
             r"export const requiredFields = .*?\n\};?\n", self.js, re.S).group(0))
 
+    def test_the_admission_date_is_never_required_on_either_side(self):
+        # Python: never, for any case type; the placement date still is.
+        for case_type, adoption in (("Residential Care", ""), ("Adoption", "Regular"),
+                                    ("Foster Care", ""), ("Adoption", "IP")):
+            self.assertNotIn(intake.ADMISSION, intake.required_fields(case_type, adoption))
+        self.assertIn(intake.PLACEMENT, intake.required_fields("Foster Care"))
+        # Browser: requiredFields must exclude it the same way.
+        body = re.search(r"export const requiredFields = .*?\n\};?\n", self.js, re.S).group(0)
+        self.assertIn("date !== ADMISSION", body)
+
     def test_what_is_always_required(self):
         self.assertEqual(intake.ALWAYS_REQUIRED, _js_array(self.js, "ALWAYS_REQUIRED"))
 
@@ -270,10 +280,10 @@ class CreatingARecordTest(_Staff):
         self.assertEqual(400, r.status_code)
         self.assertIn("type_of_adoption", r.data)
 
-        r = self.post(case_type="Adoption", type_of_adoption="Regular",
+        # The admission date is optional (14 Nov 2026): blank saves.
+        r = self.post(case_type="Adoption", type_of_adoption="Regular", last_name="NoAdmit",
                       date_of_placement_to_custodian=None)
-        self.assertEqual(400, r.status_code)
-        self.assertEqual({"date_of_admission"}, set(r.data))
+        self.assertEqual(201, r.status_code, r.data)
 
         r = self.post(case_type="Adoption", type_of_adoption="Regular",
                       date_of_placement_to_custodian=None, date_of_admission="2026-03-01")
@@ -284,13 +294,39 @@ class CreatingARecordTest(_Staff):
         self.assertEqual(201, r.status_code, r.data)
 
     def test_residential_care_records_the_admission_and_no_custodian(self):
-        r = self.post(case_type="Residential Care", custodian_name="",
+        r = self.post(case_type="Residential Care", custodian_name="", last_name="NoAdmit",
                       date_of_placement_to_custodian=None)
-        self.assertEqual(400, r.status_code)
-        self.assertEqual({"date_of_admission"}, set(r.data))
+        self.assertEqual(201, r.status_code, r.data)
         r = self.post(case_type="Residential Care", custodian_name="",
                       date_of_placement_to_custodian=None, date_of_admission="2026-03-01")
         self.assertEqual(201, r.status_code, r.data)
+
+    def test_house_number_is_optional(self):
+        self.assertNotIn("house_number", intake.required_fields("Foster Care"))
+        r = self.post(house_number="", last_name="NoHouse")
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertEqual("", r.data["house_number"])
+        body = complete(last_name="NoKeyHouse")
+        body.pop("house_number")
+        self.assertEqual(201, self.client.post("/api/children/", body, format="json").status_code)
+
+    def test_the_admission_date_is_optional_and_the_placement_date_is_not(self):
+        for case_type, adoption in (("Residential Care", ""), ("Adoption", "Regular")):
+            self.assertNotIn(intake.ADMISSION, intake.required_fields(case_type, adoption))
+        self.assertIn(intake.PLACEMENT, intake.required_fields("Foster Care"))
+        self.assertIn(intake.PLACEMENT, intake.required_fields("Adoption", "IP"))
+        r = self.post(date_of_placement_to_custodian=None, last_name="NoPlaced")
+        self.assertEqual(400, r.status_code)
+        self.assertEqual({"date_of_placement_to_custodian"}, set(r.data))
+
+    def test_foundling_is_a_category_and_the_old_name_is_not_offered(self):
+        r = self.post(case_category="Foundling", last_name="Found1")
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertEqual("Foundling", r.data["case_category"])
+        # Refused like any unknown value: it is not normalised.
+        r = self.post(case_category="Without Known Parents", last_name="Found2")
+        self.assertEqual(400, r.status_code)
+        self.assertIn("case_category", r.data)
 
     def test_renamed_and_retired_values_cannot_be_picked(self):
         for field, value in (("case_category", "Orphan"), ("birth_status", "N/A")):
@@ -352,7 +388,7 @@ class CreatingARecordTest(_Staff):
         self.assertEqual(201, r.status_code, r.data)
 
     def test_the_alias_is_optional_and_saved(self):
-        r = self.post(case_category="Without Known Parents", alias="Bunso", last_name="Alias1")
+        r = self.post(case_category="Foundling", alias="Bunso", last_name="Alias1")
         self.assertEqual(201, r.status_code, r.data)
         self.assertEqual("Bunso", r.data["alias"])
         r = self.post(last_name="Alias2")
@@ -432,19 +468,40 @@ class EditingARecordTest(_Staff):
         return self.client.put(f"/api/children/{self.child.id}/", body, format="json")
 
     def test_an_answer_cannot_be_taken_away(self):
-        for field in ("house_number", "street", "case_category",
+        for field in ("street", "case_category",
                       "custodian_name", "date_of_placement_to_custodian"):
             r = self.put(**{field: "" if field != "date_of_placement_to_custodian" else None})
             self.assertEqual(400, r.status_code, field)
             self.assertIn(field, r.data)
 
-    def test_changing_the_case_type_asks_its_questions_again(self):
-        r = self.put(case_type="Residential Care", custodian_name="",
-                     date_of_placement_to_custodian=None)
-        self.assertEqual(400, r.status_code)
-        self.assertEqual({"date_of_admission"}, set(r.data))
+    def test_house_number_and_the_admission_date_can_be_blanked(self):
+        r = self.put(house_number="")
+        self.assertEqual(200, r.status_code, r.data)
+        self.child.refresh_from_db()
+        self.assertEqual("", self.child.house_number)
         r = self.put(case_type="Residential Care", custodian_name="",
                      date_of_placement_to_custodian=None, date_of_admission="2026-03-02")
+        self.assertEqual(200, r.status_code, r.data)
+        r = self.put(case_type="Residential Care", custodian_name="",
+                     date_of_placement_to_custodian=None, date_of_admission=None)
+        self.assertEqual(200, r.status_code, r.data)
+        self.child.refresh_from_db()
+        self.assertIsNone(self.child.date_of_admission)
+
+    def test_changing_the_case_type_asks_its_questions_again(self):
+        # Foster Care -> Adoption (IP) asks the type of adoption again.
+        r = self.put(case_type="Adoption", type_of_adoption="",
+                     date_of_placement_to_custodian=None)
+        self.assertEqual(400, r.status_code)
+        self.assertEqual({"type_of_adoption"}, set(r.data))
+        # ... and a placement type asks the placement date again; the
+        # admission date of a Regular adoption is never asked.
+        r = self.put(case_type="Adoption", type_of_adoption="IP",
+                     date_of_placement_to_custodian=None)
+        self.assertEqual(400, r.status_code)
+        self.assertEqual({"date_of_placement_to_custodian"}, set(r.data))
+        r = self.put(case_type="Adoption", type_of_adoption="Regular",
+                     date_of_placement_to_custodian=None, date_of_admission=None)
         self.assertEqual(200, r.status_code, r.data)
 
     def test_moving_the_birth_date_past_a_recorded_date_is_refused(self):
@@ -535,9 +592,9 @@ class EditingARecordTest(_Staff):
         self.assertEqual(("Healthy", ""), (self.child.health_condition, self.child.special_needs))
 
     def test_an_alias_survives_a_change_of_category(self):
-        """Hidden by the form when the category is not Without Known Parents,
+        """Hidden by the form when the category is not Foundling,
         never deleted (the same rule as the case-type answers)."""
-        self.assertEqual(200, self.put(case_category="Without Known Parents",
+        self.assertEqual(200, self.put(case_category="Foundling",
                                        alias="Bunso").status_code)
         r = self.put(case_category="Neglected", alias="Bunso")
         self.assertEqual(200, r.status_code, r.data)
@@ -772,7 +829,34 @@ class RenamingMigrationTest(TestCase):
         self.assertEqual("Relative", guess.type_of_adoption)
 
 
+class FoundlingMigrationTest(TestCase):
+    """children 0035: Without Known Parents -> Foundling, and back."""
+
+    def test_forwards_and_backwards(self):
+        from importlib import import_module
+        from django.apps import apps
+        migration = import_module("children.migrations.0035_rename_without_known_parents_foundling")
+        old = Child.objects.create(fullname="Old", case_category="Without Known Parents")
+        other = Child.objects.create(fullname="Other", case_category="Orphaned")
+        migration.forwards(apps, None)
+        old.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual(("Foundling", "Orphaned"), (old.case_category, other.case_category))
+        migration.backwards(apps, None)
+        old.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual(("Without Known Parents", "Orphaned"),
+                         (old.case_category, other.case_category))
+
+
 class AnOlderDemoFixtureStillLoadsTest(TestCase):
+    def test_the_old_category_name_is_upgraded_on_import(self):
+        from children.management.commands.import_demo_data import upgrade_rows
+        rows = [{"model": "children.child", "pk": 1,
+                 "fields": {"case_category": "Without Known Parents"}}]
+        self.assertTrue(upgrade_rows(rows))
+        self.assertEqual("Foundling", rows[0]["fields"]["case_category"])
+
     def test_upgraded_on_the_way_in(self):
         psy = User.objects.create_user(
             email="p@racco1.gov.ph", username="p", password="pass1234",

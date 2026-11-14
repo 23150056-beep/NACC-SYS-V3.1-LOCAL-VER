@@ -471,7 +471,7 @@ class WhatTheSocialWorkerGetsTest(CaseStudyTestCase):
 
     def test_which_boxes_apply_to_an_adult_adoption_of_an_abandoned_person(self):
         Child.objects.filter(pk=self.child.pk).update(
-            case_category="Without Known Parents", type_of_adoption="Adult")
+            case_category="Foundling", type_of_adoption="Adult")
         self.start()
         applies = {s["key"]: s["applies"]
                    for s in self.as_user(self.sw).get(self.url()).data["sections"]}

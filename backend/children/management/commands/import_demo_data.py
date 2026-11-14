@@ -45,7 +45,9 @@ from scheduling import demo_schedule
 # child, never who they live with - are cleared, then filled with a demo
 # custodian after loading (children/demo_custodians.py).
 _RENAMED_FIELDS = {"middle_initial": "middle_name", "surrendered_by": "custodian_name"}
-_RENAMED_VALUES = {"case_category": {"Orphan": "Orphaned"},
+_RENAMED_VALUES = {"case_category": {"Orphan": "Orphaned",
+                                      # children 0035, 14 Nov 2026
+                                      "Without Known Parents": "Foundling"},
                    "birth_status": {"N/A": "Unknown"},
                    "type_of_adoption": {"Stepparent": "Step-parent"},
                    "custodian_name": {"Social Worker": "", "Police": "", "Relatives": ""},

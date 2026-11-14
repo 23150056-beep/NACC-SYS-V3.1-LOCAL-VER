@@ -52,7 +52,7 @@ class RemoveDuplicateBase(TestCase):
         cls.other_psy = make("psy3@t.ph", "Andres", "Bonifacio", Role.PSYCHOLOGIST)
         child = lambda **over: Child.objects.create(  # noqa: E731
             **{"first_name": "Libai", "last_name": "Cramm", "birth_date": BORN,
-               "case_type": "Adoption", "case_category": "Without Known Parents",
+               "case_type": "Adoption", "case_category": "Foundling",
                "social_worker": cls.sw, **over})
         cls.original = child()
         cls.duplicate = child()

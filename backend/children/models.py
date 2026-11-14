@@ -95,7 +95,7 @@ class Child(models.Model):
         ("Abandoned", "Abandoned"),
         ("Dependent", "Dependent"),
         ("Neglected", "Neglected"),
-        ("Without Known Parents", "Without Known Parents"),
+        ("Foundling", "Foundling"),
         ("Orphaned", "Orphaned"),
     ]
 
@@ -251,7 +251,7 @@ class Child(models.Model):
     health_condition = models.CharField(
         max_length=30, blank=True, choices=HEALTH_CONDITION_CHOICES)
     special_needs = models.CharField(max_length=300, blank=True)
-    # Beside the name, for a child without known parents: the SCSR asks for the
+    # Beside the name, for a foundling: the SCSR asks for the
     # given first and last name "and alias, if applicable". The form shows it
     # for that category only; a value saved stays if the category changes.
     alias = models.CharField(max_length=150, blank=True)

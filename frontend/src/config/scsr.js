@@ -84,7 +84,7 @@ export const SCSR_SECTIONS = [
       "Age, personality, physical deformities and birthmarks if any, and other significant observations on admission.",
       "The anthropometric measurements.",
       "Overall appearance: whether the child was properly cared for, the clothing and the hygiene. Leave out graphic details.",
-      "For a child without known parents: the condition and appearance when found (no graphic details), behavior when found, who named the child and what the name means.",
+      "For a foundling: the condition and appearance when found (no graphic details), behavior when found, who named the child and what the name means.",
       "Developmental achievements, such as fine and gross motor skills and speech and language."
     ]
   },
@@ -909,7 +909,7 @@ export function appliesTo(entry, child, caseStudy) {
     case 'surrendered':
       return child.case_category === 'Surrendered';
     case 'abandoned':
-      return ['Abandoned', 'Without Known Parents'].includes(child.case_category);
+      return ['Abandoned', 'Foundling'].includes(child.case_category);
     case 'stc':
       return ['Regular', 'IP', 'Foster-Adopt'].includes(child.type_of_adoption);
     case 'placement_history':

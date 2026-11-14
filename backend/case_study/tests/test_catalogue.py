@@ -219,7 +219,7 @@ class TheCatalogueKeepsItsPromisesTest(SimpleTestCase):
         self.assertTrue(applies(entry("always"), child(), None))
         self.assertTrue(applies(entry("surrendered"), child("Surrendered"), None))
         self.assertFalse(applies(entry("surrendered"), child("Abandoned"), None))
-        for category in ("Abandoned", "Without Known Parents"):
+        for category in ("Abandoned", "Foundling"):
             self.assertTrue(applies(entry("abandoned"), child(category), None))
         self.assertFalse(applies(entry("abandoned"), child("Surrendered"), None))
         for adoption in ("Regular", "IP", "Foster-Adopt"):
@@ -282,7 +282,7 @@ class OnlyAnAdoptionRecordHasBlocksBAndCTest(SimpleTestCase):
         for case_type in [t for t, _ in Child.CASE_TYPE_CHOICES] + [""]:
             surrendered = self.keys(self.child(case_type, "Surrendered"), "A")
             abandoned = self.keys(self.child(case_type, "Abandoned"), "A")
-            unknown = self.keys(self.child(case_type, "Without Known Parents"), "A")
+            unknown = self.keys(self.child(case_type, "Foundling"), "A")
             dependent = self.keys(self.child(case_type, "Dependent"), "A")
             self.assertIn("a5_dvc_signed", surrendered, case_type)
             self.assertNotIn("a5_abandonment", surrendered, case_type)

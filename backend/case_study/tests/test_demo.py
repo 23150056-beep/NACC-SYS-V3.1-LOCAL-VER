@@ -36,7 +36,7 @@ from children.models import Child
 from locations.models import Barangay, Municipality, Province
 
 CATEGORIES = ["Surrendered", "Abandoned", "Dependent", "Neglected",
-              "Without Known Parents", "Orphaned"]
+              "Foundling", "Orphaned"]
 # A phone number, an e-mail address, a web address.
 CONTACT = re.compile(r"\d{7,}|@|https?://", re.I)
 
@@ -291,7 +291,7 @@ class SeededDraftsAreWhatTheEndpointWouldTake(CaseStudyTestCase):
     def test_a_child_without_known_parents_has_no_family_to_describe(self):
         child = Child.objects.create(
             first_name="Found", last_name="Child", birth_date=date(2016, 5, 5),
-            case_type="Adoption", case_category="Without Known Parents",
+            case_type="Adoption", case_category="Foundling",
             type_of_adoption="Regular", date_of_admission=TODAY - timedelta(days=90),
             social_worker=self.sw)
         draft = demo_case_studies.draft_for(child, 2, TODAY)

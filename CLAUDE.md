@@ -1281,8 +1281,8 @@ middle name, a date found, and every question that applies made mandatory.
     `requiredFields`), and the server blanks it for any other answer.
   - Both are new questions, so records from before keep their blanks through
     an unrelated edit, by the usual edit rule.
-  - **Alias** is optional and shown only for the Without Known Parents
-    category (the SCSR: "the given first and last name and alias"). Changing
+  - **Alias** is optional and shown only for the Foundling
+    category (renamed from Without Known Parents, 14 Nov 2026; the SCSR: "the given first and last name and alias"). Changing
     the category hides it, never deletes it; the server never clears it.
   - **Age follows the adoption type** (7 Oct 2026): 5-17 for every record
     except an Adoption of type Adult, which is 18 or older with no upper
@@ -1302,6 +1302,19 @@ middle name, a date found, and every question that applies made mandatory.
   - Children 0029 is additive. `children/demo_profiles.py` gives demo
     children a health condition and whereabouts, from `seed_demo_data` and
     `import_demo_data` only.
+- **Foundling, and two answers made optional** (owner, 14 Nov 2026). The
+  category "Without Known Parents" is "Foundling": the VALUE in
+  `case_category` was renamed by a reversible data migration plus a choices-only
+  `AlterField` (children 0035, the way 0021 renamed Orphan), not the column, so
+  the release still serving during a deploy keeps working - the serializer lets
+  a record's own unchanged category through. The old word is refused as a new
+  pick like any unknown value, not normalised; `import_demo_data` upgrades an
+  older fixture's. The Alias shows for Foundling. Final case study snapshots
+  and activity labels still hold the old word on purpose. **House number and
+  the Date of Admission to the Agency are optional**: out of `required_fields`
+  and `requiredFields`, labelled "(optional)", blank saves and can be blanked;
+  the Date of Placement to Custodian stays required where it is asked, and the
+  admission date's other checks (future, before birth) are unchanged.
 - **Birth Status is optional, and two case types are retired** (owner, 14 Nov
   2026). `birth_status` left `ALWAYS_REQUIRED` and its caseData.js mirror: it
   stays on the form marked "(optional)", a blank saves on create and can be

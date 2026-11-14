@@ -32,7 +32,7 @@ class OneRecordPerChildTest(TestCase):
         cls.psy = make("psy@t.ph", "Marivic", "Bulan", Role.PSYCHOLOGIST)
         cls.libai = Child.objects.create(
             first_name="Libai", last_name="Cramm", birth_date=BORN,
-            case_type="Adoption", case_category="Without Known Parents",
+            case_type="Adoption", case_category="Foundling",
             social_worker=cls.sw)
 
     def _as(self, user):

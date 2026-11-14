@@ -698,7 +698,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   </F>
                 </div>
               )}
-              {/* The SCSR: "For Child Without Known Parents, indicate the given
+              {/* The SCSR: "For Child Without Known Parents" (now Foundling), indicate the given
                   first and last name and alias, if applicable". Shown for that
                   category only; an alias already saved stays when the category
                   changes - hidden, never deleted - and is sent with the save. */}
@@ -825,7 +825,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
               {/* One date, never both: an admission for a child the agency took
                   in, a placement for a child placed with a custodian. */}
               {dateField === ADMISSION && (
-                <F name={ADMISSION} label="Date of Admission to the Agency" required error={shown(ADMISSION)}>
+                <F name={ADMISSION} label={optional('Date of Admission to the Agency')} error={shown(ADMISSION)}>
                   <Input type="date" value={form[ADMISSION] || ''} min={form.birth_date || undefined} max={todayIso} onChange={(e) => setForm({ ...form, [ADMISSION]: e.target.value })} />
                 </F>
               )}
@@ -867,7 +867,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
               Choose the province first — the municipality and barangay lists follow from it.
             </div>
             <div className="racco-case-grid">
-              <F name="house_number" label="House Number" required error={shown('house_number')}>
+              <F name="house_number" label={optional('House Number')} error={shown('house_number')}>
                 <Input value={form.house_number || ''} maxLength={50} onChange={(e) => setForm({ ...form, house_number: e.target.value })} />
               </F>
               <F name="street" label="Street Number" required hint="Or the purok or sitio, where there is no street." error={shown('street')}>

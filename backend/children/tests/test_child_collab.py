@@ -278,7 +278,7 @@ class IdentifyingInformationFieldsTests(APITestCase):
             legal_status="With Issued CDCLAA",
             date_of_placement_to_custodian="2026-02-01",
             type_of_adoption="Foster-Adopt",
-            case_category="Without Known Parents",
+            case_category="Foundling",
         ), format="json")
         self.assertEqual(r.status_code, 201, r.data)
         self.assertEqual(r.data["place_of_birth_or_found"], "Bauang, La Union")
@@ -286,7 +286,7 @@ class IdentifyingInformationFieldsTests(APITestCase):
         self.assertEqual(r.data["legal_status"], "With Issued CDCLAA")
         self.assertEqual(r.data["date_of_placement_to_custodian"], "2026-02-01")
         self.assertEqual(r.data["type_of_adoption"], "Foster-Adopt")
-        self.assertEqual(r.data["case_category"], "Without Known Parents")
+        self.assertEqual(r.data["case_category"], "Foundling")
 
     def test_only_legal_status_is_optional_since_24_sep_2026(self):
         # The six were optional until the form made every applicable question
@@ -310,7 +310,7 @@ class IdentifyingInformationFieldsTests(APITestCase):
         self.assertIn("case_category", r.data)
 
     def test_category_accepts_all_six_new_values(self):
-        for value in ("Surrendered", "Abandoned", "Dependent", "Neglected", "Without Known Parents", "Orphaned"):
+        for value in ("Surrendered", "Abandoned", "Dependent", "Neglected", "Foundling", "Orphaned"):
             r = self.client.post("/api/children/", self._payload(
                 first_name="Ivy", last_name=f"Fields-{value}", case_category=value,
             ), format="json")

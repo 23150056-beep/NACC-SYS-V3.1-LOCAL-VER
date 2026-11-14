@@ -76,7 +76,7 @@ class WhatAFosterCareRecordGetsTest(NonAdoptionCase):
         self.assertTrue(flags["a5_dvc_signed"] and flags["a5_counselling"]
                         and flags["a5_aware_irrevocable"])
         self.assertFalse(flags["a5_abandonment"])
-        Child.objects.filter(pk=self.foster.pk).update(case_category="Without Known Parents")
+        Child.objects.filter(pk=self.foster.pk).update(case_category="Foundling")
         flags = {s["key"]: s["applies"] for s in self.get(self.foster).data["sections"]}
         self.assertTrue(flags["a5_abandonment"] and flags["a5_search_efforts"])
         self.assertFalse(flags["a5_dvc_signed"])

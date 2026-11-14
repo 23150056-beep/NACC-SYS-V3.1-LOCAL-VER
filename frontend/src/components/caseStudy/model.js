@@ -234,14 +234,14 @@ export function partOneRows(f, fmt) {
   const health = f.health_condition === 'With special needs' && f.special_needs
     ? `${f.health_condition}: ${f.special_needs}` : f.health_condition;
   const rows = [
-    ['Name (First, Middle and Last Name. For Child Without Known Parents, indicate the given first and last name and alias, if applicable)',
+    ['Name (First, Middle and Last Name. For a Foundling, indicate the given first and last name and alias, if applicable)',
       f.alias ? `${f.fullname} (alias ${f.alias})` : f.fullname, 'Name'],
     ['Sex', f.gender],
     ['Date of Birth or Given Date of Birth', fmt(f.birth_date), 'Date of birth or given date of birth'],
     ['Age', f.age != null ? `${f.age} years old` : ''],
     ['Place of Birth or Place Found', f.place_of_birth_or_found, 'Place of birth or place found'],
     ['Birth Status (Marital/Non-Marital/Child)', f.birth_status, 'Birth status'],
-    ['Category (Surrendered/Abandoned/Dependent/Neglected/Without Known Parents, Orphan)', f.case_category, 'Category'],
+    ['Category (Surrendered/Abandoned/Dependent/Neglected/Foundling, Orphan)', f.case_category, 'Category'],
     ['Legal Status (with issued CDCLAA / IVC / judicially declared abandoned)',
       [f.legal_status, f.legal_status && f.legal_status_date ? `issued ${fmt(f.legal_status_date)}` : ''].filter(Boolean).join(', '), 'Legal status', true],
     ['Health Condition (healthy or with special needs, specify)', health, 'Health condition'],

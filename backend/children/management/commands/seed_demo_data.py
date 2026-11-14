@@ -71,7 +71,7 @@ LAST_NAMES = [
 # The two retired on 14 Nov 2026 are not seeded (children/intake.py).
 CASE_TYPES = ["Adoption", "Foster Care", "Kinship Care", "Residential Care"]
 CATEGORIES = ["Surrendered", "Abandoned", "Dependent", "Neglected",
-              "Without Known Parents", "Orphaned"]
+              "Foundling", "Orphaned"]
 # Street addresses as a field office writes them: a numbered street in town,
 # a purok where there is no street.
 STREETS = ["Rizal St.", "Mabini St.", "Bonifacio St.", "Quezon Ave.", "Luna St.",
