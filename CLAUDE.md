@@ -1302,6 +1302,21 @@ middle name, a date found, and every question that applies made mandatory.
   - Children 0029 is additive. `children/demo_profiles.py` gives demo
     children a health condition and whereabouts, from `seed_demo_data` and
     `import_demo_data` only.
+- **Present Environment is filled big to small** (owner, 15 Nov 2026): the
+  Custodian block stays first (the owner's choice, "Custodian, then address"),
+  then Province, Municipality / City, Barangay, Street Number, House Number
+  (optional), Landmark (optional). Each list comes from the one before it, so
+  every field is usable when reached; the address was laid out small to big
+  with two disabled selects in the way. Only the order changed - names, rules
+  and the cascade are as they were. Under the six fields "Address as written:"
+  shows it small to big ("12, Rizal St., San Jose, Agoo, La Union", from
+  `writtenAddress` in `utils/child.js`; landmark left out, plain text, hidden
+  while a pre-list typed address is on screen with nothing re-picked). The
+  printed reports keep their own composers (house number and street joined by a
+  space). "Show me" lists the step's answers in the on-screen order
+  (`STEP2_ORDER` in `ChildForm.jsx`), not `requiredFields` order, which is
+  pinned against the server and cannot follow the screen. Three columns on a
+  wide form, two to 900px, one under 760 (`.racco-address-grid`).
 - **Foundling, and two answers made optional** (owner, 14 Nov 2026). The
   category "Without Known Parents" is "Foundling": the VALUE in
   `case_category` was renamed by a reversible data migration plus a choices-only

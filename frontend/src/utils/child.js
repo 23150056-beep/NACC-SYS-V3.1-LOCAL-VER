@@ -122,6 +122,18 @@ export function shortName(full = '') {
   return `${first[0]}. ${parts.slice(i).join(' ')}`;
 }
 
+/* An address as it is WRITTEN, small to big: house number, street, barangay,
+ * municipality, province. Blank parts are left out (no stray commas or
+ * spaces); nothing filled in gives ''. The landmark is not part of it. The
+ * printed reports join house number and street with a space instead, so they
+ * keep their own copies. */
+export function writtenAddress(a = {}) {
+  return [a.house_number, a.street, a.barangay, a.municipality, a.province]
+    .map((v) => String(v ?? '').trim().replace(/\s+/g, ' '))
+    .filter(Boolean)
+    .join(', ');
+}
+
 export function scheduleName(a) {
   if (a.child_name) return a.child_name;
   const ref = a.case_ref || (a.child ? caseRef(a.child) : 'A child');

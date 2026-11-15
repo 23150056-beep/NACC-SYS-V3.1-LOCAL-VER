@@ -10,6 +10,7 @@ import {
   dateFieldFor, requiredFields, unaskedAnswers,
 } from '../../config/caseData';
 import { clock, shortDate, timeAgo } from '../../utils/time';
+import { writtenAddress } from '../../utils/child';
 import { PolishBar, usePolish } from '../../components/PolishWriting';
 import CustodianFields from './CustodianFields';
 import PsychologistPicker from './PsychologistPicker';
@@ -65,6 +66,19 @@ const FIELD_INFO = {
   social_worker: [4, 'social worker'],
 };
 const NAME_FIELDS = ['first_name', 'middle_name', 'last_name'];
+
+/* Present Environment as it is laid out, top to bottom (15 Nov 2026). "Show
+ * me" lists that step's answers in this order, not in the order of the
+ * required list, which is pinned to the server's and cannot follow the screen. */
+const STEP2_ORDER = [
+  'custodian_name', 'custodian_contact', 'custodian_sms_consent',
+  'province', 'psgc_province', 'municipality', 'psgc_municipality', 'barangay', 'psgc_barangay',
+  'street', 'house_number', 'landmark',
+];
+const onScreenOrder = (a, b) => {
+  const [i, j] = [STEP2_ORDER.indexOf(a), STEP2_ORDER.indexOf(b)];
+  return i < 0 || j < 0 ? 0 : i - j;
+};
 
 /* The fields that show their own error under the control. A refusal for any
  * other field - or for one the current case type hides - is listed at the top
@@ -311,6 +325,8 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
     ? [form._record.barangay, form._record.municipality, form._record.province].filter(Boolean).join(', ')
     : '';
 
+  const writtenLine = writtenAddress(form);
+
   /* Both the code and the name are stored. The code is what survives a place
    * being renamed upstream; the name is what a case worker reads back, and what
    * every record written before this picker existed already holds. */
@@ -506,7 +522,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
      reads. A blocker that is a refusal of what was typed says so. */
   const needList = FORM_STEPS.map((label, i) => ({
     label, n: i + 1,
-    items: blockers.filter((f) => stepOf(f) === i + 1)
+    items: blockers.filter((f) => stepOf(f) === i + 1).sort(onScreenOrder)
       .map((f) => ({ f, text: labelOf(f), kind: needed.includes(f) ? 'needed' : 'check' })),
   })).filter((g) => g.items.length);
   const jumpTo = (f) => {
@@ -864,19 +880,14 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             )}
             <div className="racco-eyebrow" style={{ fontSize: 10, margin: '6px 0 4px' }}>Address</div>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 10 }}>
-              Choose the province first — the municipality and barangay lists follow from it.
+              Fill it in from the largest place down — each list follows from the one before it.
             </div>
-            <div className="racco-case-grid">
-              <F name="house_number" label={optional('House Number')} error={shown('house_number')}>
-                <Input value={form.house_number || ''} maxLength={50} onChange={(e) => setForm({ ...form, house_number: e.target.value })} />
-              </F>
-              <F name="street" label="Street Number" required hint="Or the purok or sitio, where there is no street." error={shown('street')}>
-                <Input value={form.street || ''} maxLength={150} onChange={(e) => setForm({ ...form, street: e.target.value })} />
-              </F>
-              {/* Province, then municipality, then barangay: the order the
-                  lists unlock in, each filtered by the one before it. They
-                  were laid out the other way round, so the address was filled
-                  right to left past two disabled selects. */}
+            <div className="racco-case-grid racco-address-grid">
+              {/* Big to small (owner, 15 Nov 2026): province, municipality,
+                  barangay, then street and house number, landmark last. Each
+                  list is filtered by the one before it, so every field is
+                  usable when reached. DOM order is the tab order and the
+                  reading order; the written line below shows it small to big. */}
               <F name="province" label="Province" required error={shown('province')}>
                 <Select value={form.psgc_province || ''} onChange={(e) => pickPlace('province', e.target.value, provinces)}>
                   <option value="">— Select province —</option>
@@ -895,9 +906,25 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   {brgys.map((b) => <option key={b.psgc_code} value={b.psgc_code}>{b.name}</option>)}
                 </Select>
               </F>
+              <F name="street" label="Street Number" required hint="Or the purok or sitio, where there is no street." error={shown('street')}>
+                <Input value={form.street || ''} maxLength={150} onChange={(e) => setForm({ ...form, street: e.target.value })} />
+              </F>
+              <F name="house_number" label={optional('House Number')} error={shown('house_number')}>
+                <Input value={form.house_number || ''} maxLength={50} onChange={(e) => setForm({ ...form, house_number: e.target.value })} />
+              </F>
               <F name="landmark" label={optional('Landmark')} hint="Anything that helps find the house." error={shown('landmark')}>
                 <Input value={form.landmark || ''} maxLength={200} onChange={(e) => setForm({ ...form, landmark: e.target.value })} />
               </F>
+              {/* The address as the record will read it, small to big. Plain
+                  text, not a live region: it changes on every keystroke. Left
+                  out for an address typed before the lists existed and not yet
+                  re-picked, where the note below already shows it. */}
+              {writtenLine && !(typedAddress && !form.psgc_province) && (
+                <div style={{ gridColumn: '1 / -1', fontSize: 12.5, color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>
+                  Address as written:{' '}
+                  <strong data-testid="address-as-written" style={{ color: 'var(--text-strong)' }}>{writtenLine}</strong>
+                </div>
+              )}
               {/* An address typed before the picker existed has no code, so the
                   selects above sit empty and would look like a blank address.
                   Show what the record actually says. */}
