@@ -378,7 +378,7 @@ class Command(BaseCommand):
                 rng.choice(["Social Worker", "Police", "Relatives"])
             adoption = (rng.choice(["Regular", "Domestic Relative", "Step-parent"])
                         if case_type == "Adoption" else "")
-            birth_status = rng.choice(["Marital", "Non-Marital", "Unknown"])
+            birth_status = rng.choice(["Marital Child", "Non-Marital Child", "Unknown"])
             dated = intake_rules.date_field_for(case_type, adoption)
             child = Child.objects.create(
                 first_name=first, last_name=last, fullname=f"{first} {last}",

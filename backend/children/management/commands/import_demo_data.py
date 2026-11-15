@@ -48,7 +48,9 @@ _RENAMED_FIELDS = {"middle_initial": "middle_name", "surrendered_by": "custodian
 _RENAMED_VALUES = {"case_category": {"Orphan": "Orphaned",
                                       # children 0035, 14 Nov 2026
                                       "Without Known Parents": "Foundling"},
-                   "birth_status": {"N/A": "Unknown"},
+                   # children 0036, 15 Nov 2026
+                   "birth_status": {"N/A": "Unknown", "Marital": "Marital Child",
+                                    "Non-Marital": "Non-Marital Child"},
                    "type_of_adoption": {"Stepparent": "Step-parent"},
                    "custodian_name": {"Social Worker": "", "Police": "", "Relatives": ""},
                    # The counseling stage was retired on 2 Nov 2026

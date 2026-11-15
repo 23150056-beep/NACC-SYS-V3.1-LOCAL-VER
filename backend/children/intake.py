@@ -57,6 +57,9 @@ CATEGORY_OPTIONS = {
 # so every rule entry below stays for them; only the OFFER went. Both pair only
 # with the four leaving-care categories, all of which still have four other
 # case types on offer, so no category is left without one.
+# Birth status "Child" was retired on 15 Nov 2026 (owner): not offered, but a
+# record that holds it keeps it. Mirrors RETIRED_BIRTH_STATUSES in caseData.js.
+RETIRED_BIRTH_STATUSES = ["Child"]
 RETIRED_CASE_TYPES = ["Family Tracing & Reunification", "Independent Living"]
 
 

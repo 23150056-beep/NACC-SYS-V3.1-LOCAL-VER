@@ -102,12 +102,13 @@ class Child(models.Model):
     # New fields below match the agency's official "I. Identifying
     # Information" intake form (2026-07), which the agency's Social Case Study
     # Report (SCSR) repeats as its Part I. "N/A" became "Unknown" on 24 Sep
-    # 2026; "Child" was retired that day and offered again on 7 Oct 2026, the
-    # SCSR listing it (owner). "Unknown" stays.
+    # 2026; "Child" was retired that day, offered again on 7 Oct 2026 and
+    # retired again on 15 Nov 2026 (intake.RETIRED_BIRTH_STATUSES). "Marital"
+    # and "Non-Marital" became "Marital Child" and "Non-Marital Child" that
+    # day (children 0036). "Unknown" stays.
     BIRTH_STATUS_CHOICES = [
-        ("Marital", "Marital"),
-        ("Non-Marital", "Non-Marital"),
-        ("Child", "Child"),
+        ("Marital Child", "Marital Child"),
+        ("Non-Marital Child", "Non-Marital Child"),
         ("Unknown", "Unknown"),
     ]
     # The SCSR's "Health Condition (healthy or with special needs, specify)".

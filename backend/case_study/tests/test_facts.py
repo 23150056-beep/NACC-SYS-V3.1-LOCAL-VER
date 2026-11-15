@@ -28,7 +28,7 @@ class PartOneFromTheRecordTest(FactsBase):
     def test_the_identifying_information_as_the_record_holds_it(self):
         self.update_child(
             alias="Bunso", place_of_birth_or_found="Laoag City, Ilocos Norte",
-            birth_status="Non-Marital", legal_status="With IVC", health_condition="Healthy",
+            birth_status="Non-Marital Child", legal_status="With IVC", health_condition="Healthy",
             current_placement="With the prospective adoptive family",
             date_of_admission=date(2024, 5, 1), education_level="Grade 1")
         facts = self.facts()
@@ -37,7 +37,7 @@ class PartOneFromTheRecordTest(FactsBase):
         self.assertEqual("Female", facts["gender"])
         self.assertEqual("2019-03-02", facts["birth_date"])
         self.assertEqual("Laoag City, Ilocos Norte", facts["place_of_birth_or_found"])
-        self.assertEqual("Non-Marital", facts["birth_status"])
+        self.assertEqual("Non-Marital Child", facts["birth_status"])
         self.assertEqual("Surrendered", facts["case_category"])
         self.assertEqual("With IVC", facts["legal_status"])
         self.assertEqual("Healthy", facts["health_condition"])

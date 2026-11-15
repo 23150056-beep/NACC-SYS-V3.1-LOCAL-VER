@@ -274,7 +274,7 @@ class IdentifyingInformationFieldsTests(APITestCase):
         r = self.client.post("/api/children/", self._payload(
             case_type="Adoption",
             place_of_birth_or_found="Bauang, La Union",
-            birth_status="Non-Marital",
+            birth_status="Non-Marital Child",
             legal_status="With Issued CDCLAA",
             date_of_placement_to_custodian="2026-02-01",
             type_of_adoption="Foster-Adopt",
@@ -282,7 +282,7 @@ class IdentifyingInformationFieldsTests(APITestCase):
         ), format="json")
         self.assertEqual(r.status_code, 201, r.data)
         self.assertEqual(r.data["place_of_birth_or_found"], "Bauang, La Union")
-        self.assertEqual(r.data["birth_status"], "Non-Marital")
+        self.assertEqual(r.data["birth_status"], "Non-Marital Child")
         self.assertEqual(r.data["legal_status"], "With Issued CDCLAA")
         self.assertEqual(r.data["date_of_placement_to_custodian"], "2026-02-01")
         self.assertEqual(r.data["type_of_adoption"], "Foster-Adopt")

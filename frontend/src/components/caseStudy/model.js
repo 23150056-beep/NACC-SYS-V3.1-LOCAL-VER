@@ -240,7 +240,7 @@ export function partOneRows(f, fmt) {
     ['Date of Birth or Given Date of Birth', fmt(f.birth_date), 'Date of birth or given date of birth'],
     ['Age', f.age != null ? `${f.age} years old` : ''],
     ['Place of Birth or Place Found', f.place_of_birth_or_found, 'Place of birth or place found'],
-    ['Birth Status (Marital/Non-Marital/Child)', f.birth_status, 'Birth status'],
+    ['Birth Status (Marital Child/Non-Marital Child)', f.birth_status, 'Birth status'],
     ['Category (Surrendered/Abandoned/Dependent/Neglected/Foundling, Orphan)', f.case_category, 'Category'],
     ['Legal Status (with issued CDCLAA / IVC / judicially declared abandoned)',
       [f.legal_status, f.legal_status && f.legal_status_date ? `issued ${fmt(f.legal_status_date)}` : ''].filter(Boolean).join(', '), 'Legal status', true],

@@ -1268,8 +1268,9 @@ middle name, a date found, and every question that applies made mandatory.
   custody; only its Part I (Identifying Information) is intake. Parts II-V
   (background, family, the prospective adoptive parents, placement,
   assessment) are a separate module still to be designed, not form fields.
-  - Birth status "Child" and adoption types SIBRA and ICA Relative are
-    offered again, in the SCSR's order, with "Relative (Without 2-yr
+  - Birth status "Child" (offered again 7 Oct, retired again 15 Nov - see the
+    Birth Status bullet below) and adoption types SIBRA and ICA Relative
+    were offered again on 7 Oct, in the SCSR's order, with "Relative (Without 2-yr
     custody)" kept and "Orphaned" kept as written (owner's choice). Only a
     Regular adoption records the Date of Admission, so SIBRA and ICA
     Relative take the Date of Placement.
@@ -1348,6 +1349,21 @@ middle name, a date found, and every question that applies made mandatory.
   draws from the four current ones (a seed therefore gives a different
   caseload than before the change); readers and filters keep seeing the two.
   A test that needs a legacy record makes it with the ORM.
+- **Birth Status reads "Marital Child" / "Non-Marital Child" / "Unknown"**
+  (owner, 15 Nov 2026). The two values were renamed IN THE COLUMN by children
+  0036 (reversible RunPython plus a choices-only `AlterField`, the way 0035
+  moved Foundling), so the release still serving during a deploy keeps working:
+  its `_current_or_unchanged` lets a record's own unchanged birth status
+  through. "Child" is retired again (`intake.RETIRED_BIRTH_STATUSES`,
+  `RETIRED_BIRTH_STATUSES` in caseData.js, pinned in test_intake.py): not
+  offered, no migration, a record holding it keeps it through any edit, shown
+  "(no longer offered)" and selectable back during that edit. "Marital",
+  "Non-Marital" and "Child" are refused as a new pick, not normalised;
+  `import_demo_data` upgrades an older fixture's two old words. Case study
+  final snapshots and activity labels keep the old words on purpose, so a
+  reprint of an old final still says "Marital" / "Non-Marital". Optional
+  still. The case study's `b6_marital_history` section and the Marital
+  Satisfaction Inventory are other things and were not touched.
 - **A rename cannot ride along with a deploy the old release survives.** On
   24 Sep the demo API's first deploy of 0020 failed on Render's side after the
   web had gone live; had the migration run first, the old API - still serving

@@ -201,8 +201,11 @@ export const unaskedAnswers = (form, record) => {
 
 // New fields from the same official intake form, which the SCSR repeats as its
 // Part I. "N/A" became "Unknown" on 24 Sep 2026; "Child" was retired that day
-// and offered again on 7 Oct 2026 (owner).
-export const BIRTH_STATUSES = ['Marital', 'Non-Marital', 'Child', 'Unknown'];
+// and offered again on 7 Oct 2026, then retired again on 15 Nov 2026, when
+// "Marital" and "Non-Marital" became "Marital Child" and "Non-Marital Child"
+// (owner). A record that holds a retired value keeps it. Mirrors children/intake.py.
+export const BIRTH_STATUSES = ['Marital Child', 'Non-Marital Child', 'Unknown'];
+export const RETIRED_BIRTH_STATUSES = ['Child'];
 
 // The SCSR's Health Condition. "With special needs" asks what they are
 // (special_needs); any other answer takes none. Mirrors children/intake.py.
