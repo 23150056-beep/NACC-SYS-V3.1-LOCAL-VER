@@ -1763,6 +1763,13 @@ button: "Pre-Assessment" with Not started / Started · Consent / In progress ·
   tool / 4 wrong argument / 4 rejected; new 5 / 3 / 2, plus one empty answer
   per role (not yet traced to its question). Within noise, so it stands. The
   "3/87" figure under "The chatbot" is from 30 Aug, on an older question set.
+- **"In Pre-Assessment" on the psychologist's Dashboard** (owner, 15 Nov 2026).
+  The tile that was "In counseling", then "Pre-assessed", reads "In
+  Pre-Assessment" and counts active children whose pre-assessment is NOT
+  finished (`by_pre_assessment.not_started + in_progress`), with the finished
+  count in its hint: on the "Pre-assessments waiting on someone" card (which
+  the ISA sees too) and on the psychologist's rail tile. The SW's and ISA's
+  rail tile and the team list still say "Pre-assessed" and count finished ones.
 
 ## The pre-assessment tracker: times on each step
 

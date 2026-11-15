@@ -76,7 +76,8 @@ export function CensusCard({ wide = false }) {
    * a count you cannot act on is decoration. */
   const railStats = isPsych ? [
     { label: 'My active', value: census.active ?? 0, hint: 'children assigned', color: 'var(--success-700)', to: '/children' },
-    { label: 'Pre-assessed', value: byPa.completed ?? 0, hint: `${byPa.in_progress ?? 0} in progress`, color: 'var(--blue-600)', to: '/monitoring' },
+    // The psychologist's tile counts who is still in pre-assessment (owner, 15 Nov 2026).
+    { label: 'In Pre-Assessment', value: (byPa.not_started ?? 0) + (byPa.in_progress ?? 0), hint: `${byPa.completed ?? 0} completed`, color: 'var(--blue-600)', to: '/monitoring' },
     { label: 'Today', value: today.length, hint: 'appointments', color: 'var(--text-body)', to: '/schedule' },
     { label: 'Care gaps', value: gaps.length, hint: `${dueToday} need today`, color: 'var(--red-700)', to: '/' },
   ] : [
