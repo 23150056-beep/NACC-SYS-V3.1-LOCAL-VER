@@ -49,9 +49,17 @@ list (`children/termination.py:75`); the custodian rule treats "not ISA, not
 Staff" as a psychologist (`children/custodian.py:83`); care gaps give any
 non-Staff the ISA's list (`clinical/care_gaps.py:242`).
 
+The code already knows this about itself. `accounts/authentication.py:37`
+says roles are read as "if psychologist ... else everything" in a dozen
+places, and that "rather than audit and invert a dozen call sites" it refuses
+an account with **no** role at the one door they all come through. That
+backstop asks whether there is a role at all. An Officer has one, so it does
+not catch an Officer.
+
 No such account can exist today, because the only Role rows are the three. It
 becomes real the day a fourth row is added. So the first thing the build does
-is close those branches, before the role exists (work package 1).
+is the audit that comment put off: close those branches, before the role
+exists (work package 1).
 
 ## The idea in one line
 
@@ -125,9 +133,10 @@ because the plan puts every one of them behind a single named list or function.
    or leave it and assign it from the desk later.
 4. A worker goes on leave: **Transfer records**, from her to two colleagues.
 5. Opens a colleague's child: files the referral, asks a psychologist, books
-   the session, starts a survey, reads the case study and prints it. Each of
-   these tells the record's social worker the way it tells them today when the
-   ISA or a psychologist acts on their record.
+   the session, starts a survey, reads the case study and prints it. The
+   record's social worker hears of the booking by email and text, and sees the
+   request in their bell, as they do today when the ISA acts on their record
+   ("Who is told" has the two that stay quiet).
 6. A case ends with the family reunified: **Terminate**, with the outcome.
 
 What the Officer never sees: Users, Settings, Access Requests, the admin
@@ -444,9 +453,9 @@ or a screen that falls into another role's branch, is a defect.
   Officer or the ISA".
 - **The child's page**: referral upload, survey and referral summary follow
   `KEEPS_RECORDS`; Print on the Case study tab is for whoever may print it;
-  the Assistant log tab stays the ISA's, and so does `canAdvance` (the ISA or
-  the assigned psychologist: a report's summary and its check). `CaseStudyTab`
-  gives the Officer the read-only editor. With no survey form set up, the
+  the Assistant log tab stays the ISA's; a report's summary and its check
+  (`canAdvance`) stay with the ISA and the assigned psychologist.
+  `CaseStudyTab` gives the Officer the read-only editor. With no survey form set up, the
   Officer is told what a social worker is told: ask the ISA to add one.
 - **Results & Reports** (`pages/Report.jsx`): "Upload case referral" follows
   `KEEPS_RECORDS`. Reviewing a report's check stays the psychologist's and
