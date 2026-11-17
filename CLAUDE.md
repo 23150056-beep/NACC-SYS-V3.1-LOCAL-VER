@@ -1037,13 +1037,15 @@ steps.
   command needs the app that is now gone.
 - **Kept on purpose**: the record form's fields that were modelled on SCSR
   Part I (alias, health condition, whereabouts, legal status date and the
-  rest; see "The record form"), which are intake, not the case study; the
-  AgencyProfile card and the PRC license on My Profile; and the
-  `finalized`/`reopened` activity actions with their old lines, which are
+  rest; see "The record form"), which are intake, not the case study; and
+  the `finalized`/`reopened` activity actions with their old lines, which are
   history. Those lines now open the child's page.
-  Nothing prints the license or the Head of Office's name any more (the SCSR
-  was their only reader); the screens no longer claim it. Dropping the
-  fields is the owner's call.
+- **Its two readers went with it** (owner, same day): the PRC license on My
+  Profile (`UserProfile.license_number`, `license_valid_until`) and the Head
+  of Office on Settings (`AgencyProfile.head_of_office_name`, `_title`),
+  dropped by an accounts migration. The rest of AgencyProfile stays - the
+  calendar invite carries its office address - and so does UserProfile,
+  which holds the social links.
 - `import_demo_data` drops any `case_study.*` rows from an older fixture
   before loading it.
 - **Print still needs the print fix** (found 8 Oct 2026). The app shell is a
@@ -2525,7 +2527,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 3,435 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 3,426 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

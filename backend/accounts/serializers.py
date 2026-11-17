@@ -5,7 +5,6 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from accounts.models import AgencyProfile, Role, UserProfile
 from accounts.names import refuse_unreadable
-from accounts.scoping import role_of
 from activity.models import ActivityLog
 from accounts.token_claims import stamp
 from activity.services import log_activity
@@ -394,42 +393,14 @@ _SOCIAL_HOSTS = {
 }
 
 
-LICENSE_FIELDS = ("license_number", "license_valid_until")
-
-
 class UserProfileSerializer(serializers.ModelSerializer):
     """A person's own optional details. Never anybody else's — the view binds
     this to request.user and takes no id."""
 
     class Meta:
         model = UserProfile
-        fields = ["facebook", "twitter", "instagram",
-                  "license_number", "license_valid_until", "updated_at"]
+        fields = ["facebook", "twitter", "instagram", "updated_at"]
         read_only_fields = ["updated_at"]
-
-    def _holds_a_license(self):
-        """Social workers and psychologists are licensed; an administrator is
-        the agency's IT support and has no PRC license to record."""
-        request = self.context.get("request")
-        return role_of(request) in (Role.STAFF, Role.PSYCHOLOGIST)
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        # Not offered, rather than offered blank: a blank would read as a
-        # license somebody has yet to fill in.
-        if not self._holds_a_license():
-            for name in LICENSE_FIELDS:
-                data.pop(name, None)
-        return data
-
-    def validate(self, attrs):
-        if not self._holds_a_license():
-            sent = [name for name in LICENSE_FIELDS if name in attrs]
-            if sent:
-                raise serializers.ValidationError({
-                    sent[0]: "An administrator account has no PRC license to record. "
-                             "Only social workers and psychologists do."})
-        return attrs
 
     def _normalise(self, field, value):
         raw = (value or "").strip()
@@ -480,12 +451,12 @@ class UserProfileSerializer(serializers.ModelSerializer):
 
 
 class AgencyProfileSerializer(serializers.ModelSerializer):
-    """The agency's name, address and head of office. Every field is optional
+    """The agency's name, address and contact details. Every field is optional
     and trimmed; the lengths are the model's, which the serializer enforces
     because a TextField's max_length is otherwise only a hint."""
 
     class Meta:
         model = AgencyProfile
         fields = ["agency_name", "office_address", "contact_details",
-                  "head_of_office_name", "head_of_office_title", "updated_at"]
+                  "updated_at"]
         read_only_fields = ["updated_at"]

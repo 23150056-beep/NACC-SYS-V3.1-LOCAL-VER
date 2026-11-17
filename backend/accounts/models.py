@@ -163,13 +163,6 @@ class UserProfile(models.Model):
     facebook = models.CharField(max_length=200, blank=True, default="")
     twitter = models.CharField(max_length=200, blank=True, default="")
     instagram = models.CharField(max_length=200, blank=True, default="")
-    # The PRC license a social worker or psychologist practises under. The
-    # Social Case Study Report's signature block prints both. Only the person
-    # themselves writes them, and only a Staff or Psychologist account has one -
-    # an administrator is IT support. A date in the past is allowed on purpose:
-    # a lapsed license is a fact about the person, not an input error.
-    license_number = models.CharField(max_length=50, blank=True, default="")
-    license_valid_until = models.DateField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -181,14 +174,10 @@ class UserProfile(models.Model):
 
 
 class AgencyProfile(models.Model):
-    """Who the agency is, as printed on its reports: one row, pk=1.
+    """Who the agency is: one row, pk=1.
 
-    Agency-wide and set by an administrator in Settings. It exists because the
-    Social Case Study Report's signature block needs the Head of Office's name
-    and the printed headings need the office's name and address, and until now
-    those were typed into each report by hand or not at all. The ISA is the
-    agency's IT support and not the head of office, so the Head of Office is a
-    name and a title held here, never an account.
+    Agency-wide and set by an administrator in Settings. It holds the agency's
+    name, the office address that calendar invites carry, and contact details.
 
     Blank is a valid state - an agency that has not filled it in prints lines
     to complete by hand, as the other printed forms do.
@@ -197,8 +186,6 @@ class AgencyProfile(models.Model):
     agency_name = models.CharField(max_length=200, blank=True, default="")
     office_address = models.TextField(max_length=500, blank=True, default="")
     contact_details = models.TextField(max_length=300, blank=True, default="")
-    head_of_office_name = models.CharField(max_length=150, blank=True, default="")
-    head_of_office_title = models.CharField(max_length=150, blank=True, default="")
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

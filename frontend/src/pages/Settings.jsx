@@ -43,8 +43,6 @@ const AGENCY_FIELDS = [
   ['agency_name', 'Agency name', 200, 'Regional Alternative Child Care Office No. 1'],
   ['office_address', 'Office address', 500, 'Street, barangay, city or municipality, province'],
   ['contact_details', 'Contact details', 300, 'Telephone and email'],
-  ['head_of_office_name', 'Head of Office', 150, 'Full name as it should be printed'],
-  ['head_of_office_title', 'Head of Office title', 150, 'Regional Director'],
 ];
 const NO_AGENCY = Object.fromEntries(AGENCY_FIELDS.map(([key]) => [key, '']));
 
