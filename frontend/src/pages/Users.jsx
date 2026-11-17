@@ -422,6 +422,9 @@ export default function Users() {
       delete payload.role_name; delete payload.fullname;
       delete payload.must_change_password; delete payload.admin_takeover_pending;
       delete payload.google_linked; delete payload.last_login; delete payload.created_at;
+      // Status moves only through Approve, Decline, Deactivate and Reactivate; resending
+      // it from a stale drawer would try to revert a change made elsewhere.
+      delete payload.status;
       if (form.id) {
         await api.put(`/users/${form.id}/`, payload);
         toast.success(roleChange ? `${nameOf(form)}'s role is now ${roleLabel(roleChange.to)}` : 'User updated');

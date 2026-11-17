@@ -6,13 +6,19 @@ from accounts.names import refuse_unreadable
 from accounts.models import Role
 from accounts.phone import as_typed as phone_as_typed
 from children import assignment, custodian, duplicates, intake
+from config.lifecycle import EditKeepsStatus
+from children.lifecycle import CHILD_LIFECYCLE, DOORS as STATUS_DOORS
 from children.models import AssignmentRequest, Child
 
 User = get_user_model()
 
 
 
-class ChildSerializer(serializers.ModelSerializer):
+class ChildSerializer(EditKeepsStatus, serializers.ModelSerializer):
+    # case_status mirrors the status, so an edit leaves both alone.
+    lifecycle = CHILD_LIFECYCLE
+    edit_skip = ("case_status",)
+
     # Frontend uses `psychologist`; map it to the assigned_psychologist FK.
     psychologist = serializers.PrimaryKeyRelatedField(
         source="assigned_psychologist", queryset=User.objects.all(),
@@ -334,6 +340,9 @@ class ChildSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         role = getattr(getattr(getattr(request, "user", None), "role", None),
                        "role_name", None) if request else None
+        # No edit changes the status, whoever sends it; resending the value
+        # the record holds is fine (the form sends everything).
+        CHILD_LIFECYCLE.refuse_edit(self.instance, attrs, STATUS_DOORS)
         if self.instance:
             # The token belongs to the submission that made the record; no
             # edit moves or sets it.
@@ -357,7 +366,6 @@ class ChildSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         {"psychologist": "Only administrators or staff can reassign a psychologist."})
                 attrs.pop("assignee_sees_history", None)
-                attrs.pop("status", None)
         else:
             # Create: fullname is read-only and first_name/last_name are
             # blank=True on the model, so DRF won't require any of them on

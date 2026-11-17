@@ -2,7 +2,9 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from config.clock import clock
+from config.lifecycle import EditKeepsStatus
 from scheduling import visibility
+from scheduling.lifecycle import APPOINTMENT_LIFECYCLE
 from scheduling.models import AvailabilityBlock, Appointment, Unavailability
 
 
@@ -73,7 +75,9 @@ class AvailabilityBlockSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class AppointmentSerializer(serializers.ModelSerializer):
+class AppointmentSerializer(EditKeepsStatus, serializers.ModelSerializer):
+    lifecycle = APPOINTMENT_LIFECYCLE
+
     # Whether the child's name is shown depends on who is looking - see
     # scheduling/visibility.py. Without a request there is nobody to show it
     # to, so it is left out.

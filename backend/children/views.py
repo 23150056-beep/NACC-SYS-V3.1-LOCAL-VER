@@ -1,6 +1,6 @@
 ﻿import time
 from django.core.cache import cache
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.db.models import Prefetch, Q
 from django.http import Http404
 from rest_framework import viewsets, status
@@ -17,6 +17,7 @@ from accounts.scoping import role_of, scope_to_visible, visible_pre_assessments
 from activity.models import ActivityLog
 from activity.services import log_activity
 from children import assignment, custodian, duplicates, termination, transfer
+from children.lifecycle import CHILD_LIFECYCLE, LOST_RACE
 from children.models import AssignmentRequest, Child, TerminationRecord
 from children.serializers import ChildSerializer
 
@@ -160,6 +161,9 @@ class ChildViewSet(viewsets.ModelViewSet):
             return
         wanted = data.pop("assigned_psychologist")
         asking = wanted is not None and wanted.pk != instance.assigned_psychologist_id
+        if asking and instance.status == Child.INACTIVE:
+            raise ValidationError({
+                "psychologist": "This case is closed. Reopen it before asking a psychologist."})
         if not asking:
             carry = None
         if wanted is None:
@@ -271,12 +275,18 @@ class ChildViewSet(viewsets.ModelViewSet):
         if not note:
             return Response({"note": "A reason note is required to terminate a case."},
                             status=status.HTTP_400_BAD_REQUEST)
-        record = TerminationRecord.objects.create(
-            child=child, terminated_by=request.user,
-            reason_category=reason, note=note)
-        child.status = Child.INACTIVE
-        child.case_status = Child.STAGE_TERMINATED
-        child.save(update_fields=["status", "case_status", "updated_at"])
+        # The record is made only after the move wins, in the same block, so
+        # a double press leaves one record and one set of side effects.
+        with transaction.atomic():
+            moved = CHILD_LIFECYCLE.move(
+                child, Child.INACTIVE,
+                extra={"case_status": Child.STAGE_TERMINATED})
+            if moved:
+                record = TerminationRecord.objects.create(
+                    child=child, terminated_by=request.user,
+                    reason_category=reason, note=note)
+        if not moved:
+            return Response({"detail": LOST_RACE}, status=status.HTTP_409_CONFLICT)
         self._log(child, ActivityLog.ARCHIVED)
         # A closed case has nobody left to ask.
         assignment.withdraw_pending(child, by=request.user)
@@ -339,14 +349,14 @@ class ChildViewSet(viewsets.ModelViewSet):
         if child.status != Child.INACTIVE:
             return Response({"detail": "This case is already active."},
                             status=status.HTTP_400_BAD_REQUEST)
-        child.status = Child.ACTIVE
-        child.case_status = Child.STAGE_PRE_ASSESSMENT
-        child.assigned_psychologist = None
-        fields = ["status", "case_status", "assigned_psychologist", "updated_at"]
+        extra = {"case_status": Child.STAGE_PRE_ASSESSMENT,
+                 "assigned_psychologist": None}
         if taking_over:
-            child.social_worker = request.user
-            fields.append("social_worker")
-        child.save(update_fields=fields)
+            extra["social_worker"] = request.user
+        with transaction.atomic():
+            moved = CHILD_LIFECYCLE.move(child, Child.ACTIVE, extra=extra)
+        if not moved:
+            return Response({"detail": LOST_RACE}, status=status.HTTP_409_CONFLICT)
         # Taken over: the worker who held it is told, since it has just left
         # their records. Otherwise as before.
         log_activity(request.user, ActivityLog.UPDATED, ActivityLog.RECORD,

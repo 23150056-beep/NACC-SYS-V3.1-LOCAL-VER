@@ -354,6 +354,62 @@ Without `--clear` only the fixture's children are dealt; a child already there
 keeps its psychologist.
 
 
+## Status lifecycles: one door each
+
+Built 18 Nov 2026. The owner asked for every implicit state machine to be
+found and the best change made. An inventory found about ninety. The
+commonest fault was the same one three times: a status could be written
+through the ordinary edit endpoint, which skipped the action that guards
+the move. An archived administrator came back by a PATCH, a case closed
+with no TerminationRecord, and a completed session moved into the future
+and still counted as held.
+
+- **`config/lifecycle.py` holds `Lifecycle`**, and each lifecycle declares
+  its states and legal moves as a table in its own app:
+  `accounts/lifecycle.py` (User: pending -> active/archived, active ->
+  archived, archived -> active), `children/lifecycle.py` (Child: active <->
+  inactive) and `scheduling/lifecycle.py` (Appointment: scheduled ->
+  completed/no_show/cancelled; completed <-> no_show and either -> cancelled
+  as a correction; cancelled is terminal). Read the table before adding a
+  button that changes a status.
+- **The edit endpoint never changes a status.** `refuse_edit` accepts the
+  same value (forms resend everything) and refuses a different one with 400
+  naming the real door ("Approve it from Access Requests.", "Close a case
+  with Terminate, which records why."). An edit also saves only its own
+  columns (`edit_fields`), so an edit in flight cannot write an old status
+  back over a move that won. Users.jsx no longer sends `status`: a drawer
+  opened before an approval in another tab used to undo it.
+- **Every move is a conditional UPDATE on the status the caller saw**
+  (`move()`). A lost race answers 409 and sends nothing: no second
+  TerminationRecord, email, custodian text or log line. `QuerySet.update`
+  skips `save()`, so a User move passes
+  `extra={"is_active": is_active_for(status)}` - forgetting it is the one
+  trap.
+- **A guard test per table** (`check_table()`) fails on a status choice the
+  table does not list. A new status is a decision, never a default.
+- **Rules this made explicit** (18 Nov 2026):
+  - A social worker can cancel only a SCHEDULED appointment. A completed or
+    no-show one is the psychologist's record (403); the psychologist and
+    the ISA can still correct an outcome, cancelling included.
+  - Only a scheduled appointment can be moved (start, length,
+    psychologist). An appointment stays with the child it was booked for,
+    whatever its status. This also closed a way around the referral gate:
+    moving a booking onto a child with no referral.
+  - A closed case cannot ask a psychologist ("Reopen it before asking a
+    psychologist.").
+  - Signing in with Google while `must_change_password` is set makes the
+    password unusable, whether it was an emailed temporary password or a
+    reactivated account's old one. Until then the temporary password kept
+    working with nothing forcing a change.
+  - Deactivating an account twice answers 400, not 500.
+- **Not yet covered** (found, verified, left for later rounds):
+  PreAssessment (a completed one can still be edited; `complete()` is not
+  atomic), OpinionnaireInvite (single use is check-then-write), the case
+  study's Final/Reopen (no `updated_at` bump), document summaries (a
+  re-summarise destroys the confirmed text), and frontend flows held in
+  several booleans (the pre-assessment wizard prints "step 5.5 of 6" on
+  Review). Bring each onto a table the same way.
+
 ## Booking and the calendar
 
 Every rule about whether a booking can exist lives in `scheduling/booking.py`,
@@ -2259,8 +2315,7 @@ the psychologist asked to take a child. Design and what was settled in review:
   sign-in (`returnPath`: a single leading `/`, never `/login`). The button's
   `for=<recipient id>` says whose open session to borrow. It is not a secret
   and signs nobody in.
-- **Left open for the owner**: a session PATCHed onto another child (API only)
-  sends nothing; the footer's "No case details are included" is stronger than
+- **Left open for the owner**: the footer's "No case details are included" is stronger than
   a session's date and time; dark mode is unchecked on a real phone. **The sender is the bigger risk**: gmail.com sent
   through Brevo cannot pass DMARC, so it is spoofable and spam-prone - send
   from an agency-controlled domain with SPF/DKIM/DMARC. Brevo also rewrites

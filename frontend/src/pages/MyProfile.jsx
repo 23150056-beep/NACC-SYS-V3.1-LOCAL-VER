@@ -151,8 +151,7 @@ export default function MyProfile() {
 
   const stats = useMemo(() => {
     if (children === null || appointments === null) return null;
-    const active = children.filter((c) => c.status !== 'archived'
-      && (c.case_status || 'active') !== 'inactive');
+    const active = children.filter((c) => c.status === 'active');
     const now = new Date();
     const weekEnd = new Date(now); weekEnd.setDate(now.getDate() + 7);
     const upcoming = appointments.filter((a) => {

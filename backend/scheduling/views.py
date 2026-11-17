@@ -17,6 +17,7 @@ from activity.models import ActivityLog
 from activity.services import log_activity
 from children.models import Child
 from scheduling import booking
+from scheduling.lifecycle import APPOINTMENT_LIFECYCLE
 from scheduling.models import (
     AvailabilityBlock, Appointment, CustodianReminder, Unavailability,
 )
@@ -484,23 +485,40 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         """
         instance = serializer.instance
         data = serializer.validated_data
+        # Only a session still to be held has a time to change; status moves
+        # have their own door (_set_status). Notes and purpose of a past
+        # session stay editable.
+        moves = ("psychologist" in data and data["psychologist"] != instance.psychologist) \
+            or ("start" in data and data["start"] != instance.start) \
+            or ("duration_minutes" in data
+                and data["duration_minutes"] != instance.duration_minutes)
+        if instance.status != Appointment.SCHEDULED and moves:
+            raise ValidationError({"detail": (
+                "Only a scheduled appointment can be moved. This one is "
+                f"{instance.get_status_display().lower()}.")})
+        # An appointment stays with the child it was booked for. Moving it onto
+        # another child would also skip that child's referral check.
+        if "child" in data and data["child"] != instance.child:
+            raise ValidationError({"child": (
+                "An appointment stays with the child it was booked for. "
+                "Cancel it and book the other child.")})
         # A social worker changes only their own children's sessions. A
         # psychologist's own calendar is theirs to edit even for a child since
         # reassigned; the child a session is moved TO is checked for everyone.
         if _role(self.request) == Role.STAFF:
             self._require_own_child(instance.child, "change")
-        if "child" in data and data["child"] != instance.child:
-            self._require_own_child(data["child"], "change")
         psychologist = data.get("psychologist") or instance.psychologist
         if _role(self.request) == Role.PSYCHOLOGIST:
             psychologist = instance.psychologist
-        self._validate_booking(
-            psychologist,
-            data.get("child", instance.child),
-            data.get("start", instance.start),
-            data.get("duration_minutes", instance.duration_minutes),
-            exclude_id=instance.pk,
-        )
+        # A past session's notes are not a booking, so no booking rule applies.
+        if instance.status == Appointment.SCHEDULED:
+            self._validate_booking(
+                psychologist,
+                data.get("child", instance.child),
+                data.get("start", instance.start),
+                data.get("duration_minutes", instance.duration_minutes),
+                exclude_id=instance.pk,
+            )
         was_at, was_for, was_with = (instance.start, instance.duration_minutes,
                                      instance.psychologist)
         obj = serializer.save(psychologist=psychologist)
@@ -536,22 +554,34 @@ class AppointmentViewSet(viewsets.ModelViewSet):
                             status=status.HTTP_403_FORBIDDEN)
         if role == Role.STAFF:
             self._require_own_child(obj.child, "cancel")
+            # An outcome the psychologist recorded is not the social worker's
+            # to erase.
+            if obj.status in (Appointment.COMPLETED, Appointment.NO_SHOW):
+                return Response(
+                    {"detail": "Only the psychologist can change a recorded outcome."},
+                    status=status.HTTP_403_FORBIDDEN)
         # Cancelling stays available at any time - a session called off on the
         # day, or a no-show written up late, are both normal. Recording an
         # OUTCOME is different: it is a claim about something that happened.
-        if new_status in (Appointment.COMPLETED, Appointment.NO_SHOW):
-            if obj.status == Appointment.CANCELLED:
-                return Response(
-                    {"detail": "This appointment was cancelled. Book a new one rather "
-                               "than recording an outcome against it."},
-                    status=status.HTTP_400_BAD_REQUEST)
-            if obj.start > timezone.now():
-                return Response(
-                    {"detail": "This appointment has not happened yet."},
-                    status=status.HTTP_400_BAD_REQUEST)
+        if not APPOINTMENT_LIFECYCLE.allows(obj.status, new_status):
+            if (new_status in (Appointment.COMPLETED, Appointment.NO_SHOW)
+                    and obj.status == Appointment.CANCELLED):
+                detail = ("This appointment was cancelled. Book a new one rather "
+                          "than recording an outcome against it.")
+            else:
+                detail = f"This appointment is already {obj.get_status_display().lower()}."
+            return Response({"detail": detail}, status=status.HTTP_400_BAD_REQUEST)
+        if new_status in (Appointment.COMPLETED, Appointment.NO_SHOW) \
+                and obj.start > timezone.now():
+            return Response(
+                {"detail": "This appointment has not happened yet."},
+                status=status.HTTP_400_BAD_REQUEST)
         was = obj.status
-        obj.status = new_status
-        obj.save(update_fields=["status", "updated_at"])
+        # The notifications below run only for the request that made the move.
+        if not APPOINTMENT_LIFECYCLE.move(obj, new_status):
+            return Response(
+                {"detail": "This appointment changed a moment ago. Reload to see it."},
+                status=status.HTTP_409_CONFLICT)
         log_activity(request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type="Appointment", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.psychologist)

@@ -3,6 +3,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from accounts.lifecycle import EDIT_DOORS, USER_LIFECYCLE, is_active_for
 from accounts.models import AgencyProfile, Role, UserProfile
 from accounts.names import refuse_unreadable
 from accounts.scoping import role_of
@@ -55,6 +56,15 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_google_linked(self, obj):
         return bool(obj.google_sub)
+
+
+# Columns an account edit leaves alone (is_active follows the status, which
+# the edit never writes either).
+_EDIT_NEVER_WRITES = (
+    "is_active", "password", "last_login", "date_joined", "is_staff",
+    "is_superuser", "must_change_password", "admin_takeover_pending",
+    "google_sub", "requested_role", "created_at", "phone", "phone_verified",
+)
 
 
 class UserWriteSerializer(serializers.ModelSerializer):
@@ -115,10 +125,7 @@ class UserWriteSerializer(serializers.ModelSerializer):
         if self.instance is not None and self.instance.status == User.PENDING:
             # A request is let in by approve/ and nowhere else: it asks for a
             # role, refuses an unconfirmed address and refuses Administrator.
-            # Flipping the status here would skip all three.
-            if attrs.get("status") == User.ACTIVE:
-                raise serializers.ValidationError(
-                    {"status": "Approve it from Access Requests."})
+            # The lifecycle check below refuses a status flip from here.
             # A Google request's address is the one Google verified, and
             # resend never serves it, so a corrected address could not be
             # confirmed again and the request could never be approved.
@@ -129,16 +136,16 @@ class UserWriteSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"email": "A Google request's address is the Google "
                               "account's. Decline it and ask them to apply again."})
-        # `status` is writable here, so this endpoint is a second way to
-        # deactivate the last administrator — the one account the system
-        # cannot replace. Any move off ACTIVE counts: is_active follows
-        # status, so "pending" locks them out exactly as "archived" does.
+        # The last administrator is the one account the system cannot
+        # replace, so a status edit gets that explanation before the generic
+        # "use the real door" one. Any move off ACTIVE counts.
         if (self.instance is not None and attrs.get("status", User.ACTIVE) != User.ACTIVE
                 and self.instance.is_last_active_administrator()):
             raise serializers.ValidationError(
                 {"status": "This is the only administrator account. Create the "
                            "replacement administrator first — that hands over "
                            "properly — then deactivate this one."})
+        USER_LIFECYCLE.refuse_edit(self.instance, attrs, EDIT_DOORS)
         return attrs
 
     def create(self, validated_data):
@@ -201,7 +208,11 @@ class UserWriteSerializer(serializers.ModelSerializer):
         # Keep username in sync with email (email is the username).
         if validated_data.get("email"):
             instance.username = validated_data["email"]
-        instance.save()
+        # The status column and is_active are never written by an edit: a form
+        # opened before a Deactivate would put the old values back. The rest
+        # of the credential and sign-in columns are not an edit's either.
+        instance.save(update_fields=USER_LIFECYCLE.edit_fields(
+            instance, also_skip=_EDIT_NEVER_WRITES))
 
         # Logged separately from the ordinary "updated" line, and naming both
         # roles: "who made her a psychologist, and when" is a question the
@@ -259,9 +270,12 @@ def _complete_admin_takeover(new_admin):
               .filter(role__role_name=Role.ADMINISTRATOR, status=User.ACTIVE)
               .exclude(pk=new_admin.pk))
     for old in others:
-        old.status = User.ARCHIVED
-        # is_active follows status automatically (User.save).
-        old.save(update_fields=["status", "updated_at"])
+        # A queryset update skips User.save, so is_active goes with the move.
+        # False means somebody archived this account first: nothing to log.
+        if not USER_LIFECYCLE.move(
+                old, User.ARCHIVED,
+                extra={"is_active": is_active_for(User.ARCHIVED)}):
+            continue
         log_activity(
             new_admin, ActivityLog.ARCHIVED, ActivityLog.USER,
             entity_type="User",

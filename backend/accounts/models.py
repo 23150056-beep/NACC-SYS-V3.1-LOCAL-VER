@@ -98,11 +98,15 @@ class User(AbstractUser):
         neither has heard of `status`). Deriving one from the other here means
         the two cannot drift, and — the reason it exists — a status added
         later cannot accidentally authenticate because someone forgot to set
-        `is_active` alongside it. Callers set `status` and nothing else.
+        `is_active` alongside it. A new account sets `status` and nothing else.
 
-        Caveat for future work: a queryset-level `.update(status=...)` skips
-        this and would leave the two out of step. Change status through an
-        instance save."""
+        Status moves go through accounts.lifecycle.USER_LIFECYCLE.move() with
+        extra={"is_active": is_active_for(status)}. move() is a conditional
+        queryset update, so it skips this method and the caller derives
+        is_active itself; what it buys is that a stale copy cannot win a
+        race. An edit's save leaves status out of update_fields (see
+        config.lifecycle.Lifecycle.edit_fields).
+        """
         self.is_active = self.status == self.ACTIVE
         update_fields = kwargs.get("update_fields")
         if update_fields is not None:

@@ -418,7 +418,8 @@ class MovedTest(SessionMailBase):
             self.cancel(self.sw, appointment)
         with self.outbox() as sent:
             res = self.change(self.admin, appointment, start=self.later())
-        self.assertEqual(200, res.status_code, res.data)
+        # A cancelled session cannot be moved at all now (appointment lifecycle).
+        self.assertEqual(400, res.status_code, res.data)
         self.assertEqual([], sent)
 
 

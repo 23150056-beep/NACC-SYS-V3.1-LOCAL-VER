@@ -20,6 +20,7 @@ from accounts.display import display_name
 from accounts import email_notifications, email_verification
 from accounts.lockout import (ADDRESS_LOCK_LABEL, client_ip, clear_failures, is_locked,
                               readable_sign_in_name, register_failure)
+from accounts.lifecycle import LOST_RACE, USER_LIFECYCLE, is_active_for
 from accounts.models import AgencyProfile, EmailOptOut, Role, UserProfile
 from accounts import signup_limit
 from accounts.permissions import IsAdministrator, IsAdminOrStaff
@@ -735,15 +736,19 @@ class UserViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["post"])
     def archive(self, request, pk=None):
         user = self.get_object()
+        if user.status == User.ARCHIVED:
+            return Response({"detail": "This account is already deactivated."},
+                            status=status.HTTP_400_BAD_REQUEST)
         if user.is_last_active_administrator():
             return Response(
                 {"detail": "This is the only administrator account. Create the "
                            "replacement administrator first — that hands over "
                            "properly — then deactivate this one."},
                 status=status.HTTP_400_BAD_REQUEST)
-        user.status = User.ARCHIVED
-        # is_active follows status automatically (User.save).
-        user.save(update_fields=["status", "updated_at"])
+        # A queryset update skips User.save, so is_active is passed along.
+        if not USER_LIFECYCLE.move(user, User.ARCHIVED,
+                                   extra={"is_active": is_active_for(User.ARCHIVED)}):
+            return Response({"detail": LOST_RACE}, status=status.HTTP_409_CONFLICT)
         self._log(user, ActivityLog.ARCHIVED)
         return Response({"status": "archived"}, status=status.HTTP_200_OK)
 
@@ -786,9 +791,13 @@ class UserViewSet(viewsets.ModelViewSet):
                            "nothing to restore. Approve a new request from "
                            "Access Requests instead."},
                 status=status.HTTP_400_BAD_REQUEST)
-        user.status = User.ACTIVE
-        user.must_change_password = user.has_usable_password()
-        user.save(update_fields=["status", "must_change_password", "updated_at"])
+        # The status moves first; a lost race changes nothing else.
+        with transaction.atomic():
+            if not USER_LIFECYCLE.move(
+                    user, User.ACTIVE, expected=User.ARCHIVED,
+                    extra={"is_active": is_active_for(User.ACTIVE),
+                           "must_change_password": user.has_usable_password()}):
+                return Response({"detail": LOST_RACE}, status=status.HTTP_409_CONFLICT)
         self._log(user, ActivityLog.UPDATED, ActivityLog.KIND_REACTIVATE)
         return Response(
             {"status": user.status,
@@ -872,9 +881,11 @@ class UserViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST)
 
         asked = user.requested_role.role_name if user.requested_role else "none stated"
-        user.role = role
-        user.status = User.ACTIVE
-        user.save(update_fields=["role", "status", "updated_at"])
+        with transaction.atomic():
+            if not USER_LIFECYCLE.move(
+                    user, User.ACTIVE, expected=User.PENDING,
+                    extra={"role": role, "is_active": is_active_for(User.ACTIVE)}):
+                return Response({"detail": LOST_RACE}, status=status.HTTP_409_CONFLICT)
         # Both roles in the audit line: when someone asked for more than they
         # were given, that should be legible a year later.
         log_activity(
@@ -899,8 +910,9 @@ class UserViewSet(viewsets.ModelViewSet):
             return Response({"detail": "This account is not awaiting approval."},
                             status=status.HTTP_400_BAD_REQUEST)
         asked = user.requested_role.role_name if user.requested_role else "none stated"
-        user.status = User.ARCHIVED
-        user.save(update_fields=["status", "updated_at"])
+        if not USER_LIFECYCLE.move(user, User.ARCHIVED, expected=User.PENDING,
+                                   extra={"is_active": is_active_for(User.ARCHIVED)}):
+            return Response({"detail": LOST_RACE}, status=status.HTTP_409_CONFLICT)
         log_activity(
             request.user, ActivityLog.ARCHIVED, ActivityLog.USER,
             entity_type="User",

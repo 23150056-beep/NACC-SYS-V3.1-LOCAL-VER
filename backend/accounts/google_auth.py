@@ -276,6 +276,12 @@ def link_google_account(user, claims):
     if user.must_change_password:
         user.must_change_password = False
         updates.append("must_change_password")
+        # Whatever password the flag was guarding stops working: the temporary
+        # one the ISA issued, or a reactivated account's old one that was
+        # waiting to be changed. A Google account signs in with Google and has
+        # no usable password, so there is no second credential left behind.
+        user.set_unusable_password()
+        updates.append("password")
 
     user.last_login = timezone.now()
     updates.append("last_login")
