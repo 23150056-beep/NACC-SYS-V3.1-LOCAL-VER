@@ -1597,6 +1597,15 @@ record bears it out:
 - **Terminating ends with an end dialog** (`useNotice`, owner 30 Sep 2026):
   "Case terminated", reading back the child and case number, the reason, the
   closing summary and the date - it was a toast, gone before anyone read it.
+- **A case's status moves through `terminate` and `reopen` and nothing else**
+  (17 Nov 2026). `status` was writable on the child serializer and dropped
+  only for a psychologist, so a social worker's `PATCH {"status": "inactive"}`
+  closed their own case with no reason, no note and no `TerminationRecord`
+  (`case_status` still said pre-assessment), and a new record could be
+  created already closed. It is read-only for every role now, on create and
+  on edit. A body that still carries it saves and the value is ignored, which
+  the record form relies on: it PUTs the whole record back.
+  `children/tests/test_status_is_read_only.py`.
 
 ## The Pre-Assessment status (was "Move to Counseling")
 
