@@ -256,7 +256,7 @@ export default function MyProfile() {
   const saveLicense = async (e) => {
     e.preventDefault();
     if (!(await confirm({
-      description: 'This saves your PRC license number and when it is valid until. They are printed in the signature block of the reports you sign.',
+      description: 'This saves your PRC license number and when it is valid until. They are kept on your profile.',
       confirmLabel: 'Yes, save my license',
     }))) return;
     write({
@@ -465,7 +465,7 @@ export default function MyProfile() {
                   </FormField>
                   <FormField label="Valid until" error={fieldErrors.license_valid_until}
                              hint={form.license_valid_until
-                               ? `Printed as ${shortDate(form.license_valid_until)}.`
+                               ? `Reads as ${shortDate(form.license_valid_until)}.`
                                : null}>
                     <Input
                       type="date" value={form.license_valid_until} disabled={busy}
@@ -486,11 +486,6 @@ export default function MyProfile() {
                   </div>
                 </form>
               )}
-              <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text-faint)', marginTop: 13 }}>
-                Printed under your name on the Social Case Study Report. An
-                expired license can still be saved, but it will print with
-                that date.
-              </div>
             </Card>
           )}
 

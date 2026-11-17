@@ -178,9 +178,7 @@ export default function Settings() {
               <>
                 {AGENCY_FIELDS.map(([key, label, max, placeholder]) => (
                   <FormField key={key} label={label}
-                             hint={key === 'head_of_office_name'
-                               ? "Printed under 'Approved by' on the Social Case Study Report."
-                               : null}>
+                             >
                     {key === 'office_address' || key === 'contact_details' ? (
                       <textarea value={agencyDraft[key]} rows={2} maxLength={max} placeholder={placeholder}
                                 disabled={agencySaving} style={textarea}

@@ -7,8 +7,9 @@ class ActivityLog(models.Model):
     # A psychologist asked to take a child, and their answer
     # (children/assignment.py). Entity type "Assignment"; the id is the child's.
     REQUESTED, ACCEPTED, DECLINED, WITHDRAWN = "requested", "accepted", "declined", "withdrawn"
-    # A case study made final, and taken back to a draft (case_study/views.py).
-    # Entity type "CaseStudy"; the id is the child's.
+    # A case study made final, and taken back to a draft. The feature is gone
+    # (children 0035) but old log lines remain: entity type "CaseStudy", the
+    # id the child's.
     FINALIZED, REOPENED = "finalized", "reopened"
     # A duplicate record taken out by the ISA (children/duplicates.py). Entity
     # type "Child"; the label reads "C-0050 (duplicate of C-0049)", since the

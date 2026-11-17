@@ -286,7 +286,7 @@ def build_census_prompt(figures):
 #
 # What it never reads, by construction rather than by instruction: case
 # remarks, a child's own self-report words (a COUNT of unread answers is all
-# there is), the case study's text, a referral summary nobody has confirmed
+# there is), a referral summary nobody has confirmed
 # (brief_facts already withholds it), and the custodian's name or number
 # (brief_facts never carries them). The open problems are counted, never
 # quoted, and the treatment plan is left out altogether.

@@ -504,7 +504,7 @@ export default function Children() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoOpenCreate, form]);
 
-  /* /children?edit=<id> opens that record's edit form, the way the case study's
+  /* /children?edit=<id> opens that record's edit form, the way a deep link
    * "Edit on the record" asks. Waits for the list, opens it once, and clears the
    * parameter whether or not the record turned out to be editable here. */
   const editParam = searchParams.get('edit');

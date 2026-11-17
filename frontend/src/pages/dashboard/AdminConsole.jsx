@@ -25,7 +25,7 @@ import ConsoleActions from './ConsoleActions';
  * footer's actions (ConsoleActions.jsx), which are ones an administrator already
  * had on the Users, Records and Settings screens.
  * Children appear by case number and name only where a queue has to say which
- * record to open; no case note, report, case study or custodian detail is in
+ * record to open; no case note, report or custodian detail is in
  * the response, so none can be on this screen.
  *
  * Only an administrator's Dashboard mounts this, so nobody else ever sends the
