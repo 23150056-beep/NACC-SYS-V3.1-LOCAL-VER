@@ -404,8 +404,8 @@ and still counted as held.
   - Deactivating an account twice answers 400, not 500.
 - **Not yet covered** (found, verified, left for later rounds):
   PreAssessment (a completed one can still be edited; `complete()` is not
-  atomic), OpinionnaireInvite (single use is check-then-write), the case
-  study's Final/Reopen (no `updated_at` bump), document summaries (a
+  atomic), OpinionnaireInvite (single use is check-then-write), document
+  summaries (a
   re-summarise destroys the confirmed text), and frontend flows held in
   several booleans (the pre-assessment wizard prints "step 5.5 of 6" on
   Review). Bring each onto a table the same way.
