@@ -29,17 +29,25 @@ cannot see a colleague's record even to cover for them.
 **An account with a role the code has never heard of** is refused or sees
 nothing at most doors, because scoping answers "nothing" for an unknown role
 and the permission classes list the three roles by name. That is the safe
-default and it should stay. But it is not true everywhere. Reading the code,
-these doors decide with an `else` that means "the Administrator", so a fourth
-role would walk into the ISA's branch without anybody deciding it:
+default and it should stay. But it is not true everywhere. These doors decide
+with an `else` that means "the Administrator", so a fourth role walks into the
+ISA's branch without anybody deciding it. **Measured on 17 Nov 2026**, by
+giving a test account a Role row the code does not name and asking as it; the
+last row was read from the code, not run:
 
 | Door | What an unknown role gets | Where |
 |---|---|---|
-| The bell and the audit trail | the whole audit stream, security and user lines included | `activity/views.py:81` |
+| The bell and the audit trail | the whole audit stream. It read a security line and a user line, and `?category=security` gave it the security lines alone | `activity/views.py:81` |
 | The appointments list | every session in the agency (names masked) | `scheduling/views.py:407` |
-| Moving an appointment | any session it names; the own-child check asks Staff only | `scheduling/views.py:490` |
+| Moving an appointment | `PATCH` answered 200, for the notes and for a new time. The own-child check asks Staff only | `scheduling/views.py:490` |
 | The Dashboard | today's sessions and availability, unfiltered | `clinical/reports_views.py:379` |
+| Availability and leave | every psychologist's hours, and their leave with its reason. These two lists ask only that somebody is signed in | `scheduling/views.py:40`, `:310` |
 | The assistant's schedule answers | the agency's | `assistant/tools.py:566` |
+
+The same account was refused or shown nothing everywhere else it was tried:
+Records, a child's page, Monitoring, the clinical records, the Agency Summary,
+Users, roles, the admin console, booking, cancelling, closing, reopening,
+Transfer, Remove duplicate.
 
 And these sit behind a gate today but would open the moment the gate admits a
 new role: Add Record's `else` is the ISA's path (`children/views.py:123`); an
@@ -383,13 +391,22 @@ reassign a psychologist's children, so a refusal would have no way out.
 Found while reading, and it exists today: `Child.status` is a writable field
 on the record's serializer (`children/serializers.py:82`, not in
 `read_only_fields` at `:99`), and an edit drops it only for a psychologist
-(`:360`). So a Staff or ISA `PATCH {"status": "inactive"}` should close a case
-with no reason, no note and no `TerminationRecord`, and the reverse should
-reopen one without `reopen`. No screen sends it. Read from the code, not run.
+(`:360`). No screen sends it. **Measured on 17 Nov 2026:**
 
-It becomes read-only for every role: a case moves through `terminate` and
-`reopen` only. Its own commit, with a test written first that shows the hole.
-The Officer would otherwise inherit it over every record in the agency.
+- A social worker's `PATCH {"status": "inactive"}` on their own active record
+  answered 200. The record was stored inactive, its `case_status` still said
+  `pre_assessment`, and no `TerminationRecord` was written: a case closed with
+  no reason, no note and nobody named, by an account that may not close cases.
+  The ISA's did the same.
+- `POST /api/children/` with `"status": "inactive"` answered 201 and stored a
+  record that was closed from the start.
+- The way back is not open: an edit to an inactive record answers 404, so a
+  case closed this way returns only through `reopen`.
+
+It becomes read-only for every role, on create and on edit: a case moves
+through `terminate` and `reopen` only. Its own commit, with a test written
+first that shows the hole. The Officer would otherwise inherit it over every
+record in the agency.
 
 ## Who is told
 
@@ -497,6 +514,19 @@ axe-core on every screen that changed.
   starters reuse labels already measured.
 - No stored key is renamed: not a role, not an email kind, not a section.
 
+## Handing it over
+
+A build session starts by doing three things, in this order:
+
+1. Write the owner's answers into "Decisions for the owner". The plan is
+   written to the defaults; an answer that differs changes the packages it
+   names and nothing else.
+2. Have a reader who did not write this note try to break it against the
+   code, one area at a time (accounts, clinical and scheduling; children, case
+   study and assistant; the frontend). That review never ran: see the last
+   section.
+3. Then WP0.
+
 ## Work packages
 
 In order. Each is one worker's job with its own commits, and the planner reads
@@ -550,14 +580,19 @@ the Officer yet.
   `management/commands/ai_eval.py`; `activity/views.py`.
 - The four "must be a Staff account" checks become `may_hold_records`.
 - Every `else` that meant "the Administrator" names the Administrator, and
-  what is left over is refused or sees nothing: the five doors in the first
-  table of this note, and the five behind a gate.
+  what is left over is refused or sees nothing: the doors in the first table
+  of this note, and the five behind a gate.
 - `may_close_case` replaces `is_admin_or_assignee` in `terminate` and
   `closure_reasons` only.
-- `status` read-only, as its own commit with its own test.
+- `status` read-only on create and on edit, as its own commit with its own
+  test.
+- The availability and leave lists ask for `EVERY_ROLE`, not merely for a
+  sign-in.
 - **Done when:** every existing test passes unedited (imports for the renamed
   permission class aside); the route table's known columns have not moved;
-  its unknown-role column is all *refused*, *hidden* or *no rows*.
+  its unknown-role column is all *refused*, *hidden* or *no rows*, apart from
+  the doors every signed-in account has (their own profile, password, the
+  agency's name, what they can ask the assistant).
 
 ### WP2. The role exists
 
@@ -572,7 +607,9 @@ the Officer yet.
   `SIGNS_IN_WITH_GOOGLE`, not the claimable list: a Google-only account has
   no password, so a promoted one would otherwise be locked out for good.
 - The role-change refusal for a Staff account holding active records.
-- The ISA console's people counts.
+- The ISA console's people counts
+  (`accounts/tests/test_admin_overview.py:82` lists the three roles and gains
+  the fourth).
 - **Done when,** by test: the row is there after `migrate` on a database that
   already has accounts; "Officer" cannot be claimed at either sign-up door
   and the refusal reads like the Administrator's; the ISA can grant it at
@@ -623,6 +660,11 @@ the Officer yet.
 
 - The READ level in `case_study/access.py`, its payload and its sentences;
   print for READ.
+- Where no case study exists yet, the Officer is told "No case study yet. The
+  record's social worker starts it." The tab's start screen shows only the
+  read-only reason (`CaseStudyTab.jsx:158`), so the reason has to say that.
+  The editor's read-only state is general (`Editor.jsx:67`), separate from
+  "locked by Final" (`:73`).
 - **Done when,** by test, an Officer reads all three blocks of another
   worker's draft, prints a draft and a final, and is refused Start, the
   header, a box, Final and Reopen with the holder's sentence; the ISA is
@@ -715,11 +757,20 @@ additive and safe for a release still serving.
   The children and case-study apps were also mapped by an independent reader,
   whose 44 sites agreed with this note and supplied several of its traps.
 - The other independent readers, and the review pass meant to try to break
-  this plan, did not run: the helpers hit the account's usage limit. So this
-  note has been checked by one reader, not several.
-- **Not measured:** the fail-open list at the top, and the `status` hole.
-  Both are read from the code. WP0's table measures the first; WP1's test
-  shows the second.
+  this plan, did not run. They were started twice, and both times the
+  account's usage limit stopped them within minutes; only the children and
+  case-study reader above ever reported. So this note has been checked by one
+  reader, not several. **The first thing a build session should do with it is
+  have somebody else try to break it.**
+- **Measured, 17 Nov 2026:** the doors in the first table of this note (all
+  but the assistant's schedule answer) and the `status` hole, with a throwaway
+  test of about forty requests as five accounts. It was not committed; WP0's
+  table is the permanent version and covers every route, which the probe did
+  not.
+- **Read, not run:** the five else-branches that sit behind a gate today;
+  everything about the frontend; every claim about what an Officer "would"
+  get once a list is widened. Nothing in this plan has been executed as an
+  Officer, because the role does not exist.
 - Baseline at this commit, on Linux: 3,794 tests found, green in 35 s with
   `--parallel 4`; `npm run lint` 0 errors and 25 warnings; `npm run build`
   passes. An earlier run of the suite, minutes before, died without naming
