@@ -408,6 +408,12 @@ through `terminate` and `reopen` only. Its own commit, with a test written
 first that shows the hole. The Officer would otherwise inherit it over every
 record in the agency.
 
+**Done on 17 Nov 2026**, ahead of the rest of this plan, because it was a hole
+whatever became of the Officer. `status` is read-only on the child serializer,
+and `children/tests/test_status_is_read_only.py` holds it, including the
+record form's PUT, which still sends the record's own status back and must
+keep saving. WP1 no longer carries it.
+
 ## Who is told
 
 Nothing here needs a new email or text. What exists already handles "someone
@@ -584,8 +590,8 @@ the Officer yet.
   of this note, and the five behind a gate.
 - `may_close_case` replaces `is_admin_or_assignee` in `terminate` and
   `closure_reasons` only.
-- `status` read-only on create and on edit, as its own commit with its own
-  test.
+- ~~`status` read-only on create and on edit~~: done on 17 Nov 2026, see
+  section 6.
 - The availability and leave lists ask for `EVERY_ROLE`, not merely for a
   sign-in.
 - **Done when:** every existing test passes unedited (imports for the renamed
