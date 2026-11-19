@@ -1,8 +1,14 @@
 # The RACC Officer: a Fourth Role, Above the Social Worker
 
 **Date:** 2026-11-16
-**Status:** Plan only. Nothing is built. Written to be handed to a build session.
-**Read at:** commit `ab447f2` on `claude/sweet-wozniak-9fzjme`. Line numbers are that commit's.
+**Status:** Plan only. Nothing is built. The owner's decisions are in (19 Nov
+2026); it is ready to hand to a build session once "Before WP0" is done.
+**Read at:** commit `ab447f2` (`main`), so line numbers are that commit's. On
+19 Nov the claims were checked again against `cloud-setup` (`48124fc`) and two
+branches not yet merged into it: `claude/bold-carson-4oq44s` (the case study,
+PRC license and Head of Office removed) and `claude/amazing-fermat-8hity4` (one
+door for every status). Where those change what this note says, it says so.
+Search by the symbol named; the line will have moved.
 **Owner's request:** "we're adding a new type of user and its: Social Welfare
 Officer IV/OIC - RACC Officer ... this role is the above level of the social
 worker and what this account can do is able to access all the child record of
@@ -106,27 +112,33 @@ The seven rules:
    Staff account (decision 1 below).
 
 Where the ISA is kept **out** of something for being IT support, the Officer
-follows the social worker's rule, not the ISA's: the written brief, remark
-polish, and the case study's text.
+follows the social worker's rule, not the ISA's: the written brief and remark
+polish.
 
-## Decisions for the owner
+## The owner's decisions (19 Nov 2026)
 
-Each has a default the plan is written to. Each is a small change either way,
-because the plan puts every one of them behind a single named list or function.
+The owner took every suggestion: "proceed to all suggestion". The one
+exception is the old decision 2, what the Officer may do with a case study.
+The owner has removed the case study (SCSR) feature, so the question no longer
+exists (`claude/bold-carson-4oq44s`, 17 Nov 2026). Each decision sits behind a
+single named list or function, so changing one later is a small change.
 
-| # | Question | Default | The other way costs |
+| # | Question | Decided | The other way would cost |
 |---|---|---|---|
 | 1 | Does the Officer also hold records of their own? | **No.** They assign and work on everyone's; a holder is a Staff account. | Add the Officer to `HOLDS_RECORDS`; Add Record's default holder, the pickers, Transfer's two ends and Workload follow. About a day. |
-| 2 | What may the Officer do with a social worker's case study (SCSR)? | **Read all of it, drafts included, and print. Not write, Final or Reopen.** The copy freezes the name and PRC license of whoever pressed Final as its preparer (`case_study/finalize.py:78`), and it is the preparing social worker's signed report. | Give the Officer the holder's level in `access_for`, decide whose name the copy carries, and tell the holder when somebody else changes it. |
+| 2 | ~~What may the Officer do with a social worker's case study?~~ | **Does not apply.** The case study is removed. | - |
 | 3 | May the Officer remove a duplicate record? It is the only delete of a child. | **Yes**, with the same typed case number. | One list entry less. |
 | 4 | May the Officer close a case by outcome? | **Yes**, the ISA's list (`CASE_OUTCOMES`), any record. The ISA keeps it too. | One list entry less. Taking it from the ISA is a later decision. |
 | 5 | May the Officer record a psychologist's leave or availability? | **No.** The ISA for anybody, a psychologist for themselves, as now. | Two checks in `scheduling/views.py`. |
 | 6 | The words on screen | **"SWO IV/OIC (RACC Officer)"** | Display only; one line. |
 | 7 | How many Officers at once? | **Any number.** An OIC designation changes hands and can overlap. No hand-over rule like the single administrator's. | - |
-| 8 | Who edits the agency details (Head of Office on the SCSR)? | **Still the ISA**, in Settings. | One permission. |
+| 8 | Who edits the agency details (name, address, contact)? | **Still the ISA**, in Settings. The Head of Office fields went with the case study. | One permission. |
 | 9 | Which emails does the Officer get? | **None yet**, like the ISA. Candidates are under "Not done, suggested". | New catalogue keys. |
 | 10 | The child's Assistant log tab (who had the model read a record) | **Still the ISA only.** | One permission, one tab. |
 | 11 | A Staff account that still holds active records cannot be changed to another role until they are moved | **Yes.** See "A promotion must not strand a caseload". | Drop one check. |
+
+Decisions 1, 3, 4 and 6 were explained to the owner one by one first; the
+others are the plan's defaults, accepted with the rest.
 
 ## A day as the Officer
 
@@ -141,7 +153,7 @@ because the plan puts every one of them behind a single named list or function.
    or leave it and assign it from the desk later.
 4. A worker goes on leave: **Transfer records**, from her to two colleagues.
 5. Opens a colleague's child: files the referral, asks a psychologist, books
-   the session, starts a survey, reads the case study and prints it. The
+   the session, starts a survey. The
    record's social worker hears of the booking by email and text, and sees the
    request in their bell, as they do today when the ISA acts on their record
    ("Who is told" has the two that stay quiet).
@@ -167,7 +179,6 @@ list of roles becomes a **named capability**, defined once.
 | `SOCIAL_WORK` | Officer, Staff | follows the social worker's rule where it differs from the ISA's: care gaps, next steps, the drafting table, cancel-only |
 | `OVERSEES_CASEWORK` | Administrator, Officer | chooses holders, transfers, closes by outcome, removes a duplicate, reads the casework desk |
 | `HOLDS_RECORDS` | Staff | may be `Child.social_worker` |
-| `HOLDS_A_LICENSE` | Officer, Psychologist, Staff | PRC license on My Profile |
 | `CLAIMABLE_AT_SIGNUP` | Psychologist, Staff | what a stranger may say they are |
 | `SIGNS_IN_WITH_GOOGLE` | Officer, Psychologist, Staff | the Google door, for an account that already exists |
 
@@ -255,15 +266,13 @@ literal holding two or more role names outside `config/roles.js`. A single
 | Terminate | by case outcome, any record (decision 4) | `children/views.py:253`, `children/termination.py:75` |
 | A psychologist's clinical reasons | never | |
 | Reopen | yes. The holder is unchanged | `children/views.py:304` |
+| Close or reopen by editing the record | never, for anyone: an edit refuses a status change | `children/lifecycle.py`, `config/lifecycle.py` (lifecycle branch) |
 
-### The case study
-
-| Door | The Officer | Where |
-|---|---|---|
-| Read every block, drafts included | yes | `case_study/access.py:91` |
-| Print a draft or a final copy | yes | `case_study/views.py:352` |
-| Start, write, make Final, Reopen | no. The record's social worker (decision 2) | `case_study/views.py:58`-`318` |
-| The status-only card | stays the ISA's | |
+On the lifecycle branch, Terminate and Reopen move the status through
+`CHILD_LIFECYCLE.move()`, a conditional update that answers 409 to the second
+of two clicks, and a closed case can no longer ask a psychologist. Those rules
+are role-blind, so the Officer gets them by passing the same doors; nothing
+in them needs an Officer branch.
 
 ### Clinical records
 
@@ -283,7 +292,7 @@ literal holding two or more role names outside `config/roles.js`. A single
 | Door | The Officer | Where |
 |---|---|---|
 | See every session, with the child's name | yes | `scheduling/visibility.py:32` |
-| Book, move, cancel for any child | yes, inside availability like a social worker | `scheduling/views.py:424`-`496` |
+| Book, move, cancel for any child | yes, inside availability like a social worker. On the lifecycle branch only a scheduled session moves or is cancelled, and a session never changes child | `scheduling/views.py:424`-`496` |
 | Mark completed or no-show | no. The psychologist (and the ISA) | `scheduling/views.py:529` |
 | Read availability, leave, slots, the month, openings | yes | |
 | Write availability or leave | no (decision 5) | `scheduling/views.py:49`, `:320` |
@@ -316,11 +325,11 @@ literal holding two or more role names outside `config/roles.js`. A single
 | Ask for the role at sign-up, by form or Google | impossible | `accounts/serializers.py:329`, `accounts/google_auth.py:52` |
 | Be given it | by the ISA: when approving a request, in Add user, or by changing a role | `accounts/views.py:826`, `accounts/serializers.py:154` |
 | Sign in with Google | yes, once the account exists and is active | `accounts/google_auth.py:218` |
-| My Profile: PRC license, mobile number, password | yes | `accounts/serializers.py:410` |
+| My Profile: mobile number, password, profile links | yes. The PRC license fields are gone with the case study | `accounts/views.py` `MyProfileView` |
 | Emails | none yet (decision 9) | `accounts/email_notifications.py:75` |
 | Users, roles, access requests, credential hand-offs, Settings, test text and email, the admin console, Django admin | never | `IsAdministrator`, on 12 views |
 
-## Six things that are new, not just a wider list
+## Five things that are new, not just a wider list
 
 ### 1. `GET /api/social-workers/`
 
@@ -338,7 +347,9 @@ move to it too, so the ISA and the Officer cannot be shown different lists.
 
 `accounts/admin_overview.py` already builds the four records queues and the
 workload as separate functions (`_stuck_requests`, `_no_social_worker`,
-`_archived_holder`, `_duplicates`, `_workload`). A second view serves only
+`_archived_holder`, `_duplicates`, `_workload`). On `cloud-setup` the second
+and third share one counting query, passed in as `tally`, so the new view
+builds that tally too. A second view serves only
 those to `OVERSEES_CASEWORK`: `{generated_at, needs, workload}`. It never
 carries people and sign-ins, health, the version, or the security log. A test
 plants a sentinel in each of those and searches the whole response, as
@@ -351,24 +362,13 @@ button, **Transfer records**. The Transfer drawer moves out of
 Explicitly routed paths, both: the deploy probe in CLAUDE.md can tell them
 from a 404.
 
-### 3. A reading level for the case study
-
-`case_study/access.py` has FULL (the holder), BLOCK_A (the assigned
-psychologist) and STATUS (the ISA). The Officer gets a fourth, **READ**: every
-section that applies, drafts included, the finals on file and their print;
-`can_write` false, with "Only the social worker who holds this record can
-change the case study." The answer is the holder's shape marked read-only
-(`study.read_only`, which the editor already honours for a closed case), minus
-the pre-fill seeds, which are offered to a writer. Check in a browser that the
-editor's read-only state covers a draft and not only a closed case.
-
-### 4. `may_close_case`
+### 3. `may_close_case`
 
 Described above. `termination.reasons_for` and `refusal` name their roles:
 the psychologist's list, `OVERSEES_CASEWORK`'s list, and nothing for anyone
 else.
 
-### 5. A promotion must not strand a caseload
+### 4. A promotion must not strand a caseload
 
 The likeliest first Officer is a senior social worker whose Staff account
 holds twenty children. Change that account's role and the records are held by
@@ -386,9 +386,9 @@ The psychologist's side of the same hole (a psychologist changed to another
 role while children are assigned) is not touched here. There is no bulk way to
 reassign a psychologist's children, so a refusal would have no way out.
 
-### 6. `status` is not a form field
+### 5. `status` is not a form field
 
-Found while reading, and it exists today: `Child.status` is a writable field
+Found while reading, and it existed at `ab447f2`: `Child.status` is a writable field
 on the record's serializer (`children/serializers.py:82`, not in
 `read_only_fields` at `:99`), and an edit drops it only for a psychologist
 (`:360`). No screen sends it. **Measured on 17 Nov 2026:**
@@ -408,11 +408,20 @@ through `terminate` and `reopen` only. Its own commit, with a test written
 first that shows the hole. The Officer would otherwise inherit it over every
 record in the agency.
 
-**Done on 17 Nov 2026**, ahead of the rest of this plan, because it was a hole
-whatever became of the Officer. `status` is read-only on the child serializer,
-and `children/tests/test_status_is_read_only.py` holds it, including the
-record form's PUT, which still sends the record's own status back and must
-keep saving. WP1 no longer carries it.
+**Closed by the lifecycle branch** (`claude/amazing-fermat-8hity4`,
+"Give each status lifecycle one door", 17 Nov 2026), which does more than this
+section asked. `config/lifecycle.py` declares each status as a table of legal
+moves, for children, users and appointments alike. An edit that sends a
+different status is refused with a sentence naming the right door, while the
+record's own status sent back is accepted (the record form does that). A create
+that sends anything but "active" is refused ("A new record is always open."),
+and Terminate and Reopen are conditional updates that answer 409 to a lost race.
+
+This branch had its own fix, commit `56bd9dc`, which made `status`
+read-only. **It is reverted** (19 Nov 2026), because the two cannot be merged
+together. They merge with no text conflict, but read-only drops `status`
+before the lifecycle's check can see it, so the lifecycle's refusals never
+fire and its tests fail. WP1 no longer carries this item.
 
 ## Who is told
 
@@ -433,8 +442,9 @@ other than the record's social worker did this":
   The catalogue **key** `records_transferred` does not change.
 - An Officer **edits a record, asks a psychologist, or closes a case**: the
   record's social worker sees the line in their own bell, because their feed
-  is every Child, Assignment and CaseStudy line on their records, whoever
-  wrote it (`activity/views.py:74`).
+  is every Child and Assignment line on their records, whoever wrote it
+  (`activity/views.py:74`; it still reads the CaseStudy lines written before
+  the removal).
 - An Officer **files a referral or starts a survey** on someone's record:
   that worker's bell does not show it. Those lines are keyed by the
   referral's or the invite's own id, not the child's, so a social worker's
@@ -475,11 +485,10 @@ or a screen that falls into another role's branch, is a defect.
   "Ask the ISA (Administrator) to transfer it to you" becomes "Ask the RACC
   Officer or the ISA".
 - **The child's page**: referral upload, survey and referral summary follow
-  `KEEPS_RECORDS`; Print on the Case study tab is for whoever may print it;
-  the Assistant log tab stays the ISA's; a report's summary and its check
-  (`canAdvance`) stay with the ISA and the assigned psychologist.
-  `CaseStudyTab` gives the Officer the read-only editor. With no survey form set up, the
-  Officer is told what a social worker is told: ask the ISA to add one.
+  `KEEPS_RECORDS`; the Assistant log tab stays the ISA's; a report's summary
+  and its check (`canAdvance`) stay with the ISA and the assigned
+  psychologist. With no survey form set up, the Officer is told what a social
+  worker is told: ask the ISA to add one.
 - **Results & Reports** (`pages/Report.jsx`): "Upload case referral" follows
   `KEEPS_RECORDS`. Reviewing a report's check stays the psychologist's and
   the ISA's.
@@ -491,9 +500,9 @@ or a screen that falls into another role's branch, is a defect.
   leave, completed and no-show stay as they are.
 - **Header search**: the social worker's actions, plus "No social worker yet"
   under Needs you. The colleague search reads `/users/` and stays the ISA's.
-- **My Profile**: the license fields; the personal column only, as the ISA,
-  because the right-hand lists would be the whole agency's; the email card is
-  hidden for a role with no kinds, not for "the ISA".
+- **My Profile**: the personal column only, as the ISA, because the
+  right-hand lists would be the whole agency's; the email card is hidden for a
+  role with no kinds, not for "the ISA".
 - **Audit trail and bell**: the Officer's sentence ("Every record event in the
   agency") and the RECORD tab only.
 - **Users and Access Requests**: both read `/api/roles/`, so the role appears
@@ -510,28 +519,63 @@ axe-core on every screen that changed.
   sees only their assigned children, under the carry-history control.
 - The ISA loses nothing and gains nothing.
 - Only acceptance writes `assigned_psychologist`.
-- The case study is written by the record's social worker; the ISA sees its
-  status; it is not in Django admin.
+- A status changes only through its lifecycle door (Terminate, Reopen, the
+  appointment actions, the account actions), for the Officer as for everyone.
 - An Officer account is never `is_staff` or a superuser. Django admin is the
   ISA's.
 - No prompt, tool description or `CHAT_SYSTEM` byte changes, so nothing needs
   a new `ai_eval` run. The Officer's "what you can ask" sentence and starter
   questions are server-side tables (`assistant/tools.py:477`, `:517`), and the
   starters reuse labels already measured.
-- No stored key is renamed: not a role, not an email kind, not a section.
+- No stored key is renamed: not a role, not an email kind.
 
 ## Handing it over
 
-A build session starts by doing three things, in this order:
+The owner's answers are in. A build session starts with three steps, in this
+order:
 
-1. Write the owner's answers into "Decisions for the owner". The plan is
-   written to the defaults; an answer that differs changes the packages it
-   names and nothing else.
-2. Have a reader who did not write this note try to break it against the
-   code, one area at a time (accounts, clinical and scheduling; children, case
-   study and assistant; the frontend). That review never ran: see the last
-   section.
+1. **Before WP0** (below): land the case study removal and the lifecycle work
+   in `cloud-setup`, and branch from that.
+2. Have a reader who did not write this note try to break it against that
+   code, one area at a time: accounts, clinical and scheduling; children and
+   the assistant; the frontend. That review never ran; see the last section.
 3. Then WP0.
+
+### Before WP0: land the removal and the lifecycle
+
+The Officer is built on code without the case study, so two of the owner's
+branches go into `cloud-setup` first. Neither is merged on 19 Nov 2026:
+
+- `claude/bold-carson-4oq44s`: removes the case study (`case_study` app,
+  `children/0035_drop_case_study`), then the PRC license and Head of Office
+  fields (`accounts/0019_remove_license_and_head_of_office`).
+- `claude/amazing-fermat-8hity4`: one door for every status
+  (`config/lifecycle.py`; see section 5 above).
+
+Both branch from `ab447f2`, so they do not contain the twenty-odd commits
+`cloud-setup` has gained since. Previewed on 19 Nov with `git merge-tree`,
+merging them into `cloud-setup` meets:
+
+- **Two migration heads in `children`.** `cloud-setup` added
+  `0035_rename_without_known_parents_foundling` and
+  `0036_rename_birth_statuses_child_suffix`, and the removal adds its own
+  `0035_drop_case_study`, all after `0034`. Django refuses two leaves, so the
+  merge needs a merge migration (`manage.py makemigrations children --merge`),
+  then `makemigrations --check --dry-run` printing nothing.
+- **The removal against `cloud-setup`**: CLAUDE.md, `frontend/src/utils/time.js`,
+  and nine case-study files that `cloud-setup` edited and the removal
+  deletes (`case_study/sections.py`, `demo_case_studies.py`, five of its tests,
+  `components/caseStudy/model.js`, `config/scsr.js`). The deletion wins. Then
+  search the merged tree for `case_study`, `caseStudy`, `scsr` and
+  `CaseStudy` in anything `cloud-setup` added since `ab447f2`.
+- **The lifecycle against `cloud-setup`**: `accounts/views.py` and
+  `frontend/src/pages/Users.jsx`, where `cloud-setup`'s user-management fixes
+  and the lifecycle's account moves touch the same code. Keep both: the
+  lifecycle's moves, and the fixes' messages and checks.
+- Then the full suite, lint and build on the result.
+
+Pushing `cloud-setup` redeploys the demo, so the owner says when. The Officer's
+own migration is then `accounts/0020`, after the removal's `0019`.
 
 ## Work packages
 
@@ -590,8 +634,11 @@ the Officer yet.
   of this note, and the five behind a gate.
 - `may_close_case` replaces `is_admin_or_assignee` in `terminate` and
   `closure_reasons` only.
-- ~~`status` read-only on create and on edit~~: done on 17 Nov 2026, see
-  section 6.
+- ~~`status` read-only on create and on edit~~: done by the lifecycle branch,
+  see section 5. The lifecycle's own tables (`config/lifecycle.py` and the
+  three apps' `lifecycle.py`) are role-blind and stay so; where a door they
+  guard also checks a role (Staff cancel only their own children's scheduled
+  sessions), that check is the one that becomes a named list.
 - The availability and leave lists ask for `EVERY_ROLE`, not merely for a
   sign-in.
 - **Done when:** every existing test passes unedited (imports for the renamed
@@ -603,12 +650,13 @@ the Officer yet.
 ### WP2. The role exists
 
 - `Role.OFFICER`, and `Role.NAMES`, the rows that must exist;
-  `accounts/migrations/0019_officer_role.py`, a data step that creates the
+  `accounts/migrations/0020_officer_role.py` (after the removal's `0019`), a
+  data step that creates the
   row if it is missing and whose reverse does nothing (an account may hold
   it); `seed_initial_data` seeds from `Role.NAMES`. That is not `EVERY_ROLE`:
   one says which rows exist, the other who may read case files, and the
   Officer's row exists a work package before the Officer may read anything.
-- `HOLDS_A_LICENSE`, `SIGNS_IN_WITH_GOOGLE`, `CLAIMABLE_AT_SIGNUP` take their
+- `SIGNS_IN_WITH_GOOGLE` and `CLAIMABLE_AT_SIGNUP` take their
   final members. The Google door's last check (`google_auth.py:218`) reads
   `SIGNS_IN_WITH_GOOGLE`, not the claimable list: a Google-only account has
   no password, so a promoted one would otherwise be locked out for good.
@@ -621,7 +669,7 @@ the Officer yet.
   and the refusal reads like the Administrator's; the ISA can grant it at
   approval and in Add user; an active Officer signs in by password and by
   Google; Staff to Officer is refused with the count while records are held
-  and passes once they are moved; the license saves; and in the route table
+  and passes once they are moved; and in the route table
   the Officer is *refused* or *no rows* everywhere except the doors every
   signed-in account has.
 
@@ -662,39 +710,27 @@ the Officer yet.
   `/users/`, `/roles/`, both test senders, assistant settings and the rest of
   `IsAdministrator`. A social worker is still refused all of WP4.
 
-### WP5. The case study, read
+(There was a WP5 for the Officer's reading of a case study. It went with the
+feature, and the packages after it moved up by one.)
 
-- The READ level in `case_study/access.py`, its payload and its sentences;
-  print for READ.
-- Where no case study exists yet, the Officer is told "No case study yet. The
-  record's social worker starts it." The tab's start screen shows only the
-  read-only reason (`CaseStudyTab.jsx:158`), so the reason has to say that.
-  The editor's read-only state is general (`Editor.jsx:67`), separate from
-  "locked by Final" (`:73`).
-- **Done when,** by test, an Officer reads all three blocks of another
-  worker's draft, prints a draft and a final, and is refused Start, the
-  header, a box, Final and Reopen with the holder's sentence; the ISA is
-  still status only; the psychologist still block A.
-
-### WP6. The screens
+### WP5. The screens
 
 Everything under "The screens", then the browser pass for all four roles.
 **Done when** lint and build pass, each changed screen has been loaded as
 each role at three widths, axe-core is clean on them, and the header fits.
 
-### WP7. Demo account, documents
+### WP6. Demo account, documents
 
 - `seed_demo_data`: one Officer account, in the style of the others, holding
   nothing. `demo_owners.active_staff` already deals only to Staff; a test
-  says an Officer present on the branch is never dealt a child nor made a
-  case study's preparer.
+  says an Officer present on the branch is never dealt a child.
 - `ai_eval`'s callers include the Officer, so the owner's next run says
   "NOT MEASURED" rather than nothing.
 - `docs/LOCAL-SETUP.md` (the sign-in), the access matrix in
   `docs/CLOUD-DEPLOYMENT.md`, and CLAUDE.md: a section for the role, and the
-  lines in "Each social worker's own records", "Closing a case", "The case
-  study", "Names on the schedule", "Role names on screen", "Getting an
-  account" and the test count that this changes.
+  lines in "Each social worker's own records", "Closing a case", "Names on
+  the schedule", "Role names on screen", "Getting an account" and the test
+  count that this changes.
 
 ## Traps for whoever builds it
 
@@ -733,21 +769,19 @@ additive and safe for a release still serving.
   `test_reopen_at_intake`, `test_termination`, `test_closure_reasons`,
   `test_remove_duplicate`, `test_assignment_requests`, `test_custodian`,
   `test_child_collab`, `test_one_record_per_child`, `test_api`,
-  `test_demo_transfer`), case_study (`test_access`, `test_final`,
-  `test_endpoints`, `test_demo`), and their counterparts in clinical,
-  scheduling, assistant, activity and accounts.
+  `test_demo_transfer`, and the lifecycle branch's `test_case_lifecycle`),
+  and their counterparts in clinical, scheduling (with
+  `test_appointment_lifecycle`), assistant, activity and accounts (with
+  `test_user_lifecycle`).
 - Fixtures: tests make roles with `Role.objects.get_or_create(role_name=...)`
-  (`case_study/tests/base.py:21`, `children/tests/test_child_collab.py:10`),
-  so an Officer in a test is one more call. No test reads the wall clock.
+  (`children/tests/test_child_collab.py:10`), so an Officer in a test is one
+  more call. No test reads the wall clock.
 
 ## Not done, suggested
 
 - **The Officer's emails.** A weekly count of records with no social worker;
   a psychologist's decline on a record nobody holds; a transfer made by the
   ISA.
-- **Reviewing a case study in the system.** Nobody approves an SCSR today; it
-  is signed on paper. With an Officer there is at last somebody who could
-  mark one reviewed and send it back with a note.
 - **Telling a record's social worker when somebody else files its referral
   or starts its survey.** Today those lines go to the psychologist only.
 - **Taking casework away from the ISA**, now that someone else can hold it.
@@ -777,6 +811,13 @@ additive and safe for a release still serving.
   everything about the frontend; every claim about what an Officer "would"
   get once a list is widened. Nothing in this plan has been executed as an
   Officer, because the role does not exist.
+- **Checked again on 19 Nov 2026**, after the owner said the case study is
+  removed: the diffs from `ab447f2` to `cloud-setup` and to the two unmerged
+  branches, for every file this note cites. The rules the note relies on
+  still hold there: an unknown role still gets the ISA's care gaps
+  (`alerts_for`) and still passes the appointment move check, which asks
+  Staff only. What changed is written in where it applies. The merges
+  under "Before WP0" were previewed with `git merge-tree`, not made.
 - Baseline at this commit, on Linux: 3,794 tests found, green in 35 s with
   `--parallel 4`; `npm run lint` 0 errors and 25 warnings; `npm run build`
   passes. An earlier run of the suite, minutes before, died without naming
