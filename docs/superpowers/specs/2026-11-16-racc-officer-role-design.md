@@ -1,8 +1,9 @@
 # The RACC Officer: a Fourth Role, Above the Social Worker
 
 **Date:** 2026-11-16
-**Status:** Plan only. Nothing is built. The owner's decisions are in (19 Nov
-2026); it is ready to hand to a build session once "Before WP0" is done.
+**Status:** Being built on `claude/sweet-wozniak-9fzjme` from 19 Nov 2026,
+with the owner's decisions in. The case study removal is merged into that
+branch (`b6940c3`); the lifecycle branch is not yet ("Before WP0").
 **Read at:** commit `ab447f2` (`main`), so line numbers are that commit's. On
 19 Nov the claims were checked again against `cloud-setup` (`48124fc`) and two
 branches not yet merged into it: `claude/bold-carson-4oq44s` (the case study,
@@ -408,9 +409,10 @@ through `terminate` and `reopen` only. Its own commit, with a test written
 first that shows the hole. The Officer would otherwise inherit it over every
 record in the agency.
 
-**Closed by the lifecycle branch** (`claude/amazing-fermat-8hity4`,
+**To be closed by the lifecycle branch** (`claude/amazing-fermat-8hity4`,
 "Give each status lifecycle one door", 17 Nov 2026), which does more than this
-section asked. `config/lifecycle.py` declares each status as a table of legal
+section asked. It is not merged yet (see "Before WP0"), so until it lands the
+hole is open on this branch and on `cloud-setup`, as it always was. `config/lifecycle.py` declares each status as a table of legal
 moves, for children, users and appointments alike. An edit that sends a
 different status is refused with a sentence naming the right door, while the
 record's own status sent back is accepted (the record form does that). A create
@@ -541,7 +543,28 @@ order:
    the assistant; the frontend. That review never ran; see the last section.
 3. Then WP0.
 
-### Before WP0: land the removal and the lifecycle
+### Before WP0: what landed (19 Nov 2026)
+
+- **The removal: merged.** `5618af3` merges it into `cloud-setup`, with
+  `children/0037_merge_case_study_drop_and_renames` joining the two migration
+  heads. 3,614 tests pass, and the demo's migrate was rehearsed on a database
+  holding 13 case studies (they are dropped cleanly). `b6940c3` brings it into
+  the Officer branch. The push of `cloud-setup` itself is the owner's: the
+  session's permission classifier refused it.
+- **The lifecycle: held back.** Another session pushed `e6beb21` to it at
+  15:01 UTC on 19 Nov ("Bring pre-assessments, survey links and summaries
+  onto one door"), so it is still being worked on. That commit also collides
+  with `cloud-setup`'s pre-assessment step tracker (`ce961ab`, `8a57e6e`,
+  `99e26c6`) on behaviour, not text: the wizard's step numbering (Review 4.5
+  and Done 5 there, Review 5 and Done 6 here) and how `complete()` records
+  the last step (the lifecycle's `move()` against `step_times.finished`).
+  That is for that session or the owner to settle. The Officer does not wait
+  for it. When it lands, the Officer branch merges `cloud-setup` again, and
+  this note's rows for surveys and summaries are read again, since `e6beb21`
+  changes those doors.
+
+The rest of this section is what was found before the merges, kept for
+whoever lands the lifecycle.
 
 The Officer is built on code without the case study, so two of the owner's
 branches go into `cloud-setup` first. Neither is merged on 19 Nov 2026:
@@ -758,6 +781,11 @@ an account made an Officer in that window would be read by the old `else`
 branches as the ISA. So WP1 ships and is verified as deployed **before** any
 push that carries the migration. Two pushes, not one. The migration itself is
 additive and safe for a release still serving.
+
+**And the Officer does not reach `cloud-setup` before the lifecycle does.**
+Until the lifecycle lands, a record's `status` can be set by an ordinary save
+(section 5), and an Officer can save any record, so shipping the Officer first
+would hand that hole to one more account over the whole agency.
 
 ## Tests, in one place
 
