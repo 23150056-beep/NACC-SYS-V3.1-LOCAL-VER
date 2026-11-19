@@ -94,11 +94,9 @@ class ChildSerializer(serializers.ModelSerializer):
             "pending_assignment", "declined_assignment",
             "intake_token", "updated_at",
         ]
-        # The tracker and the status move only through the terminate / reopen
-        # actions. fullname is derived (Child.save() composes it from the name
-        # parts).
-        read_only_fields = ["status", "case_status", "updated_at", "fullname",
-                            "custodian_sms_consent_at"]
+        # The tracker moves only through the terminate / reopen actions.
+        # fullname is derived (Child.save() composes it from the name parts).
+        read_only_fields = ["case_status", "updated_at", "fullname", "custodian_sms_consent_at"]
 
     def get_social_worker_name(self, obj):
         return display_name(obj.social_worker) or None
@@ -359,6 +357,7 @@ class ChildSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError(
                         {"psychologist": "Only administrators or staff can reassign a psychologist."})
                 attrs.pop("assignee_sees_history", None)
+                attrs.pop("status", None)
         else:
             # Create: fullname is read-only and first_name/last_name are
             # blank=True on the model, so DRF won't require any of them on
