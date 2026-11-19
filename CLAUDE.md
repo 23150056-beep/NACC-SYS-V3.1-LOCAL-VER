@@ -424,6 +424,32 @@ stay put as windows, leave and sessions are added.
 for every role. Moving an appointment that already exists is exempt, so
 children booked before the rule are not stranded by it.
 
+**One availability window a day** (9 Nov 2026, owner). Adjacent windows were
+allowed, so Mon 8-12 (2) + Mon 1-5 (2) meant four sessions for a psychologist
+who meant two. Now a day holds one window and its slot count ("Sessions that
+day") is the day's limit: `AvailabilityBlockSerializer.validate` refuses a
+second ACTIVE weekly window for a (psychologist, weekday) or a second ACTIVE
+one-off for a (psychologist, date), on create, on a PATCH that moves a window
+onto a taken day and on switching an inactive one back on. The 400 carries a
+sentence AND `existing_id` (an integer; `DayAlreadyHasWindow` is not a
+`ValidationError` precisely so DRF does not stringify it), and the Schedule
+form PATCHes that window instead of POSTing (days already held are "updated",
+old -> new, in the confirmation; one picked day that exists prefills the form
+and the title says Edit). The target owner is checked in the serializer too,
+so a colleague's day is never described to someone who may not touch it.
+**A one-off window REPLACES that weekday's weekly window for that date only**
+(`availability.blocks_for_day`, used by `Diary.blocks_on`, `_window_for`, the
+slot grid, the month, `free_windows` and the Dashboard's "today"; a weekly
+window's `booked_ahead` skips dates with an override). Capacity is read from
+that one block, so the two never add up. **Databases that already hold two
+windows on a day keep working and are never merged on their own**: they stay
+editable (an edit that keeps the day is not refused) and the Schedule screen
+offers "Combine into one" - `POST /api/availability/combine/ {ids}` keeps the
+lowest id, takes the earliest start and latest end and SUMS the capacities,
+under `select_for_update`; bookings are untouched. The demo installs one
+8:00 AM-5:00 PM window a day with 8 slots (`demo_schedule`), and leaves a day
+that already has a window alone.
+
 Declaring leave never cancels what is booked inside it, and removing an
 availability window never does either. Those sessions were agreed with
 somebody; both screens report the count and change nothing.
@@ -448,7 +474,7 @@ psychologist and the ISA on 2 Oct 2026):
   `monthSlots.js`). It replaced a native date box and five "next working day"
   chips worked out from the weekly pattern, which gave a fully booked day a chip
   and showed about a week. One `GET /availability/month/` per psychologist,
-  child, length, moved appointment and month (stale answers are never drawn:
+  child, length (the standard hour, or the moved appointment's own), moved appointment and month (stale answers are never drawn:
   the answer carries the key it was asked for); the Time grid reads the chosen
   day from that same answer, so no second request, and a day or time the answer
   no longer offers is cleared. Sunday-first like the Calendar. Only an "open"
@@ -472,6 +498,28 @@ psychologist and the ISA on 2 Oct 2026):
   refusal is scrolled into view, since it sits at the top of a tall drawer. After a refused booking (400 or
   409) the month is asked again. Under 360px the word "open" goes and the count
   stands alone. Measured locally, the month answer takes 70-350 ms.
+- **The booking Length field is gone** (owner's notes, 14 Nov 2026, Social Workers and Psychologist columns). Every door that books (the Calendar drawer, the record drawer's next slots, the dialog after accepting a case) sends `SESSION_MINUTES` (60, `utils/child.js`), and `DURATIONS` is deleted. **A move keeps the appointment's own stored `duration_minutes`**: the drawer still asks the month endpoint and the psychologist picker with it and sends it back unchanged, since a 30 or 90 minute session from before would otherwise be judged and saved as 60. The card subtitle and agenda rows show minutes only when not 60 (`lengthNote`). The API is unchanged (`duration_minutes` still accepted, default 60; `BookingWithoutALengthTests`).
+- **A fully loaded psychologist cannot be picked** (9 Nov 2026,
+  `GET /api/availability/psychologists/`, `booking.psychologist_picker`,
+  `pages/schedule/psychologistPicker.js`). The drawer's Psychologist select asks
+  which active psychologists have a bookable time on the chosen day (or a day
+  that came with the drawer), else in the WHOLE booking window (10 Nov 2026):
+  today to the last day of the month 12 months ahead, `booking.last_bookable_day`,
+  the same `MONTHS_AHEAD` the month endpoint and the day check use. It reads one
+  `Diary` per psychologist for that whole range and puts every candidate through `slots_on`, the booking
+  rule itself, never a count of places: states open / full / away / off, with
+  `next_open` and a short date-only `label` ("Fully booked on Thursday,
+  November 12"; "No open time in the next 12 months" for a range). With no day
+  the walk starts today and STOPS at the first open day, which is `next_open`,
+  so an open psychologist is cheap; `open_days` was dropped because it forced a
+  full scan. Five psychologists full all year measured 0.3 s locally. Staff and the ISA only (a psychologist 403, nobody
+  signed in 401); a child the asker cannot see, or an `exclude` that is not an
+  appointment of that child, is 404; a missing referral answers `blocked: true`
+  and judges nobody (state "unknown"). The select greys non-open names with
+  their reason in BOTH modes (it used to grey nobody in range mode, when the
+  range was shorter than the window), never the chosen one, and fails open on an error or `blocked`;
+  the booking refusal stays the authority, and a refused booking asks again.
+  The Calendar's "Show one psychologist" filter is unchanged.
 - **The drawers and the appointment card are the shared `Drawer` and `Modal`**
   from `ui`, so Escape, a close button, a focus trap and focus return come
   with them. Hand-built overlays had none of those. The card closes when
@@ -548,6 +596,13 @@ the only access control the system has.
   its own per-IP counter beside it (`resend_is_throttled`,
   `confirm_is_throttled`; 4 Oct 2026). Charging them to the creation counter
   would let a few resends use up a colleague's sign-up from the same office.
+- **Approving a Google request emails the person**
+  (`children.notifications.send_access_approved_notification`, called from
+  `UserViewSet.approve`; the response carries `email_queued`). It says the
+  access was approved and to use "Sign in with Google" - no password, no code,
+  no link that signs anyone in; its button goes to `/login`. Typed sign-ups
+  are not emailed: they already chose a password. With no Brevo key it is one
+  `EMAIL (console) access_approved` log line and `email_queued` is false.
 - **Declining archives rather than deletes.** An archived address cannot
   register again, so a refused applicant cannot loop until a distracted
   administrator approves them.
@@ -624,16 +679,26 @@ the only access control the system has.
   `must_change_password`: the gate asks for the CURRENT password and
   `check_password()` is False for an unusable one, so it locks them out with no
   way back. `reactivate` guards this with `has_usable_password()`.
-- **Approval requires `email_verified`**, because approving emails a temporary
-  password and a mistyped address sends it to whoever owns the typo. Google
-  requests arrive verified; typed ones confirm a six-digit code. Migration 0010
-  backfilled the Google accounts already in the queue.
-- **Approval is the only way in** (4 Oct 2026, `UserWriteSerializer.validate`):
-  an edit cannot move an account from PENDING to ACTIVE ("Approve it from
-  Access Requests"). An edit that changes a pending typed request's address
-  clears `email_verified`, so the new address must be proved too. A pending
-  Google request's address cannot be edited at all: it is the Google
-  account's, and with no code door it could never be proved again.
+- **Approval requires `email_verified`**, because approving opens an account on
+  that address (and, for Google, mails it), so an address nobody proved may be
+  a typo or someone else's. Google requests arrive verified; typed ones
+  confirm a six-digit code. Migration 0010 backfilled the Google accounts
+  already in the queue.
+- **Approval is the only way in** (4 Oct 2026, `UserWriteSerializer`): an edit
+  cannot change `status` at all - a different one is a 400 naming the right
+  door, the same one is accepted because the edit form resends it. The only
+  status doors are approve, decline, archive and reactivate; archive refuses a
+  pending request (decline it, so the audit line exists), and approve, decline
+  and archive lock the row and re-check its status, so two answers racing
+  cannot both win. Emails are stored lowercase and are unique
+  case-insensitively (also against another row's username); `username` is
+  never writable and always equals the email. An edit that changes a pending
+  typed request's address clears `email_verified`, so the new address must be
+  proved too. A pending Google request's address cannot be edited at all: it
+  is the Google account's, and with no code door it could never be proved
+  again. A Google sign-in clears `must_change_password` only when the account
+  has no usable password; the reactivate dialog reads `has_password`, not
+  `google_linked`.
 
 ## The assistant app
 
@@ -709,7 +774,7 @@ Settings, no per-feature flags.
 - **Instead, "What to do next" by rules** (`brief_facts.next_steps`, Staff on
   their own record only): file the referral, ask a psychologist / chase one
   silent 7+ days / ask another after a decline, consent, book, custodian
-  texts, an unanswered survey, survey answers to read, the case study - each
+  texts, an unanswered survey, survey answers to read - each
   with a link to where it is done, firing at the same moment as its Dashboard
   gap (thresholds imported from `care_gaps`, pinned to the second). The SW's
   leftover care gaps drop what a step says (`_NEXT_STEP_GAPS`, guard test).
@@ -1020,107 +1085,39 @@ none of the real ones has been seen.
   fell in step with the seeder's round-robin and each psychologist saw one.
   Exactly one carries another child's name, for the check to find.
 
-## The case study (the SCSR on the child's record)
+## Removed: the case study (SCSR)
 
-Built from 8 Oct 2026; design in
-`docs/superpowers/specs/2026-10-07-scsr-parts-2-5-design.md`. The owner's aim:
-the Social Case Study Report "digitally on the child record module" - a Case
-study tab on the child's page that prints the SCSR. No Word export.
-App `case_study` (never `adoption`, see "Removed").
+Removed on 17 Nov 2026 at the owner's request: the `case_study` app, its
+`/api/case-studies/` routes, the Case study tab on the child's page, the SCSR
+print (`ScsrPrint`), `config/scsr.js` and the brief's two case-study next
+steps.
 
-- **Block A is every child's; B and C are adoptions'** (owner, 10 Oct 2026).
-  The child's background - referral, description, medical history,
-  immunizations, development, birth family, surrender or abandonment - is the
-  child's profile whatever the case type, so the tab shows for Foster Care and
-  the rest with block A only. `sections.applies()` gates B and C on
-  `case_type == "Adoption"` (mirrored in `scsr.js appliesTo`); completeness,
-  Final and the snapshot all read `applies`, so a non-adoption Final is block
-  A. Moving a record away from Adoption HIDES B and C - their rows stay and
-  come back if it moves back. Reopen works on any active record, or a final
-  made as an adoption would be stuck after a case-type change. A
-  non-adoption record reads "The Child" (not "/Adoptee"), shows "Case type" in
-  Part I, and prints block A without the adoption subtitle; a final copy
-  prints by the case type it was MADE with.
-
-- **Numbering is the template's**: A (the child, I-V), B (the PAPs, I-XVII),
-  C (placement, I-VI), roman numbers restarting in each block. Part I is the
-  record form, read live and frozen at Final; everything else is one row per
-  section (`CaseStudySection`, unique on case study + key, JSON value).
-- **The catalogue is `case_study/sections.py` and `config/scsr.js`**, pinned
-  by `test_catalogue.py` the way `test_intake.py` pins caseData.js. **A key is
-  never renamed or reused**: `ALL_KEYS_EVER` keeps every one ever issued. A
-  JSON key rename is the 0020 trap in another form - stored text would stop
-  matching any section.
-- **Access lives in `case_study/access.py`, not the clinical base class**,
-  where "Administrators see everything" would hand IT support every case
-  study, the adoptive parents' incomes included. The record's SW reads and
-  writes; the ASSIGNED psychologist reads block A, drafts included (a pending
-  one is nobody), minus the psychological-evaluation highlights where the
-  history is not carried to them - otherwise the previous psychologist's
-  findings reach them through the SW's text; the ISA gets status only (exists,
-  state, holder, "(inactive)", how much is missing) - never text, never print;
-  anyone else 404. Not registered in Django admin, where the seeded ISA is a
-  superuser. No chatbot tool, prompt, export of counts or duplicate check
-  reads it.
-- **Each section saves on its own with the version the writer saw**: a
-  conditional UPDATE, 409 with the saved text on a stale version. Sessions are
-  per tab, so the commonest conflict is the same person in two tabs.
-- **Not applicable hides, never deletes**: a ticked box keeps its text and
-  unticking brings it back; a PUT without a `value` key leaves the text alone.
-  The psychologist's read sends null for a ticked box.
-- **Pre-fills are offered, never saved**: referral source and reason, medical
-  notes, and the latest psychological report's summary ONLY if confirmed.
-- **Ages are as of Date prepared**, not today. Domestic Relative asks whether
-  the PAPs had the child more than two years (pre-answered from the placement
-  date; unknown when there is none); a yes hides Placement History, as for
-  Adult.
-- **Nobody in the system approves.** The ISA is IT support, not the Head of
-  Office. The SW marks the case study **Final** and the printed copy is signed
-  on paper. The Head of Office's name comes from `AgencyProfile` (Settings,
-  ISA-edited - the card that used to be a fake "RCPC" field) and the SW's PRC
-  license number and validity from their own profile (`UserProfile`, Staff and
-  Psychologists; an administrator has none).
-- **Final writes an immutable copy** (`case_study/finalize.py`, the one path
-  the endpoint AND the demo seeder use, so a seeded final can only exist if it
-  passed `missing_sections()`): Part I as of Date prepared, every section that
-  applies, the preparer's license and the agency details OF THAT DAY. A
-  reprint shows what was signed even after a license renewal or a record edit.
-  A ticked Not applicable box is copied without its hidden text. Final is a
-  conditional update on `status=draft` AND the `updated_at` the screen saw, so
-  a double click or another tab's newer save is a 409, never a final of text
-  nobody reviewed; a box save that loses that race is rolled back. The box-save
-  response carries `case_study_updated_at` for that reason.
-- **Reopen** puts it back to draft; every final stays on file ("Finals on
-  file", each printable). A closed case cannot be reopened - its finals still
-  print. Finalized is addressed to the ASSIGNED psychologist
-  (a pending one is told nothing); Reopened to nobody; neither carries text.
-- **Demo data**: about a third of the active Adoption children get a draft and
-  a few others a final (`case_study/demo_case_studies.py`). The export blanks
-  the preparer's license and every phone, email and employer address in the
-  PAP table, live and in snapshots, so the fixture file never carries them;
-  the import re-homes user fields and the snapshot's preparer to the child's
-  SW and takes the agency block from the importing machine's `AgencyProfile`.
-- **The screen** (`components/caseStudy/`): one editor per section kind, so
-  all three blocks are editable. Each box saves with `useConfirm()`; "Save
-  all" confirms once and stops at the first refusal. Unsaved typing is kept in
-  `localStorage` under `nacc-draft:case-study:<user>:<child>:<key>` and offered
-  back; logout clears the `nacc-draft:` prefix. On a 409 the SW chooses "Load
-  the saved version" or "Keep mine" - neither text is lost without a choice.
-- **Print follows the tab**: on the Case study tab the page's Print button
-  prints the SCSR (`ScsrPrint`) - the newest final's copy when the case study
-  is final, the saved draft marked DRAFT otherwise (asking first when
-  something is unsaved); anywhere else it prints the psychological report.
-  Only the SW gets it.
-- **Every print used to come out ONE PAGE long** (found 8 Oct 2026). The app
-  shell is a fixed 100vh with hidden overflow so only `<main>` scrolls, and on
-  paper that clipped everything after page one - the psychological report had
-  been losing its recommendations and signature block. index.css now lets
-  `#root`, `.racco-shell` and `.racco-shell-row` go to auto height in print.
-  Check a printed page COUNT, not just the first page.
-- `/children?edit=<id>` opens the record form for that child ("Edit on the
-  record" from Part I). Activity reads "Started a case study for X" and opens
-  `?tab=casestudy`; "Finalized ..." and "Reopened ..." the same way
-  (`ActivityLog` actions `finalized` and `reopened`, activity 0005).
+- **The teardown is `children/0035_drop_case_study`**, not a migration in the
+  departing app, for the reason given under "Removed: the adoption tracker":
+  it drops `tbl_case_study_final`, `tbl_case_study_section` and
+  `tbl_case_study` (IF EXISTS) and deletes the `case_study` rows from
+  `django_migrations`, so the name is free again. Irreversible. Nothing was
+  dumped by this session, because no session can reach the owner's database:
+  back up first with `manage.py dumpdata case_study` BEFORE pulling, since the
+  command needs the app that is now gone.
+- **Kept on purpose**: the record form's fields that were modelled on SCSR
+  Part I (alias, health condition, whereabouts, legal status date and the
+  rest; see "The record form"), which are intake, not the case study; and
+  the `finalized`/`reopened` activity actions with their old lines, which are
+  history. Those lines now open the child's page.
+- **Its two readers went with it** (owner, same day): the PRC license on My
+  Profile (`UserProfile.license_number`, `license_valid_until`) and the Head
+  of Office on Settings (`AgencyProfile.head_of_office_name`, `_title`),
+  dropped by an accounts migration. The rest of AgencyProfile stays - the
+  calendar invite carries its office address - and so does UserProfile,
+  which holds the social links.
+- `import_demo_data` drops any `case_study.*` rows from an older fixture
+  before loading it.
+- **Print still needs the print fix** (found 8 Oct 2026). The app shell is a
+  fixed 100vh with hidden overflow, and on paper that clipped everything
+  after page one. index.css lets `#root`, `.racco-shell` and
+  `.racco-shell-row` go to auto height in print. Check a printed page COUNT,
+  not just the first page.
 
 ## The record form (Add Record)
 
@@ -1202,9 +1199,11 @@ middle name, a date found, and every question that applies made mandatory.
   the adoption case report written after the PAPA or supervised trial
   custody; only its Part I (Identifying Information) is intake. Parts II-V
   (background, family, the prospective adoptive parents, placement,
-  assessment) are a separate module still to be designed, not form fields.
-  - Birth status "Child" and adoption types SIBRA and ICA Relative are
-    offered again, in the SCSR's order, with "Relative (Without 2-yr
+  assessment) were built as the case study and removed on 17 Nov 2026 (see
+  "Removed: the case study"); they are not form fields.
+  - Birth status "Child" (offered again 7 Oct, retired again 15 Nov - see the
+    Birth Status bullet below) and adoption types SIBRA and ICA Relative
+    were offered again on 7 Oct, in the SCSR's order, with "Relative (Without 2-yr
     custody)" kept and "Orphaned" kept as written (owner's choice). Only a
     Regular adoption records the Date of Admission, so SIBRA and ICA
     Relative take the Date of Placement.
@@ -1216,8 +1215,8 @@ middle name, a date found, and every question that applies made mandatory.
     `requiredFields`), and the server blanks it for any other answer.
   - Both are new questions, so records from before keep their blanks through
     an unrelated edit, by the usual edit rule.
-  - **Alias** is optional and shown only for the Without Known Parents
-    category (the SCSR: "the given first and last name and alias"). Changing
+  - **Alias** is optional and shown only for the Foundling
+    category (renamed from Without Known Parents, 14 Nov 2026; the SCSR: "the given first and last name and alias"). Changing
     the category hides it, never deletes it; the server never clears it.
   - **Age follows the adoption type** (7 Oct 2026): 5-17 for every record
     except an Adoption of type Adult, which is 18 or older with no upper
@@ -1237,6 +1236,65 @@ middle name, a date found, and every question that applies made mandatory.
   - Children 0029 is additive. `children/demo_profiles.py` gives demo
     children a health condition and whereabouts, from `seed_demo_data` and
     `import_demo_data` only.
+- **Present Environment is filled big to small** (owner, 15 Nov 2026): the
+  Custodian block stays first (the owner's choice, "Custodian, then address"),
+  then Province, Municipality / City, Barangay, Street Number, House Number
+  (optional), Landmark (optional). Each list comes from the one before it, so
+  every field is usable when reached; the address was laid out small to big
+  with two disabled selects in the way. Only the order changed - names, rules
+  and the cascade are as they were. Under the six fields "Address as written:"
+  shows it small to big ("12, Rizal St., San Jose, Agoo, La Union", from
+  `writtenAddress` in `utils/child.js`; landmark left out, plain text, hidden
+  while a pre-list typed address is on screen with nothing re-picked). The
+  printed reports keep their own composers (house number and street joined by a
+  space). "Show me" lists the step's answers in the on-screen order
+  (`STEP2_ORDER` in `ChildForm.jsx`), not `requiredFields` order, which is
+  pinned against the server and cannot follow the screen. Three columns on a
+  wide form, two to 900px, one under 760 (`.racco-address-grid`).
+- **Foundling, and two answers made optional** (owner, 14 Nov 2026). The
+  category "Without Known Parents" is "Foundling": the VALUE in
+  `case_category` was renamed by a reversible data migration plus a choices-only
+  `AlterField` (children 0035, the way 0021 renamed Orphan), not the column, so
+  the release still serving during a deploy keeps working - the serializer lets
+  a record's own unchanged category through. The old word is refused as a new
+  pick like any unknown value, not normalised; `import_demo_data` upgrades an
+  older fixture's. The Alias shows for Foundling. Activity labels still hold
+  the old word on purpose. **House number and
+  the Date of Admission to the Agency are optional**: out of `required_fields`
+  and `requiredFields`, labelled "(optional)", blank saves and can be blanked;
+  the Date of Placement to Custodian stays required where it is asked, and the
+  admission date's other checks (future, before birth) are unchanged.
+- **Birth Status is optional, and two case types are retired** (owner, 14 Nov
+  2026). `birth_status` left `ALWAYS_REQUIRED` and its caseData.js mirror: it
+  stays on the form marked "(optional)", a blank saves on create and can be
+  blanked on an edit; the list and its retired values are unchanged, and a
+  blank prints "—" on Part I and the psychological report. Part I is read from
+  the record and `missing_sections()` never asked for it. "Family Tracing &
+  Reunification" and "Independent Living" are in `intake.RETIRED_CASE_TYPES`
+  and `RETIRED_CASE_TYPES` in caseData.js (test_intake.py pins both). They
+  went the way of the old categories: not in `CASE_TYPES`, so not offered, and
+  `validate_case_type` refuses them as a NEW pick only (the record's own value
+  passes, so an unrelated edit keeps it; the form lists it "(no longer
+  offered)" and `form._record.case_type` keeps it selectable back). Their
+  rule entries (`CASE_TYPE_FIELDS`, dates, category pairing) stay for the
+  records that hold them, and `Child.CASE_TYPE_CHOICES` keeps them - no
+  migration. Every category still has four case types on offer. The seeder
+  draws from the four current ones (a seed therefore gives a different
+  caseload than before the change); readers and filters keep seeing the two.
+  A test that needs a legacy record makes it with the ORM.
+- **Birth Status reads "Marital Child" / "Non-Marital Child" / "Unknown"**
+  (owner, 15 Nov 2026). The two values were renamed IN THE COLUMN by children
+  0036 (reversible RunPython plus a choices-only `AlterField`, the way 0035
+  moved Foundling), so the release still serving during a deploy keeps working:
+  its `_current_or_unchanged` lets a record's own unchanged birth status
+  through. "Child" is retired again (`intake.RETIRED_BIRTH_STATUSES`,
+  `RETIRED_BIRTH_STATUSES` in caseData.js, pinned in test_intake.py): not
+  offered, no migration, a record holding it keeps it through any edit, shown
+  "(no longer offered)" and selectable back during that edit. "Marital",
+  "Non-Marital" and "Child" are refused as a new pick, not normalised;
+  `import_demo_data` upgrades an older fixture's two old words. Activity
+  labels keep the old words on purpose. Optional still. The Marital
+  Satisfaction Inventory is another thing and was not touched.
 - **A rename cannot ride along with a deploy the old release survives.** On
   24 Sep the demo API's first deploy of 0020 failed on Render's side after the
   web had gone live; had the migration run first, the old API - still serving
@@ -1277,8 +1335,11 @@ the owner picked the plan. Presentation only - no server rule changed.
   `brief_facts.next_steps`. Hints explain the agency's words (owner); "Completed" is a finished
   pre-assessment, read from `pre_assessment_status` ("Answered" and the
   Counseling stage were retired on 2 Nov 2026).
-  Upcoming appointments open `/schedule`, which cannot open one appointment
-  from a link yet.
+  Upcoming appointments open `/schedule?appointment=<id>`, which opens that
+  one appointment's card (the id is taken into state and the parameter removed
+  at once; found in the loaded range or fetched from the detail endpoint, whose
+  scoping decides; unavailable or non-numeric ids give one toast). The Today
+  card, the rail and an appointment's activity line link the same way.
 - **The record form**: each step says how many answers it still needs, and
   "N answers still needed - Show me" jumps to each field. Next still moves on
   freely and Save is held exactly as before (the existing blockers, not a
@@ -1287,9 +1348,15 @@ the owner picked the plan. Presentation only - no server rule changed.
   Full screen under 640px.
 - **The header under 480px** (owner's choice): the search pill becomes a
   magnifier that opens the same field and panel, and tabs that do not fit go
-  under More. At 480 and wider nothing changed. Known: at exactly 480-~520 six
-  tabs at 36px still crowd the bell; moving the breakpoint changes the search
-  sizes, so it is the owner's call.
+  under More. **From 480 to 899** (no rail, More exists) the header counts how
+  many tabs fit (`AppHeader.jsx`: logo 34, `layout.searchWidth`, bell and
+  avatar 90, padding and gaps, at most 24 px spilled into the two gaps) and
+  folds the rest under More (owner, 9 Nov 2026). Six or seven tabs at 36px used
+  to run under the search pill and the bell from 480 to ~700 for the ISA and
+  psychologists (to ~540 for a SW). Under 480 and from 900 nothing changed. A
+  tab under More keeps its count: More carries the hidden tabs' summed badge
+  and says "More destinations, N waiting". The More popover has no arrow-key
+  handling (Tab and Escape work).
 - Styles for these live in their own files (`children/records.css`,
   `drawer.css`, `form.css`, `components/header-phone.css`), mostly scoped
   `!important` phone overrides because the shared controls size themselves
@@ -1330,7 +1397,7 @@ covers a hole the others leave:
   referral files and any pending, withdrawn or declined request go with it (a
   psychologist shown two identical requests declines one as a duplicate, and
   a decline holds only a reason; only a still-pending one is notified); any
-  appointment, clinical record, case study, accepted request, assigned
+  appointment, clinical record, accepted request, assigned
   psychologist or assistant job blocks it.
   Every model with a FK to Child is named in `KEEPS_IT` or `TAKEN_ALONG`, and
   a test reading `Child._meta.related_objects` fails on one that is not - a
@@ -1450,8 +1517,8 @@ are unchanged (their assigned children).
   never a part-move. **Only `social_worker` changes** (and `updated_at`,
   bumped by hand because a bulk UPDATE skips `auto_now`: a record form opened
   before the move is told "updated by someone else"). The psychologist, an
-  open request to one, the case study and the appointments stay; what a SW
-  sees of them follows the field - case study access, names on the calendar,
+  open request to one and the appointments stay; what a SW
+  sees of them follows the field - names on the calendar,
   Records, and a psychologist's answer to a request, which goes to the child's
   current SW. **The trail has two layers** (the action `transferred`, activity
   0010, choices only): a RECORD line for each record, the audit trail ("Moved
@@ -1643,6 +1710,52 @@ button: "Pre-Assessment" with Not started / Started · Consent / In progress ·
   tool / 4 wrong argument / 4 rejected; new 5 / 3 / 2, plus one empty answer
   per role (not yet traced to its question). Within noise, so it stands. The
   "3/87" figure under "The chatbot" is from 30 Aug, on an older question set.
+- **"In Pre-Assessment" on the psychologist's Dashboard** (owner, 15 Nov 2026).
+  The tile that was "In counseling", then "Pre-assessed", reads "In
+  Pre-Assessment" and counts active children whose pre-assessment is NOT
+  finished (`by_pre_assessment.not_started + in_progress`), with the finished
+  count in its hint: on the "Pre-assessments waiting on someone" card (which
+  the ISA sees too) and on the psychologist's rail tile. The SW's and ISA's
+  rail tile and the team list still say "Pre-assessed" and count finished ones.
+
+## The pre-assessment tracker: times on each step
+
+Owner's request, 5 Nov 2026: "transform it into a tracker - an automatic time
+track on each step where he/she edited". The owner chose start, last edit and
+done for every step, shown on the child's page, in the wizard and in
+Monitoring.
+
+- **`PreAssessmentStepTime`** (clinical 0014, one row per pre-assessment and
+  step, unique) holds `started_at`, `last_edited_at` and `done_at`, stamped by
+  the server's clock. Every write goes through `clinical/step_times.py`
+  (`entered`, `edited`, `moved_past`, `finished`); started is never
+  overwritten (Coalesce), done is set only on a FORWARD move (the most recent
+  one) or by Mark as completed. Time spent is done minus started, elapsed not
+  active.
+- **What counts as an edit**: linking consent or the interview, a changed set
+  of instruments, changed notes (Review), and a problem added while the
+  requester's open pre-assessment sits on Presenting problems (the resume
+  rule: the newest open row newer than the last completion). An unchanged
+  value the wizard re-sends stamps nothing; nothing is stamped on a completed
+  pre-assessment.
+- **Nothing is invented.** Clinical 0015 backfilled only what was known: a
+  consent start at `created_at`, and a Review done at `completed_at` with NO
+  start. A step left before it had a row gets a done time and no start. With
+  no start there is no time spent.
+- **A step change is conditional on the step it was read at**
+  (`perform_update` filters on `current_step`): a second tab's stale move is
+  a 409, and the wizard re-reads the pre-assessment.
+- **Shown**: `step_times` on the pre-assessment API; `steps` and
+  `step_edited_at` in `Child.pre_assessment_progress()` (from the
+  `visible_pre_assessments` prefetch, which now includes `step_times`, so the
+  carry-history rule covers the times too); the "Pre-assessment tracker" card
+  on the child's Overview tab (`components/PreAssessmentTracker.jsx`); a line
+  under each wizard rail step (hidden under 480px, kept in the title) and a
+  "Time on each step" list on Review; Monitoring's cell gets "edited ..." on a
+  second line. Times through `formatStepMoment` / `formatDuration` in
+  `utils/preAssessment.js`, 12-hour via `clock()`.
+- Demo seeding creates no step times, so seeded pre-assessments show only the
+  backfilled facts. `clinical/tests/test_pre_assessment_step_times.py`.
 
 ## Interview templates by upload
 
@@ -2061,7 +2174,7 @@ and census stay underneath, as they were.
   errors, texts refused, failed uploads) and "What changed" - nothing counts
   server errors or failed uploads, and a refusal leaves no row. A number with no
   source is worse than no number.
-- **What it never shows**: case study text, any record's text (remarks,
+- **What it never shows**: any record's text (remarks,
   reports, referral summaries), what the assistant wrote, a custodian's name or
   number, or the reason a psychologist gave for declining a request (the stuck
   queue says who declined and how long ago; the ISA reads why on the child's
@@ -2532,6 +2645,143 @@ Built 27 Aug 2026. Public, free, fictional children, real accounts. Runbook in
   `==>` line says which step is too slow.
 - **Cloudflare retires models** — `llama-3.1-8b` returns 410. Check
   `/api/assistant/model-health/` before assuming the code broke.
+- **The Blueprint follows `main`; the services deploy `cloud-setup`**
+  (found 9 Nov 2026). The Blueprint "NACC-SYS-V3.1" is linked to this repo's
+  `main`, which stopped at `ab447f2` (5 Nov) and is BEHIND `cloud-setup`.
+  Its sync offered to "Update web service nacc-v3-demo-api / -web branch to
+  main" and to set `USE_S3` from the file: approving it would have rolled the
+  demo back 11 commits, stopped `cloud-setup` pushes deploying, and possibly
+  sent uploads to the container disk. **Never approve a Blueprint sync without
+  reading every line it lists.** So `render.yaml` changes do NOT reach the
+  demo by a push: the cache headers and `RUN_SEED=false` were set by hand in
+  the dashboard on 9 Nov. The file now matches the service (`USE_S3: "true"`,
+  the demo's own bucket `nacc-v3-demo-media`, the four `AWS_` keys declared
+  `sync: false`), and **since 9 Nov the Blueprint follows `cloud-setup`**: its
+  first sync (`b51af17`) listed only the web service's headers and was
+  approved. A `render.yaml` change now reaches the demo as a sync to approve,
+  still read line by line first. This Blueprint manages the demo services
+  only; live is `NACC-SYS-V3` and not connected to it.
+- **A keep-awake pinger runs on cron-job.org** (owner's account, job "NACC
+  demo keep-awake", 9 Nov 2026): `*/10 7-18 * * 1-6`, Asia/Shanghai (the same
+  clock as Manila), so the API stays up 7 AM-7 PM Monday to Saturday and
+  sleeps outside that. It fetches
+  `/static/admin/css/base.css` from the API: WhiteNoise answers 200 from the
+  Django process with no query. Not `/healthz/` (a `SELECT 1` keeps the Neon
+  compute awake, and the demo is a branch of the production project), not a
+  401 route (cron-job.org counts non-2xx as failures and can disable the
+  job). Round the clock was rejected: ~744 h a month against the workspace's
+  750 free instance hours (24 used by 9 Nov without it), and running out
+  suspends every free service in the workspace. Office hours is ~310 h. A
+  healthy run takes under a second; a run of 15-60 s mid-day means the
+  instance restarted or slept.
+- **This sandbox cannot measure the demo API**: Cloudflare in front of
+  Render answers a cloud session with a bot challenge (429,
+  `cf-mitigated: challenge`) or holds the request, so a curl timeout from a
+  sandbox says nothing about the API. The web host answers normally. Judge the
+  API from the owner's browser or the Render log.
+
+### Making it load faster (9 Nov 2026)
+
+The owner: "too much time of waiting to load the site". Diagnosed live and in
+code; the free API's sleep (20-60 s on the first visit after ~15 min idle) is
+most of it, and no code removes that - only a keep-warm pinger or a paid
+instance. The pinger now runs in office hours only (the bullet above says
+what it fetches and why not `/healthz/`). The Render log measured our own
+boot at about 4 s of the wake; the rest is Render starting the container.
+What was cut, commit `c016312`:
+
+- **Start-up is one process**: `entrypoint.sh` runs `manage.py boot_tasks`
+  (`accounts/management/commands/boot_tasks.py`): migrate, `seed_initial_data`
+  only when `RUN_SEED=true`, `seed_psgc`, `backfill_psgc --apply`, the same
+  order and the same `==>` lines, each followed by its seconds
+  (`==> Loading PSGC addresses (0.4 s)`) so the Render log says where a wake
+  goes. A failure still exits non-zero before Gunicorn. Locally the no-op boot
+  a wake hits went 2.5 s -> 0.9 s; four Django imports were nearly all of it.
+- **Gunicorn has `--threads ${GUNICORN_THREADS:-4}`** (gthread) beside the 2
+  workers: a page fires 5-9 requests at once and sync workers served two at a
+  time. Audited for module-level state first: the assistant lock, retention
+  and prefetch throttles were already locked; the cache-counted rate limits can
+  undercount by one under a race, as multiple workers already allowed. A new
+  per-process global mutated in a request needs a lock.
+- **The web build is split**: every page but sign-in and the shell is
+  `React.lazy` in `App.jsx`, under `Suspense`; `manualChunks` in
+  `vite.config.js` makes `react`, `vendor`, `calendar` (react-big-calendar)
+  and `qrcode`. First download 472 KB -> ~155 KB gzip. A page with a named
+  export another module imports cannot be lazy - none has one today.
+- **Icons are an explicit map**, `ui/icons.js` (129). `import * as Lucide`
+  defeated tree-shaking. An unknown name draws a circle (and warns in dev), so
+  **`npm run lint` runs `scripts/check-icons.mjs`**: every string literal that
+  is a lucide name must be in the map or in its `NOT_ICONS` list with a reason.
+  The first version only looked at lines that said "icon" and missed six
+  (brand icons on My Profile among them); a browser count of
+  `svg.lucide-circle` found them.
+- **The seal is `racco-seal.webp`**, 7 KB at 160x160 (was a 518 KB JPEG).
+- **`wakeServer()` runs at start-up** in `main.jsx`, so every entry route
+  wakes the API while the bundle loads, not only `/login` and `/signup`. It
+  has a once-guard.
+- **Google Fonts load without blocking** (`media="print"` + onload, with a
+  noscript copy); Baloo 2 500 and Plex Mono 500 were unused and dropped.
+- **Queries cut, each pinned in `clinical/tests/test_endpoint_query_counts.py`**:
+  availability 31 -> 2 (`BookedAhead`, one grouped query for the list), a
+  child's page 22 -> 15 (one pre-assessment prefetch, sorted in Python), the
+  census 18-20 -> 13-16, the console 42 -> 40. The ISA's pending-access badge
+  reads `GET /api/users/pending-count/` (one COUNT, admin only) instead of the
+  whole `/users/` list.
+- **Hashed assets are cached for a year** (`/assets/*`
+  `public, max-age=31536000, immutable`; `/index.html` `no-cache`), set in the
+  web service's Headers page; also in `render.yaml`, which the demo does not
+  read (above).
+- **One child list for every screen** (commit `021c199`,
+  `context/ChildrenContext.jsx`, `useChildren()`): Records, the calendar,
+  Results & Reports, the pre-assessment picker, My Profile and the header
+  search read one copy of `/children/?include_archived=true`, each filtering
+  for itself. Stale-while-revalidate: a screen shows the copy at once and
+  `revalidate()`s as it opens (joining a request already out); a write that
+  changes the list calls `refresh()`, which never joins an earlier request.
+  Memory only, owned by the account that fetched it, dropped when the account
+  changes; a reply for a previous account is discarded. `loaded` is false
+  until the first answer - an empty list before it is not "no children".
+  Transfer records still reads its own list on open (its counts must match
+  the list it ticks). Measured: a repeat Records visit drew rows in ~60 ms.
+- **The console is 25 queries** (was 40): the security log's kinds counted and
+  rowed in one window-function query, counts read with their rows. Every
+  signed-in request loads the user's role with the user
+  (`ForcePasswordChangeJWTAuthentication.get_user`, a copy of SimpleJWT
+  5.3.1's without `CHECK_REVOKE_TOKEN`). `/children/` was already flat at 8-9
+  queries. Pinned in `test_endpoint_query_counts.py`. Measured on SQLite only.
+- Left: whether API answers are compressed is unknown (see the sandbox bullet
+  above).
+
+## List order: newest edited first
+
+Owner's request, 8 Nov 2026: "last in first out - the latest edited will be
+shown first". Work lists open on the record touched most recently.
+
+- **Progress Monitoring** sorts by `last_updated` (`MonitoringListView`): the
+  newest of the child's own `updated_at`, its appointments, remarks, result
+  entries, report files and pre-assessments - counting only what
+  `hide_earlier_history` / `visible_pre_assessments` let the reader see, so a
+  note hidden from a new psychologist cannot lift its child. Appointments
+  count for everyone: the calendar shows every session anyway. A "Sort:
+  Recently updated / A-Z" switch keeps alphabetical one click away.
+- **Records'** sort is "Recently updated" (`updated_at`, then newest id); it
+  was newest CREATED. **Results & Reports** orders children's result groups,
+  report files and referrals newest first.
+- **The child's page** (`ChildReportView`) lists every tab newest edited first:
+  `-updated_at` where a model has it, else `-created_at`, then `-id`, applied
+  after the carry-history filter. **Open problems stay above resolved ones**
+  (`resolved` first in the order), or resolving one would put it on top.
+- `ResultEntry`, `PsychologicalReport`, `CaseReferral`, `OpinionnaireInvite`
+  and `SelfReportFlag` have no `updated_at`: for them "edited" is "filed", and
+  a result backdated by its `date` sorts by when it was filed.
+- **The printed report keeps its own order** (owner): results by date
+  oldest first, instruments in the order given (pre-assessments sorted
+  oldest first in `PsychReportPrint.jsx`); interviews and problems follow the
+  page.
+- Left alphabetical on purpose: pickers (reset password, transfer records),
+  the pre-assessment child picker (pipeline stage), Users (its own column
+  sort). `clinical/tests/test_monitoring_order.py`,
+  `test_child_page_order.py`.
 
 ## Accessibility
 
@@ -2578,8 +2828,11 @@ rule is `!important`, the one thing that outranks an inline style, and is kept
 to the Button's own class so the inset rings of `.racco-queue-tile` and
 `.racco-pick-row`, which are plain buttons, are not overruled. The Dashboard's
 quick-action row is hand-built with the same inline shadow and carries the class
-by hand. Other hand-built `<button>`s that set `boxShadow` inline have the same
-fault and have not been swept: give them `racco-btn`, do not drop the shadow. A computed-style
+by hand. **Swept 9 Nov 2026**: the assistant launcher, the sidebar rail links,
+the psychologist picker rows, the sign-up role choices and the calendar's
+psychologist rows carry `racco-btn` too, each checked for a ring and an
+unchanged size. A new hand-built control that sets `boxShadow` inline needs the
+class: give it `racco-btn`, do not drop the shadow. A computed-style
 check needs a wait after focusing: the shadow transitions in, and a read straight
 away says `none`.
 
@@ -2594,7 +2847,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 3,662 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 3,614 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

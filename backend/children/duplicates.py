@@ -215,7 +215,6 @@ KEEPS_IT = {
     "clinical.OpinionnaireInvite": ("survey invite", "survey invites"),
     "clinical.ProblemEntry": ("problem entry", "problem entries"),
     "clinical.SelfReportFlag": ("self-report flag", "self-report flags"),
-    "case_study.CaseStudy": ("case study", "case studies"),
     # SET_NULL, not CASCADE: removing the child would not delete these, it
     # would detach them, and the access log would stop saying whose record
     # the assistant had read.

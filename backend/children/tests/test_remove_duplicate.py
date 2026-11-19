@@ -21,7 +21,6 @@ from rest_framework.test import APIClient
 from accounts.models import Role
 from activity.models import ActivityLog
 from assistant.models import AssistantJob
-from case_study.models import CaseStudy
 from children import duplicates
 from children.models import AssignmentRequest, Child, TerminationRecord
 from clinical.models import (AgencyFormTemplate, CaseReferral, ClinicalInterviewRecord,
@@ -52,7 +51,7 @@ class RemoveDuplicateBase(TestCase):
         cls.other_psy = make("psy3@t.ph", "Andres", "Bonifacio", Role.PSYCHOLOGIST)
         child = lambda **over: Child.objects.create(  # noqa: E731
             **{"first_name": "Libai", "last_name": "Cramm", "birth_date": BORN,
-               "case_type": "Adoption", "case_category": "Without Known Parents",
+               "case_type": "Adoption", "case_category": "Foundling",
                "social_worker": cls.sw, **over})
         cls.original = child()
         cls.duplicate = child()
@@ -369,7 +368,6 @@ KEEPERS = {
     "clinical.ProblemEntry": lambda t, c: ProblemEntry.objects.create(child=c, description="x"),
     "clinical.SelfReportFlag": lambda t, c: SelfReportFlag.objects.create(
         invite=_invite(t, c), child=c, question="q", answer="a", source=SelfReportFlag.LEXICON),
-    "case_study.CaseStudy": lambda t, c: CaseStudy.objects.create(child=c),
     "assistant.AssistantJob": lambda t, c: AssistantJob.objects.create(
         job_type="brief", child=c),
     "children.AssignmentRequest": lambda t, c: AssignmentRequest.objects.create(

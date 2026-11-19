@@ -198,7 +198,11 @@ export default function Dashboard() {
           {[
             { label: 'Not yet started', n: stats.unassessed ?? 0, hint: 'Active children with no completed pre-assessment', fg: 'var(--red-700)' },
             { label: 'In progress', n: stats.pending_pre_assessments ?? 0, hint: 'Started, waiting on interview or instrument titles', fg: 'var(--warning-700)' },
-            { label: 'Pre-assessed', n: (census.by_pre_assessment || {}).completed ?? 0, hint: 'Pre-assessment finished', fg: 'var(--blue-700)' },
+            /* "In Pre-Assessment" (owner, 15 Nov 2026; it was "In counseling",
+               then "Pre-assessed"): every active child whose pre-assessment is
+               not finished - not started plus in progress - with the finished
+               count in the hint. */
+            { label: 'In Pre-Assessment', n: ((census.by_pre_assessment || {}).not_started ?? 0) + ((census.by_pre_assessment || {}).in_progress ?? 0), hint: `Not finished yet · ${(census.by_pre_assessment || {}).completed ?? 0} completed`, fg: 'var(--blue-700)' },
           ].map((b) => (
             <div key={b.label} style={{ background: 'var(--surface)', padding: '13px 14px', display: 'flex', flexDirection: 'column', gap: 5 }}>
               <span style={{ fontFamily: 'var(--font-sans)', fontWeight: 800, fontSize: 'var(--text-3xs)', letterSpacing: '0.08em', textTransform: 'uppercase', color: b.fg }}>{b.label}</span>

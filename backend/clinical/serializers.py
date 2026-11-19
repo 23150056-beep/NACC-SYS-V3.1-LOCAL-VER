@@ -125,14 +125,20 @@ class PreAssessmentSerializer(serializers.ModelSerializer):
     consent_status = serializers.CharField(source="consent.status", read_only=True, default=None)
     interview_respondent = serializers.CharField(
         source="interview.respondent", read_only=True, default=None)
+    step_times = serializers.SerializerMethodField()
 
     class Meta:
         model = PreAssessment
         fields = ["id", "child", "child_name", "psychologist", "psychologist_name",
                   "date", "status", "instruments", "instrument_titles",
                   "consent", "consent_status", "interview", "interview_respondent",
-                  "notes", "current_step", "completed_at", "created_at", "updated_at"]
+                  "notes", "current_step", "step_times", "completed_at", "created_at",
+                  "updated_at"]
         read_only_fields = ["psychologist", "status", "completed_at", "updated_at"]
+
+    def get_step_times(self, obj):
+        from clinical.step_times import entries
+        return entries(obj.step_times.all())
 
     def get_instrument_titles(self, obj):
         return [i.title for i in obj.instruments.all()]

@@ -1092,19 +1092,47 @@ input::-ms-clear {
 .racco-name-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 @media (max-width: 760px) { .racco-name-grid { grid-template-columns: 1fr; } }
 
-/* The Case study tab on a child's record (components/caseStudy/).
- *
- * Each box is the input on the left and the template's guidance beside it as a
- * checklist; on a narrow window the guidance drops under the box and is folded
- * away behind a button. `racco-sr-only` is text for screen readers only. */
-.racco-cs-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 300px); gap: 16px 22px; align-items: start; }
-@media (max-width: 960px) { .racco-cs-body { grid-template-columns: minmax(0, 1fr); } }
-.racco-cs-stacked { grid-template-columns: minmax(0, 1fr); }
+/* Text for screen readers only. */
 .racco-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
-.racco-cs-section { scroll-margin-top: 16px; }
 
 /* The month in the booking drawer: seven columns that shrink with the drawer.
    Under 360px the word "open" goes and the count stands alone, because a cell
    is about 40px wide there. */
 .racco-month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
 @media (max-width: 359px) { .racco-month-word { display: none; } .racco-month-grid { gap: 2px; } }
+
+/* Pre-assessment wizard: the tracker line under each step label. Too wide for
+   a phone's rail, where the title attribute carries it. */
+@media (max-width: 479px) {
+  .racco-pa-rail-note { display: none !important; }
+}
+/* Wizard rail: fits its card, never scrolls sideways. */
+.racco-pa-rail-scroll { margin: 0; }
+.racco-pa-rail-cell { min-width: 0; }
+@media (max-width: 479px) {
+  .racco-pa-rail-cell { min-width: 52px; }
+  .racco-pa-rail-line { height: 24px !important; }
+  .racco-pa-rail-dot { width: 24px !important; height: 24px !important; font-size: 10.5px !important; }
+  .racco-pa-rail-label { font-size: 10.5px !important; max-width: 100%; }
+  .racco-pa-rail-note { display: none !important; }
+}
+/* Review summary: label column narrows on a phone. */
+.racco-pa-summary { grid-template-columns: minmax(110px, 170px) minmax(0, 1fr); }
+@media (max-width: 479px) {
+  .racco-pa-summary { grid-template-columns: minmax(90px, 110px) minmax(0, 1fr); }
+}
+/* Review timeline: the time sits right after the step name; wraps under it on a phone. */
+.racco-pa-tl-row { display: grid; grid-template-columns: minmax(0, 220px) auto; column-gap: 16px; row-gap: 2px; align-items: baseline; justify-content: start; }
+@media (max-width: 479px) {
+  .racco-pa-tl-row { grid-template-columns: minmax(0, 1fr); }
+}
+/* Wizard footers: helper text left, actions right; stacked full width on a phone. */
+@media (max-width: 519px) {
+  .racco-pa-actions { width: 100%; flex-direction: column-reverse; }
+  .racco-pa-actions > * { width: 100%; justify-content: center; }
+}
+
+/* Pre-assessment tracker card: the same four columns on every row; two by two
+   on a narrow card. */
+.racco-pa-track-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px 14px; }
+@media (max-width: 519px) { .racco-pa-track-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

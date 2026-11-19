@@ -10,8 +10,8 @@ children/tests/test_intake.py pins the two together.
 
 HEALTH_CONDITIONS = ["Healthy", "With special needs"]
 SPECIAL_NEEDS = "With special needs"
-# Alias is asked of a child without known parents only (the SCSR, Part I).
-ALIAS_CATEGORY = "Without Known Parents"
+# Alias is asked of a Foundling only (the SCSR, Part I).
+ALIAS_CATEGORY = "Foundling"
 
 # The age the agency serves. A child is 5-17; an Adult adoption (the SCSR
 # covers it) is for a person of 18 or older, with no upper limit.
@@ -41,8 +41,8 @@ PLACEMENT = "date_of_placement_to_custodian"
 # independent living are about leaving it, so "Surrendered" and "Abandoned"
 # are not offered there.
 ALL_CATEGORIES = ["Surrendered", "Abandoned", "Dependent", "Neglected",
-                  "Without Known Parents", "Orphaned"]
-_LEAVING_CARE = ["Dependent", "Neglected", "Without Known Parents", "Orphaned"]
+                  "Foundling", "Orphaned"]
+_LEAVING_CARE = ["Dependent", "Neglected", "Foundling", "Orphaned"]
 CATEGORY_OPTIONS = {
     "Adoption": ALL_CATEGORIES,
     "Foster Care": ALL_CATEGORIES,
@@ -51,6 +51,25 @@ CATEGORY_OPTIONS = {
     "Family Tracing & Reunification": _LEAVING_CARE,
     "Independent Living": _LEAVING_CARE,
 }
+
+# Retired 14 Nov 2026 (owner): no longer offered for a new record or as a new
+# pick on an edit. A record that already holds one keeps it through any edit,
+# so every rule entry below stays for them; only the OFFER went. Both pair only
+# with the four leaving-care categories, all of which still have four other
+# case types on offer, so no category is left without one.
+# Birth status "Child" was retired on 15 Nov 2026 (owner): not offered, but a
+# record that holds it keeps it. Mirrors RETIRED_BIRTH_STATUSES in caseData.js.
+RETIRED_BIRTH_STATUSES = ["Child"]
+RETIRED_CASE_TYPES = ["Family Tracing & Reunification", "Independent Living"]
+
+
+def offered_case_types(category=""):
+    """The case types a new record may pick, narrowed by the category when it
+    is one the pairing knows."""
+    return [t for t in CATEGORY_OPTIONS
+            if t not in RETIRED_CASE_TYPES
+            and (category not in ALL_CATEGORIES or category in CATEGORY_OPTIONS[t])]
+
 
 # The case-specific questions besides the date, per track.
 CASE_TYPE_FIELDS = {
@@ -101,19 +120,20 @@ def intake_date(child):
     return getattr(child, intake_date_field(child))
 
 
-# Always asked. Middle name, legal status, landmark and date found are not
-# here on purpose: a foundling or a non-marital child may have no middle name,
+# Always asked. House number and the Date of Admission to the Agency (14 Nov
+# 2026, owner) are optional too, as are birth status, middle name, legal status,
+# landmark and date found are not here on purpose: a foundling or a non-marital child may have no middle name,
 # a child newly in care may not have a legal status yet, and most addresses
 # have no landmark. Asking for something that does not exist gets "N/A" typed
 # into it, which is worse than a blank.
 ALWAYS_REQUIRED = [
     "case_category", "case_type",
     "first_name", "last_name", "birth_date", "gender",
-    "place_of_birth_or_found", "birth_status", "health_condition",
+    "place_of_birth_or_found", "health_condition",
     "education_level", "current_placement",
     # In the form's order, which is what the "Still needed" line lists them in:
     # province first, because the municipality and barangay lists follow it.
-    "house_number", "street", "province", "municipality", "barangay",
+    "street", "province", "municipality", "barangay",
 ]
 
 # Answered by the case type, so asked again whenever the case type (or the
@@ -126,7 +146,9 @@ def required_fields(case_type, type_of_adoption="", health_condition=""):
     # What the special needs are, once "With special needs" is the answer.
     if health_condition == SPECIAL_NEEDS:
         fields.append("special_needs")
+    # The Date of Admission to the Agency is asked but optional (14 Nov 2026,
+    # owner); the Date of Placement to Custodian stays required where it is asked.
     date = date_field_for(case_type, type_of_adoption)
-    if date:
+    if date and date != ADMISSION:
         fields.append(date)
     return fields

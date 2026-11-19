@@ -95,6 +95,25 @@ class ImportDemoDataTest(TestCase):
         call_command("import_demo_data", fixture=str(self.fixture))
         self.assertEqual(4, Child.objects.count())
 
+    def test_an_older_fixture_with_case_study_rows_still_loads(self):
+        # Case studies were removed (children 0035); an export made before then
+        # still carries their rows, which have no model to load into.
+        self._write_fixture()
+        rows = json.loads(self.fixture.read_text(encoding="utf-8"))
+        rows += [
+            {"model": "case_study.casestudy", "pk": 1,
+             "fields": {"child": 900, "status": "draft"}},
+            {"model": "case_study.casestudysection", "pk": 1,
+             "fields": {"case_study": 1, "key": "a3_description", "value": {}}},
+            {"model": "case_study.casestudyfinal", "pk": 1,
+             "fields": {"case_study": 1, "snapshot": {}}},
+        ]
+        self.fixture.write_text(json.dumps(rows), encoding="utf-8")
+        out = StringIO()
+        call_command("import_demo_data", fixture=str(self.fixture), stdout=out)
+        self.assertEqual(4, Child.objects.count())
+        self.assertIn("3 case study row(s) left behind", out.getvalue())
+
     def test_spreads_them_across_the_real_psychologists(self):
         # The whole point: the demo caseload lands on the accounts that already
         # exist, not on the seeder's invented ones.

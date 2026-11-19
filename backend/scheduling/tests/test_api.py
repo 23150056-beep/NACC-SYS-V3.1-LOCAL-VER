@@ -130,18 +130,21 @@ class AvailabilityTest(SchedulingBase):
         self.assertEqual(len(resp.data), 1)
 
     def test_rejects_overlapping_block_same_day(self):
-        # setUp block: Wednesday 09:00-12:00 — a 10:00-14:00 window overlaps it.
+        # setUp block: Wednesday 09:00-12:00 - a 10:00-14:00 window overlaps it.
         self._auth("p@racco1.gov.ph")
         resp = self.client.post("/api/availability/", {
             "weekday": 2, "start_time": "10:00", "end_time": "14:00", "capacity": 1}, format="json")
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("Overlaps", str(resp.data))
+        self.assertEqual(self.block.id, resp.data["existing_id"])
 
-    def test_adjacent_block_same_day_is_allowed(self):
+    def test_adjacent_block_same_day_is_refused_too(self):
+        # One window a day: adjacent used to be allowed and the two capacities
+        # added up to a limit the psychologist never meant.
         self._auth("p@racco1.gov.ph")
         resp = self.client.post("/api/availability/", {
             "weekday": 2, "start_time": "12:00", "end_time": "15:00", "capacity": 1}, format="json")
-        self.assertEqual(resp.status_code, 201)
+        self.assertEqual(resp.status_code, 400)
+        self.assertEqual(self.block.id, resp.data["existing_id"])
 
     def test_same_window_on_other_day_is_allowed(self):
         self._auth("p@racco1.gov.ph")

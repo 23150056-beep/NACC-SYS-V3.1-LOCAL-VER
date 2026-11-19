@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "lint": "eslint . --ext .js,.jsx",
+    "lint": "eslint . --ext .js,.jsx && node scripts/check-icons.mjs",
+    "check:icons": "node scripts/check-icons.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

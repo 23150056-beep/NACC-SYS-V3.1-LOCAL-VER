@@ -10,7 +10,7 @@ The contract these tests exist to protect is one sentence: **anything this
 offers can be booked.** It is enforced literally at the bottom of this file by
 taking every slot the endpoint returns and posting it.
 """
-from datetime import timedelta
+from datetime import time, timedelta
 
 from django.utils import timezone
 
@@ -223,3 +223,63 @@ class SlotsRespectTodayTests(SchedulingBase):
         starts = [s["start"] for s in booking.bookable_slots(
             self.psy, self.child, now.date(), duration_minutes=60)]
         self.assertTrue(starts, "a window opening in half an hour has openings")
+
+
+class BookingWithoutALengthTests(SchedulingBase):
+    """The screens no longer ask for a length (14 Nov 2026): a booking that
+    omits `duration_minutes` is the standard hour, judged by the real rule."""
+
+    def setUp(self):
+        super().setUp()
+        self.wednesday = next_weekday(2, 9).date()
+        self._auth("s@racco1.gov.ph")
+
+    def _post(self, child, time):
+        return self.client.post("/api/appointments/", {
+            "child": child.id, "psychologist": self.psy.id,
+            "start": f"{self.wednesday.isoformat()}T{time}:00",
+            "purpose": "session"}, format="json")
+
+    def test_a_booking_without_a_length_is_sixty_minutes(self):
+        r = self._post(self.child, "09:00")
+        self.assertEqual(201, r.status_code, r.data)
+        self.assertEqual(60, r.data["duration_minutes"])
+        self.assertEqual(60, Appointment.objects.get(pk=r.data["id"]).duration_minutes)
+
+    def test_the_default_hour_is_what_the_clash_rule_judges(self):
+        self.assertEqual(201, self._post(self.child, "09:00").status_code)
+        other = child_with_referral("Ben", self.psy)
+        # 09:30 overlaps an hour starting at 09:00, but not a half hour.
+        self.assertIn(self._post(other, "09:30").status_code, (400, 409))
+        self.assertEqual(201, self._post(other, "10:00").status_code)
+
+
+class ShortWindowTests(SchedulingBase):
+    """Every booking is an hour, so a window under an hour is refused when it
+    is set, and an older one still saves an unrelated edit."""
+
+    def _window(self, start, end, **extra):
+        return {"psychologist": self.psy.id, "date": self.wednesday.isoformat(),
+                "start_time": start, "end_time": end, "capacity": 1, **extra}
+
+    def setUp(self):
+        super().setUp()
+        self.wednesday = next_weekday(2, 9).date()
+        AvailabilityBlock.objects.filter(psychologist=self.psy).delete()
+        self._auth("p@racco1.gov.ph")
+
+    def test_a_window_under_an_hour_is_refused(self):
+        r = self.client.post("/api/availability/", self._window("16:00", "16:30"), format="json")
+        self.assertEqual(400, r.status_code, r.data)
+        self.assertIn("end_time", r.data)
+
+    def test_an_hour_is_accepted(self):
+        r = self.client.post("/api/availability/", self._window("16:00", "17:00"), format="json")
+        self.assertEqual(201, r.status_code, r.data)
+
+    def test_an_older_short_window_still_saves_an_unrelated_edit(self):
+        block = AvailabilityBlock.objects.create(
+            psychologist=self.psy, date=self.wednesday, start_time=time(16, 0),
+            end_time=time(16, 30), capacity=1, active=True)
+        r = self.client.patch(f"/api/availability/{block.id}/", {"capacity": 2}, format="json")
+        self.assertEqual(200, r.status_code, r.data)

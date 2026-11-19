@@ -6,10 +6,11 @@ import {
 import { PROCEED, useConfirm } from '../../context/ConfirmContext';
 import {
   ADMISSION, ALIAS_CATEGORY, BIRTH_STATUSES, CASE_CATEGORIES, CASE_CATEGORY_OPTIONS, CASE_TYPES, CASE_TYPE_FIELDS,
-  DYNAMIC, HEALTH_CONDITIONS, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, SPECIAL_NEEDS, TYPES_OF_ADOPTION, ageRange, ageRefusal, caseChanged, caseTypesFor,
+  DYNAMIC, HEALTH_CONDITIONS, LEGAL_STATUSES, PLACEMENT, REFERRAL_SOURCES, RETIRED_CASE_TYPES, SPECIAL_NEEDS, TYPES_OF_ADOPTION, ageRange, ageRefusal, caseChanged, caseTypesFor,
   dateFieldFor, requiredFields, unaskedAnswers,
 } from '../../config/caseData';
 import { clock, shortDate, timeAgo } from '../../utils/time';
+import { writtenAddress } from '../../utils/child';
 import { PolishBar, usePolish } from '../../components/PolishWriting';
 import CustodianFields from './CustodianFields';
 import PsychologistPicker from './PsychologistPicker';
@@ -65,6 +66,19 @@ const FIELD_INFO = {
   social_worker: [4, 'social worker'],
 };
 const NAME_FIELDS = ['first_name', 'middle_name', 'last_name'];
+
+/* Present Environment as it is laid out, top to bottom (15 Nov 2026). "Show
+ * me" lists that step's answers in this order, not in the order of the
+ * required list, which is pinned to the server's and cannot follow the screen. */
+const STEP2_ORDER = [
+  'custodian_name', 'custodian_contact', 'custodian_sms_consent',
+  'province', 'psgc_province', 'municipality', 'psgc_municipality', 'barangay', 'psgc_barangay',
+  'street', 'house_number', 'landmark',
+];
+const onScreenOrder = (a, b) => {
+  const [i, j] = [STEP2_ORDER.indexOf(a), STEP2_ORDER.indexOf(b)];
+  return i < 0 || j < 0 ? 0 : i - j;
+};
 
 /* The fields that show their own error under the control. A refusal for any
  * other field - or for one the current case type hides - is listed at the top
@@ -311,6 +325,8 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
     ? [form._record.barangay, form._record.municipality, form._record.province].filter(Boolean).join(', ')
     : '';
 
+  const writtenLine = writtenAddress(form);
+
   /* Both the code and the name are stored. The code is what survives a place
    * being renamed upstream; the name is what a case worker reads back, and what
    * every record written before this picker existed already holds. */
@@ -363,7 +379,8 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
   const categoryOptions = form.case_type ? (CASE_CATEGORY_OPTIONS[form.case_type] || CASE_CATEGORIES) : CASE_CATEGORIES;
   const caseTypeOptions = caseTypesFor(form.case_category);
   // What each list leaves out, said in its hint: a list that silently lacks
-  // Family Tracing reads as a form that cannot do it.
+  // a case type reads as a form that cannot do it. (Two were retired on 14 Nov 2026;
+  // they come back only as the value a record already holds.)
   const hiddenCategories = form.case_type ? CASE_CATEGORIES.filter((c) => !categoryOptions.includes(c)) : [];
   const hiddenCaseTypes = form.case_category ? CASE_TYPES.filter((t) => !caseTypeOptions.includes(t)) : [];
   // "(no longer offered)" is for a retired value only. A current category the
@@ -439,6 +456,12 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
       problems.legal_status_date = 'The date issued cannot be before the date of birth.';
     }
   }
+  // A retired case type is refused as a new pick (the server's
+  // validate_case_type); a restored draft can still hold one, so say so here
+  // rather than after the save.
+  if (RETIRED_CASE_TYPES.includes(form.case_type) && changed('case_type')) {
+    problems.case_type = `${form.case_type} is no longer offered as a case type.`;
+  }
   const bornMoved = isEdit && changed('birth_date');
   for (const [f, label] of [['date_found', 'The date found'], [ADMISSION, 'The date of admission'],
     [PLACEMENT, 'The date of placement']]) {
@@ -499,7 +522,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
      reads. A blocker that is a refusal of what was typed says so. */
   const needList = FORM_STEPS.map((label, i) => ({
     label, n: i + 1,
-    items: blockers.filter((f) => stepOf(f) === i + 1)
+    items: blockers.filter((f) => stepOf(f) === i + 1).sort(onScreenOrder)
       .map((f) => ({ f, text: labelOf(f), kind: needed.includes(f) ? 'needed' : 'check' })),
   })).filter((g) => g.items.length);
   const jumpTo = (f) => {
@@ -661,7 +684,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   : undefined}>
                 <Select value={form.case_type || ''} onChange={(e) => setForm({ ...form, case_type: e.target.value })}>
                   <option value="">— Select case type —</option>
-                  {withRetired(caseTypeOptions, form.case_type).map((t) => <option key={t} value={t}>{caseTypeLabel(t)}</option>)}
+                  {withRetired(caseTypeOptions, form.case_type, form._record?.case_type).map((t) => <option key={t} value={t}>{caseTypeLabel(t)}</option>)}
                 </Select>
               </F>
 
@@ -691,7 +714,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   </F>
                 </div>
               )}
-              {/* The SCSR: "For Child Without Known Parents, indicate the given
+              {/* The SCSR: "For Child Without Known Parents" (now Foundling), indicate the given
                   first and last name and alias, if applicable". Shown for that
                   category only; an alias already saved stays when the category
                   changes - hidden, never deleted - and is sent with the save. */}
@@ -762,7 +785,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
               <F name="place_of_birth_or_found" label="Place of Birth or Place Found" required error={shown('place_of_birth_or_found')}>
                 <Input value={form.place_of_birth_or_found || ''} maxLength={150} onChange={(e) => setForm({ ...form, place_of_birth_or_found: e.target.value })} />
               </F>
-              <F name="birth_status" label="Birth Status" required error={shown('birth_status')}>
+              <F name="birth_status" label={optional('Birth Status')} error={shown('birth_status')}>
                 <Select value={form.birth_status || ''} onChange={(e) => setForm({ ...form, birth_status: e.target.value })}>
                   <option value="">— Select —</option>
                   {withRetired(BIRTH_STATUSES, form.birth_status, form._record?.birth_status).map((v) => <option key={v} value={v}>{optionLabel(BIRTH_STATUSES, v)}</option>)}
@@ -818,7 +841,7 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
               {/* One date, never both: an admission for a child the agency took
                   in, a placement for a child placed with a custodian. */}
               {dateField === ADMISSION && (
-                <F name={ADMISSION} label="Date of Admission to the Agency" required error={shown(ADMISSION)}>
+                <F name={ADMISSION} label={optional('Date of Admission to the Agency')} error={shown(ADMISSION)}>
                   <Input type="date" value={form[ADMISSION] || ''} min={form.birth_date || undefined} max={todayIso} onChange={(e) => setForm({ ...form, [ADMISSION]: e.target.value })} />
                 </F>
               )}
@@ -857,19 +880,14 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
             )}
             <div className="racco-eyebrow" style={{ fontSize: 10, margin: '6px 0 4px' }}>Address</div>
             <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)', marginBottom: 10 }}>
-              Choose the province first — the municipality and barangay lists follow from it.
+              Fill it in from the largest place down — each list follows from the one before it.
             </div>
-            <div className="racco-case-grid">
-              <F name="house_number" label="House Number" required error={shown('house_number')}>
-                <Input value={form.house_number || ''} maxLength={50} onChange={(e) => setForm({ ...form, house_number: e.target.value })} />
-              </F>
-              <F name="street" label="Street Number" required hint="Or the purok or sitio, where there is no street." error={shown('street')}>
-                <Input value={form.street || ''} maxLength={150} onChange={(e) => setForm({ ...form, street: e.target.value })} />
-              </F>
-              {/* Province, then municipality, then barangay: the order the
-                  lists unlock in, each filtered by the one before it. They
-                  were laid out the other way round, so the address was filled
-                  right to left past two disabled selects. */}
+            <div className="racco-case-grid racco-address-grid">
+              {/* Big to small (owner, 15 Nov 2026): province, municipality,
+                  barangay, then street and house number, landmark last. Each
+                  list is filtered by the one before it, so every field is
+                  usable when reached. DOM order is the tab order and the
+                  reading order; the written line below shows it small to big. */}
               <F name="province" label="Province" required error={shown('province')}>
                 <Select value={form.psgc_province || ''} onChange={(e) => pickPlace('province', e.target.value, provinces)}>
                   <option value="">— Select province —</option>
@@ -888,9 +906,25 @@ export default function ChildForm({ form, setForm, draftKey, psychologists, soci
                   {brgys.map((b) => <option key={b.psgc_code} value={b.psgc_code}>{b.name}</option>)}
                 </Select>
               </F>
+              <F name="street" label="Street Number" required hint="Or the purok or sitio, where there is no street." error={shown('street')}>
+                <Input value={form.street || ''} maxLength={150} onChange={(e) => setForm({ ...form, street: e.target.value })} />
+              </F>
+              <F name="house_number" label={optional('House Number')} error={shown('house_number')}>
+                <Input value={form.house_number || ''} maxLength={50} onChange={(e) => setForm({ ...form, house_number: e.target.value })} />
+              </F>
               <F name="landmark" label={optional('Landmark')} hint="Anything that helps find the house." error={shown('landmark')}>
                 <Input value={form.landmark || ''} maxLength={200} onChange={(e) => setForm({ ...form, landmark: e.target.value })} />
               </F>
+              {/* The address as the record will read it, small to big. Plain
+                  text, not a live region: it changes on every keystroke. Left
+                  out for an address typed before the lists existed and not yet
+                  re-picked, where the note below already shows it. */}
+              {writtenLine && !(typedAddress && !form.psgc_province) && (
+                <div style={{ gridColumn: '1 / -1', fontSize: 12.5, color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>
+                  Address as written:{' '}
+                  <strong data-testid="address-as-written" style={{ color: 'var(--text-strong)' }}>{writtenLine}</strong>
+                </div>
+              )}
               {/* An address typed before the picker existed has no code, so the
                   selects above sit empty and would look like a blank address.
                   Show what the record actually says. */}

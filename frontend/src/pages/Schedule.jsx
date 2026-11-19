@@ -8,18 +8,21 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useConfirm } from '../context/ConfirmContext';
 import { loadAll } from '../utils/load';
+import { useChildren } from '../context/ChildrenContext';
 import { clock, clockRange, exactDate } from '../utils/time';
-import { DURATIONS, scheduleName, shortName } from '../utils/child';
+import { SESSION_MINUTES, lengthNote, scheduleName, shortName } from '../utils/child';
 import {
   Alert, Avatar, Badge, Button, Card, ConfirmDialog, Drawer, FormField, hoverLift, Icon, iconBtn, Input, Modal, PAGE, PageHeader, Select, TimeInput,
 } from '../ui';
 import { prefetchBriefs } from '../api/assistant';
 import { useAssistant } from '../context/AssistantContext';
 import { useOpenFromLink } from '../utils/links';
+import { useSearchParams } from 'react-router-dom';
 import { firstError } from '../utils/errors';
 import { useSingleFlight } from '../utils/singleFlight';
 import BookingMonth from './schedule/MonthSlots';
 import { spokenDays, useMonthSlots } from './schedule/monthSlots';
+import { usePsychologistPicker, pickerOption } from './schedule/psychologistPicker';
 
 const localizer = dateFnsLocalizer({ format, parse, startOfWeek, getDay, locales: { 'en-US': enUS } });
 // Every time the calendar draws, on the 12-hour clock. The localizer's own
@@ -128,6 +131,65 @@ function workingWeekdays(blocks, psychologistId) {
     .map((b) => b.weekday))].sort((a, b) => a - b);
 }
 
+/* One window a day (owner, 9 Nov 2026): a day holds a single window and its
+   slot count is the day's limit, so adding availability to a day that has one
+   means editing it. These read the active windows the page already holds. */
+const slotsWord = (n) => `${n} slot${n === 1 ? '' : 's'}`;
+const describeBlock = (b) => `${clockRange(b.start_time, b.end_time)}, ${slotsWord(b.capacity)}`;
+const forPsychologist = (blocks, psyId) => blocks.filter(
+  (b) => b.active !== false && psyId !== '' && psyId != null
+    && String(b.psychologist) === String(psyId));
+const holderOfWeekday = (list, weekday, ignoreId) => list.find(
+  (b) => b.id !== ignoreId && b.date == null && Number(b.weekday) === Number(weekday));
+const holderOfDate = (list, date, ignoreId) => list.find(
+  (b) => b.id !== ignoreId && date && b.date === date);
+
+/* Days that still hold two or more active windows (data from before the rule).
+   They keep working; "Combine into one" folds them into a single window with
+   the earliest start, the latest end and the slots added up. */
+function crowdedDays(blocks) {
+  const groups = new Map();
+  for (const b of blocks.filter((x) => x.active !== false)) {
+    const key = `${b.psychologist}|${b.date ? `d:${b.date}` : `w:${b.weekday}`}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(b);
+  }
+  return [...groups.entries()].filter(([, list]) => list.length > 1).map(([key, list]) => {
+    const sorted = [...list].sort((a, b) => a.id - b.id);
+    const starts = sorted.map((b) => String(b.start_time).slice(0, 5)).sort();
+    const ends = sorted.map((b) => String(b.end_time).slice(0, 5)).sort();
+    return {
+      key, blocks: sorted, ids: sorted.map((b) => b.id),
+      day: blockDay(sorted[0]), date: sorted[0].date, name: sorted[0].psychologist_name,
+      start: starts[0], end: ends[ends.length - 1],
+      capacity: sorted.reduce((n, b) => n + (b.capacity || 0), 0),
+    };
+  });
+}
+
+/* "Mondays has two windows - Combine into one", for each day that still holds
+   more than one. The button is aria-disabled while it works, never disabled. */
+function CombineNotice({ days, onCombine, busy }) {
+  if (!days.length) return null;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {days.map((d) => (
+        <Alert key={d.key} tone="warning" icon={<Icon name="alert-triangle" size={18} />}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <span style={{ flex: 1, minWidth: 200 }}>
+              {`${d.name ? `${d.name}: ` : ''}${d.day} ${d.date ? 'has' : 'have'} ${d.blocks.length} windows (${d.blocks.map((b) => clockRange(b.start_time, b.end_time)).join(', ')}). A day holds one.`}
+            </span>
+            <Button type="button" variant="secondary" size="sm" aria-disabled={busy}
+              onClick={() => { if (!busy) onCombine(d); }}>
+              Combine into one
+            </Button>
+          </div>
+        </Alert>
+      ))}
+    </div>
+  );
+}
+
 // Local date. toISOString() converts to UTC and hands back yesterday for
 // anybody east of Greenwich, which is all of the Philippines.
 const isoOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -185,10 +247,14 @@ export default function Schedule() {
   const canBook = ['Administrator', 'Staff', 'Psychologist'].includes(role);
   const [appointments, setAppointments] = useState([]);
   const [blocks, setBlocks] = useState([]);
-  const [children, setChildren] = useState([]);
+  const { children: allChildren, revalidate: revalidateChildren } = useChildren();
+  const children = useMemo(() => allChildren.filter((c) => c.status === 'active'), [allChildren]);
   const [psychologists, setPsychologists] = useState([]);
   const [booking, setBooking] = useState(null);
   const [blockForm, setBlockForm] = useState(null);
+  // Id of the window a refused save says already holds the day (a race).
+  const [conflictId, setConflictId] = useState(null);
+  const [combining, setCombining] = useState(false);
   const [sel, setSel] = useState(null);
   const [error, setError] = useState('');
   const [openPsy, setOpenPsy] = useState(null); // { id, name } — full-page availability view (admin/staff)
@@ -208,6 +274,9 @@ export default function Schedule() {
   // can fetch that range rather than the entire history.
   const [calDate, setCalDate] = useState(() => new Date());
   const [calView, setCalView] = useState('month');
+  const [firstLoaded, setFirstLoaded] = useState(false);
+  const [wantAppt, setWantAppt] = useState(null);   // an appointment a link asked for
+  const [linkParams, setLinkParams] = useSearchParams();
 
   // Which appointments to hold in memory. The page used to ask for EVERY
   // appointment ever booked on every load - the endpoint is unpaginated, and
@@ -269,13 +338,14 @@ export default function Schedule() {
     () => api.get(`/appointments/?from=${range.from}&to=${range.to}`).then((r) => setAppointments(r.data)),
     () => api.get('/availability/').then((r) => setBlocks(r.data)),
     () => api.get('/unavailability/?upcoming=true').then((r) => setLeave(r.data)),
-    () => api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))),
+    () => revalidateChildren(),
     !isPsych && (() => api.get('/psychologists/').then((r) => setPsychologists(r.data))),
-  ], 'Could not load the calendar. Check your connection and refresh.'),
-  [isPsych, range.from, range.to, toast]);
+  ], 'Could not load the calendar. Check your connection and refresh.').then(() => setFirstLoaded(true)),
+  [isPsych, range.from, range.to, toast, revalidateChildren]);
   useEffect(() => { load(); }, [load]);
   // The openings for the psychologist actually chosen, on the day actually
-  // chosen, at the duration actually chosen. The old version asked about the
+  // chosen, at the length the booking carries (an hour, or the moved
+  // appointment's own). The old version asked about the
   // child's ASSIGNED psychologist regardless of who was picked in the form,
   // so booking anyone else showed somebody else's free time.
   useEffect(() => {
@@ -294,10 +364,14 @@ export default function Schedule() {
   const bookingChild = booking?.child;
   const movingId = booking?.id;
   const month = useMonthSlots({
-    psychologist: bookingPsy, child: bookingChild, duration: bookingDuration || 60,
+    psychologist: bookingPsy, child: bookingChild, duration: bookingDuration || SESSION_MINUTES,
     exclude: movingId, date: bookingDate, open: !!booking,
   });
   const monthData = month.data;
+  const picker = usePsychologistPicker({
+    child: bookingChild, duration: bookingDuration || SESSION_MINUTES, day: bookingDate,
+    exclude: movingId, open: !!booking && !isPsych,
+  });
   // The chosen day's times, kept when somebody pages to another month and
   // back (or just peeks), so a look at December does not lose the pick.
   const [pickedDay, setPickedDay] = useState(null);
@@ -369,13 +443,44 @@ export default function Schedule() {
     // 09:00 and the second one was refused.
     setBooking({
       child: childId ? String(childId) : '', psychologist: '',
-      date: '', time: '', purpose: 'session', duration: 60, notes: '',
+      date: '', time: '', purpose: 'session', duration: SESSION_MINUTES, notes: '',
     });
   };
   // `?book=1&child=12` — opening the drawer from a child's record should not
   // then ask which child. Both parameters are cleared afterwards so a refresh
   // does not reopen it.
   useOpenFromLink('book', '1', (params) => openBooking(params?.get('child')), !!booking, ['child']);
+
+  /* `?appointment=<id>` opens that one appointment's card. The parameter is
+     taken into state and removed from the address at once (as useOpenFromLink
+     does), so a reload does not reopen it. The appointment comes from what is
+     already loaded or, failing that, from the detail endpoint, whose scoping
+     decides; the calendar then moves to its day. */
+  const appointmentParam = linkParams.get('appointment');
+  useEffect(() => {
+    if (appointmentParam === null) return;
+    if (/^\d+$/.test(appointmentParam)) setWantAppt(appointmentParam);
+    else toast.warning('That appointment is not available to you.');
+    const next = new URLSearchParams(linkParams);
+    next.delete('appointment');
+    setLinkParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [appointmentParam]);
+  useEffect(() => {
+    if (!wantAppt || !firstLoaded) return;
+    const show = (a) => {
+      const at = new Date(a.start);
+      setCalDate(at);
+      setSel(a);
+    };
+    const found = appointments.find((a) => String(a.id) === wantAppt);
+    setWantAppt(null);
+    if (found) { show(found); return; }
+    api.get(`/appointments/${wantAppt}/`)
+      .then((r) => show(r.data))
+      .catch(() => toast.warning('That appointment is not available to you.'));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantAppt, firstLoaded]);
 
   const events = useMemo(() => appointments
     .filter((a) => !calPsy || String(a.psychologist) === String(calPsy))
@@ -387,7 +492,7 @@ export default function Schedule() {
       // read "C-0042 · Ref. E. Pascua" (utils/child.js scheduleName).
       title: `${scheduleName(a)} · ${PURPOSES.find((p) => p.v === a.purpose)?.label || a.purpose}`,
       start,
-      end: new Date(start.getTime() + (a.duration_minutes || 60) * 60000),
+      end: new Date(start.getTime() + (a.duration_minutes || SESSION_MINUTES) * 60000),
       resource: a,
     };
   }), [appointments, calPsy]);
@@ -458,7 +563,7 @@ export default function Schedule() {
     const payload = {
       child: booking.child, psychologist: booking.psychologist || undefined,
       start: `${booking.date}T${booking.time}:00`,
-      duration_minutes: booking.duration || 60,
+      duration_minutes: booking.duration || SESSION_MINUTES,
       purpose: booking.purpose, notes: booking.notes || '',
     };
     const who = booking.id ? booking.label
@@ -488,7 +593,7 @@ export default function Schedule() {
     } catch (err) {
       setError(firstError(err.response?.data));
       // Whatever was just refused must stop being offered.
-      if ([400, 409].includes(err.response?.status)) month.refresh();
+      if ([400, 409].includes(err.response?.status)) { month.refresh(); picker.refresh(); }
     }
   };
 
@@ -518,20 +623,20 @@ export default function Schedule() {
       date: day,
       time: '',
       purpose: appt.purpose,
-      duration: appt.duration_minutes || 60,
+      duration: appt.duration_minutes || SESSION_MINUTES,
       notes: appt.notes || '',
     });
   };
 
   const openCreateBlock = () => {
-    setError('');
+    setError(''); setConflictId(null);
     setBlockForm({ mode: 'weekly', weekdays: [], date: '', start_time: '09:00', end_time: '12:00', capacity: 2, psychologist: '' });
   };
 
   useOpenFromLink('availability', '1', openCreateBlock, !!blockForm);
 
   const openEditBlock = (b) => {
-    setError('');
+    setError(''); setConflictId(null);
     setBlockForm({
       id: b.id,
       mode: b.date ? 'date' : 'weekly',
@@ -545,16 +650,73 @@ export default function Schedule() {
     });
   };
 
-  // One block being edited, or a whole weekly pattern: either way it is an
-  // edit, and the form said "Add Availability ... Availability added".
-  const editingBlock = !!(blockForm?.id || blockForm?.byDay);
+  /* What saving would do, day by day. A day that already has a window is
+     updated, never given a second one: the form says so beside the day, and
+     Save PATCHes that window. `existing` is the window that holds the day. */
+  const blockPsyId = blockForm ? (isPsych ? user?.id : blockForm.psychologist) : '';
+  const heldWindows = forPsychologist(blocks, blockPsyId);
+  const targets = (() => {
+    if (!blockForm) return [];
+    if (blockForm.mode === 'date') {
+      return blockForm.date
+        ? [{ key: blockForm.date, label: blockDay({ date: blockForm.date }),
+             date: blockForm.date, existing: holderOfDate(heldWindows, blockForm.date, blockForm.id) }]
+        : [];
+    }
+    const days = blockForm.id ? [Number(blockForm.weekday)] : blockForm.weekdays.map(Number);
+    return days.map((wd) => ({
+      key: String(wd), label: `${WEEKDAYS[wd]}s`, weekday: wd,
+      existing: blockForm.byDay?.[wd] != null
+        ? blocks.find((x) => x.id === blockForm.byDay[wd])
+        : holderOfWeekday(heldWindows, wd, blockForm.id),
+    }));
+  })();
+  // Days among the picked ones that still hold several windows (from before
+  // the one-window rule). Saving would PATCH just one of them, so they are
+  // combined first.
+  const crowdedHere = crowdedDays(heldWindows);
+  const crowdedFor = (t) => crowdedHere.find((d) => (t.date
+    ? d.date === t.date
+    : !d.date && Number(d.blocks[0].weekday) === Number(t.weekday)));
+  // A weekly window a single date would replace, said beside the date.
+  const weeklyBehindDate = blockForm?.mode === 'date' && blockForm.date && !blockForm.id
+    ? holderOfWeekday(heldWindows, (new Date(`${blockForm.date}T12:00:00`).getDay() + 6) % 7)
+    : null;
+
+  // One block being edited, a whole weekly pattern, or days that all already
+  // have a window (saving updates them): either way it is an edit, and the
+  // form said "Add Availability ... Availability added".
+  const updatesOnly = !!blockForm && !blockForm.id && !blockForm.byDay
+    && targets.length > 0 && targets.every((t) => t.existing);
+  const editingBlock = !!(blockForm?.id || blockForm?.byDay || updatesOnly);
+
+  // Exactly one day picked and it exists: show that window's hours and slots
+  // instead of the defaults, unless the person already typed their own.
+  const prefillFrom = (form, existing) => (
+    existing && !form.touched ? {
+      ...form,
+      start_time: String(existing.start_time).slice(0, 5),
+      end_time: String(existing.end_time).slice(0, 5),
+      capacity: existing.capacity,
+    } : form);
+  const pickWeekdays = (nextDays) => setBlockForm((f) => {
+    const next = { ...f, weekdays: nextDays };
+    const only = nextDays.length === 1
+      ? holderOfWeekday(forPsychologist(blocks, isPsych ? user?.id : f.psychologist), nextDays[0])
+      : null;
+    return prefillFrom(next, only);
+  });
+  const pickDate = (date) => setBlockForm((f) => prefillFrom(
+    { ...f, date },
+    holderOfDate(forPsychologist(blocks, isPsych ? user?.id : f.psychologist), date)));
+  const touch = (patch) => setBlockForm((f) => ({ ...f, ...patch, touched: true }));
 
   const saveBlock = (e) => {
     e.preventDefault();
     return once(() => saveBlockNow());
   };
   const saveBlockNow = async () => {
-    setError('');
+    setError(''); setConflictId(null);
     if (!isPsych && !blockForm.id && !blockForm.psychologist) {
       setError('Select which psychologist this availability belongs to.');
       return;
@@ -563,61 +725,126 @@ export default function Schedule() {
       setError('Tick at least one weekday.');
       return;
     }
+    if (!blockForm.id && blockForm.mode === 'date' && !blockForm.date) {
+      setError('Pick the date.');
+      return;
+    }
+    if (!blockForm.id && targets.some((t) => crowdedFor(t))) {
+      setError('A day you picked has more than one window. Press "Combine into one" beside it, then save.');
+      return;
+    }
     const base = {
       start_time: blockForm.start_time, end_time: blockForm.end_time,
       capacity: Number(blockForm.capacity) || 1,
     };
     // Owner is only set on create — editing never reassigns whose calendar a block belongs to.
-    if (!isPsych && !blockForm.id) base.psychologist = blockForm.psychologist;
+    const createBase = { ...base };
+    if (!isPsych && !blockForm.id) createBase.psychologist = blockForm.psychologist;
+
+    const to = `${clockRange(base.start_time, base.end_time)}, ${slotsWord(base.capacity)}`;
+    // Which days are new and which already have a window (old -> new).
+    const adds = [];
+    const updates = [];
+    if (!blockForm.id) {
+      for (const t of targets) {
+        if (t.existing) updates.push([`${t.label}`, `${describeBlock(t.existing)} \u2192 ${to}`, t]);
+        else adds.push(t.label);
+      }
+    }
+    const removed = blockForm.byDay
+      ? Object.keys(blockForm.byDay).map(Number).filter((wd) => !blockForm.weekdays.map(Number).includes(wd))
+      : [];
+    const onlyUpdating = !!blockForm.id || adds.length === 0;
     if (!(await confirm({
-      description: blockForm.id || blockForm.byDay
-        ? 'This saves the changed hours. Sessions already booked are kept as they are.'
-        : 'This adds the hours to the calendar, where they can be booked straight away.',
+      description: onlyUpdating
+        ? 'This updates the hours and sessions for the day. Sessions already booked are kept as they are.'
+        : adds.length && updates.length
+          ? 'This adds the new days and updates the days that already have availability. Sessions already booked are kept as they are.'
+          : 'This adds the hours to the calendar, where they can be booked straight away.',
       confirmLabel: 'Yes, save the hours',
-      details: [['Hours', clockRange(blockForm.start_time, blockForm.end_time)],
-        ['Sessions at a time', String(base.capacity)],
-        ['Date', blockForm.mode === 'date' ? blockForm.date : null]],
+      details: [
+        adds.length ? ['Added', adds.join(', ')] : null,
+        ...updates.map(([label, change]) => [`Updated ${label}`, change]),
+        removed.length ? ['Removed', removed.map((wd) => `${WEEKDAYS[wd]}s`).join(', ')] : null,
+        blockForm.id ? ['Hours', clockRange(blockForm.start_time, blockForm.end_time)] : null,
+        ['Sessions that day', String(base.capacity)],
+        ['Date', blockForm.mode === 'date' ? blockForm.date : null],
+      ].filter(Boolean),
     }))) return;
+    let outside = 0;
     try {
-      if (blockForm.byDay) {
-        // Editing a whole weekly pattern: the ticked days are the truth. Days
-        // still ticked are updated in place, newly ticked ones created, and
-        // unticked ones removed — so "I no longer work Fridays" is one untick
-        // rather than hunting for the right row to delete.
-        const wanted = blockForm.weekdays.map(Number);
-        const existing = Object.entries(blockForm.byDay)
-          .map(([wd, id]) => [Number(wd), id]);
-        await Promise.all([
-          ...existing
-            .filter(([wd]) => wanted.includes(wd))
-            .map(([wd, id]) => api.patch(`/availability/${id}/`,
-              { ...base, weekday: wd, date: null })),
-          ...existing
-            .filter(([wd]) => !wanted.includes(wd))
-            .map(([, id]) => api.delete(`/availability/${id}/`)),
-          ...wanted
-            .filter((wd) => !(wd in blockForm.byDay))
-            .map((wd) => api.post('/availability/', { ...base, weekday: wd, date: null })),
-        ]);
-      } else if (blockForm.id) {
+      if (blockForm.id) {
         const payload = {
           ...base,
           weekday: blockForm.mode === 'weekly' ? Number(blockForm.weekday) : null,
           date: blockForm.mode === 'date' ? blockForm.date : null,
         };
-        await api.patch(`/availability/${blockForm.id}/`, payload);
-      } else if (blockForm.mode === 'weekly') {
-        for (const wd of blockForm.weekdays) {
-          await api.post('/availability/', { ...base, weekday: wd, date: null });
-        }
+        const r = await api.patch(`/availability/${blockForm.id}/`, payload);
+        outside += r.data?.outside_hours || 0;
       } else {
-        await api.post('/availability/', { ...base, weekday: null, date: blockForm.date });
+        // A day that has a window is updated in place; a new day is created;
+        // in a pattern edit, unticked days are removed. One at a time, so a
+        // refusal stops at the day that caused it.
+        for (const t of targets) {
+          if (t.existing) {
+            const r = await api.patch(`/availability/${t.existing.id}/`,
+              { ...base, weekday: t.weekday ?? null, date: t.date ?? null });
+            outside += r.data?.outside_hours || 0;
+          } else {
+            const r = await api.post('/availability/',
+              { ...createBase, weekday: t.weekday ?? null, date: t.date ?? null });
+            outside += r.data?.outside_hours || 0;
+          }
+        }
+        for (const wd of removed) {
+          await api.delete(`/availability/${blockForm.byDay[wd]}/`);
+        }
       }
       toast.success(editingBlock ? 'Availability updated' : 'Availability added');
+      if (outside > 0) {
+        toast.warning(`${outside} session${outside === 1 ? '' : 's'} already booked on that day `
+          + `${outside === 1 ? 'falls' : 'fall'} outside the new hours. ${outside === 1 ? 'It is' : 'They are'} kept as agreed.`);
+      }
       setBlockForm(null); load();
     } catch (err) {
-      setError(firstError(err.response?.data, 'Could not save availability.'));
+      const data = err.response?.data;
+      setError(firstError(data, 'Could not save availability.'));
+      // A race: somebody gave the day a window since this page loaded. Offer
+      // to edit that one rather than leave a dead end.
+      if (data && Number.isInteger(data.existing_id)) setConflictId(data.existing_id);
+      load();
     }
+  };
+
+  const editConflict = async () => {
+    try {
+      const { data } = await api.get(`/availability/${conflictId}/`);
+      openEditBlock(data);
+    } catch {
+      toast.error('Could not open that day. Reload the page and try again.');
+    }
+  };
+
+  /* Days that still hold two or more windows (from before the one-window
+     rule) are folded into one on request, never on their own. */
+  const combineDay = async (day) => {
+    if (!(await confirm({
+      description: 'This replaces the windows with one. Sessions already booked are kept as they are.',
+      confirmLabel: 'Yes, combine them',
+      details: [
+        ['Day', day.day],
+        ['Hours', clockRange(day.start, day.end)],
+        ['Sessions that day', `${day.capacity} (${day.blocks.map((b) => b.capacity).join(' + ')})`],
+      ],
+    }))) return;
+    setCombining(true);
+    try {
+      await api.post('/availability/combine/', { ids: day.ids });
+      toast.success(`${day.day} now has one window`);
+      load();
+    } catch (err) {
+      toast.error(firstError(err.response?.data, 'Could not combine those windows.'));
+    } finally { setCombining(false); }
   };
 
   /* Removing a window never cancels what is booked inside it — those sessions
@@ -691,7 +918,7 @@ export default function Schedule() {
      unticking removes it, and the times and capacity apply across the lot —
      which is how somebody thinks about their own week. */
   const openEditPattern = (pattern) => {
-    setError('');
+    setError(''); setConflictId(null);
     setBlockForm({
       ids: pattern.blocks.map((b) => b.id),
       byDay: Object.fromEntries(pattern.blocks.map((b) => [b.weekday, b.id])),
@@ -729,7 +956,7 @@ export default function Schedule() {
             <Button variant="ghost" onClick={() => setOpenPsy(null)} iconLeft={<Icon name="arrow-left" size={17} />}>Back to Calendar</Button>
             {canRecordLeave && (
               <Button variant="secondary" iconLeft={<Icon name="clock" size={16} />}
-                onClick={() => { setError(''); setBlockForm({ mode: 'weekly', weekdays: [], date: '', start_time: '09:00', end_time: '12:00', capacity: 2, psychologist: openPsy.id }); }}>
+                onClick={() => { setError(''); setConflictId(null); setBlockForm({ mode: 'weekly', weekdays: [], date: '', start_time: '09:00', end_time: '12:00', capacity: 2, psychologist: openPsy.id }); }}>
                 Add Availability
               </Button>
             )}
@@ -752,6 +979,9 @@ export default function Schedule() {
               <div style={{ fontSize: 13, color: 'var(--text-muted)' }}>No availability blocks for this psychologist yet.</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                {canRecordLeave && (
+                  <CombineNotice days={crowdedDays(openPsyBlocks)} onCombine={combineDay} busy={combining} />
+                )}
                 {openPsyPatterns.length > 0 && (
                   <div>
                     <div className="racco-eyebrow" style={{ fontSize: 10, marginBottom: 8 }}>Weekly pattern</div>
@@ -935,7 +1165,7 @@ export default function Schedule() {
               setBooking({
                 child: '', psychologist: '',
                 date: format(slot.start, 'yyyy-MM-dd'), time: '',
-                purpose: 'session', duration: 60, notes: '',
+                purpose: 'session', duration: SESSION_MINUTES, notes: '',
               });
             }}
             style={{ fontFamily: 'var(--font-sans)', fontSize: 13, height: '100%' }}
@@ -960,6 +1190,7 @@ export default function Schedule() {
           </div>
         ) : isPsych ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <CombineNotice days={crowdedDays(myBlocks)} onCombine={combineDay} busy={combining} />
             {myBlocks.map((b) => (
               <div key={b.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderRadius: 'var(--radius-lg)', background: 'var(--ink-50)', border: '1px solid var(--border)' }}>
                 <Icon name="clock" size={16} style={{ color: 'var(--blue-600)' }} />
@@ -981,7 +1212,7 @@ export default function Schedule() {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 12 }}>
               {psyGroups.map((g) => (
-                <div key={g.id} role="button" tabIndex={0}
+                <div key={g.id} role="button" tabIndex={0} className="racco-btn"
                   onClick={() => setOpenPsy({ id: g.id, name: g.name })}
                   onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); setOpenPsy({ id: g.id, name: g.name }); } }}
                   {...hoverLift()}
@@ -1072,7 +1303,7 @@ export default function Schedule() {
             <div style={{ padding: '10px 12px', borderRadius: 'var(--radius-md)', background: 'var(--ink-50)', border: '1px solid var(--border)' }}>
               <div style={{ fontWeight: 700, fontSize: 13.5, color: 'var(--text-strong)' }}>{scheduleName(a)}</div>
               <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
-                {exactDate(a.start)} · {a.duration_minutes} min
+                {exactDate(a.start)}{lengthNote(a.duration_minutes)}
                 {a.psychologist_name ? ` · ${a.psychologist_name}` : ''}
               </div>
             </div>
@@ -1157,32 +1388,37 @@ export default function Schedule() {
           </FormField>
           )}
           {!isPsych && (
-            <FormField label="Psychologist" required hint="Bookings must fall inside their availability.">
+            <FormField
+              label="Psychologist" required
+              hint={(() => {
+                const chosen = picker.rows.get(String(booking.psychologist));
+                if (chosen && chosen.state !== 'open') return picker.onDay
+                  ? `${chosen.label}. Pick another psychologist or another day.`
+                  : `${chosen.label}. Pick another psychologist.`;
+                const greyed = psychologists.some((p) => pickerOption(p, picker.rows, booking.psychologist).disabled);
+                return greyed
+                  ? (picker.onDay
+                    ? 'Greyed out: no open time on that day. Bookings must fall inside their availability.'
+                    : 'Greyed out: no open time in the next 12 months. Bookings must fall inside their availability.')
+                  : 'Bookings must fall inside their availability.';
+              })()}
+            >
               <Select value={booking.psychologist} onChange={(e) => setBooking({ ...booking, psychologist: e.target.value })}>
                 <option value="">— Select psychologist —</option>
-                {psychologists.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                {psychologists.map((p) => {
+                  const opt = pickerOption(p, picker.rows, booking.psychologist);
+                  return <option key={p.id} value={p.id} disabled={opt.disabled}>{opt.text}</option>;
+                })}
               </Select>
             </FormField>
           )}
-          {/* Purpose and length come BEFORE the day, because both change
-              which times are free. Asking for a time first and letting the
-              length invalidate it afterwards is how the old form produced
-              a refusal only once you pressed Book. */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <FormField label="Purpose">
-              <Select value={booking.purpose} onChange={(e) => setBooking({ ...booking, purpose: e.target.value })}>
-                {PURPOSES.map((p) => <option key={p.v} value={p.v}>{p.label}</option>)}
-              </Select>
-            </FormField>
-            <FormField label="Length">
-              <Select
-                value={booking.duration}
-                onChange={(e) => setBooking({ ...booking, duration: Number(e.target.value), time: '' })}
-              >
-                {DURATIONS.map((d) => <option key={d.v} value={d.v}>{d.label}</option>)}
-              </Select>
-            </FormField>
-          </div>
+          {/* No length to pick: a new session is the standard hour, and a
+              moved one keeps its own (booking.duration). */}
+          <FormField label="Purpose">
+            <Select value={booking.purpose} onChange={(e) => setBooking({ ...booking, purpose: e.target.value })}>
+              {PURPOSES.map((p) => <option key={p.v} value={p.v}>{p.label}</option>)}
+            </Select>
+          </FormField>
           <FormField
             label="Day" required
             hint={bookingPsy && (monthData?.works || bookingWorkingDays).length
@@ -1263,9 +1499,20 @@ export default function Schedule() {
             </Button>
           )}
         >
-          {error && <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>{String(error)}</Alert>}
+          {error && (
+            <Alert tone="danger" icon={<Icon name="alert-triangle" size={18} />}>
+              {String(error)}
+              {conflictId != null && (
+                <div style={{ marginTop: 8 }}>
+                  <Button type="button" variant="secondary" size="sm" onClick={editConflict}>
+                    Edit that day
+                  </Button>
+                </div>
+              )}
+            </Alert>
+          )}
           {!isPsych && (
-            editingBlock ? (
+            editingBlock && !updatesOnly ? (
               <FormField label="Psychologist">
                 <Input value={blockForm.psychologist_name || ''} disabled />
               </FormField>
@@ -1285,14 +1532,14 @@ export default function Schedule() {
             </Select>
           </FormField>
           {blockForm.mode === 'weekly' && !blockForm.id ? (
-            <FormField label="Weekdays" required hint="Tick every day this window repeats — one block is created per day.">
+            <FormField label="Weekdays" required hint="Tick every day this window repeats. A day holds one window, so a day that already has one is updated instead.">
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
                 {WEEKDAYS.map((d, i) => {
                   const on = blockForm.weekdays.includes(i);
                   return (
                     <label key={d} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '6px 11px', borderRadius: 'var(--radius-pill)', border: `1px solid ${on ? 'var(--blue-500)' : 'var(--border)'}`, background: on ? 'var(--blue-50)' : 'var(--surface)', fontSize: 12.5, fontWeight: 700, color: on ? 'var(--blue-700)' : 'var(--text-body)', cursor: 'pointer' }}>
                       <input type="checkbox" checked={on} style={{ accentColor: 'var(--blue-600)' }}
-                        onChange={() => setBlockForm((f) => ({ ...f, weekdays: on ? f.weekdays.filter((x) => x !== i) : [...f.weekdays, i] }))} />
+                        onChange={() => pickWeekdays(on ? blockForm.weekdays.filter((x) => x !== i) : [...blockForm.weekdays, i])} />
                       {d.slice(0, 3)}
                     </label>
                   );
@@ -1306,16 +1553,45 @@ export default function Schedule() {
               </Select>
             </FormField>
           ) : (
-            <FormField label="Date">
-              <Input type="date" value={blockForm.date} onChange={(e) => setBlockForm({ ...blockForm, date: e.target.value })} />
+            <FormField label="Date" hint="A single date replaces that weekday's weekly hours for that date only.">
+              <Input type="date" value={blockForm.date} onChange={(e) => pickDate(e.target.value)} />
             </FormField>
           )}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-            <FormField label="From"><TimeInput value={blockForm.start_time} onChange={(v) => setBlockForm({ ...blockForm, start_time: v })} /></FormField>
-            <FormField label="To"><TimeInput value={blockForm.end_time} onChange={(v) => setBlockForm({ ...blockForm, end_time: v })} /></FormField>
+          {/* Beside the day: which of the picked days already have a window
+              (saving updates it), and which the form would send to the server
+              as new. role="status" so the change is announced. */}
+          <div role="status" aria-live="polite" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {targets.filter((t) => t.existing && !blockForm.byDay?.[t.weekday]).map((t) => {
+              const crowded = !blockForm.id && crowdedFor(t);
+              return crowded ? (
+                <Alert key={t.key} tone="warning" icon={<Icon name="alert-triangle" size={16} />}>
+                  {`${t.label} ${t.date ? 'has' : 'have'} ${crowded.blocks.length} windows. They need to become one before the day can be edited.`}
+                  {' '}
+                  <Button type="button" variant="secondary" size="sm" aria-disabled={combining}
+                    onClick={() => { if (!combining) combineDay(crowded); }}>
+                    Combine into one
+                  </Button>
+                </Alert>
+              ) : (
+                <Alert key={t.key} tone="info" icon={<Icon name="info" size={16} />}>
+                  {blockForm.id
+                    ? `${t.label} already have ${describeBlock(t.existing)}. Edit that window instead, or pick another day.`
+                    : `${t.label} already ${t.date ? 'has' : 'have'} ${describeBlock(t.existing)} - saving updates it.`}
+                </Alert>
+              );
+            })}
+            {weeklyBehindDate && (
+              <Alert tone="info" icon={<Icon name="info" size={16} />}>
+                {`${WEEKDAYS[weeklyBehindDate.weekday]}s normally have ${describeBlock(weeklyBehindDate)}. This date uses the hours below instead, for this date only.`}
+              </Alert>
+            )}
           </div>
-          <FormField label="Capacity" hint="How many appointments fit in this block per day.">
-            <Input type="number" min="1" value={blockForm.capacity} onChange={(e) => setBlockForm({ ...blockForm, capacity: e.target.value })} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <FormField label="From"><TimeInput value={blockForm.start_time} onChange={(v) => touch({ start_time: v })} /></FormField>
+            <FormField label="To"><TimeInput value={blockForm.end_time} onChange={(v) => touch({ end_time: v })} /></FormField>
+          </div>
+          <FormField label="Sessions that day" hint="The most sessions that can be booked on this day. When it is reached, nobody can book more.">
+            <Input type="number" min="1" value={blockForm.capacity} onChange={(e) => touch({ capacity: e.target.value })} />
           </FormField>
         </Drawer>
       )}
@@ -1332,7 +1608,7 @@ export default function Schedule() {
           <Modal
             onClose={() => setSel(null)} width={420}
             title={sel.child_name || `Case ${sel.case_ref}`}
-            subtitle={`${exactDate(sel.start)} · ${sel.duration_minutes} min`}
+            subtitle={`${exactDate(sel.start)}${lengthNote(sel.duration_minutes)}`}
             footer={scheduled && !sel.name_hidden ? (
               <>
                 {(isPsych || role === 'Administrator') && (

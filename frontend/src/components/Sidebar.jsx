@@ -127,7 +127,7 @@ export default function Sidebar() {
           const badge = badgeFor(s.id);
           return (
             <Link
-              key={s.id} to={s.to} title={s.label} aria-current={active ? 'page' : undefined}
+              key={s.id} to={s.to} className="racco-btn" title={s.label} aria-current={active ? 'page' : undefined}
               style={railRowStyle({ active, icons: !labels })}
               onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.6)'; }}
               onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}

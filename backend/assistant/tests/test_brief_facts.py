@@ -101,9 +101,9 @@ class ScopeTest(FactsFixture):
         # The case brief's extra rows (CaseBriefTest holds what is in them).
         case_rows = {"case_referral", "psychologist", "consent", "custodian_texts",
                      "survey"}
-        # And the record's own social worker's: where the case study stands, and
-        # what to do next (test_next_steps). The ISA and a psychologist get neither.
-        own_sw = {"case_study", "next_steps"}
+        # And the record's own social worker's: what to do next
+        # (test_next_steps). The ISA and a psychologist get neither.
+        own_sw = {"next_steps"}
         for user, keys in ((self.psy, shared), (self.sw, shared | case_rows | own_sw),
                            (self.admin, shared | case_rows)):
             with self.subTest(user=user.email):

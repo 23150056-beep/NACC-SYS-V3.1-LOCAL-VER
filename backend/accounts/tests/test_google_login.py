@@ -80,7 +80,8 @@ class GoogleLoginTests(APITestCase):
         # A Google user has no password to rotate; leaving the flag set would
         # trap them in the change-password gate forever.
         self.staff.must_change_password = True
-        self.staff.save(update_fields=["must_change_password"])
+        self.staff.set_unusable_password()
+        self.staff.save(update_fields=["must_change_password", "password"])
         with mock.patch(VERIFY, return_value=claims("staff@racco1.gov.ph")):
             token = self.post().data["access"]
         self.staff.refresh_from_db()

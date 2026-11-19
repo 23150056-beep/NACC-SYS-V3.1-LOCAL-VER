@@ -33,7 +33,7 @@ import urllib.request
 from django.conf import settings
 from django.db import transaction
 
-from accounts.display import display_name
+from accounts.display import display_name, entered_name
 
 logger = logging.getLogger(__name__)
 
@@ -367,6 +367,146 @@ def send_temporary_password_notification(user, temporary_password):
     transaction.on_commit(
         lambda: threading.Thread(
             target=_post, args=(payload, "temporary password email"),
+            daemon=True).start())
+    return True
+
+
+def _role_words(role):
+    """How the approval email names a role, in the words people use."""
+    name = getattr(role, "role_name", None) or str(role or "")
+    if name == "Staff":
+        return "a Social Worker (SW)"
+    if name == "Psychologist":
+        return "a Psychologist"
+    return name
+
+
+def build_access_approved_payload(user, role):
+    """The "your access was approved" email for a Google applicant.
+
+    Carries no password, no code and no link that signs anybody in: the button
+    goes to /login (which never borrows another tab's session), and the person
+    signs in with Google themselves. Nothing about any child.
+    """
+    # Imported here: accounts.email_notifications imports this module.
+    from accounts.email_notifications import SAFETY
+
+    plain_name = entered_name(user, "there")
+    name = html.escape(plain_name)
+    role_words = _role_words(role)
+    role_html = html.escape(role_words)
+    address = getattr(user, "email", "") or ""
+    site = sign_in_url()
+    url = f"{site}/login" if site else ""
+
+    button = (
+        f'<tr><td align="center" style="padding:4px 32px 12px;">'
+        f'<a href="{html.escape(url)}" '
+        f'style="display:inline-block;background:{_BRAND};color:#ffffff;'
+        f'text-decoration:none;font-weight:700;font-size:15px;'
+        f'padding:13px 30px;border-radius:8px;">Go to NACC SYS</a>'
+        f"</td></tr>"
+        f'<tr><td align="center" style="padding:0 32px 22px;font-size:12px;'
+        f'color:{_MUTED};word-break:break-all;">{html.escape(site)}</td></tr>'
+    ) if url else ""
+
+    html_body = (
+        f'<!DOCTYPE html><html><body style="margin:0;padding:0;'
+        f'background:{_PAPER};">'
+        f'<table role="presentation" width="100%" cellpadding="0" '
+        f'cellspacing="0" style="background:{_PAPER};padding:24px 12px;">'
+        f'<tr><td align="center">'
+        f'<table role="presentation" width="100%" cellpadding="0" '
+        f'cellspacing="0" style="max-width:560px;background:#ffffff;'
+        f'border:1px solid {_BORDER};border-radius:14px;overflow:hidden;'
+        f'font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;">'
+
+        # Header
+        f'<tr><td style="background:{_BRAND};padding:22px 32px;">'
+        f'<div style="color:#ffffff;font-size:17px;font-weight:700;'
+        f'line-height:1.3;">NACC &ndash; RACCO 1</div>'
+        f'<div style="color:#c3cbf5;font-size:12px;padding-top:3px;">'
+        f'National Authority for Child Care</div></td></tr>'
+
+        # Greeting
+        f'<tr><td style="padding:30px 32px 0;">'
+        f'<div style="font-size:19px;font-weight:700;color:{_INK};">'
+        f'Your access was approved</div>'
+        f'<p style="margin:14px 0 0;font-size:15px;line-height:1.6;'
+        f'color:{_INK};">Hello {name},</p>'
+        f'<p style="margin:10px 0 0;font-size:15px;line-height:1.6;'
+        f'color:{_MUTED};">An administrator approved your request for access '
+        f'to NACC SYS as {role_html}.</p></td></tr>'
+
+        # Steps
+        f'<tr><td style="padding:22px 32px 0;">'
+        f'<div style="font-size:14px;font-weight:700;color:{_INK};">'
+        f'What to do next</div>'
+        f'<ol style="margin:9px 0 0;padding-left:20px;font-size:14px;'
+        f'line-height:1.75;color:{_MUTED};">'
+        f'<li>Open NACC SYS.</li>'
+        f'<li>Choose &ldquo;Sign in with Google&rdquo;.</li>'
+        f'<li>Pick the Google account {html.escape(address)}.</li>'
+        f'</ol></td></tr>'
+
+        f'<tr><td style="padding:24px 32px 0;"></td></tr>'
+        f"{button}"
+
+        # Security note
+        f'<tr><td style="padding:0 32px 26px;">'
+        f'<div style="background:{_PAPER};border-left:3px solid {_BRAND};'
+        f'border-radius:0 8px 8px 0;padding:13px 16px;font-size:13px;'
+        f'line-height:1.65;color:{_MUTED};">{html.escape(SAFETY)}'
+        f'</div></td></tr>'
+
+        # Footer
+        f'<tr><td style="background:{_PAPER};border-top:1px solid {_BORDER};'
+        f'padding:15px 32px;font-size:11.5px;line-height:1.6;color:{_MUTED};">'
+        f'Automated message from NACC SYS. Replies are not monitored.'
+        f'</td></tr>'
+
+        f"</table></td></tr></table></body></html>"
+    )
+
+    text_body = (
+        f"Your access was approved\n\n"
+        f"Hello {plain_name},\n\n"
+        f"An administrator approved your request for access to NACC SYS as "
+        f"{role_words}.\n\n"
+        f"1. Open NACC SYS.\n"
+        f"2. Choose \"Sign in with Google\".\n"
+        f"3. Pick the Google account {address}.\n\n"
+        + (f"{url}\n\n" if url else "")
+        + f"{SAFETY}\n\n"
+          "Automated message from NACC SYS. Replies are not monitored."
+    )
+
+    return {
+        "sender": {
+            "name": settings.BREVO_SENDER_NAME,
+            "email": settings.BREVO_SENDER_EMAIL,
+        },
+        "to": [{"email": address, "name": plain_name}],
+        "subject": "Your NACC SYS access was approved",
+        "htmlContent": html_body,
+        "textContent": text_body,
+    }
+
+
+def send_access_approved_notification(user, role):
+    """Queue the approval email for a Google applicant. True only when queued
+    (handed to a background thread, not delivered), False for no address or
+    no BREVO_API_KEY (the console line says what would have gone)."""
+    if not getattr(user, "email", ""):
+        return False
+    payload = build_access_approved_payload(user, role)
+    if not settings.BREVO_API_KEY:
+        logger.warning("EMAIL (console) access_approved to %s: %s",
+                       user.email, payload["subject"])
+        return False
+    transaction.on_commit(
+        lambda: threading.Thread(
+            target=_post, args=(payload, "access approved email"),
             daemon=True).start())
     return True
 

@@ -96,8 +96,8 @@ class UserManagementTest(APITestCase):
         self.assertTrue(self.admin.is_active)
 
     def test_last_administrator_cannot_be_deactivated_by_editing_status(self):
-        """archive/ is not the only door: `status` is writable on the ordinary
-        update endpoint, so the rule has to live where both paths pass."""
+        """archive/ is not the only door: the ordinary update endpoint must not
+        move the status either (see test_user_edit_status.py)."""
         self._auth("admin@racco1.gov.ph", "admin1234")
         resp = self.client.patch(f"/api/users/{self.admin.id}/",
                                  {"status": "archived"}, format="json")

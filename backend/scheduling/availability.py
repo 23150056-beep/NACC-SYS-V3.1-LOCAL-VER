@@ -14,6 +14,23 @@ from django.utils import timezone
 from scheduling.models import Appointment, AvailabilityBlock
 
 
+def blocks_for_day(blocks, day):
+    """The windows that apply on one local date, from active `blocks`.
+
+    A day holds one window. A one-off window on a date REPLACES that weekday's
+    weekly window for that date only ("this Monday, 1-3 PM, 1 slot"), so the
+    dated ones win when any exist and the weekly ones are the fallback. Every
+    reader that needs "what is on this day" goes through here, so the booking
+    rule, the slot grid, the month view and the assistant agree.
+    """
+    dated = [b for b in blocks if b.active and b.date == day]
+    if dated:
+        return dated
+    return [b for b in blocks
+            if b.active and b.date is None and b.weekday is not None
+            and b.weekday == day.weekday()]
+
+
 def free_windows(psychologist, start_date, end_date, now=None):
     """Bookable windows with spare capacity for one psychologist, [start, end).
 
@@ -39,12 +56,7 @@ def free_windows(psychologist, start_date, end_date, now=None):
             day += timedelta(days=1)
             continue
         day_start = timezone.make_aware(datetime.combine(day, time.min))
-        for block in blocks:
-            if block.date is not None and block.date != day:
-                continue
-            if block.date is None and (block.weekday is None
-                                       or block.weekday != day.weekday()):
-                continue
+        for block in blocks_for_day(blocks, day):
             if day == today and block.start_time <= now.time():
                 continue
             taken = (Appointment.objects

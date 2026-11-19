@@ -16,6 +16,14 @@ export const CASE_TYPES = [
   'Foster Care',
   'Kinship Care',
   'Residential Care',
+];
+
+/* Retired 14 Nov 2026 (owner): not offered for a new record or as a new pick
+ * on an edit. A record that already holds one keeps it through any edit
+ * (shown "(no longer offered)", the same change-only rule as the categories),
+ * so every rule map below keeps their entries. Mirrors RETIRED_CASE_TYPES in
+ * backend/children/intake.py. */
+export const RETIRED_CASE_TYPES = [
   'Family Tracing & Reunification',
   'Independent Living',
 ];
@@ -29,7 +37,7 @@ export const CASE_CATEGORIES = [
   'Abandoned',
   'Dependent',
   'Neglected',
-  'Without Known Parents',
+  'Foundling',
   'Orphaned',
 ];
 
@@ -42,8 +50,8 @@ export const CASE_CATEGORY_OPTIONS = {
   'Foster Care': CASE_CATEGORIES,
   'Kinship Care': CASE_CATEGORIES,
   'Residential Care': CASE_CATEGORIES,
-  'Family Tracing & Reunification': ['Dependent', 'Neglected', 'Without Known Parents', 'Orphaned'],
-  'Independent Living': ['Dependent', 'Neglected', 'Without Known Parents', 'Orphaned'],
+  'Family Tracing & Reunification': ['Dependent', 'Neglected', 'Foundling', 'Orphaned'],
+  'Independent Living': ['Dependent', 'Neglected', 'Foundling', 'Orphaned'],
 };
 
 /* The Category comes first on the form, so the pairing runs both ways: a
@@ -121,22 +129,23 @@ export const caseDate = (child) => {
   return [field === PLACEMENT ? 'Date of placement' : 'Date of admission', child[field] || null];
 };
 
-/* What the Add Record form will not save without (since 24 Sep 2026). Middle
- * name, legal status, landmark and date found are left out on purpose: a
+/* What the Add Record form will not save without (since 24 Sep 2026). House
+ * number and the Date of Admission (14 Nov 2026, owner), birth
+ * status, middle name, legal status, landmark and date found are left out on purpose: a
  * foundling may have no middle name, a child new to care may have no legal
  * status yet, and most addresses have no landmark. Mirrors required_fields in
  * backend/children/intake.py, which refuses the same blanks. */
 export const ALWAYS_REQUIRED = [
   'case_category', 'case_type',
   'first_name', 'last_name', 'birth_date', 'gender',
-  'place_of_birth_or_found', 'birth_status', 'health_condition',
+  'place_of_birth_or_found', 'health_condition',
   'education_level', 'current_placement',
-  'house_number', 'street', 'province', 'municipality', 'barangay',
+  'street', 'province', 'municipality', 'barangay',
 ];
 export const requiredFields = (caseType, typeOfAdoption, healthCondition) => {
   const date = dateFieldFor(caseType, typeOfAdoption);
   return [
-    ...ALWAYS_REQUIRED, ...(CASE_TYPE_FIELDS[caseType] || []), ...(date ? [date] : []),
+    ...ALWAYS_REQUIRED, ...(CASE_TYPE_FIELDS[caseType] || []), ...(date && date !== ADMISSION ? [date] : []),
     // What the special needs are, once "With special needs" is the answer.
     ...(healthCondition === SPECIAL_NEEDS ? ['special_needs'] : []),
   ];
@@ -192,17 +201,20 @@ export const unaskedAnswers = (form, record) => {
 
 // New fields from the same official intake form, which the SCSR repeats as its
 // Part I. "N/A" became "Unknown" on 24 Sep 2026; "Child" was retired that day
-// and offered again on 7 Oct 2026 (owner).
-export const BIRTH_STATUSES = ['Marital', 'Non-Marital', 'Child', 'Unknown'];
+// and offered again on 7 Oct 2026, then retired again on 15 Nov 2026, when
+// "Marital" and "Non-Marital" became "Marital Child" and "Non-Marital Child"
+// (owner). A record that holds a retired value keeps it. Mirrors children/intake.py.
+export const BIRTH_STATUSES = ['Marital Child', 'Non-Marital Child', 'Unknown'];
+export const RETIRED_BIRTH_STATUSES = ['Child'];
 
 // The SCSR's Health Condition. "With special needs" asks what they are
 // (special_needs); any other answer takes none. Mirrors children/intake.py.
 export const HEALTH_CONDITIONS = ['Healthy', 'With special needs'];
 export const SPECIAL_NEEDS = 'With special needs';
 
-// The Alias is asked of a child without known parents only (SCSR Part I). The
+// The Alias is asked of a Foundling only (SCSR Part I). The
 // form hides it for any other category and never deletes what was saved.
-export const ALIAS_CATEGORY = 'Without Known Parents';
+export const ALIAS_CATEGORY = 'Foundling';
 
 export const LEGAL_STATUSES = [
   'With Issued CDCLAA',

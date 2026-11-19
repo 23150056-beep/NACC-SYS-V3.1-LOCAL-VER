@@ -26,6 +26,19 @@ function webCommit() {
 export default defineConfig({
   base: process.env.VITE_DEMO_MODE === 'true' ? '/NACC_RACCO1_SYS/' : '/',
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (/node_modules\/qrcode\.react\//.test(id)) return 'qrcode'
+          if (/node_modules\/(react|react-dom|react-router|react-router-dom|scheduler|@remix-run)\//.test(id)) return 'react'
+          if (/node_modules\/(react-big-calendar|date-fns|dom-helpers|clsx|memoize-one|uncontrollable|invariant|prop-types|react-overlays|react-lifecycles-compat|@restart|warning)\//.test(id)) return 'calendar'
+          return 'vendor'
+        },
+      },
+    },
+  },
   define: {
     'import.meta.env.VITE_WEB_COMMIT': JSON.stringify(webCommit()),
   },

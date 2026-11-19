@@ -78,13 +78,20 @@ export function shortDate(iso) {
   return d.toLocaleDateString(undefined, DATE);
 }
 
-/** True once a date with no time ("2027-03-14") is behind us. The day itself
- *  still counts: a license valid until the 14th is valid on the 14th. */
-export function dayHasPassed(iso) {
-  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
-  if (!day) return false;
-  const nextMidnight = new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]) + 1);
-  return new Date() >= nextMidnight;
+/** "Mon, Nov 9, 2026" — a fixed en-US day with its weekday, whatever the
+ *  browser's region. Empty for a missing or unreadable value. */
+export function weekdayDate(iso) {
+  if (!iso) return '';
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso));
+  const d = day ? new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3])) : new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+/** "Mon, Nov 9, 2026, 3:05 PM" — the weekday date plus the 12-hour time. */
+export function weekdayDateTime(iso) {
+  const d = weekdayDate(iso);
+  return d ? `${d}, ${clock(iso)}` : '';
 }
 
 /** "just now" · "5 min ago" · "3 hr ago" · "2 d ago" · "12 Aug 2026". */

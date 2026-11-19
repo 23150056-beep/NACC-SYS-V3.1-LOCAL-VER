@@ -44,8 +44,6 @@ from clinical.models import (
     AgencyFormTemplate, ConsentRecord, InstrumentCatalog, OpinionnaireInvite,
     PreAssessment, ProblemEntry, RemarkNote, ResultEntry, TreatmentPlan)
 from locations.models import Barangay, Municipality, Province
-from case_study import demo_case_studies
-from case_study.models import CaseStudy
 from clinical import demo_referrals, demo_reports
 from scheduling import demo_schedule
 from scheduling.models import Appointment
@@ -68,10 +66,10 @@ LAST_NAMES = [
     "Castañeda", "Duque", "Estrada", "Fariñas", "Guillermo", "Hufana",
 ]
 
-CASE_TYPES = ["Adoption", "Foster Care", "Kinship Care", "Residential Care",
-              "Family Tracing & Reunification", "Independent Living"]
+# The two retired on 14 Nov 2026 are not seeded (children/intake.py).
+CASE_TYPES = ["Adoption", "Foster Care", "Kinship Care", "Residential Care"]
 CATEGORIES = ["Surrendered", "Abandoned", "Dependent", "Neglected",
-              "Without Known Parents", "Orphaned"]
+              "Foundling", "Orphaned"]
 # Street addresses as a field office writes them: a numbered street in town,
 # a purok where there is no street.
 STREETS = ["Rizal St.", "Mabini St.", "Bonifacio St.", "Quezon Ave.", "Luna St.",
@@ -237,14 +235,6 @@ class Command(BaseCommand):
             Child.objects.filter(status=Child.ACTIVE)
             .select_related("assigned_psychologist").order_by("pk"))
 
-        # A draft case study for a third of the adoption children, a final one
-        # for a few more, and a block-A draft for a few of the other case
-        # types, after the social workers are dealt: each is the record
-        # holder's own (case_study/demo_case_studies.py).
-        case_studies = demo_case_studies.install_case_studies(
-            list(Child.objects.filter(status=Child.ACTIVE)
-                 .select_related("social_worker").order_by("pk")))
-
         moved, _ = demo_schedule.realign_appointments()
 
         self.stdout.write("")
@@ -253,8 +243,6 @@ class Command(BaseCommand):
         self.stdout.write(f"  {moved} appointments placed in clinic hours")
         self.stdout.write(f"  {referrals} case referrals written")
         self.stdout.write(f"  {reports} psychological reports written")
-        final = CaseStudy.objects.filter(status=CaseStudy.FINAL).count()
-        self.stdout.write(f"  case studies written: {case_studies}, {final} of them final")
         for label in ("steady", "declining", "divergent"):
             self.stdout.write(f"  {label:<12} {made[label]:>3}")
         self.stdout.write(
@@ -378,7 +366,7 @@ class Command(BaseCommand):
                 rng.choice(["Social Worker", "Police", "Relatives"])
             adoption = (rng.choice(["Regular", "Domestic Relative", "Step-parent"])
                         if case_type == "Adoption" else "")
-            birth_status = rng.choice(["Marital", "Non-Marital", "Unknown"])
+            birth_status = rng.choice(["Marital Child", "Non-Marital Child", "Unknown"])
             dated = intake_rules.date_field_for(case_type, adoption)
             child = Child.objects.create(
                 first_name=first, last_name=last, fullname=f"{first} {last}",

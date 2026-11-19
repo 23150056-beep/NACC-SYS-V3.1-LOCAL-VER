@@ -198,6 +198,25 @@ class PreAssessment(models.Model):
         ordering = ["-date", "-id"]
 
 
+class PreAssessmentStepTime(models.Model):
+    """When each wizard step was started, last edited and finished (the
+    tracker). One row per (pre-assessment, step); every write goes through
+    clinical/step_times.py, the one place the rule is written."""
+    pre_assessment = models.ForeignKey(
+        PreAssessment, on_delete=models.CASCADE, related_name="step_times")
+    step = models.CharField(max_length=20, choices=PreAssessment.STEP_CHOICES)
+    started_at = models.DateTimeField(null=True, blank=True)
+    last_edited_at = models.DateTimeField(null=True, blank=True)
+    done_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "tbl_pre_assessment_step_time"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["pre_assessment", "step"], name="uniq_pa_step_time"),
+        ]
+
+
 class PsychologicalReport(models.Model):
     """The psychologist's own uploaded report file (each keeps her own format).
     Text is extracted (PDF) for search and, later, AI summarization drafts."""

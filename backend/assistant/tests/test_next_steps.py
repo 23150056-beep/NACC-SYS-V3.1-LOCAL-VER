@@ -10,7 +10,7 @@ that every sentence is made by a rule and nothing else:
 * a step agrees with the care gap that says the same thing (seven days, not
   "about seven");
 * and no step ever carries a custodian's name or number, a case note, a
-  child's own words or a line of the case study.
+  child's own words.
 
 Nothing here calls a model, and nothing reads the wall clock.
 """
@@ -26,8 +26,6 @@ from assistant import brief_facts
 from assistant.brief_facts import next_steps
 from assistant.models import AssistantJob
 from assistant.tests.test_brief_facts import FactsFixture
-from case_study.completeness import missing_sections
-from case_study.models import CaseStudy, CaseStudySection
 from children import custodian
 from children.models import AssignmentRequest, Child
 from clinical import care_gaps
@@ -52,7 +50,6 @@ def facts(**changes):
         "kind": "case", "case_referral": REFERRAL, "psychologist": ASSIGNED,
         "consent": SIGNED, "custodian_texts": None, "survey": None,
         "next_session": SESSION, "unreviewed_self_reports": 0,
-        "case_study": {"state": "final"},
     }
     base.update(changes)
     return base
@@ -77,7 +74,7 @@ class EveryRuleTest(SimpleTestCase):
             case_referral=None, psychologist={"state": "none"}, consent=None,
             next_session=None, custodian_texts="No contact number - texts off",
             survey={"state": "sent", "date": "2026-09-30", "elapsed_days": 8},
-            unreviewed_self_reports=2, case_study={"state": "none"}), CHILD)
+            unreviewed_self_reports=2), CHILD)
         self.assertTrue(every)
         for step in every:
             with self.subTest(step["key"]):
@@ -281,32 +278,6 @@ class EveryRuleTest(SimpleTestCase):
                     steps(unreviewed_self_reports=n))
         self.assertEqual([], steps(unreviewed_self_reports=0))
 
-    # -- the case study ------------------------------------------------------
-
-    def test_a_case_study_not_started(self):
-        self.assertEqual(
-            [{"key": "case_study_start", "text": "Start the case study.",
-              "link": "/report/child/7?tab=casestudy"}],
-            steps(case_study={"state": "none"}))
-
-    def test_a_draft_says_how_many_sections_are_left(self):
-        for n, said in ((1, "Case study: 1 section still to complete."),
-                        (12, "Case study: 12 sections still to complete.")):
-            with self.subTest(n=n):
-                self.assertEqual(
-                    [{"key": "case_study_complete", "text": said,
-                      "link": "/report/child/7?tab=casestudy"}],
-                    steps(case_study={"state": "draft", "missing": n}))
-
-    def test_a_finished_or_final_case_study_is_no_step(self):
-        self.assertEqual([], steps(case_study={"state": "draft", "missing": 0}))
-        self.assertEqual([], steps(case_study={"state": "final"}))
-
-    def test_no_case_study_row_in_the_facts_is_no_step(self):
-        given = facts()
-        del given["case_study"]
-        self.assertEqual([], next_steps(given, CHILD))
-
     # -- the order -----------------------------------------------------------
 
     def test_the_order_is_the_order_to_do_them_in(self):
@@ -314,20 +285,20 @@ class EveryRuleTest(SimpleTestCase):
             case_referral=None, psychologist={"state": "none"}, consent=None,
             next_session=None, custodian_texts="No contact number - texts off",
             survey={"state": "sent", "date": "2026-09-30", "elapsed_days": 8},
-            unreviewed_self_reports=2, case_study={"state": "none"}), CHILD)
+            unreviewed_self_reports=2), CHILD)
         self.assertEqual(
             ["case_referral", "psychologist_none", "consent", "custodian_texts",
-             "survey_unanswered", "self_reports", "case_study_start"],
+             "survey_unanswered", "self_reports"],
             [s["key"] for s in every])
 
     def test_the_order_when_a_psychologist_is_there_and_a_session_is_wanted(self):
         got = keys(case_referral=REFERRAL, consent=None, next_session=None,
                    custodian_texts="No consent recorded - texts off",
                    survey={"state": "expired", "date": "2026-09-30", "elapsed_days": 9},
-                   unreviewed_self_reports=1, case_study={"state": "draft", "missing": 4})
+                   unreviewed_self_reports=1)
         self.assertEqual(
             ["consent", "book_session", "custodian_texts", "survey_unanswered",
-             "self_reports", "case_study_complete"], got)
+             "self_reports"], got)
 
     def test_the_silent_and_declined_psychologist_steps_come_before_consent(self):
         silent = keys(consent=None, psychologist={
@@ -346,11 +317,10 @@ class EveryRuleTest(SimpleTestCase):
             facts(case_referral=None, psychologist={"state": "none"}, consent=None,
                   next_session=None, custodian_texts="No contact number - texts off",
                   survey={"state": "sent", "date": "2026-09-30", "elapsed_days": 8},
-                  unreviewed_self_reports=2, case_study={"state": "none"}),
+                  unreviewed_self_reports=2),
             facts(psychologist={"state": "asked", "name": "M", "days_ago": 8,
                                 "elapsed_days": 8}),
             facts(psychologist={"state": "declined", "name": "M", "reason": ""}),
-            facts(case_study={"state": "draft", "missing": 3}),
             facts(next_session=None),
         ]
         made = {s["key"] for state in every_state for s in next_steps(state, CHILD)}
@@ -420,18 +390,16 @@ class OverARecordTest(FactsFixture):
             [("case_referral", f"/reports?upload=1&child={cid}"),
              ("psychologist_none", f"/children?edit={cid}"),
              ("consent", None),
-             ("custodian_texts", f"/children?edit={cid}"),
-             ("case_study_start", f"/report/child/{cid}?tab=casestudy")],
+             ("custodian_texts", f"/children?edit={cid}")],
             [(s["key"], s["link"]) for s in self._steps()])
 
-    def test_the_isa_and_a_psychologist_get_no_steps_and_no_case_study_row(self):
+    def test_the_isa_and_a_psychologist_get_no_steps(self):
         for user in (self.admin, self.psy):
             res = self._facts(user)
             with self.subTest(user=user.email):
                 self.assertEqual(200, res.status_code)
                 self.assertNotIn("next_steps", res.data)
-                self.assertNotIn("case_study", res.data)
-
+        
     def test_another_social_workers_child_is_404_both_ways(self):
         self.assertEqual(404, self._facts(self.sw, self.other_child).status_code)
         self.assertEqual(404, self._facts(self.other_sw, self.child).status_code)
@@ -556,38 +524,6 @@ class OverARecordTest(FactsFixture):
                           submitted_at=NOW - timedelta(days=8))
         self.assertNotIn("survey_unanswered", self._keys())
 
-    # -- the case study ------------------------------------------------------
-
-    def test_no_case_study_then_a_draft_with_the_sections_the_screen_counts(self):
-        self.assertEqual(
-            "Start the case study.",
-            next(s["text"] for s in self._steps() if s["key"] == "case_study_start"))
-        study = CaseStudy.objects.create(child=self.child, created_by=self.sw)
-        left = len(missing_sections(study))
-        self.assertGreater(left, 1)
-        step = next(s for s in self._steps() if s["key"] == "case_study_complete")
-        self.assertEqual(f"Case study: {left} sections still to complete.", step["text"])
-        # The very number the case study's own screen is sent.
-        self.client.force_authenticate(self.sw)
-        payload = self.client.get(f"/api/case-studies/child/{self.child.id}/").data
-        self.assertEqual(left, len(payload["missing"]))
-
-    def test_a_section_filled_in_is_one_fewer(self):
-        study = CaseStudy.objects.create(child=self.child, created_by=self.sw)
-        left = len(missing_sections(study))
-        CaseStudySection.objects.create(
-            case_study=study, key="a3_description", value="A description.")
-        step = next(s for s in self._steps() if s["key"] == "case_study_complete")
-        self.assertEqual(f"Case study: {left - 1} sections still to complete.",
-                         step["text"])
-
-    def test_a_final_case_study_is_no_step(self):
-        CaseStudy.objects.create(child=self.child, created_by=self.sw,
-                                 status=CaseStudy.FINAL)
-        keys = self._keys()
-        self.assertNotIn("case_study_start", keys)
-        self.assertNotIn("case_study_complete", keys)
-
     # -- what must not be in a step ------------------------------------------
 
     SECRETS = {
@@ -599,7 +535,6 @@ class OverARecordTest(FactsFixture):
         "problem": "PROBLEM-SECRET-TEXT",
         "self-report answer": "SELFREPORT-SECRET-WORDS",
         "self-report question": "SELFREPORT-SECRET-QUESTION",
-        "case study": "CASESTUDY-SECRET-TEXT",
         "referral text": "REFERRAL-RAW-SECRET-TEXT",
         "surname": "Santos",
     }
@@ -612,9 +547,6 @@ class OverARecordTest(FactsFixture):
                                     description=self.SECRETS["problem"])
         self._flag(question=self.SECRETS["self-report question"],
                    answer=self.SECRETS["self-report answer"])
-        study = CaseStudy.objects.create(child=self.child, created_by=self.sw)
-        CaseStudySection.objects.create(
-            case_study=study, key="a3_description", value=self.SECRETS["case study"])
         CaseReferral.objects.create(
             child=self.child, uploaded_by=self.sw, original_filename="r.pdf",
             extracted_text=self.SECRETS["referral text"])
@@ -627,7 +559,7 @@ class OverARecordTest(FactsFixture):
         self.psy.save()
         got = self._steps()
         # The control: a rich list, so the absence below is not an empty one.
-        self.assertGreaterEqual(len(got), 5, got)
+        self.assertGreaterEqual(len(got), 4, got)
         body = json.dumps(got)
         for label, text in self.SECRETS.items():
             with self.subTest(label):

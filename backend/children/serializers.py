@@ -37,6 +37,8 @@ class ChildSerializer(serializers.ModelSerializer):
     # future edit before validate_case_category ever got a chance to apply
     # its change-only exemption.
     case_category = serializers.CharField(required=False, allow_blank=True)
+    # And for the Case Type, two of whose values were retired on 14 Nov 2026.
+    case_type = serializers.CharField(required=False, allow_blank=True)
     # The same, for the two lists that retired values on 24 Sep 2026 (birth
     # status "Child", adoption types "SIBRA" and "ICA Relative", offered again
     # since 7 Oct): a value a later change retires must keep its record valid.
@@ -289,6 +291,15 @@ class ChildSerializer(serializers.ModelSerializer):
         if self.instance is not None and value == getattr(self.instance, field):
             return value
         if value and value not in {c[0] for c in choices}:
+            raise serializers.ValidationError(f'"{value}" is not a valid choice.')
+        return value
+
+    def validate_case_type(self, value):
+        if self.instance is not None and value == self.instance.case_type:
+            return value
+        if value in intake.RETIRED_CASE_TYPES:
+            raise serializers.ValidationError(f"{value} is no longer offered as a case type.")
+        if value and value not in {c[0] for c in Child.CASE_TYPE_CHOICES}:
             raise serializers.ValidationError(f'"{value}" is not a valid choice.')
         return value
 

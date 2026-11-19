@@ -1,6 +1,7 @@
 """V2 report endpoints: per-child chart view, cross-child monitoring, agency
 summary, and the (interim) dashboard — all sourced from clinical records."""
 
+from django.db.models import Max, Prefetch
 from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -14,7 +15,7 @@ from children.models import Child, TerminationRecord
 from children.serializers import ChildSerializer
 from clinical import reports
 from clinical.models import (
-    PreAssessment, ResultEntry, RemarkNote, PsychologicalReport,
+    CaseReferral, PreAssessment, ResultEntry, RemarkNote, PsychologicalReport,
 )
 from clinical.serializers import (
     PreAssessmentSerializer, ResultEntrySerializer, RemarkNoteSerializer,
@@ -37,18 +38,32 @@ class ChildReportView(generics.GenericAPIView):
         # its own: this checked only psychologists, which was the whole rule
         # while staff saw every child and was a side door once they did not.
         try:
+            # One read of the pre-assessments serves both the child's own
+            # fields (status, progress, instruments used) and the list below:
+            # the same carry-history rule, with the joins the list needs added
+            # to the prefetch instead of the whole set being read a second time.
+            # The model's own order is kept for the child's fields; the list
+            # is put in its page order in Python.
             child = (scope_to_visible(Child.objects.all(), request, path=None)
-                     .prefetch_related(visible_pre_assessments(request)).get(pk=child_id))
+                     .select_related("assigned_psychologist", "social_worker")
+                     .prefetch_related(Prefetch("pre_assessments", queryset=hide_earlier_history(
+                         PreAssessment.objects
+                         .select_related("consent", "interview", "psychologist")
+                         .prefetch_related("instruments", "step_times"),
+                         request, "psychologist")),
+                         # Also answers the child's has_case_referral chip.
+                         Prefetch("case_referrals", queryset=CaseReferral.objects.select_related("uploaded_by")))
+                     .get(pk=child_id))
         except Child.DoesNotExist:
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
-        pas = child.pre_assessments.all().select_related("consent", "interview", "psychologist")
+        pas = child.pre_assessments.all()
         results = child.result_entries.select_related("instrument", "entered_by")
         remarks = child.remarks.select_related("author")
         plans = child.treatment_plans.select_related("author")
         files = child.psych_reports.select_related("author")
-        problems = child.problems.all()
-        case_referrals = child.case_referrals.select_related("uploaded_by")
+        problems = child.problems.select_related("logged_by")
+        case_referrals = child.case_referrals.all()
         opinionnaires = child.opinionnaire_invites.select_related("template")
         interviews = child.clinical_interviews.select_related("template", "interviewer")
         self_report_flags = child.self_report_flags.select_related("reviewed_by")
@@ -62,12 +77,28 @@ class ChildReportView(generics.GenericAPIView):
         # are the child's own words, not a colleague's prior opinions, and the
         # person responsible for her now must see them. Problems and case
         # referrals likewise. The omissions are decisions, not oversights.
-        pas = hide_earlier_history(pas, request, "psychologist")
         results = hide_earlier_history(results, request, "entered_by")
         remarks = hide_earlier_history(remarks, request, "author")
         plans = hide_earlier_history(plans, request, "author")
         files = hide_earlier_history(files, request, "author")
         interviews = hide_earlier_history(interviews, request, "interviewer")
+
+        # Last in, first out on the child's page: the most recently edited
+        # record first (updated_at where the model keeps one, else when it was
+        # filed), id as the tie-break. Applied AFTER the carry-history control
+        # above, which only filters. Screens that read best oldest-first (the
+        # printed report) sort for themselves rather than lean on this order.
+        pas = sorted(pas, key=lambda p: (p.updated_at, p.id), reverse=True)
+        interviews = interviews.order_by("-updated_at", "-id")
+        results = results.order_by("-created_at", "-id")
+        remarks = remarks.order_by("-updated_at", "-id")
+        plans = plans.order_by("-updated_at", "-id")
+        files = files.order_by("-created_at", "-id")
+        # Open problems stay above resolved ones, newest edit first within each.
+        problems = problems.order_by("resolved", "-updated_at", "-id")
+        case_referrals = sorted(case_referrals, key=lambda r: (r.created_at, r.id), reverse=True)
+        opinionnaires = opinionnaires.order_by("-created_at", "-id")
+        self_report_flags = self_report_flags.order_by("-created_at", "-id")
 
         return Response({
             "child": ChildSerializer(child).data,
@@ -107,6 +138,20 @@ class MonitoringListView(generics.GenericAPIView):
                   .order_by("start")):
             next_appt.setdefault(a.child_id, a.start)
 
+        # When each case was last touched, for the list's order (newest edit
+        # first). Folded into the queries below rather than asked again, and
+        # the records a reader may not see never count: a hidden note must not
+        # lift its child to the top.
+        touched = {}
+
+        def touch(child_id, stamp):
+            if stamp and (child_id not in touched or stamp > touched[child_id]):
+                touched[child_id] = stamp
+
+        for child_id, stamp in (Appointment.objects.filter(child_id__in=ids)
+                                .values_list("child_id").annotate(Max("updated_at"))):
+            touch(child_id, stamp)
+
         # The latest remark and classification are opinions, and the report
         # count stands for a list: each goes through the carry-history
         # control, so a newly assigned psychologist is not quoted the previous
@@ -115,16 +160,20 @@ class MonitoringListView(generics.GenericAPIView):
         for r in hide_earlier_history(ResultEntry.objects.filter(child_id__in=ids),
                                       request, "entered_by").order_by("date", "id"):
             latest_result[r.child_id] = r
+            # Result entries and report files record only when they were filed.
+            touch(r.child_id, r.created_at)
         # The note itself, not just its date: monitoring shows the psychologist's
         # most recent remark, and re-querying per row would be N+1.
         last_remark = {}
         for r in hide_earlier_history(RemarkNote.objects.filter(child_id__in=ids),
                                       request, "author").order_by("date", "id"):
             last_remark[r.child_id] = r
+            touch(r.child_id, r.updated_at)
         report_counts = {}
         for r in hide_earlier_history(PsychologicalReport.objects.filter(child_id__in=ids),
                                       request, "author"):
             report_counts[r.child_id] = report_counts.get(r.child_id, 0) + 1
+            touch(r.child_id, r.created_at)
 
         rows = []
         for c in children:
@@ -137,6 +186,10 @@ class MonitoringListView(generics.GenericAPIView):
                                       res.date if res else None) if d]
             last_activity = max(candidates) if candidates else None
             psy = c.assigned_psychologist
+            touch(c.id, c.updated_at)
+            for p in c.pre_assessments.all():
+                touch(c.id, p.updated_at)
+            last_updated = touched.get(c.id)
             rows.append({
                 "child_id": c.id,
                 "child_name": c.fullname,
@@ -148,13 +201,17 @@ class MonitoringListView(generics.GenericAPIView):
                 "latest_classification": (res.classification or None) if res else None,
                 "latest_remark": (remark.text or None) if remark else None,
                 "last_activity": last_activity.isoformat() if last_activity else None,
+                "last_updated": last_updated.isoformat() if last_updated else None,
                 "next_session": (f"{tz.localtime(next_appt[c.id]):%Y-%m-%d} "
                                  f"{clock(tz.localtime(next_appt[c.id]))}"
                                  if c.id in next_appt else None),
                 "report_count": report_counts.get(c.id, 0),
                 "pre_assessment_count": len(completed),
             })
-        rows.sort(key=lambda r: (r["child_name"] or "").lower())
+        # Last in, first out: the case edited most recently comes first; a case
+        # with nothing recorded goes last. Ties fall back to name, then id.
+        rows.sort(key=lambda r: ((r["child_name"] or "").lower(), r["child_id"]))
+        rows.sort(key=lambda r: r["last_updated"] or "", reverse=True)
         return Response(rows)
 
 
@@ -391,11 +448,17 @@ class DashboardView(generics.GenericAPIView):
         # queryset that got iterated for the census below AND counted three
         # separate times in the response - four trips for one set of rows,
         # each of them a hop to another region on the hosted deployment.
+        #
+        # The pre-assessments are prefetched through the same carry-history
+        # rule as everywhere else, but without their instruments and step
+        # times: the census reads only each row's status.
         active_rows = list(scoped_children.filter(status=Child.ACTIVE)
                            .select_related("assigned_psychologist")
-                           .prefetch_related(visible_pre_assessments(request), "consents"))
+                           .prefetch_related(
+                               Prefetch("pre_assessments", queryset=hide_earlier_history(
+                                   PreAssessment.objects.all(), request, "psychologist")),
+                               "consents"))
         active_count = len(active_rows)
-        inactive_count = scoped_children.filter(status=Child.INACTIVE).count()
 
         # Census: ACTIVE children per case type (the interview's
         # "active/adoption, active/foster care" view) + where each child is in
@@ -420,27 +483,39 @@ class DashboardView(generics.GenericAPIView):
                 pre_assessed_per_psy[name] = pre_assessed_per_psy.get(name, 0) + 1
 
         # Intake vs termination trend (follows the range selector, last 6 buckets).
+        # Dates only: whole rows were loaded to read one column. The same
+        # pass counts the closed records, which used to be a query of its own.
         intake, term = {}, {}
-        for c in scoped_children:
-            b = reports.bucket(c.created_at.date(), rng)
+        inactive_count = 0
+        for created_at, child_status in scoped_children.values_list("created_at", "status"):
+            b = reports.bucket(created_at.date(), rng)
             intake[b] = intake.get(b, 0) + 1
-        term_qs = TerminationRecord.objects.all()
-        term_qs = scope_to_visible(term_qs, request)
-        for t in term_qs:
-            b = reports.bucket(t.date, rng)
+            if child_status == Child.INACTIVE:
+                inactive_count += 1
+        term_qs = scope_to_visible(TerminationRecord.objects.all(), request)
+        for t_date in term_qs.values_list("date", flat=True):
+            b = reports.bucket(t_date, rng)
             term[b] = term.get(b, 0) + 1
         months = sorted(set(intake) | set(term))[-6:]
         intake_vs_termination = [
             {"bucket": m, "intake": intake.get(m, 0), "terminations": term.get(m, 0)}
             for m in months]
 
-        today_weekday = tz.localdate().weekday()
+        from scheduling.availability import blocks_for_day
+
+        def _todays_blocks(all_blocks, day):
+            # A dated window replaces the weekly one for that date, per person.
+            by_person = {}
+            for b in all_blocks:
+                by_person.setdefault(b.psychologist_id, []).append(b)
+            return [b for person in by_person.values()
+                    for b in blocks_for_day(person, day)]
+
         availability_today = [{
             "psychologist": display_name(b.psychologist),
             "start": str(b.start_time)[:5], "end": str(b.end_time)[:5],
             "capacity": b.capacity,
-        } for b in blocks
-            if (b.date == tz.localdate()) or (b.date is None and b.weekday == today_weekday)]
+        } for b in _todays_blocks(blocks, tz.localdate())]
 
         today = tz.localdate()
 
@@ -484,5 +559,5 @@ class DashboardView(generics.GenericAPIView):
             "trend": agg["trend"][-6:],
             "per_psychologist": agg["per_psychologist"],
             "by_case_type": agg["by_case_type"],
-            "care_gaps": alerts_for(request, scoped_children),
+            "care_gaps": alerts_for(request, scoped_children, active_children=active_rows),
         })

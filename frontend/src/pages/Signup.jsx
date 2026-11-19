@@ -371,6 +371,7 @@ export default function Signup() {
                 <button
                   key={name}
                   type="button"
+                  className="racco-btn"
                   aria-pressed={on}
                   // Clicking the chosen one again clears it. The question is
                   // optional, and a set of buttons with no way back is not.

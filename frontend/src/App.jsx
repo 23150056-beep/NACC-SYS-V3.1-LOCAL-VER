@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react';
+import { Suspense, lazy, useLayoutEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ActivityProvider } from './context/ActivityContext';
@@ -6,6 +6,7 @@ import { AssistantProvider } from './context/AssistantContext';
 import { ToastProvider } from './context/ToastContext';
 import { LayoutProvider, useLayout } from './context/LayoutContext';
 import { CensusProvider } from './context/CensusContext';
+import { ChildrenProvider } from './context/ChildrenContext';
 import { ConfirmProvider } from './context/ConfirmContext';
 import { INSTRUMENT_MANAGER_ROLES } from './config/roles';
 import ProtectedRoute from './components/ProtectedRoute';
@@ -14,21 +15,31 @@ import AppHeader from './components/AppHeader';
 import RightRail from './components/RightRail';
 import AssistantPanel from './components/AssistantPanel';
 import Login from './pages/Login';
-import Signup from './pages/Signup';
-import Dashboard from './pages/Dashboard';
-import Children from './pages/Children';
-import Report from './pages/Report';
-import ChildProgressReport from './pages/ChildProgressReport';
-import Monitoring from './pages/Monitoring';
-import AgencySummary from './pages/AgencySummary';
-import Settings from './pages/Settings';
-import Users from './pages/Users';
-import MyProfile from './pages/MyProfile';
-import Instruments from './pages/Instruments';
-import PreAssessment from './pages/PreAssessment';
-import Schedule from './pages/Schedule';
-import Survey from './pages/Survey';
-import AuditTrail from './pages/AuditTrail';
+
+// Each screen is its own chunk, fetched when its route is first visited.
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Children = lazy(() => import('./pages/Children'));
+const Report = lazy(() => import('./pages/Report'));
+const ChildProgressReport = lazy(() => import('./pages/ChildProgressReport'));
+const Monitoring = lazy(() => import('./pages/Monitoring'));
+const AgencySummary = lazy(() => import('./pages/AgencySummary'));
+const Settings = lazy(() => import('./pages/Settings'));
+const Users = lazy(() => import('./pages/Users'));
+const MyProfile = lazy(() => import('./pages/MyProfile'));
+const Instruments = lazy(() => import('./pages/Instruments'));
+const PreAssessment = lazy(() => import('./pages/PreAssessment'));
+const Schedule = lazy(() => import('./pages/Schedule'));
+const Survey = lazy(() => import('./pages/Survey'));
+const AuditTrail = lazy(() => import('./pages/AuditTrail'));
+const Signup = lazy(() => import('./pages/Signup'));
+
+function RouteLoading() {
+  return (
+    <div role="status" aria-live="polite" style={{ padding: 24, color: 'var(--text-muted)', fontSize: 14 }}>
+      Loading&hellip;
+    </div>
+  );
+}
 
 /* The three-column shell.
  *
@@ -60,7 +71,7 @@ function Shell({ children }) {
       <div className="racco-shell-row" style={{ flex: 1, minHeight: 0, display: 'flex', gap: layout.gap, padding: layout.pad, overflow: 'hidden' }}>
         {layout.leftRailOn && <Sidebar />}
         <main ref={main} className="racco-scroll" style={{ flex: 1, minWidth: 0, overflowX: 'hidden', overflowY: 'auto', paddingRight: 2 }}>
-          {children}
+          <Suspense fallback={<RouteLoading />}>{children}</Suspense>
         </main>
         {layout.rightRailOn && <RightRail />}
       </div>
@@ -84,6 +95,8 @@ export default function App() {
               route would re-fetch it on every click. */}
           <LayoutProvider>
           <CensusProvider>
+          <ChildrenProvider>
+          <Suspense fallback={<RouteLoading />}>
           <Routes>
           <Route path="/login" element={<Login />} />
           {/* Open, like /login: someone without an account has to be able
@@ -112,6 +125,8 @@ export default function App() {
               role cannot reach — lands on sign-in rather than rendering nothing. */}
           <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
+          </Suspense>
+          </ChildrenProvider>
           </CensusProvider>
           </LayoutProvider>
         </BrowserRouter>

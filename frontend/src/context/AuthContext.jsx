@@ -180,8 +180,8 @@ export function AuthProvider({ children }) {
     clearTokens();
     // Clear any unsaved intake drafts (keyed per-user) so they never leak to
     // whichever account logs in next on this workstation. `nacc-draft:` is the
-    // case study's unsaved text (components/caseStudy/drafts.js), which can
-    // hold an adoptive parent's income and must not outlive the session.
+    // old case study drafts' prefix (feature removed 17 Nov 2026); still
+    // cleared so any left in a browser do not outlive the session.
     try {
       Object.keys(localStorage)
         .filter((k) => k.startsWith('nacc-child-draft:') || k.startsWith('nacc-draft:'))

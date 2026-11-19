@@ -18,7 +18,7 @@ export const ACTION_META = {
   accepted: { icon: 'user-check', color: 'var(--success-700)', bg: 'var(--success-50)' },
   declined: { icon: 'user-x', color: 'var(--red-700)', bg: 'var(--red-50)' },
   withdrawn: { icon: 'undo-2', color: 'var(--text-body)', bg: 'var(--ink-50)' },
-  // The case study (backend case_study): started now, and finalized or
+  // The case study (feature removed 17 Nov 2026; old lines remain as history): started now, and finalized or
   // reopened once those events exist (phase P2).
   finalized: { icon: 'file-check', color: 'var(--success-700)', bg: 'var(--success-50)' },
   reopened: { icon: 'undo-2', color: 'var(--amber-700)', bg: 'var(--amber-50)' },
@@ -85,10 +85,12 @@ export function eventDestination(e, role) {
     return e.entity_id ? `/report/child/${e.entity_id}` : '/children';
   }
   if (type === 'child') return e.entity_id ? `/report/child/${e.entity_id}` : '/children';
-  // The id is the child's; the page opens on its Case study tab.
-  if (type === 'casestudy') return e.entity_id ? `/report/child/${e.entity_id}?tab=casestudy` : '/children';
+  // The id is the child's. Old case study lines remain in the history; the
+  // feature was removed on 17 Nov 2026, so they open the child's page.
+  if (type === 'casestudy') return e.entity_id ? `/report/child/${e.entity_id}` : '/children';
   if (type === 'guardian') return '/children';
-  if (type === 'appointment' || type === 'availabilityblock') return '/schedule';
+  if (type === 'appointment') return e.entity_id ? `/schedule?appointment=${e.entity_id}` : '/schedule';
+  if (type === 'availabilityblock') return '/schedule';
   if (['instrumentcatalog', 'instrument', 'agencyformtemplate', 'questionnaire'].includes(type)) return '/instruments';
   if (e.category === 'user' || e.category === 'security' || type === 'user') {
     return role === 'Administrator' ? '/users' : '/';

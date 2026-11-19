@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import viewsets, status, mixins
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -31,7 +31,7 @@ _CONSENT_CONTENT_TYPES = {
     "heic": "image/heic", "heif": "image/heif",
 }
 
-from clinical import form_import
+from clinical import form_import, step_times
 from clinical.serializers import (
     ALLOWED_CONSENT_EXTENSIONS,
     InstrumentCatalogSerializer, AgencyFormTemplateSerializer,
@@ -302,13 +302,20 @@ class _ChildScopedClinicalViewSet(viewsets.ModelViewSet):
                      entity_id=obj.id, recipient=obj.child.assigned_psychologist)
 
 
+class _StepMoved(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = ("This pre-assessment was moved to another step in another "
+                      "tab. Reload to continue.")
+
+
 class PreAssessmentViewSet(_ChildScopedClinicalViewSet):
     model = PreAssessment
     serializer_class = PreAssessmentSerializer
     author_field = "psychologist"
 
     def get_queryset(self):
-        return super().get_queryset().prefetch_related("instruments").select_related("consent", "interview")
+        return (super().get_queryset().prefetch_related("instruments", "step_times")
+                .select_related("consent", "interview"))
 
     def create(self, request, *args, **kwargs):
         """Resume the psychologist's own in-progress pre-assessment for this
@@ -358,11 +365,35 @@ class PreAssessmentViewSet(_ChildScopedClinicalViewSet):
             rows = PreAssessment.objects.filter(pk=instance.pk)
             if was_open:
                 rows = rows.exclude(status=PreAssessment.COMPLETED)
+            moves_step = bool(data.get("current_step")) and \
+                data["current_step"] != instance.current_step
+            if moves_step:
+                # Based on a stale read (another tab moved it): match nothing.
+                rows = rows.filter(current_step=instance.current_step)
             if not rows.update(updated_at=now, **data):
+                if moves_step and PreAssessment.objects.filter(pk=instance.pk).exclude(
+                        status=PreAssessment.COMPLETED).exists():
+                    raise _StepMoved()
                 raise ValidationError({
                     "detail": "This pre-assessment is completed; it no longer changes."})
+            instruments_changed = False
             if instruments is not None:
+                before = {i.pk for i in instance.instruments.all()}
                 instance.instruments.set(instruments)
+                instruments_changed = before != {i.pk for i in instruments}
+            # The tracker: same transaction, same instant, only for a write
+            # that really landed on an open row, and only for a field the
+            # request actually changed (the wizard resends what it holds).
+            new_step = data.get("current_step")
+            if new_step and new_step != instance.current_step:
+                step_times.entered(instance, new_step, now)
+                step_times.moved_past(instance, instance.current_step, new_step, now)
+            for field, step in (("consent", "consent"), ("interview", "interview"),
+                                ("notes", "review")):
+                if field in data and data[field] != getattr(instance, field):
+                    step_times.edited(instance, step, now)
+            if instruments_changed:
+                step_times.edited(instance, "instruments", now)
         for name, value in data.items():
             setattr(instance, name, value)
         instance.updated_at = now
@@ -376,6 +407,7 @@ class PreAssessmentViewSet(_ChildScopedClinicalViewSet):
         log_activity(self.request.user, ActivityLog.CREATED, ActivityLog.RECORD,
                      entity_type="PreAssessment", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.child.assigned_psychologist)
+        step_times.entered(obj, PreAssessment.STEP_CONSENT, obj.created_at or timezone.now())
 
     @action(detail=True, methods=["post"])
     def complete(self, request, pk=None):
@@ -394,7 +426,11 @@ class PreAssessmentViewSet(_ChildScopedClinicalViewSet):
         from django.utils import timezone as tz
         obj.status = PreAssessment.COMPLETED
         obj.completed_at = tz.now()
-        obj.save(update_fields=["status", "completed_at", "updated_at"])
+        with transaction.atomic():
+            obj.save(update_fields=["status", "completed_at", "updated_at"])
+            step_times.finished(obj, obj.completed_at)
+        # The prefetch was read before the stamp; serve the new one.
+        getattr(obj, "_prefetched_objects_cache", {}).pop("step_times", None)
         log_activity(request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type="PreAssessment", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.child.assigned_psychologist)
@@ -461,6 +497,26 @@ class ProblemEntryViewSet(_ChildScopedClinicalViewSet):
     # The presenting problems are the case, not an opinion about it; the
     # child's page has always shown them whoever logged them.
     hides_history = False
+
+    # The tracker: a problem added, changed or removed while the psychologist
+    # is on the "Presenting problems" step is an edit of that step.
+    def _track(self, child_id):
+        pa = step_times.open_pre_assessment_at_problems(child_id, self.request.user)
+        if pa is not None:
+            step_times.edited(pa, "problems", timezone.now())
+
+    def perform_create(self, serializer):
+        super().perform_create(serializer)
+        self._track(serializer.instance.child_id)
+
+    def perform_update(self, serializer):
+        super().perform_update(serializer)
+        self._track(serializer.instance.child_id)
+
+    def perform_destroy(self, instance):
+        child_id = instance.child_id
+        super().perform_destroy(instance)
+        self._track(child_id)
 
 
 class PsychologicalReportViewSet(_ChildScopedClinicalViewSet):

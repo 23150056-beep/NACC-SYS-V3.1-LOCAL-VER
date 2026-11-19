@@ -30,6 +30,29 @@ PA_STEP_LABELS = dict(PA_STEPS)
 PA_TOTAL_STEPS = 6
 
 
+def _pa_step_entries(pa):
+    """The tracker's five entries for one pre-assessment (all null when there
+    is none), worked out from its step_times - read through .all() so the
+    visible_pre_assessments prefetch keeps list views flat. Literal copy of
+    clinical.step_times.entries (this app never imports clinical)."""
+    by_step = {r.step: r for r in pa.step_times.all()} if pa is not None else {}
+    out = []
+    for key, label in PA_STEPS:
+        r = by_step.get(key)
+        started = r.started_at if r else None
+        done = r.done_at if r else None
+        edited = r.last_edited_at if r else None
+        out.append({
+            "step": key, "label": label,
+            "started_at": started.isoformat() if started else None,
+            "last_edited_at": edited.isoformat() if edited else None,
+            "done_at": done.isoformat() if done else None,
+            "seconds": (max(0, int((done - started).total_seconds()))
+                        if started and done else None),
+        })
+    return out
+
+
 class Child(models.Model):
     ACTIVE = "active"
     INACTIVE = "inactive"
@@ -50,6 +73,9 @@ class Child(models.Model):
     # NACC-SAMD-GF-000 KRA III (transition strategies: adoption, kinship/foster
     # care, family reunification, independent living); final wording still
     # pending RACCO I confirmation.
+    # "Family Tracing & Reunification" and "Independent Living" were retired on
+    # 14 Nov 2026 (children/intake.py RETIRED_CASE_TYPES): they stay here so an
+    # older record keeps a valid value; the serializer refuses them as a new pick.
     CASE_TYPE_CHOICES = [
         ("Adoption", "Adoption"),
         ("Foster Care", "Foster Care"),
@@ -69,19 +95,20 @@ class Child(models.Model):
         ("Abandoned", "Abandoned"),
         ("Dependent", "Dependent"),
         ("Neglected", "Neglected"),
-        ("Without Known Parents", "Without Known Parents"),
+        ("Foundling", "Foundling"),
         ("Orphaned", "Orphaned"),
     ]
 
     # New fields below match the agency's official "I. Identifying
     # Information" intake form (2026-07), which the agency's Social Case Study
     # Report (SCSR) repeats as its Part I. "N/A" became "Unknown" on 24 Sep
-    # 2026; "Child" was retired that day and offered again on 7 Oct 2026, the
-    # SCSR listing it (owner). "Unknown" stays.
+    # 2026; "Child" was retired that day, offered again on 7 Oct 2026 and
+    # retired again on 15 Nov 2026 (intake.RETIRED_BIRTH_STATUSES). "Marital"
+    # and "Non-Marital" became "Marital Child" and "Non-Marital Child" that
+    # day (children 0036). "Unknown" stays.
     BIRTH_STATUS_CHOICES = [
-        ("Marital", "Marital"),
-        ("Non-Marital", "Non-Marital"),
-        ("Child", "Child"),
+        ("Marital Child", "Marital Child"),
+        ("Non-Marital Child", "Non-Marital Child"),
         ("Unknown", "Unknown"),
     ]
     # The SCSR's "Health Condition (healthy or with special needs, specify)".
@@ -225,7 +252,7 @@ class Child(models.Model):
     health_condition = models.CharField(
         max_length=30, blank=True, choices=HEALTH_CONDITION_CHOICES)
     special_needs = models.CharField(max_length=300, blank=True)
-    # Beside the name, for a child without known parents: the SCSR asks for the
+    # Beside the name, for a foundling: the SCSR asks for the
     # given first and last name "and alias, if applicable". The form shows it
     # for that category only; a value saved stays if the category changes.
     alias = models.CharField(max_length=150, blank=True)
@@ -281,7 +308,8 @@ class Child(models.Model):
         done = [p for p in pas if p.status == "completed"]
         keys = {"state": None, "label": None, "step": None, "step_label": None,
                 "step_number": None, "total_steps": PA_TOTAL_STEPS,
-                "reassessment": False, "updated_at": None, "completed_at": None}
+                "reassessment": False, "updated_at": None, "completed_at": None,
+                "steps": _pa_step_entries(None), "step_edited_at": None}
         # An open row older than the newest completed one is abandoned; only
         # a row started after the last completion is a live re-assessment.
         open_ = [p for p in pas if p.status != "completed"]
@@ -301,12 +329,18 @@ class Child(models.Model):
                 step_number=[k for k, _ in PA_STEPS].index(step) + 2,
                 label=f"{'Started' if started else 'In progress'} \u00b7 {label}",
                 reassessment=bool(done),
-                updated_at=newest.updated_at.isoformat() if newest.updated_at else None)
+                updated_at=newest.updated_at.isoformat() if newest.updated_at else None,
+                steps=_pa_step_entries(newest))
+            current = next((e for e in keys["steps"] if e["step"] == step), None)
+            keys["step_edited_at"] = (
+                current and (current["last_edited_at"] or current["started_at"]))
             return keys
         if done:
             stamps = [p.completed_at for p in done if p.completed_at]
+            newest_done = max(done, key=lambda p: (p.created_at, p.id))
             keys.update(state="completed", label="Completed",
-                        completed_at=max(stamps).isoformat() if stamps else None)
+                        completed_at=max(stamps).isoformat() if stamps else None,
+                        steps=_pa_step_entries(newest_done))
             return keys
         keys.update(state="not_started", label="Not started")
         return keys

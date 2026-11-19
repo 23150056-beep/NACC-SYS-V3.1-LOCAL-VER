@@ -13,6 +13,7 @@ import { ADMISSION, CASE_TYPE_FIELDS, PLACEMENT, SPECIAL_NEEDS, dateFieldFor } f
 import { PURPOSE_LABEL, fmtDay, fmtTime, localDate } from './shared';
 import { clock, clockRange } from '../../utils/time';
 import { firstError } from '../../utils/errors';
+import { SESSION_MINUTES } from '../../utils/child';
 import './drawer.css';
 
 /* Text typed into the record's boxes, shown as typed: its line breaks kept,
@@ -168,7 +169,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
       await api.post('/appointments/', {
         child: child.id, psychologist: child.psychologist,
         start: `${pendingSlot.date}T${pendingSlot.start}:00`,
-        duration_minutes: 60, purpose, notes: '',
+        duration_minutes: SESSION_MINUTES, purpose, notes: '',
       });
       toast.success(`Booked — ${pendingSlot.weekday} ${pendingSlot.date} at ${clock(pendingSlot.start)}`);
       setPendingSlot(null);
@@ -301,7 +302,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
             {child.case_type && <Badge tone="neutral" size="sm">{child.case_type}</Badge>}
             {child.age != null && <span className="racco-cd-small" style={{ fontWeight: 600 }}>{child.age} yrs old ({child.group})</span>}
           </div>
-          {/* The case study, sessions and remarks live on the child's own page;
+          {/* Sessions and remarks live on the child's own page;
               the only other way there used to be an eye icon on archived rows. */}
           <Button variant="outline" size="sm" onClick={() => navigate(`/report/child/${child.id}`)} iconRight={<Icon name="arrow-right" size={14} />}>
             Open full record
@@ -432,10 +433,8 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
                   {upcoming.slice(0, UPCOMING_SHOWN).map((a) => {
                     const isToday = a.start.slice(0, 10) === today;
                     return (
-                      // The calendar does not open a single appointment from a
-                      // link, so this goes to the calendar itself.
-                      <button key={a.id} type="button" className="racco-cd-appt" onClick={() => navigate('/schedule')}
-                        title="Open the calendar"
+                      <button key={a.id} type="button" className="racco-cd-appt" onClick={() => navigate(`/schedule?appointment=${a.id}`)}
+                        title="Open this appointment"
                         style={{ background: isToday ? 'var(--amber-50)' : 'var(--ink-50)', border: `1px solid ${isToday ? 'var(--amber-200)' : 'var(--border)'}` }}>
                         <Icon name="calendar" size={15} style={{ color: isToday ? 'var(--amber-600)' : 'var(--blue-600)', flex: 'none' }} />
                         <span style={{ minWidth: 0, flex: 1 }}>

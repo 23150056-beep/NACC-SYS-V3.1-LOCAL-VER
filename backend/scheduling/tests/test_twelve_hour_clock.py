@@ -58,13 +58,13 @@ class WrittenTimesTests(SchedulingBase):
         self.assertEqual(400, r.status_code)
         self.assertIn("appointment at 9:00 AM that day", str(r.data))
 
-    def test_an_overlapping_window_is_named_on_the_12_hour_clock(self):
+    def test_a_day_that_already_has_a_window_is_named_on_the_12_hour_clock(self):
         self._auth("p@racco1.gov.ph")
         r = self.client.post("/api/availability/", {
             "weekday": 2, "start_time": "10:00", "end_time": "14:00", "capacity": 1},
             format="json")
         self.assertEqual(400, r.status_code)
-        self.assertIn("9:00 AM–12:00 PM", str(r.data))
+        self.assertIn("9:00 AM-12:00 PM, 2 slots", str(r.data))
 
     def test_monitoring_writes_the_next_session_on_the_12_hour_clock(self):
         start = next_weekday(2, 10)

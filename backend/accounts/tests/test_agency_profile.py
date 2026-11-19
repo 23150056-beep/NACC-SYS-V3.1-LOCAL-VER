@@ -1,4 +1,4 @@
-"""The agency's own details: who it is and who heads the office.
+"""The agency's own details: who it is.
 
 Printed reports read these, so every signed-in account may read them; only the
 ISA writes them, the same split as the rest of Settings. And there is exactly
@@ -34,20 +34,19 @@ class AgencyProfileTest(APITestCase):
         self._as(Role.STAFF)
         resp = self.client.get(URL)
         self.assertEqual(resp.status_code, 200, resp.data)
-        for key in ("agency_name", "office_address", "contact_details",
-                    "head_of_office_name", "head_of_office_title"):
+        for key in ("agency_name", "office_address", "contact_details"):
             self.assertEqual(resp.data[key], "")
 
     def test_staff_and_psychologists_read_but_cannot_write(self):
         self._as(Role.ADMINISTRATOR)
-        self.client.put(URL, {"head_of_office_name": "A. Reyes"}, format="json")
+        self.client.put(URL, {"agency_name": "A. Reyes"}, format="json")
         for role in (Role.STAFF, Role.PSYCHOLOGIST):
             self._as(role)
-            self.assertEqual(self.client.get(URL).data["head_of_office_name"], "A. Reyes")
+            self.assertEqual(self.client.get(URL).data["agency_name"], "A. Reyes")
             for verb in (self.client.put, self.client.patch):
-                resp = verb(URL, {"head_of_office_name": "Someone Else"}, format="json")
+                resp = verb(URL, {"agency_name": "Someone Else"}, format="json")
                 self.assertEqual(resp.status_code, 403, (role, resp.data))
-        self.assertEqual(AgencyProfile.load().head_of_office_name, "A. Reyes")
+        self.assertEqual(AgencyProfile.load().agency_name, "A. Reyes")
 
     def test_the_administrator_writes_and_the_text_is_trimmed(self):
         self._as(Role.ADMINISTRATOR)
@@ -55,32 +54,37 @@ class AgencyProfileTest(APITestCase):
             "agency_name": "  RACCO 1  ",
             "office_address": " Government Center, San Fernando City ",
             "contact_details": "0917 000 0000",
-            "head_of_office_name": "  Maria Dela Cruz ",
-            "head_of_office_title": "Regional Director",
         }, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
         row = AgencyProfile.objects.get()
         self.assertEqual(row.agency_name, "RACCO 1")
         self.assertEqual(row.office_address, "Government Center, San Fernando City")
-        self.assertEqual(row.head_of_office_name, "Maria Dela Cruz")
-        self.assertEqual(row.head_of_office_title, "Regional Director")
 
     def test_a_field_can_be_cleared_again(self):
         self._as(Role.ADMINISTRATOR)
-        self.client.put(URL, {"head_of_office_name": "A. Reyes"}, format="json")
-        resp = self.client.patch(URL, {"head_of_office_name": ""}, format="json")
+        self.client.put(URL, {"agency_name": "A. Reyes"}, format="json")
+        resp = self.client.patch(URL, {"agency_name": ""}, format="json")
         self.assertEqual(resp.status_code, 200, resp.data)
-        self.assertEqual(AgencyProfile.load().head_of_office_name, "")
+        self.assertEqual(AgencyProfile.load().agency_name, "")
 
     def test_an_overlong_value_is_refused_with_the_field_named(self):
         self._as(Role.ADMINISTRATOR)
-        resp = self.client.put(URL, {"head_of_office_name": "x" * 151}, format="json")
+        resp = self.client.put(URL, {"agency_name": "x" * 201}, format="json")
         self.assertEqual(resp.status_code, 400)
-        self.assertIn("head_of_office_name", resp.data)
+        self.assertIn("agency_name", resp.data)
         resp = self.client.put(URL, {"office_address": "x" * 501}, format="json")
         self.assertEqual(resp.status_code, 400)
         self.assertIn("office_address", resp.data)
-        self.assertEqual(AgencyProfile.load().head_of_office_name, "")
+        self.assertEqual(AgencyProfile.load().agency_name, "")
+
+    def test_the_removed_fields_are_gone(self):
+        self._as(Role.ADMINISTRATOR)
+        data = self.client.get(URL).data
+        self.assertEqual(
+            set(data),
+            {"agency_name", "office_address", "contact_details", "updated_at"})
+        self.assertNotIn("head_of_office_name", data)
+        self.assertNotIn("head_of_office_title", data)
 
     def test_it_stays_one_row_however_often_it_is_saved(self):
         self._as(Role.ADMINISTRATOR)

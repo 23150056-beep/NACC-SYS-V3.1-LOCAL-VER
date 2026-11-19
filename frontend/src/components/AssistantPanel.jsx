@@ -348,7 +348,7 @@ export default function AssistantPanel() {
         ref={launcher}
         type="button"
         onClick={toggleAssistant}
-        className="racco-no-print racco-assistant-launcher"
+        className="racco-no-print racco-assistant-launcher racco-btn"
         data-open={open}
         aria-expanded={open}
         aria-controls={panelId}

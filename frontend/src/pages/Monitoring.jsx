@@ -4,9 +4,9 @@ import api from '../api/client';
 import { useLayout } from '../context/LayoutContext';
 import { useToast } from '../context/ToastContext';
 import {
-  Avatar, EmptyState, Icon, Input, PAGE, PageHeader, TD, TH, THEAD_ROW, TR,
+  Avatar, EmptyState, Icon, Input, PAGE, PageHeader, Segmented, TD, TH, THEAD_ROW, TR,
 } from '../ui';
-import { paProgressLabel } from '../utils/preAssessment';
+import { paProgressLabel, shortMoment } from '../utils/preAssessment';
 
 /* One row per child, and eight columns' worth of case state on it.
  *
@@ -20,25 +20,44 @@ export default function Monitoring() {
   const toast = useToast();
   const [rows, setRows] = useState([]);
   const [q, setQ] = useState('');
+  const [sortMode, setSortMode] = useState('recent');
 
   useEffect(() => {
     api.get('/reports/monitoring/').then((r) => setRows(r.data))
       .catch(() => toast.error('Could not load progress monitoring. Check your connection and refresh.'));
   }, [toast]);
 
+  // Last in, first out by default: the case edited most recently is on top.
+  // The server sends last_updated as ISO text, which orders correctly as a
+  // string; a case with nothing recorded sorts last. Ties fall back to name.
+  const byName = (a, b) => (a.child_name || '').localeCompare(b.child_name || '', undefined, { sensitivity: 'base' });
   const visible = useMemo(() => rows
     .filter((r) => (r.child_name || '').toLowerCase().includes(q.toLowerCase())
       || (r.case_ref || '').toLowerCase().includes(q.toLowerCase()))
-    .sort((a, b) => (a.child_name || '').localeCompare(b.child_name || '', undefined, { sensitivity: 'base' })),
-  [rows, q]);
+    .sort((a, b) => {
+      if (sortMode === 'recent') {
+        const x = a.last_updated || '';
+        const y = b.last_updated || '';
+        if (x !== y) return x < y ? 1 : -1;
+      }
+      return byName(a, b);
+    }),
+  [rows, q, sortMode]);
 
   // Monitoring lists active children only, so there is no closed row to word.
   const caseType = (r) => r.case_type || '—';
 
+  // "In progress · Instruments · edited Today, 9:30 AM": the tracker's last edit.
+  const paEdited = (r) => {
+    const at = r.pre_assessment_progress?.step_edited_at;
+    return at ? `edited ${shortMoment(at)}` : '';
+  };
+  const paText = (r) => paProgressLabel(r.pre_assessment_progress);
+
   const subLine = (r) => [
     r.case_ref,
     !layout.monitorPsychCol ? (r.psychologist_name || 'no psychologist') : null,
-    !layout.monitorPaCol ? paProgressLabel(r.pre_assessment_progress) : null,
+    !layout.monitorPaCol ? [paText(r), paEdited(r)].filter(Boolean).join(' · ') : null,
     !layout.monitorClassCol ? r.latest_classification : null,
     !layout.monitorLastCol && r.last_activity ? `last ${r.last_activity}` : null,
   ].filter(Boolean).join(' · ');
@@ -61,6 +80,11 @@ export default function Monitoring() {
           size="md" style={{ width: 300 }} fullWidth={false}
           placeholder="Search by child name or case ID…" value={q} onChange={(e) => setQ(e.target.value)}
           leading={<Icon name="search" size={17} />} aria-label="Search children"
+        />
+        <Segmented
+          label="Sort"
+          value={sortMode} onChange={setSortMode}
+          options={[{ value: 'recent', label: 'Recently updated' }, { value: 'az', label: 'A–Z' }]}
         />
         <span style={{ fontWeight: 600, fontSize: 12.5, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
           Showing <strong style={{ color: 'var(--text-strong)' }}>{visible.length}</strong> of {rows.length} children
@@ -106,7 +130,10 @@ export default function Monitoring() {
                           Reunification" is long. */}
                       <td style={{ ...TD, maxWidth: 180, lineHeight: 1.4 }}>{caseType(r)}</td>
                       {layout.monitorPsychCol && <td style={{ ...TD, whiteSpace: 'nowrap' }}>{r.psychologist_name || '—'}</td>}
-                      {layout.monitorPaCol && <td style={{ ...TD, whiteSpace: 'nowrap' }}>{paProgressLabel(r.pre_assessment_progress)}</td>}
+                      {layout.monitorPaCol && <td style={{ ...TD, whiteSpace: 'nowrap' }}>
+                        {paText(r)}
+                        {paEdited(r) && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{paEdited(r)}</div>}
+                      </td>}
                       {layout.monitorClassCol && (
                         <td style={{ ...TD, whiteSpace: 'nowrap', fontWeight: 600, color: borderline ? 'var(--warning-700)' : r.latest_classification ? 'var(--text-body)' : 'var(--text-faint)' }}>
                           {r.latest_classification || '—'}

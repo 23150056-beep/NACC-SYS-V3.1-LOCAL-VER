@@ -8,7 +8,7 @@ to do and to check. Three things are held here and not left to the screen:
   that includes the near-miss that must NOT be counted, since a count that is
   slightly too generous looks exactly like one that is right.
 * What it never carries. A sentinel string is planted in every kind of text the
-  endpoint must not return (case study, remark, a child's own answers, what the
+  endpoint must not return (remark, a child's own answers, what the
   assistant read or wrote, a custodian), and the whole response body is
   searched for each.
 
@@ -17,7 +17,6 @@ never reads the wall clock). The pinned moment is mid-afternoon in Manila, so
 "today" differs from the UTC date for the first eight hours of every local day
 and the sign-in tests put a login on each side of that line.
 """
-import ast
 import os
 import tempfile
 from datetime import date, datetime, timedelta
@@ -40,7 +39,6 @@ from accounts.models import Role, SmsSend, User
 from activity.models import ActivityLog
 from activity.services import log_activity
 from assistant.models import AssistantJob, AssistantSetting
-from case_study.models import CaseStudy, CaseStudySection
 from children.models import AssignmentRequest, Child
 from children.views import ChildViewSet
 from clinical.models import (AgencyFormTemplate, CaseReferral, OpinionnaireInvite,
@@ -1819,7 +1817,7 @@ class PrivacyTest(ConsoleCase):
         to read, on children who ARE in the queues (no social worker, a
         stranded holder, a duplicate) so their rows are in the response."""
         sentinel = {name: f"ZZSENTINEL-{name}-ZZ" for name in (
-            "case_study", "remark", "answer", "question", "job_input", "job_output",
+            "remark", "answer", "question", "job_input", "job_output",
             "custodian", "referral_reason", "medical", "decline_reason", "flag_note", "google")}
         # Two columns hold 16 characters at most.
         sentinel["custodian_number"] = "ZZ-CNUM-90210"
@@ -1833,9 +1831,6 @@ class PrivacyTest(ConsoleCase):
         self.child("Ana", "Cruz", birth_date=date(2015, 3, 2), social_worker=gone,
                    assigned_psychologist=self.bulan)
 
-        study = CaseStudy.objects.create(child=orphan)
-        CaseStudySection.objects.create(case_study=study, key="child_description",
-                                        value={"text": sentinel["case_study"]})
         RemarkNote.objects.create(child=orphan, author=self.bulan, text=sentinel["remark"])
         template = AgencyFormTemplate.objects.create(
             form_type=AgencyFormTemplate.SELF_REPORT_GOV, title=sentinel["question"])
@@ -1889,14 +1884,6 @@ class PrivacyTest(ConsoleCase):
         self.assertNotIn("md5$", body)
         self.assertNotIn("pbkdf2", body)
         self.assertNotIn(self.editha.password, body)
-
-    def test_the_module_does_not_import_the_case_study(self):
-        tree = ast.parse(Path(admin_overview.__file__).read_text(encoding="utf-8"))
-        imported = [node.module if isinstance(node, ast.ImportFrom) else alias.name
-                    for node in ast.walk(tree)
-                    if isinstance(node, (ast.Import, ast.ImportFrom))
-                    for alias in (node.names if isinstance(node, ast.Import) else [None])]
-        self.assertFalse([m for m in imported if m and m.split(".")[0] == "case_study"])
 
 
 # ---------------------------------------------------------------------------

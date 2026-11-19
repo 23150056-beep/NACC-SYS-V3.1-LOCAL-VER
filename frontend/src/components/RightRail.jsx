@@ -76,7 +76,8 @@ export function CensusCard({ wide = false }) {
    * a count you cannot act on is decoration. */
   const railStats = isPsych ? [
     { label: 'My active', value: census.active ?? 0, hint: 'children assigned', color: 'var(--success-700)', to: '/children' },
-    { label: 'Pre-assessed', value: byPa.completed ?? 0, hint: `${byPa.in_progress ?? 0} in progress`, color: 'var(--blue-600)', to: '/monitoring' },
+    // The psychologist's tile counts who is still in pre-assessment (owner, 15 Nov 2026).
+    { label: 'In Pre-Assessment', value: (byPa.not_started ?? 0) + (byPa.in_progress ?? 0), hint: `${byPa.completed ?? 0} completed`, color: 'var(--blue-600)', to: '/monitoring' },
     { label: 'Today', value: today.length, hint: 'appointments', color: 'var(--text-body)', to: '/schedule' },
     { label: 'Care gaps', value: gaps.length, hint: `${dueToday} need today`, color: 'var(--red-700)', to: '/' },
   ] : [
@@ -182,7 +183,7 @@ export function TodayCard({ wide = false }) {
         const t = STATUS_TONE[a.status] || STATUS_TONE.scheduled;
         return (
           <button
-            key={a.id} type="button" onClick={() => navigate('/schedule')}
+            key={a.id} type="button" onClick={() => navigate(`/schedule?appointment=${a.id}`)}
             style={{ width: '100%', display: 'flex', gap: 11, padding: wide ? '10px 14px' : '9px 13px', borderBottom: '1px solid var(--divider-row)', border: 'none', background: 'transparent', cursor: 'pointer', textAlign: 'left', fontFamily: 'var(--font-sans)' }}
             onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--blue-50)'; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}

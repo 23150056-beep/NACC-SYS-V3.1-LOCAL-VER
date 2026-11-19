@@ -495,6 +495,12 @@ class OpeningsAfterAcceptingTest(AssignmentBase):
 
     def setUp(self):
         super().setUp()
+        # Pinned before the agency's day starts: openings begin TODAY, and run
+        # between 9 and 11 AM Manila the wall clock made today offer 9:30.
+        now = timezone.make_aware(timezone.datetime(2026, 11, 11, 7, 0))
+        clock = patch("django.utils.timezone.now", return_value=now)
+        clock.start()
+        self.addCleanup(clock.stop)
         give_referral(self.child, self.sw)
         tomorrow = timezone.localdate() + timedelta(days=1)
         for offset in range(7):

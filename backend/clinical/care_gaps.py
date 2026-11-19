@@ -92,12 +92,17 @@ def _sorted(alerts):
     return alerts
 
 
-def compute_alerts(children_qs):
-    """Compute care-gap alerts for the given (already role-scoped) children."""
+def compute_alerts(children_qs, active_children=None):
+    """Compute care-gap alerts for the given (already role-scoped) children.
+
+    `active_children` is the caller's own list of the same active rows with
+    every pre-assessment prefetched into `pre_assessments`; given, the rows
+    are not read a second time."""
     today = timezone.localdate()
     now = timezone.now()
-    children = list(children_qs.filter(status=Child.ACTIVE)
-                    .prefetch_related("pre_assessments"))
+    children = (active_children if active_children is not None
+                else list(children_qs.filter(status=Child.ACTIVE)
+                          .prefetch_related("pre_assessments")))
     ids = [c.id for c in children]
 
     last_completed_appt, has_upcoming = _booking_state(ids, now)
@@ -148,7 +153,7 @@ def compute_alerts(children_qs):
     return _sorted(alerts)
 
 
-def compute_staff_alerts(children_qs):
+def compute_staff_alerts(children_qs, active_children=None):
     """A social worker's gaps, over their own (already scoped) records.
 
     These are what stops a case moving that is theirs to close. They cannot
@@ -158,7 +163,8 @@ def compute_staff_alerts(children_qs):
     step 2.
     """
     now = timezone.now()
-    children = list(children_qs.filter(status=Child.ACTIVE))
+    children = (active_children if active_children is not None
+                else list(children_qs.filter(status=Child.ACTIVE)))
     ids = [c.id for c in children]
 
     has_referral = set(CaseReferral.objects.filter(
@@ -231,14 +237,23 @@ def compute_staff_alerts(children_qs):
     return _sorted(alerts)
 
 
-def alerts_for(request, children_qs):
+def alerts_for(request, children_qs, active_children=None):
     """The care gaps for whoever is asking, over children already scoped to them.
 
     The Dashboard's card and the assistant's list_care_gaps both call this, so
     they name the same children. A psychologist keeps the clinical rules and the
     ISA keeps them agency-wide; a user with no role is scoped to nothing
     upstream and gets [].
+
+    `active_children` lets a caller that already holds the active rows hand
+    them over. It is used for a social worker (the rules read no
+    pre-assessment) and for the ISA, whose prefetch is the whole set; a
+    psychologist's own prefetch hides a colleague's history, which these
+    rules must still see, so theirs is read again.
     """
-    if role_of(request) == Role.STAFF:
-        return compute_staff_alerts(children_qs)
-    return compute_alerts(children_qs)
+    role = role_of(request)
+    if role == Role.STAFF:
+        return compute_staff_alerts(children_qs, active_children)
+    if role == Role.PSYCHOLOGIST:
+        active_children = None
+    return compute_alerts(children_qs, active_children)

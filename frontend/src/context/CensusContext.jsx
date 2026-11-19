@@ -56,8 +56,9 @@ export function CensusProvider({ children }) {
    * is a queue that sits. */
   const refreshPendingAccess = useCallback(() => {
     if (!isAdmin) { setPendingAccess(0); return; }
-    api.get('/users/', { params: { include_archived: 'true' } })
-      .then((r) => setPendingAccess((r.data || []).filter((u) => u.status === 'pending').length))
+    // A single COUNT on the server, not the whole directory.
+    api.get('/users/pending-count/')
+      .then((r) => setPendingAccess(Number(r.data?.pending) || 0))
       // Silent on purpose: this is a badge count on other people's screens.
       // A missing number on the Admin tab is not worth interrupting anyone,
       // and the queue itself reports properly when it is opened.
