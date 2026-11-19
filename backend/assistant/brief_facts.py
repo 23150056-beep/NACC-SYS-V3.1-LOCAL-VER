@@ -22,16 +22,12 @@ A social worker's case brief also says what to do next (`next_steps`, 12 Oct
 written brief drafted by the model, which was measured and invented dates and
 relationships; nothing here reaches a model.
 """
-from django.http import Http404
 from django.utils import timezone
 
 from accounts.display import display_name
 from accounts.models import Role
 from accounts.scoping import (hide_earlier_history, role_of, scope_to_visible,
                               visible_children)
-from case_study.access import access_for
-from case_study.completeness import missing_sections
-from case_study.models import CaseStudy
 from children import custodian, intake
 from children.models import AssignmentRequest, Child
 from clinical.care_gaps import (ASSIGNMENT_ANSWER_DAYS, SURVEY_UNANSWERED_DAYS,
@@ -76,8 +72,6 @@ _NEXT_STEP_GAPS = {
     "custodian_texts": set(),
     "survey_unanswered": {"survey_unanswered"},
     "self_reports": {"self_report_concern"},
-    "case_study_start": set(),
-    "case_study_complete": set(),
 }
 _SAID_IN_NEXT_STEPS = set().union(*_NEXT_STEP_GAPS.values())
 
@@ -184,24 +178,6 @@ def _is_the_social_worker(request, child):
             and child.social_worker_id == request.user.pk)
 
 
-def _case_study(request, child):
-    """Where the case study stands, never what it says: {"state": "none"}, or
-    its state and how many applicable sections are still empty. Read through
-    the case study's own access and completeness rules, so whoever may not
-    read it is told nothing (None) and "missing" is the number every other
-    screen shows."""
-    try:
-        access = access_for(request, child)
-    except Http404:
-        return None
-    if not access.can_write:
-        return None
-    study = CaseStudy.objects.filter(child=child).first()
-    if study is None:
-        return {"state": "none"}
-    return {"state": study.status, "missing": len(missing_sections(study))}
-
-
 # --- what to do next (a social worker's) ------------------------------------
 #
 # Plain rules over the facts above - no model, no database. An ordered list of
@@ -209,8 +185,8 @@ def _case_study(request, child):
 # the thing is done (null where a social worker cannot do it). A step is a TASK:
 # a psychologist who was asked yesterday is waiting, not a task, so there is
 # none. Counted nothing the facts did not already carry, and worded without a
-# custodian's name or number, a case note, a child's own words or a line of the
-# case study - the facts carry none of them.
+# custodian's name or number, a case note or a child's own words - the facts
+# carry none of them.
 
 DECLINE_REASON_CHARS = 200
 
@@ -227,7 +203,7 @@ def _plural(n, one, many):
 def next_steps(facts, child):
     """What the record's social worker has left to do for this child, in the
     order to do it. `facts` is brief_facts() of kind "case" with the social
-    worker's `case_study` row; `child` is only asked for its id and whether the
+    worker's; `child` is only asked for its id and whether the
     case is still open (a closed case has nothing to do: the care gaps skip it
     too).
 
@@ -299,16 +275,6 @@ def next_steps(facts, child):
             f"Read the {_plural(waiting, 'survey answer', 'survey answers')} "
             "waiting for review.", f"/report/child/{cid}?tab=overview")
 
-    study = facts.get("case_study")
-    if study is not None:
-        if study["state"] == "none":
-            add("case_study_start", "Start the case study.",
-                f"/report/child/{cid}?tab=casestudy")
-        elif study["state"] == "draft" and study.get("missing", 0) > 0:
-            add("case_study_complete",
-                f"Case study: {_plural(study['missing'], 'section', 'sections')} "
-                "still to complete.", f"/report/child/{cid}?tab=casestudy")
-
     return steps
 
 
@@ -379,6 +345,5 @@ def brief_facts(request, child):
             "survey": _survey(request, child),
         })
     if own_sw:
-        facts["case_study"] = _case_study(request, child)
         facts["next_steps"] = next_steps(facts, child)
     return facts

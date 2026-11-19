@@ -8,7 +8,7 @@ here writes, calls a gateway or asks the assistant anything. Each "Test"
 button on the screen goes to the endpoint that already tests that one thing.
 
 What it must never carry is kept out by the module's shape rather than by a
-promise: it imports no model that holds case text (the case study, remarks,
+promise: it imports no model that holds case text (remarks,
 reports, interviews, plans), reads no answer a child gave, and the assistant's
 audit rows are taken with a `values_list` that names its columns, so a job's
 text is never loaded. accounts/tests/test_admin_overview.py plants a sentinel

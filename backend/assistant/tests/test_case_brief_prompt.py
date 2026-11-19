@@ -22,7 +22,6 @@ from assistant import prompts
 from assistant.brief_facts import brief_facts
 from assistant.models import AssistantJob
 from assistant.tests.test_brief_facts import FactsFixture
-from case_study.models import CaseStudy, CaseStudySection
 from children.models import AssignmentRequest, Child
 from clinical.models import (AgencyFormTemplate, CaseReferral, ConsentRecord,
                              OpinionnaireInvite, ProblemEntry, RemarkNote,
@@ -360,7 +359,6 @@ class WhatItMustNeverReadTest(CaseBriefFixture):
         "remark": "REMARK-SECRET-TEXT",
         "self-report answer": "SELFREPORT-SECRET-WORDS",
         "self-report question": "SELFREPORT-SECRET-QUESTION",
-        "case study": "CASESTUDY-SECRET-TEXT",
         "unconfirmed summary": "UNCONFIRMED-SECRET-SUMMARY",
         "referral document text": "REFERRAL-RAW-SECRET-TEXT",
         "custodian name": "Lola Cora Dizon",
@@ -378,9 +376,6 @@ class WhatItMustNeverReadTest(CaseBriefFixture):
                                   text=self.SECRETS["remark"])
         self._flag(question=self.SECRETS["self-report question"],
                    answer=self.SECRETS["self-report answer"])
-        study = CaseStudy.objects.create(child=self.child, created_by=self.sw)
-        CaseStudySection.objects.create(
-            case_study=study, key="a3_description", value=self.SECRETS["case study"])
         self._referral(summary=self.SECRETS["unconfirmed summary"], confirmed=False,
                        text=self.SECRETS["referral document text"])
         Child.objects.filter(pk=self.child.pk).update(
@@ -397,7 +392,6 @@ class WhatItMustNeverReadTest(CaseBriefFixture):
         # Without this the test below passes for a child who has none of it.
         self.assertTrue(self.child.remarks.exists())
         self.assertEqual(1, self.child.self_report_flags.count())
-        self.assertTrue(CaseStudySection.objects.filter(case_study__child=self.child).exists())
         self.assertEqual(1, self.child.case_referrals.count())
         self.assertEqual(1, self.child.problems.count())
         self.assertEqual(1, self.child.treatment_plans.count())

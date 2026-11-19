@@ -77,7 +77,6 @@ INSTALLED_APPS = [
     "scheduling",
     "activity",
     "assistant",
-    "case_study",
 ]
 
 MIDDLEWARE = [

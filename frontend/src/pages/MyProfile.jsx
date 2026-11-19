@@ -9,7 +9,7 @@ import {
   RoleAccessPanel, Skeleton, EmptyState, Note, Switch, PAGE, hoverLift,
 } from '../ui';
 import { eventText, eventDestination } from '../utils/activity';
-import { dayHasPassed, exactDate, shortDate, timeAgo } from '../utils/time';
+import { exactDate, shortDate, timeAgo } from '../utils/time';
 import api from '../api/client';
 import {
   getMyPhone, requestPhoneCode, confirmPhoneCode, removeMyPhone,
@@ -36,23 +36,13 @@ import { getMyEmailNotifications, saveMyEmailNotifications } from '../api/email'
  * all mean the same thing) and refuses another site or a link to a post, so
  * the messages below come from it rather than being guessed at here.
  *
- * The "PRC license" card is the other thing a person writes, and only for a
- * social worker or a psychologist: the Social Case Study Report's signature
- * block prints the number and when it is valid until. An administrator is IT
- * support and has no license, so the server neither offers nor accepts it.
- *
  * There is no home address field. The earlier prototype had one; nothing in
  * the system reads a staff member's home address, and collecting personal
  * data with no purpose is what RA 10173 asks agencies not to do.
  */
 
 const LINKS_EMPTY = { facebook: '', twitter: '', instagram: '' };
-// The PRC license is its own block with its own save, so the two never send
-// or wipe each other's fields. The date is '' on screen and null on the wire.
-const LICENSE_EMPTY = { license_number: '', license_valid_until: '' };
-const EMPTY = { ...LINKS_EMPTY, ...LICENSE_EMPTY };
-const LICENSE_KEYS = Object.keys(LICENSE_EMPTY);
-
+const EMPTY = LINKS_EMPTY;
 // Short enough not to truncate in a 300px field. The note under the form is
 // where "or just your username" is said, once, rather than three times.
 const FIELDS = [
@@ -96,7 +86,6 @@ export default function MyProfile() {
   // administrator are the whole agency's - security audit trail included -
   // and would read as "yours" under these headings.
   const isAdmin = role === 'Administrator';
-  const holdsLicense = role === 'Staff' || role === 'Psychologist';
 
   const [form, setForm] = useState(EMPTY);
   const [saved, setSaved] = useState(null);   // null until the server answers
@@ -123,7 +112,7 @@ export default function MyProfile() {
   useEffect(() => {
     api.get('/auth/me/profile/')
       .then((r) => {
-        const next = { ...EMPTY, ...r.data, license_valid_until: r.data.license_valid_until || '' };
+        const next = { ...EMPTY, ...r.data };
         setForm(next);
         setSaved(next);
       })
@@ -149,9 +138,6 @@ export default function MyProfile() {
   const dirty = useMemo(
     () => !!saved && FIELDS.some(([k]) => (form[k] || '') !== (saved[k] || '')),
     [form, saved]);
-  const licenseDirty = useMemo(
-    () => !!saved && LICENSE_KEYS.some((k) => (form[k] || '').trim() !== (saved[k] || '')),
-    [form, saved]);
   const hasLinks = useMemo(
     () => !!saved && FIELDS.some(([k]) => (saved[k] || '').trim()), [saved]);
 
@@ -174,8 +160,7 @@ export default function MyProfile() {
     setFieldErrors({});
     try {
       const { data } = await api.patch('/auth/me/profile/', payload);
-      // Take back only what was sent. The links and the license are saved
-      // separately, and the other block may be holding an edit not yet saved.
+      // Take back only what was sent.
       const taken = Object.fromEntries(Object.keys(payload).map((k) => [k, data[k] ?? '']));
       setForm((f) => ({ ...f, ...taken }));
       setSaved((s) => ({ ...s, ...taken }));
@@ -258,17 +243,6 @@ export default function MyProfile() {
     e.preventDefault();
     if (!(await confirm({ description: 'This saves the links on your profile.', confirmLabel: 'Yes, save the links' }))) return;
     write(Object.fromEntries(FIELDS.map(([k]) => [k, form[k]])), 'Links saved.');
-  };
-  const saveLicense = async (e) => {
-    e.preventDefault();
-    if (!(await confirm({
-      description: 'This saves your PRC license number and when it is valid until. They are printed in the signature block of the reports you sign.',
-      confirmLabel: 'Yes, save my license',
-    }))) return;
-    write({
-      license_number: form.license_number.trim(),
-      license_valid_until: form.license_valid_until || null,
-    }, 'License saved.');
   };
   const clear = async () => {
     if (!(await confirm({
@@ -447,58 +421,6 @@ export default function MyProfile() {
               kinds for an administrator), so the card is not even mounted:
               it would ask for nothing and leave a gap where it was. */}
           {!isAdmin && <EmailNotificationsCard />}
-
-          {/* Printed in the signature block of the Social Case Study Report.
-              Not offered to the ISA: IT support holds no PRC license. */}
-          {holdsLicense && (
-            <Card padding="20px" eyebrow="For your reports" title="PRC license">
-              {saved === null ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 16, marginTop: 10 }}>
-                  {[0, 1].map((i) => <Skeleton key={i} height={58} radius="var(--radius-md)" />)}
-                </div>
-              ) : (
-                <form onSubmit={saveLicense} style={{ display: 'flex', flexDirection: 'column', gap: 13, marginTop: 6 }}>
-                  <FormField label="License number" error={fieldErrors.license_number}>
-                    <Input
-                      value={form.license_number} maxLength={50} disabled={busy}
-                      invalid={!!fieldErrors.license_number}
-                      leading={<Icon name="badge-check" size={16} />}
-                      onChange={(e) => {
-                        setForm({ ...form, license_number: e.target.value });
-                        setFieldErrors((fe) => ({ ...fe, license_number: undefined }));
-                      }}
-                    />
-                  </FormField>
-                  <FormField label="Valid until" error={fieldErrors.license_valid_until}
-                             hint={form.license_valid_until
-                               ? `Printed as ${shortDate(form.license_valid_until)}.`
-                               : null}>
-                    <Input
-                      type="date" value={form.license_valid_until} disabled={busy}
-                      invalid={!!fieldErrors.license_valid_until}
-                      trailing={dayHasPassed(form.license_valid_until)
-                        ? <Badge tone="danger" size="sm">Expired</Badge> : null}
-                      onChange={(e) => {
-                        setForm({ ...form, license_valid_until: e.target.value });
-                        setFieldErrors((fe) => ({ ...fe, license_valid_until: undefined }));
-                      }}
-                    />
-                  </FormField>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 9, flexWrap: 'wrap' }}>
-                    <Button type="submit" variant="primary" size="sm" disabled={!licenseDirty || busy}
-                            iconLeft={<Icon name="save" size={15} />}>
-                      {busy ? 'Saving…' : licenseDirty ? 'Save' : 'Saved'}
-                    </Button>
-                  </div>
-                </form>
-              )}
-              <div style={{ fontSize: 12, lineHeight: 1.55, color: 'var(--text-faint)', marginTop: 13 }}>
-                Printed under your name on the Social Case Study Report. An
-                expired license can still be saved, but it will print with
-                that date.
-              </div>
-            </Card>
-          )}
 
           {/* The one thing on this page a person writes. */}
           <Card padding="20px" eyebrow="Optional" title="Links">

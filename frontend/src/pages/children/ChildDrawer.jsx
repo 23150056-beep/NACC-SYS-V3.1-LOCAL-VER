@@ -302,7 +302,7 @@ export default function ChildDrawer({ child, upcoming = [], canEdit, canTerminat
             {child.case_type && <Badge tone="neutral" size="sm">{child.case_type}</Badge>}
             {child.age != null && <span className="racco-cd-small" style={{ fontWeight: 600 }}>{child.age} yrs old ({child.group})</span>}
           </div>
-          {/* The case study, sessions and remarks live on the child's own page;
+          {/* Sessions and remarks live on the child's own page;
               the only other way there used to be an eye icon on archived rows. */}
           <Button variant="outline" size="sm" onClick={() => navigate(`/report/child/${child.id}`)} iconRight={<Icon name="arrow-right" size={14} />}>
             Open full record

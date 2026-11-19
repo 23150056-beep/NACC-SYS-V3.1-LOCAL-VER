@@ -410,8 +410,8 @@ class AgencyProfileView(generics.RetrieveUpdateAPIView):
     """The agency's own details, as printed on its reports.
 
     One row, so no id in the path. Anyone signed in may read it - a printed
-    report is assembled in the reader's browser and needs the head of office's
-    name - but only an administrator writes it, the same split as the rest of
+    report is assembled in the reader's browser and needs the agency's
+    name and address - but only an administrator writes it, the same split as the rest of
     Settings. Nothing here is about a child or a person's account.
     """
 

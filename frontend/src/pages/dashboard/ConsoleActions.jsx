@@ -318,7 +318,7 @@ function TransferDrawer({ onClose, onMoved }) {
     const n = chosen.length;
     const ok = await confirm({
       title: `Move ${num(n)} ${plural(n, 'record', 'records')} from ${nameOf(fromUser)} to ${nameOf(toUser)}?`,
-      description: 'Only who holds the records changes. Each keeps its psychologist, its appointments and its case study. The move is written to the audit trail.',
+      description: 'Only who holds the records changes. Each keeps its psychologist and its appointments. The move is written to the audit trail.',
       confirmLabel: `Yes, move ${plural(n, 'it', 'them')}`,
     });
     if (!ok) return;
@@ -395,7 +395,7 @@ function TransferDrawer({ onClose, onMoved }) {
       ) : (
         <>
           <div style={{ fontSize: 12.5, lineHeight: 1.55, color: 'var(--text-muted)' }}>
-            Only who holds a record changes. Its psychologist, appointments and case study stay with it.
+            Only who holds a record changes. Its psychologist and appointments stay with it.
             Closed records are not moved.
           </div>
           <FormField label="From" hint={fromUser && fromUser.status !== 'active' ? 'This account is deactivated, so nobody can open these records until they are moved.' : null}>
@@ -555,7 +555,7 @@ export default function ConsoleActions({ accessCount, narrow, assistant, onChang
     const records = <KeepRefs>{shown}</KeepRefs>;
     await notice({
       title: 'Records moved',
-      description: `${num(done.moved)} ${plural(done.moved, 'record', 'records')} moved from ${fromName} to ${done.to.name}. ${plural(done.moved, 'It is', 'They are')} in ${done.to.name}'s Records now, and keep${plural(done.moved, 's', '')} ${plural(done.moved, 'its', 'their')} psychologist, appointments and case study.`,
+      description: `${num(done.moved)} ${plural(done.moved, 'record', 'records')} moved from ${fromName} to ${done.to.name}. ${plural(done.moved, 'It is', 'They are')} in ${done.to.name}'s Records now, and keep${plural(done.moved, 's', '')} ${plural(done.moved, 'its', 'their')} psychologist and appointments.`,
       details: [['From', fromName], ['To', done.to.name], ['Records', records]],
     });
   };

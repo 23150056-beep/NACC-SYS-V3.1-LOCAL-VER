@@ -20,7 +20,6 @@ from rest_framework.test import APIClient
 from accounts.models import Role
 from activity.models import ActivityLog
 from activity.services import log_activity
-from case_study.models import CaseStudy
 from children.models import AssignmentRequest, Child
 from children.transfer import MAX_ID, MAX_RECORDS
 from scheduling.models import Appointment
@@ -431,14 +430,13 @@ class MoveTest(TransferCase):
         self.assertEqual({self.rosa.pk}, {self.holders()[self.fe.pk], self.holders()[self.gil.pk]})
 
     def test_nothing_else_about_the_record_changes(self):
-        """Assigned psychologist, an open request to one, the case study and
+        """Assigned psychologist, an open request to one and
         the appointments stay exactly as they are."""
         asked = User.objects.create_user(
             email="psy2@t.ph", username="psy2", password="x", first_name="Jose", last_name="Rizal",
             role=self.psy.role)
         request = AssignmentRequest.objects.create(
             child=self.ana, psychologist=asked, requested_by=self.rosa)
-        study = CaseStudy.objects.create(child=self.ana, created_by=self.rosa)
         session = Appointment.objects.create(
             child=self.ana, psychologist=self.psy,
             start=datetime(2026, 11, 3, 1, 0, tzinfo=dt_timezone.utc))
@@ -453,8 +451,6 @@ class MoveTest(TransferCase):
         request.refresh_from_db()
         self.assertEqual((AssignmentRequest.PENDING, self.rosa.pk, asked.pk),
                          (request.status, request.requested_by_id, request.psychologist_id))
-        study.refresh_from_db()
-        self.assertEqual(self.rosa.pk, study.created_by_id)
         session.refresh_from_db()
         self.assertEqual((self.ana.pk, self.psy.pk), (session.child_id, session.psychologist_id))
 
@@ -470,7 +466,7 @@ class MoveTest(TransferCase):
 
 
 class WhoCanReadItTest(TransferCase):
-    """Case study access, the calendar's names and Records all follow
+    """The calendar's names and Records all follow
     `social_worker`, so they move with it."""
 
     def test_the_new_worker_can_read_the_child_and_the_old_one_cannot(self):
@@ -485,17 +481,6 @@ class WhoCanReadItTest(TransferCase):
         self.assertIn(self.ana.pk, [c["id"] for c in new.get("/api/children/").data])
         # Left alone, still the old worker's.
         self.assertEqual(200, old.get(f"/api/children/{self.ben.pk}/").status_code)
-
-    def test_the_case_study_follows_the_record(self):
-        CaseStudy.objects.create(child=self.ana, created_by=self.rosa)
-        url = f"/api/case-studies/child/{self.ana.pk}/"
-        self.assertEqual(200, self.as_user(self.rosa).get(url).status_code)
-        self.assertEqual(404, self.as_user(self.editha).get(url).status_code)
-
-        self.assertEqual(200, self.transfer([self.ana]).status_code)
-
-        self.assertEqual(404, self.as_user(self.rosa).get(url).status_code)
-        self.assertEqual(200, self.as_user(self.editha).get(url).status_code)
 
 
 class ActivityTest(TransferCase):

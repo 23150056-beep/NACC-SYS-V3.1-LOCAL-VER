@@ -27,7 +27,7 @@ The rules, all of them checked before anything is written:
   record that changed: 409, nothing moved.
 
 Only `social_worker` changes. The assigned psychologist, any open request to
-one, the case study and the appointments stay as they are; what a social worker
+one and the appointments stay as they are; what a social worker
 sees of all of them follows the field. `updated_at` is bumped by hand, because
 a bulk UPDATE skips `auto_now`, and the record form's "updated by someone else"
 check reads it - a form opened before the move must not save over it.

@@ -774,7 +774,7 @@ Settings, no per-feature flags.
 - **Instead, "What to do next" by rules** (`brief_facts.next_steps`, Staff on
   their own record only): file the referral, ask a psychologist / chase one
   silent 7+ days / ask another after a decline, consent, book, custodian
-  texts, an unanswered survey, survey answers to read, the case study - each
+  texts, an unanswered survey, survey answers to read - each
   with a link to where it is done, firing at the same moment as its Dashboard
   gap (thresholds imported from `care_gaps`, pinned to the second). The SW's
   leftover care gaps drop what a step says (`_NEXT_STEP_GAPS`, guard test).
@@ -1085,107 +1085,39 @@ none of the real ones has been seen.
   fell in step with the seeder's round-robin and each psychologist saw one.
   Exactly one carries another child's name, for the check to find.
 
-## The case study (the SCSR on the child's record)
+## Removed: the case study (SCSR)
 
-Built from 8 Oct 2026; design in
-`docs/superpowers/specs/2026-10-07-scsr-parts-2-5-design.md`. The owner's aim:
-the Social Case Study Report "digitally on the child record module" - a Case
-study tab on the child's page that prints the SCSR. No Word export.
-App `case_study` (never `adoption`, see "Removed").
+Removed on 17 Nov 2026 at the owner's request: the `case_study` app, its
+`/api/case-studies/` routes, the Case study tab on the child's page, the SCSR
+print (`ScsrPrint`), `config/scsr.js` and the brief's two case-study next
+steps.
 
-- **Block A is every child's; B and C are adoptions'** (owner, 10 Oct 2026).
-  The child's background - referral, description, medical history,
-  immunizations, development, birth family, surrender or abandonment - is the
-  child's profile whatever the case type, so the tab shows for Foster Care and
-  the rest with block A only. `sections.applies()` gates B and C on
-  `case_type == "Adoption"` (mirrored in `scsr.js appliesTo`); completeness,
-  Final and the snapshot all read `applies`, so a non-adoption Final is block
-  A. Moving a record away from Adoption HIDES B and C - their rows stay and
-  come back if it moves back. Reopen works on any active record, or a final
-  made as an adoption would be stuck after a case-type change. A
-  non-adoption record reads "The Child" (not "/Adoptee"), shows "Case type" in
-  Part I, and prints block A without the adoption subtitle; a final copy
-  prints by the case type it was MADE with.
-
-- **Numbering is the template's**: A (the child, I-V), B (the PAPs, I-XVII),
-  C (placement, I-VI), roman numbers restarting in each block. Part I is the
-  record form, read live and frozen at Final; everything else is one row per
-  section (`CaseStudySection`, unique on case study + key, JSON value).
-- **The catalogue is `case_study/sections.py` and `config/scsr.js`**, pinned
-  by `test_catalogue.py` the way `test_intake.py` pins caseData.js. **A key is
-  never renamed or reused**: `ALL_KEYS_EVER` keeps every one ever issued. A
-  JSON key rename is the 0020 trap in another form - stored text would stop
-  matching any section.
-- **Access lives in `case_study/access.py`, not the clinical base class**,
-  where "Administrators see everything" would hand IT support every case
-  study, the adoptive parents' incomes included. The record's SW reads and
-  writes; the ASSIGNED psychologist reads block A, drafts included (a pending
-  one is nobody), minus the psychological-evaluation highlights where the
-  history is not carried to them - otherwise the previous psychologist's
-  findings reach them through the SW's text; the ISA gets status only (exists,
-  state, holder, "(inactive)", how much is missing) - never text, never print;
-  anyone else 404. Not registered in Django admin, where the seeded ISA is a
-  superuser. No chatbot tool, prompt, export of counts or duplicate check
-  reads it.
-- **Each section saves on its own with the version the writer saw**: a
-  conditional UPDATE, 409 with the saved text on a stale version. Sessions are
-  per tab, so the commonest conflict is the same person in two tabs.
-- **Not applicable hides, never deletes**: a ticked box keeps its text and
-  unticking brings it back; a PUT without a `value` key leaves the text alone.
-  The psychologist's read sends null for a ticked box.
-- **Pre-fills are offered, never saved**: referral source and reason, medical
-  notes, and the latest psychological report's summary ONLY if confirmed.
-- **Ages are as of Date prepared**, not today. Domestic Relative asks whether
-  the PAPs had the child more than two years (pre-answered from the placement
-  date; unknown when there is none); a yes hides Placement History, as for
-  Adult.
-- **Nobody in the system approves.** The ISA is IT support, not the Head of
-  Office. The SW marks the case study **Final** and the printed copy is signed
-  on paper. The Head of Office's name comes from `AgencyProfile` (Settings,
-  ISA-edited - the card that used to be a fake "RCPC" field) and the SW's PRC
-  license number and validity from their own profile (`UserProfile`, Staff and
-  Psychologists; an administrator has none).
-- **Final writes an immutable copy** (`case_study/finalize.py`, the one path
-  the endpoint AND the demo seeder use, so a seeded final can only exist if it
-  passed `missing_sections()`): Part I as of Date prepared, every section that
-  applies, the preparer's license and the agency details OF THAT DAY. A
-  reprint shows what was signed even after a license renewal or a record edit.
-  A ticked Not applicable box is copied without its hidden text. Final is a
-  conditional update on `status=draft` AND the `updated_at` the screen saw, so
-  a double click or another tab's newer save is a 409, never a final of text
-  nobody reviewed; a box save that loses that race is rolled back. The box-save
-  response carries `case_study_updated_at` for that reason.
-- **Reopen** puts it back to draft; every final stays on file ("Finals on
-  file", each printable). A closed case cannot be reopened - its finals still
-  print. Finalized is addressed to the ASSIGNED psychologist
-  (a pending one is told nothing); Reopened to nobody; neither carries text.
-- **Demo data**: about a third of the active Adoption children get a draft and
-  a few others a final (`case_study/demo_case_studies.py`). The export blanks
-  the preparer's license and every phone, email and employer address in the
-  PAP table, live and in snapshots, so the fixture file never carries them;
-  the import re-homes user fields and the snapshot's preparer to the child's
-  SW and takes the agency block from the importing machine's `AgencyProfile`.
-- **The screen** (`components/caseStudy/`): one editor per section kind, so
-  all three blocks are editable. Each box saves with `useConfirm()`; "Save
-  all" confirms once and stops at the first refusal. Unsaved typing is kept in
-  `localStorage` under `nacc-draft:case-study:<user>:<child>:<key>` and offered
-  back; logout clears the `nacc-draft:` prefix. On a 409 the SW chooses "Load
-  the saved version" or "Keep mine" - neither text is lost without a choice.
-- **Print follows the tab**: on the Case study tab the page's Print button
-  prints the SCSR (`ScsrPrint`) - the newest final's copy when the case study
-  is final, the saved draft marked DRAFT otherwise (asking first when
-  something is unsaved); anywhere else it prints the psychological report.
-  Only the SW gets it.
-- **Every print used to come out ONE PAGE long** (found 8 Oct 2026). The app
-  shell is a fixed 100vh with hidden overflow so only `<main>` scrolls, and on
-  paper that clipped everything after page one - the psychological report had
-  been losing its recommendations and signature block. index.css now lets
-  `#root`, `.racco-shell` and `.racco-shell-row` go to auto height in print.
-  Check a printed page COUNT, not just the first page.
-- `/children?edit=<id>` opens the record form for that child ("Edit on the
-  record" from Part I). Activity reads "Started a case study for X" and opens
-  `?tab=casestudy`; "Finalized ..." and "Reopened ..." the same way
-  (`ActivityLog` actions `finalized` and `reopened`, activity 0005).
+- **The teardown is `children/0035_drop_case_study`**, not a migration in the
+  departing app, for the reason given under "Removed: the adoption tracker":
+  it drops `tbl_case_study_final`, `tbl_case_study_section` and
+  `tbl_case_study` (IF EXISTS) and deletes the `case_study` rows from
+  `django_migrations`, so the name is free again. Irreversible. Nothing was
+  dumped by this session, because no session can reach the owner's database:
+  back up first with `manage.py dumpdata case_study` BEFORE pulling, since the
+  command needs the app that is now gone.
+- **Kept on purpose**: the record form's fields that were modelled on SCSR
+  Part I (alias, health condition, whereabouts, legal status date and the
+  rest; see "The record form"), which are intake, not the case study; and
+  the `finalized`/`reopened` activity actions with their old lines, which are
+  history. Those lines now open the child's page.
+- **Its two readers went with it** (owner, same day): the PRC license on My
+  Profile (`UserProfile.license_number`, `license_valid_until`) and the Head
+  of Office on Settings (`AgencyProfile.head_of_office_name`, `_title`),
+  dropped by an accounts migration. The rest of AgencyProfile stays - the
+  calendar invite carries its office address - and so does UserProfile,
+  which holds the social links.
+- `import_demo_data` drops any `case_study.*` rows from an older fixture
+  before loading it.
+- **Print still needs the print fix** (found 8 Oct 2026). The app shell is a
+  fixed 100vh with hidden overflow, and on paper that clipped everything
+  after page one. index.css lets `#root`, `.racco-shell` and
+  `.racco-shell-row` go to auto height in print. Check a printed page COUNT,
+  not just the first page.
 
 ## The record form (Add Record)
 
@@ -1267,7 +1199,8 @@ middle name, a date found, and every question that applies made mandatory.
   the adoption case report written after the PAPA or supervised trial
   custody; only its Part I (Identifying Information) is intake. Parts II-V
   (background, family, the prospective adoptive parents, placement,
-  assessment) are a separate module still to be designed, not form fields.
+  assessment) were built as the case study and removed on 17 Nov 2026 (see
+  "Removed: the case study"); they are not form fields.
   - Birth status "Child" (offered again 7 Oct, retired again 15 Nov - see the
     Birth Status bullet below) and adoption types SIBRA and ICA Relative
     were offered again on 7 Oct, in the SCSR's order, with "Relative (Without 2-yr
@@ -1325,8 +1258,8 @@ middle name, a date found, and every question that applies made mandatory.
   the release still serving during a deploy keeps working - the serializer lets
   a record's own unchanged category through. The old word is refused as a new
   pick like any unknown value, not normalised; `import_demo_data` upgrades an
-  older fixture's. The Alias shows for Foundling. Final case study snapshots
-  and activity labels still hold the old word on purpose. **House number and
+  older fixture's. The Alias shows for Foundling. Activity labels still hold
+  the old word on purpose. **House number and
   the Date of Admission to the Agency are optional**: out of `required_fields`
   and `requiredFields`, labelled "(optional)", blank saves and can be blanked;
   the Date of Placement to Custodian stays required where it is asked, and the
@@ -1359,11 +1292,9 @@ middle name, a date found, and every question that applies made mandatory.
   offered, no migration, a record holding it keeps it through any edit, shown
   "(no longer offered)" and selectable back during that edit. "Marital",
   "Non-Marital" and "Child" are refused as a new pick, not normalised;
-  `import_demo_data` upgrades an older fixture's two old words. Case study
-  final snapshots and activity labels keep the old words on purpose, so a
-  reprint of an old final still says "Marital" / "Non-Marital". Optional
-  still. The case study's `b6_marital_history` section and the Marital
-  Satisfaction Inventory are other things and were not touched.
+  `import_demo_data` upgrades an older fixture's two old words. Activity
+  labels keep the old words on purpose. Optional still. The Marital
+  Satisfaction Inventory is another thing and was not touched.
 - **A rename cannot ride along with a deploy the old release survives.** On
   24 Sep the demo API's first deploy of 0020 failed on Render's side after the
   web had gone live; had the migration run first, the old API - still serving
@@ -1466,7 +1397,7 @@ covers a hole the others leave:
   referral files and any pending, withdrawn or declined request go with it (a
   psychologist shown two identical requests declines one as a duplicate, and
   a decline holds only a reason; only a still-pending one is notified); any
-  appointment, clinical record, case study, accepted request, assigned
+  appointment, clinical record, accepted request, assigned
   psychologist or assistant job blocks it.
   Every model with a FK to Child is named in `KEEPS_IT` or `TAKEN_ALONG`, and
   a test reading `Child._meta.related_objects` fails on one that is not - a
@@ -1586,8 +1517,8 @@ are unchanged (their assigned children).
   never a part-move. **Only `social_worker` changes** (and `updated_at`,
   bumped by hand because a bulk UPDATE skips `auto_now`: a record form opened
   before the move is told "updated by someone else"). The psychologist, an
-  open request to one, the case study and the appointments stay; what a SW
-  sees of them follows the field - case study access, names on the calendar,
+  open request to one and the appointments stay; what a SW
+  sees of them follows the field - names on the calendar,
   Records, and a psychologist's answer to a request, which goes to the child's
   current SW. **The trail has two layers** (the action `transferred`, activity
   0010, choices only): a RECORD line for each record, the audit trail ("Moved
@@ -2243,7 +2174,7 @@ and census stay underneath, as they were.
   errors, texts refused, failed uploads) and "What changed" - nothing counts
   server errors or failed uploads, and a refusal leaves no row. A number with no
   source is worse than no number.
-- **What it never shows**: case study text, any record's text (remarks,
+- **What it never shows**: any record's text (remarks,
   reports, referral summaries), what the assistant wrote, a custodian's name or
   number, or the reason a psychologist gave for declining a request (the stuck
   queue says who declined and how long ago; the ISA reads why on the child's
@@ -2916,7 +2847,7 @@ that must be read: the end dialogs (`useNotice`) are.
 Both of these, every time:
 
 ```
-cd backend && .venv/Scripts/python.exe manage.py test   # 3,879 tests, ~20 s with --parallel 4
+cd backend && .venv/Scripts/python.exe manage.py test   # 3,614 tests, ~20 s with --parallel 4
 cd frontend && npm run lint && npm run build
 ```
 

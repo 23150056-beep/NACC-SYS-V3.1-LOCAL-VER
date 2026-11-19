@@ -36,7 +36,7 @@ urlpatterns = [
     # Which emails you get - one switch each. No id, same rule.
     path("auth/me/email-notifications/", MyEmailNotificationsView.as_view(),
          name="my-email-notifications"),
-    # The agency's name, address and head of office. Anyone reads, the ISA writes.
+    # The agency's name, address and contact details. Anyone reads, the ISA writes.
     path("agency-profile/", AgencyProfileView.as_view(), name="agency-profile"),
     path("auth/change-password/", ChangePasswordView.as_view(), name="change-password"),
     path("roles/", RoleListView.as_view(), name="role-list"),
