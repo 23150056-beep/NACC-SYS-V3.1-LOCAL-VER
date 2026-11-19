@@ -6,13 +6,14 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import viewsets, status, mixins
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
 from accounts.models import Role
 from accounts.scoping import hide_earlier_history, role_of as _role, scope_to_visible
+from children.models import live_open_pre_assessments
 from accounts.permissions import CanManageInstruments, ProgressRecordAccess, writes_case_referrals
 from activity.models import ActivityLog
 from activity.services import log_activity
@@ -32,6 +33,8 @@ _CONSENT_CONTENT_TYPES = {
 }
 
 from clinical import form_import
+from clinical import lifecycle as pa_rules
+from clinical.lifecycle import PRE_ASSESSMENT_LIFECYCLE
 from clinical.serializers import (
     ALLOWED_CONSENT_EXTENSIONS,
     InstrumentCatalogSerializer, AgencyFormTemplateSerializer,
@@ -42,6 +45,7 @@ from clinical.serializers import (
     OpinionnaireInviteSerializer, SelfReportFlagSerializer,
 )
 from clinical.self_report_detection import detect_concerns
+from clinical.survey_lifecycle import INVITE_DAYS, INVITE_LIFECYCLE
 from clinical.self_report_model_check import start_model_check
 from clinical.services import ensure_text, extract_text, readable
 
@@ -302,6 +306,18 @@ class _ChildScopedClinicalViewSet(viewsets.ModelViewSet):
                      entity_id=obj.id, recipient=obj.child.assigned_psychologist)
 
 
+class _LostTheRace(Exception):
+    """Somebody completed the pre-assessment first."""
+
+
+class _NoInstruments(Exception):
+    pass
+
+
+class _ConsentUnsigned(Exception):
+    """The linked consent stopped being signed while it was completed."""
+
+
 class PreAssessmentViewSet(_ChildScopedClinicalViewSet):
     model = PreAssessment
     serializer_class = PreAssessmentSerializer
@@ -322,17 +338,10 @@ class PreAssessmentViewSet(_ChildScopedClinicalViewSet):
             # child's newest completed pre-assessment is resumed - the same
             # rule Child.pre_assessment_progress() uses. An older open row is
             # abandoned; resuming it would show a finished child as mid-way.
-            visible = self.get_queryset().filter(child_id=child_id)
-            last_done = max(
-                ((p.created_at, p.id) for p in visible.filter(status=PreAssessment.COMPLETED)),
-                default=None)
-            open_rows = visible.filter(
-                psychologist=request.user,
-                status__in=[PreAssessment.PENDING, PreAssessment.IN_PROGRESS],
-            ).order_by("-created_at", "-id")
-            existing = next(
-                (p for p in open_rows
-                 if last_done is None or (p.created_at, p.id) > last_done), None)
+            visible = list(self.get_queryset().filter(child_id=child_id))
+            mine = [p for p in live_open_pre_assessments(visible)
+                    if p.psychologist_id == request.user.id]
+            existing = max(mine, key=lambda p: (p.created_at, p.id), default=None)
             if existing:
                 return Response(self.get_serializer(existing).data, status=status.HTTP_200_OK)
         return super().create(request, *args, **kwargs)
@@ -385,20 +394,59 @@ class PreAssessmentViewSet(_ChildScopedClinicalViewSet):
         self._assert_can_write(obj.child)
         if obj.status == PreAssessment.COMPLETED:
             return Response({"detail": "Already completed."}, status=status.HTTP_400_BAD_REQUEST)
-        if not obj.consent or obj.consent.status != ConsentRecord.SIGNED:
-            return Response({"consent": "A signed consent is required before completing the pre-assessment."},
+        problems = pa_rules.completion_problems(obj)
+        if problems:
+            field, sentence = problems[0]
+            return Response({field: sentence}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            with transaction.atomic():
+                # Lock the consent first, as the consent edit and delete do, so
+                # the three take their locks in the same order.
+                if obj.consent_id:
+                    list(ConsentRecord.objects.select_for_update().filter(pk=obj.consent_id))
+                moved = PRE_ASSESSMENT_LIFECYCLE.move(
+                    obj, PreAssessment.COMPLETED, extra={"completed_at": timezone.now()})
+                if not moved:
+                    raise _LostTheRace()
+                # The consent and the instruments can change between the check
+                # above and the move. Look again, as they are now, and take the
+                # completion back if either no longer holds.
+                consent_id = (PreAssessment.objects.filter(pk=obj.pk)
+                              .values_list("consent_id", flat=True).first())
+                signed = ConsentRecord.objects.filter(
+                    pk=consent_id, status=ConsentRecord.SIGNED).exists()
+                if not signed:
+                    raise _ConsentUnsigned()
+                if not PreAssessment.instruments.through.objects.filter(
+                        preassessment_id=obj.pk).exists():
+                    raise _NoInstruments()
+        except _LostTheRace:
+            return Response({"detail": pa_rules.LOST_RACE}, status=status.HTTP_409_CONFLICT)
+        except _NoInstruments:
+            return Response({"instruments": pa_rules.INSTRUMENT_REQUIRED},
                             status=status.HTTP_400_BAD_REQUEST)
-        if obj.instruments.count() == 0:
-            return Response({"instruments": "Select at least one instrument title."},
+        except _ConsentUnsigned:
+            return Response({"consent": pa_rules.CONSENT_REQUIRED},
                             status=status.HTTP_400_BAD_REQUEST)
-        from django.utils import timezone as tz
-        obj.status = PreAssessment.COMPLETED
-        obj.completed_at = tz.now()
-        obj.save(update_fields=["status", "completed_at", "updated_at"])
         log_activity(request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
                      entity_type="PreAssessment", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.child.assigned_psychologist)
         return Response(PreAssessmentSerializer(obj).data)
+
+    def destroy(self, request, *args, **kwargs):
+        """A completed pre-assessment is part of the record. The delete is
+        conditional on it still being open, so one completed a moment ago is
+        refused too."""
+        obj = self.get_object()
+        self._assert_can_write(obj.child)
+        if obj.status == PreAssessment.COMPLETED:
+            return Response({"detail": pa_rules.CANNOT_DELETE}, status=status.HTTP_409_CONFLICT)
+        with transaction.atomic():
+            gone, _ = (PreAssessment.objects.filter(pk=obj.pk)
+                       .exclude(status=PreAssessment.COMPLETED).delete())
+        if not gone:
+            return Response({"detail": pa_rules.CANNOT_DELETE}, status=status.HTTP_409_CONFLICT)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class ConsentRecordViewSet(_ChildScopedClinicalViewSet):
@@ -409,6 +457,36 @@ class ConsentRecordViewSet(_ChildScopedClinicalViewSet):
     # psychologist's pre-assessment needs it on file.
     hides_history = False
     parser_classes = [MultiPartParser, FormParser, JSONParser]
+
+    def perform_update(self, serializer):
+        """Lock the consent, then look again at whether a completed
+        pre-assessment rests on it; the check in validate() ran unlocked."""
+        self._assert_can_write(serializer.instance.child)
+        _refuse_a_move(serializer)
+        with transaction.atomic():
+            list(ConsentRecord.objects.select_for_update().filter(pk=serializer.instance.pk))
+            new_status = serializer.validated_data.get("status")
+            if (new_status and new_status != ConsentRecord.SIGNED
+                    and serializer.instance.pre_assessments.filter(
+                        status=PreAssessment.COMPLETED).exists()):
+                raise ValidationError({"status": pa_rules.CONSENT_STAYS_SIGNED})
+            obj = serializer.save()
+        log_activity(self.request.user, ActivityLog.UPDATED, ActivityLog.RECORD,
+                     entity_type=self.model.__name__, entity_label=obj.child.fullname,
+                     entity_id=obj.id, recipient=obj.child.assigned_psychologist)
+
+    def destroy(self, request, *args, **kwargs):
+        """A consent a completed pre-assessment was completed with is its
+        evidence; deleting it would unlink it (SET_NULL) from the record."""
+        obj = self.get_object()
+        self._assert_can_write(obj.child)
+        with transaction.atomic():
+            list(ConsentRecord.objects.select_for_update().filter(pk=obj.pk))
+            if obj.pre_assessments.filter(status=PreAssessment.COMPLETED).exists():
+                return Response({"detail": pa_rules.CONSENT_IS_EVIDENCE},
+                                status=status.HTTP_409_CONFLICT)
+            obj.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["get"])
     def download(self, request, pk=None):
@@ -639,6 +717,11 @@ def survey_templates_for(request, child):
     return qs.order_by("title", "id")
 
 
+class Conflict(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = "That changed while you were looking at it."
+
+
 class OpinionnaireInviteViewSet(viewsets.ModelViewSet):
     """QR survey invites. Created by staff/admin (intake) or the assigned
     psychologist; answers arrive through the public token endpoints."""
@@ -693,13 +776,17 @@ class OpinionnaireInviteViewSet(viewsets.ModelViewSet):
                 {"template": "That form cannot be used for this child. "
                              "Choose one of the self-report forms offered for them."})
         obj = serializer.save(created_by=self.request.user,
-                              expires_at=timezone.now() + timedelta(days=7))
+                              expires_at=timezone.now() + timedelta(days=INVITE_DAYS))
         log_activity(self.request.user, ActivityLog.CREATED, ActivityLog.RECORD,
                      entity_type="OpinionnaireInvite", entity_label=obj.child.fullname,
                      entity_id=obj.id, recipient=obj.child.assigned_psychologist)
 
     def perform_destroy(self, instance):
         self._assert_can_write(instance.child)
+        if instance.status == OpinionnaireInvite.SUBMITTED:
+            # Deleting it would cascade the child's flags with it.
+            raise Conflict("A survey that was answered is part of the child's "
+                           "record and cannot be deleted.")
         instance.delete()
 
 
@@ -763,10 +850,31 @@ class PublicOpinionnaireView(viewsets.ViewSet):
         # Keep only answers for fields defined on the template; cap length.
         labels = {f.get("label") for f in (invite.template.fields or [])}
         cleaned = {k: str(v)[:2000] for k, v in answers.items() if k in labels}
-        invite.answers = cleaned
-        invite.status = OpinionnaireInvite.SUBMITTED
-        invite.submitted_at = timezone.now()
-        invite.save(update_fields=["answers", "status", "submitted_at"])
+        if not cleaned:
+            # Nothing matches the form as it is now: keep the link for another go.
+            return Response(
+                {"detail": "The questions changed while this page was open. "
+                           "Reload the page to answer them again."},
+                status=status.HTTP_400_BAD_REQUEST)
+        now = timezone.now()
+        lifecycle = INVITE_LIFECYCLE
+        if not lifecycle.allows(OpinionnaireInvite.PENDING, OpinionnaireInvite.SUBMITTED):
+            raise ValueError("survey link table forbids answering")
+        # Conditional on still pending and still within its expiry, so a second
+        # device or a double send loses and nothing below runs twice.
+        won = OpinionnaireInvite.objects.filter(
+            pk=invite.pk, status=OpinionnaireInvite.PENDING, expires_at__gt=now,
+        ).update(status=OpinionnaireInvite.SUBMITTED, answers=cleaned, submitted_at=now)
+        if not won:
+            # Still pending means the link expired between the read and the
+            # write: nothing was stored, so the child must not be thanked.
+            still_pending = OpinionnaireInvite.objects.filter(
+                pk=invite.pk, status=OpinionnaireInvite.PENDING).exists()
+            if still_pending:
+                return Response({"detail": "This survey link has expired or was already answered."},
+                                status=status.HTTP_410_GONE)
+            return Response({"detail": "These answers were already sent."},
+                            status=status.HTTP_409_CONFLICT)
 
         # The lexicon runs here: deterministic, sub-millisecond, and the floor
         # that holds when the model is unavailable. Nothing it does may fail
@@ -816,11 +924,10 @@ class SelfReportFlagViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
         if flag is None:
             return Response({"detail": "Not found."},
                             status=status.HTTP_404_NOT_FOUND)
-        # First acknowledgement wins. The record of who actually read it first
-        # must not be overwritten by whoever clicked next.
-        if flag.reviewed_at is None:
-            flag.reviewed_by = request.user
-            flag.reviewed_at = timezone.now()
-            flag.review_note = str(request.data.get("note") or "")[:2000]
-            flag.save(update_fields=["reviewed_by", "reviewed_at", "review_note"])
+        # First acknowledgement wins: a conditional UPDATE, so the first reader
+        # is never overwritten by whoever clicked next, even at the same moment.
+        SelfReportFlag.objects.filter(pk=flag.pk, reviewed_at__isnull=True).update(
+                reviewed_by=request.user, reviewed_at=timezone.now(),
+                review_note=str(request.data.get("note") or "")[:2000])
+        flag = self.get_queryset().get(pk=flag.pk)
         return Response(SelfReportFlagSerializer(flag).data)

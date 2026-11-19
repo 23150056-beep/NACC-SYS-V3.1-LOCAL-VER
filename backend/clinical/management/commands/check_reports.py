@@ -15,12 +15,10 @@ The check is made from the viewpoint of the report's author - the children
 THEY can see - exactly as it would have been at upload. A report whose author
 is gone is checked as its child's assigned psychologist would see it.
 """
-from types import SimpleNamespace
-
 from django.core.management.base import BaseCommand
 
 from clinical.models import CaseReferral, PsychologicalReport
-from clinical.report_check import check_for
+from clinical.report_check import check_as_author
 from clinical.services import ensure_text, readable
 
 
@@ -42,9 +40,7 @@ class Command(BaseCommand):
         reports = PsychologicalReport.objects.select_related(
             "child", "author__role", "child__assigned_psychologist__role")
         for report in reports:
-            viewer = report.author or report.child.assigned_psychologist
-            findings = check_for(SimpleNamespace(user=viewer), report.extracted_text,
-                                 report.child)
+            findings = check_as_author(report)
             checked += 1
             flagged += bool(findings)
             if findings != report.check_findings:

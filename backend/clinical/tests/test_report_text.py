@@ -215,6 +215,32 @@ class UploadTest(TestCase):
         report.refresh_from_db()
         self.assertIn("## Identifying Information", report.extracted_text)
 
+    def test_a_legacy_report_is_checked_when_it_is_first_read(self):
+        # The file says age 9; the record says the child is twelve.
+        from datetime import datetime, timedelta
+        from unittest.mock import patch
+        from django.utils import timezone
+        noon = timezone.make_aware(datetime(2026, 6, 15, 12, 0))
+        self._clock = patch("django.utils.timezone.now", return_value=noon)
+        self._clock.start()
+        self.addCleanup(self._clock.stop)
+        self.child.birth_date = timezone.localdate() - timedelta(days=365 * 12 + 30)
+        self.child.save()
+        report = PsychologicalReport(child=self.child, author=self.psy,
+                                     original_filename="old.docx", check_reviewed=True)
+        report.file.save("old.docx", ContentFile(build_docx(BLOCKS)), save=True)
+        self.assertEqual([], report.check_findings)
+        ensure_text(report)
+        report.refresh_from_db()
+        self.assertIn("age", [f["kind"] for f in report.check_findings])
+        self.assertFalse(report.check_reviewed)
+
+    def test_reading_a_referral_does_not_touch_findings(self):
+        referral = CaseReferral(child=self.child, uploaded_by=self.staff,
+                                original_filename="r.docx")
+        referral.file.save("r.docx", ContentFile(build_docx(BLOCKS)), save=True)
+        self.assertTrue(ensure_text(referral))
+
     def test_an_old_word_97_file_stays_unread(self):
         report = PsychologicalReport(child=self.child, author=self.psy,
                                      original_filename="old.doc")

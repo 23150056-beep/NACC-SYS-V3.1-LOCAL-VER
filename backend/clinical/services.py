@@ -64,7 +64,14 @@ def ensure_text(doc):
         return ""
     if text:
         doc.extracted_text = text
-        doc.save(update_fields=["extracted_text"])
+        fields = ["extracted_text"]
+        if hasattr(doc, "check_findings"):
+            # A report read for the first time is checked like an uploaded one.
+            from clinical.report_check import check_as_author
+            doc.check_findings = check_as_author(doc)
+            doc.check_reviewed = False
+            fields += ["check_findings", "check_reviewed"]
+        doc.save(update_fields=fields)
     return text
 
 

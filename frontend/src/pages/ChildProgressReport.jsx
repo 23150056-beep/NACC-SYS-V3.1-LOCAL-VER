@@ -128,11 +128,17 @@ export default function ChildProgressReport() {
   // modal mid-draft waits for it instead of asking the model a second time.
   const currentChild = useRef(id);
   const briefSeq = useRef(0);
+  const loadSeq = useRef(0); // the report request that may still write `data`
   const briefFlight = useRef(null); // { childId, seq }
   // Another child's route re-uses this component. Everything about the last
   // child's brief goes, and any request still out for it is orphaned.
   useEffect(() => {
     currentChild.current = id;
+    // The last child's report must not stay on screen under this child's id,
+    // and a reply still out for it is orphaned.
+    loadSeq.current += 1;
+    setData(null);
+    setSummaryOff('');
     briefSeq.current += 1;
     briefFlight.current = null;
     setBrief(null);
@@ -172,7 +178,19 @@ export default function ChildProgressReport() {
   // Whoever may start a survey asks the invite endpoint which forms it may use.
   const canStartSurvey = ['Administrator', 'Staff', 'Psychologist'].includes(user?.role_name);
 
-  const load = () => api.get(`/reports/child/${id}/`).then((r) => setData(r.data)).catch(() => setData('error'));
+  // A reply lands only if it is the newest request and the page is still on the
+  // child it was asked for. A call from a closure of an earlier child (a write
+  // that finished after the route changed) does nothing, so it cannot orphan
+  // the newer child's own load either.
+  const load = () => {
+    const forId = id;
+    if (currentChild.current !== forId) return Promise.resolve();
+    const seq = ++loadSeq.current;
+    const current = () => seq === loadSeq.current && currentChild.current === forId;
+    return api.get(`/reports/child/${forId}/`)
+      .then((r) => { if (current()) setData(r.data); })
+      .catch(() => { if (current()) setData('error'); });
+  };
 
   // Every case type has a case study (block A; blocks B and C are an
   // adoption's), and the tab exists only if the server does not answer 404 for
@@ -499,6 +517,8 @@ export default function ChildProgressReport() {
       }
       const detail = err.response?.data?.detail;
       const sentence = typeof detail === 'string' && detail ? detail : '';
+      // Somebody else changed the summary: show what is saved now.
+      if (err.response?.status === 409) load();
       if (err.response?.status === 503) {
         // A normal state: the sentence stays beside the buttons, which stay grey.
         const off = sentence || 'The assistant is unavailable right now.';

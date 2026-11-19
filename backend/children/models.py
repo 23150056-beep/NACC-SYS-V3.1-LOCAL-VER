@@ -30,6 +30,24 @@ PA_STEP_LABELS = dict(PA_STEPS)
 PA_TOTAL_STEPS = 6
 
 
+def live_open_pre_assessments(pas):
+    """The open pre-assessments among `pas` that are still live.
+
+    An open row older than the newest completed one is abandoned: only a row
+    started after the last completion is a live re-assessment. The one place
+    this rule is written; the child's progress, the care gaps and the wizard's
+    resume all read it. Status strings are literals so this app never imports
+    clinical.
+    """
+    pas = list(pas)
+    open_ = [p for p in pas if p.status != "completed"]
+    done = [p for p in pas if p.status == "completed"]
+    if done:
+        last_done = max((p.created_at, p.id) for p in done)
+        open_ = [p for p in open_ if (p.created_at, p.id) > last_done]
+    return open_
+
+
 class Child(models.Model):
     ACTIVE = "active"
     INACTIVE = "inactive"
@@ -282,12 +300,7 @@ class Child(models.Model):
         keys = {"state": None, "label": None, "step": None, "step_label": None,
                 "step_number": None, "total_steps": PA_TOTAL_STEPS,
                 "reassessment": False, "updated_at": None, "completed_at": None}
-        # An open row older than the newest completed one is abandoned; only
-        # a row started after the last completion is a live re-assessment.
-        open_ = [p for p in pas if p.status != "completed"]
-        if done:
-            last_done = max((p.created_at, p.id) for p in done)
-            open_ = [p for p in open_ if (p.created_at, p.id) > last_done]
+        open_ = live_open_pre_assessments(pas)
         if open_:
             newest = max(open_, key=lambda p: (p.created_at, p.id))
             step = newest.current_step or "consent"

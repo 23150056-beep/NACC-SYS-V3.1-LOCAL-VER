@@ -80,6 +80,14 @@ class ConsentRecordSerializer(serializers.ModelSerializer):
         read_only_fields = ["recorded_by"]
         extra_kwargs = {"scan": {"write_only": True, "required": False}}
 
+    def validate(self, attrs):
+        # A completed pre-assessment was completed on a signed consent.
+        if (self.instance and "status" in attrs and attrs["status"] != "signed"
+                and self.instance.pre_assessments.filter(status="completed").exists()):
+            from clinical.lifecycle import CONSENT_STAYS_SIGNED
+            raise serializers.ValidationError({"status": CONSENT_STAYS_SIGNED})
+        return attrs
+
     def get_has_scan(self, obj):
         return bool(obj.scan)
 
@@ -146,10 +154,21 @@ class PreAssessmentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"consent": "That consent belongs to a different child."})
         if interview and child and interview.child_id != child.id:
             raise serializers.ValidationError({"interview": "That interview belongs to a different child."})
-        if (self.instance and self.instance.status == "completed"
-                and "current_step" in attrs and attrs["current_step"] != self.instance.current_step):
-            raise serializers.ValidationError({
-                "current_step": "This pre-assessment is completed; its step no longer changes."})
+        if self.instance and self.instance.status == "completed":
+            if "current_step" in attrs and attrs["current_step"] != self.instance.current_step:
+                raise serializers.ValidationError({
+                    "current_step": "This pre-assessment is completed; its step no longer changes."})
+            # Notes and the like stay editable; the evidence it was completed
+            # with does not. Resending the same values is not a change.
+            from clinical.lifecycle import KEEPS_EVIDENCE
+            changes_consent = "consent" in attrs and (
+                getattr(attrs["consent"], "pk", None) != self.instance.consent_id)
+            changes_instruments = "instruments" in attrs and (
+                {i.pk for i in attrs["instruments"]}
+                != {i.pk for i in self.instance.instruments.all()})
+            if changes_consent or changes_instruments:
+                raise serializers.ValidationError(
+                    {"consent" if changes_consent else "instruments": KEEPS_EVIDENCE})
         return attrs
 
 

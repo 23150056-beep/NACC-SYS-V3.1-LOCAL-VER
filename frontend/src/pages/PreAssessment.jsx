@@ -6,7 +6,7 @@ import { useConfirm, useNotice } from '../context/ConfirmContext';
 import { useAuth } from '../context/AuthContext';
 import { caseRef } from '../utils/child';
 import { Card, Button, Badge, Input, Select, FormField, FileUpload, Alert, EmptyState, Avatar, Icon, iconBtn, hoverLift, PAGE } from '../ui';
-import { PA_STATUSES, PA_STATUS_TONES } from '../config/caseData';
+import { PA_STATUSES, PA_STATUS_TONES, PA_ROW_COMPLETED } from '../config/caseData';
 import { loadAll } from '../utils/load';
 import { printBlankForm } from '../utils/printForm';
 import InstrumentFormDrawer, { EMPTY_INSTRUMENT } from '../components/InstrumentFormDrawer';
@@ -14,9 +14,9 @@ import PdfFrame from '../components/PdfFrame';
 import TemplateUpload from '../components/TemplateUpload';
 import { pdfObjectUrl } from '../utils/pdf';
 import { useSingleFlight } from '../utils/singleFlight';
-import { stepKeyFor, stepIndexFor, paProgressLabel } from '../utils/preAssessment';
+import { stepKeyFor, stepIndexFor, paProgressLabel, paIsOpen, PA_DONE_INDEX } from '../utils/preAssessment';
 
-const STEPS = ['Child', 'Consent', 'Interview', 'Instruments', 'Problems', 'Complete'];
+const STEPS = ['Child', 'Consent', 'Interview', 'Instruments', 'Problems', 'Review'];
 
 const textarea = { width: '100%', resize: 'vertical', padding: '11px 13px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-strong)', fontFamily: 'var(--font-sans)', fontSize: 14, lineHeight: 1.55 };
 
@@ -95,7 +95,7 @@ export default function PreAssessment() {
       for (;;) {
         const current = paRef.current;
         const want = wantedStep.current;
-        if (!current || !want || want.id !== current.id || current.status === 'completed') return;
+        if (!current || !want || want.id !== current.id || current.status === PA_ROW_COMPLETED) return;
         const held = savedStep.current && savedStep.current.id === current.id
           ? savedStep.current.key : current.current_step;
         if (want.key === held) return;
@@ -103,7 +103,7 @@ export default function PreAssessment() {
           const r = await api.patch(`/pre-assessments/${current.id}/`, { current_step: want.key });
           savedStep.current = { id: r.data.id, key: r.data.current_step };
           const latest = paRef.current;
-          if (latest && latest.id === r.data.id && latest.status !== 'completed') {
+          if (latest && latest.id === r.data.id && latest.status !== PA_ROW_COMPLETED) {
             setPa({ ...latest, current_step: r.data.current_step, updated_at: r.data.updated_at });
           }
         } catch {
@@ -118,21 +118,30 @@ export default function PreAssessment() {
   const saveStep = (i) => {
     const current = paRef.current;
     const key = stepKeyFor(i);
-    if (!current || !key || current.status === 'completed') return;
+    if (!current || !key || current.status === PA_ROW_COMPLETED) return;
     wantedStep.current = { id: current.id, key };
     pumpSteps();
   };
   // Anything that writes the pre-assessment after a step save waits for it.
   const settleSteps = async () => { while (stepFlight.current) await stepFlight.current; };
 
-  const goToStep = (i) => {
+  const goToStep = async (i) => {
+    if (i === 0) { // the picker: starting over
+      if (step === 0) return;
+      if (notes.trim() !== (pa?.notes || '').trim() && !(await confirm({
+        description: 'Starting over throws away the session notes you have typed and not saved.',
+        confirmLabel: 'Yes, start over',
+      }))) return;
+      reset();
+      return;
+    }
     if (i > maxStep) return;
     setStep(i);
     saveStep(i);
   };
 
   const advanceTo = (i) => {
-    setMaxStep((m) => Math.max(m, Math.floor(i)));
+    setMaxStep((m) => Math.max(m, i));
     setStep(i);
     saveStep(i);
   };
@@ -156,23 +165,31 @@ export default function PreAssessment() {
     setError('');
     // Resuming a pre-assessment already under way asks nothing; anything else
     // creates one (a re-assessment, for a child who has answered before), so
-    // that is asked.
-    const again = c.pre_assessment_status === 'Completed';
-    if (c.pre_assessment_status !== 'In Progress' && !(await confirm({
-      description: again
+    // that is asked. Read from the progress, not the pipeline label: a
+    // re-assessment under way also reads Completed there.
+    const progress = c.pre_assessment_progress;
+    const resuming = paIsOpen(progress);
+    if (!resuming && !(await confirm({
+      description: progress?.state === 'completed'
         ? `This starts a new pre-assessment for ${c.fullname}. The earlier one is kept on the record.`
         : `This starts a pre-assessment for ${c.fullname}.`,
       confirmLabel: 'Yes, start it',
     }))) return;
     try {
       const { data } = await api.post('/pre-assessments/', { child: c.id });
+      // Everything is read before anything is shown, so a failure leaves the
+      // picker as it was instead of a header naming a child with no data.
+      const [existing, onFile] = await Promise.all([
+        api.get(`/consents/?child=${c.id}`),
+        api.get(`/problems/?child=${c.id}`),
+      ]);
       setChild(c); setPa(data);
       setSelectedInstruments(data.instruments || []);
       setNotes(data.notes || '');
-      const existing = await api.get(`/consents/?child=${c.id}`);
       setConsents(existing.data);
+      setProblems(onFile.data);
       const landing = resumeStepFor(data);
-      setMaxStep(Math.max(Math.floor(landing), derivedStepFor(data)));
+      setMaxStep(Math.max(landing, derivedStepFor(data)));
       setStep(landing);
       saveStep(landing);
     } catch (err) {
@@ -233,7 +250,8 @@ export default function PreAssessment() {
   });
 
   const reset = () => {
-    setStep(0); setMaxStep(0); setPa(null); setChild(null); setSelectedInstruments([]); setProblems([]); setNotes('');
+    setStep(0); setMaxStep(0); setPa(null); setChild(null); setConsents([]); setSelectedInstruments([]);
+    setProblems([]); setNotes(''); setError('');
     api.get('/children/').then((r) => setChildren(r.data.filter((c) => c.status === 'active'))).catch(() => toast.error('Could not reload the children.'));
   };
 
@@ -271,7 +289,7 @@ export default function PreAssessment() {
       const { data } = await api.post(`/pre-assessments/${pa.id}/complete/`);
       setPa(data);
       toast.success('Pre-assessment completed');
-      advanceTo(5);
+      advanceTo(PA_DONE_INDEX);
     } catch (err) {
       setError(JSON.stringify(err.response?.data || 'Could not complete.'));
     }
@@ -292,8 +310,8 @@ export default function PreAssessment() {
                 {caseRef(child.id)} · {child.case_type || 'No case type'} · {child.psychologist_name || 'unassigned'}
               </span>
             </span>
-            <Badge tone={step >= 5 ? 'success' : 'warning'} size="md">
-              {step >= 5 ? 'Complete' : `In progress · step ${step + 1} of ${STEPS.length}`}
+            <Badge tone={step >= PA_DONE_INDEX ? 'success' : 'warning'} size="md">
+              {step >= PA_DONE_INDEX ? 'Complete' : `In progress · step ${step + 1} of ${STEPS.length}`}
             </Badge>
           </div>
         ) : (
@@ -308,7 +326,7 @@ export default function PreAssessment() {
           {STEPS.map((s, i) => {
             const done = i < step;
             const now = i === step;
-            const reachable = i <= maxStep && i < 5;
+            const reachable = i <= maxStep && step < PA_DONE_INDEX;
             const barBefore = i === 0 ? 'transparent' : i <= step ? 'var(--blue-600)' : 'var(--divider)';
             const barAfter = i === STEPS.length - 1 ? 'transparent' : i < step ? 'var(--blue-600)' : 'var(--divider)';
             return (
@@ -474,9 +492,9 @@ export default function PreAssessment() {
       )}
 
       {step === 4 && (
-        <ProblemsStep child={child} problems={problems} setProblems={setProblems} setError={setError} onNext={() => advanceTo(4.5)} />
+        <ProblemsStep child={child} problems={problems} setProblems={setProblems} setError={setError} onNext={() => advanceTo(5)} />
       )}
-      {step === 4.5 && (
+      {step === 5 && (
         <Card eyebrow="Step 6" title="Review & complete" padding="16px">
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 16 }}>
             {[['Child', child?.fullname],
@@ -500,7 +518,7 @@ export default function PreAssessment() {
         </Card>
       )}
 
-      {step === 5 && (
+      {step === PA_DONE_INDEX && (
         <Card padding="28px">
           <div style={{ textAlign: 'center', padding: '16px 0' }}>
             <span style={{ display: 'inline-flex', width: 56, height: 56, borderRadius: '50%', background: 'var(--success-50)', color: 'var(--success-600)', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}><Icon name="check-circle-2" size={28} /></span>

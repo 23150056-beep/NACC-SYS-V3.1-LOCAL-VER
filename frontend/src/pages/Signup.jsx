@@ -70,7 +70,21 @@ export default function Signup() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
-  const [done, setDone] = useState(false);
+  // Where the person is, as ONE value, so the screens cannot be combined into
+  // one that makes no sense:
+  //   form    - the request form (the Google button is here too)
+  //   code    - a typed request was sent; its address is waiting to be confirmed
+  //   recover - asking for the confirm step by address (/login links here with
+  //             ?confirm=1, and "Not your address? Change it" lands here)
+  //   waiting - the address is confirmed (or Google vouched for it) and the
+  //             request waits for an administrator
+  // The waiting panel is reachable only from a confirmed address or Google.
+  const [step, setStep] = useState(searchParams.get('confirm') === '1' ? 'recover' : 'form');
+  // Where "Back to request access" returns to from recover: the code step when
+  // this tab has a request waiting for its code, else the form.
+  const [recoverBack, setRecoverBack] = useState('form');
+  // The address the code was mailed to, put back if they leave Change-it unused.
+  const [codeEmail, setCodeEmail] = useState('');
   // The address has to be proved before an administrator can approve the
   // request — approval emails a temporary password, and an unverified address
   // is one that credential could be handed to by mistake. Until the code is
@@ -78,20 +92,12 @@ export default function Signup() {
   // is not optional decoration.
   const [code, setCode] = useState('');
   const [codeError, setCodeError] = useState('');
-  const [verified, setVerified] = useState(false);
   const [verifying, setVerifying] = useState(false);
-  // Only the typed route mails a code. A Google request arrives verified, so
-  // it must not be shown the confirm step - there is no code for it.
-  const [needsCode, setNeedsCode] = useState(false);
+  // Only the typed route mails a code (step 'code'). A Google request arrives
+  // verified, so it goes straight to 'waiting': there is no code for it.
   const [resendNote, setResendNote] = useState('');
   const [resending, setResending] = useState(false);
   const [resendWait, setResendWait] = useState(0);
-  // The way back to the confirm step for somebody who is not in the tab that
-  // signed up: they closed it, or an administrator corrected their address.
-  // The confirm step above is otherwise reached only from this tab's own
-  // memory of having just applied. /login links here with ?confirm=1.
-  const [recovering, setRecovering] = useState(searchParams.get('confirm') === '1');
-
   // Wake the server while the form is being filled in; sending the request is
   // then not what wakes it.
   useEffect(() => { wakeServer(); }, []);
@@ -131,9 +137,8 @@ export default function Signup() {
       // requested_role is optional server-side. An unanswered question is
       // sent as blank and recorded as "none stated" rather than guessed at.
       await api.post('/auth/signup/', { ...form, requested_role: role || '' });
-      setNeedsCode(true);
       setResendWait(RESEND_WAIT_SECONDS);
-      setDone(true);
+      setStep('code');
     } catch (err) {
       const data = err.response?.data;
       if (data && typeof data === 'object' && !data.detail) {
@@ -165,7 +170,7 @@ export default function Signup() {
       // verified them and the request is now in the queue, stated role or not.
       if (err.response?.status === 403
           && err.response?.data?.state === 'pending_approval') {
-        setDone(true);
+        setStep('waiting');
         return;
       }
       setError(err.response?.data?.detail
@@ -181,10 +186,9 @@ export default function Signup() {
     setVerifying(true);
     try {
       await api.post('/auth/signup/verify-email/', { email: form.email, code });
-      setVerified(true);
       // Somebody who came back through "Confirm your email" never saw the
       // sent-and-waiting screen, which is where a confirmed address belongs.
-      setDone(true);
+      setStep('waiting');
     } catch (err) {
       setCodeError(err.response?.data?.detail
         || 'That code is not right, or it has expired.');
@@ -216,20 +220,20 @@ export default function Signup() {
   // Already applied, and asking for the confirm step by address. The server
   // never says whether an address has applied, so this only moves on; a wrong
   // address shows up as codes that never work.
-  if (recovering && !needsCode) {
+  if (step === 'recover') {
     return (
       <AuthLayout
         title="Confirm your email"
         heading="Confirm your email"
         subheading="Already asked for access? Enter the address you used."
-        footer={<button type="button" onClick={() => setRecovering(false)}
+        footer={<button type="button" onClick={() => { setCodeError(''); if (recoverBack === 'code' && codeEmail) setForm((f) => ({ ...f, email: codeEmail })); setStep(recoverBack); }}
                         style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
                                  fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 700,
                                  color: 'var(--blue-600)' }}>
           &larr; Back to request access
         </button>}
       >
-        <form onSubmit={(e) => { e.preventDefault(); if (form.email.trim()) { setCodeError(''); setNeedsCode(true); } }}
+        <form onSubmit={(e) => { e.preventDefault(); if (form.email.trim()) { setCodeError(''); setResendNote(''); setResendWait(0); setStep('code'); } }}
               className="racco-auth-stack"
               style={{ marginTop: 'clamp(12px, 2vh, 22px)', display: 'flex', flexDirection: 'column', gap: 14 }}>
           <FormField label="Email you applied with">
@@ -245,7 +249,7 @@ export default function Signup() {
     );
   }
 
-  if (needsCode && !verified) {
+  if (step === 'code') {
     return (
       <AuthLayout
         title="Confirm your email"
@@ -284,7 +288,7 @@ export default function Signup() {
             </div>
           )}
           <button type="button"
-                  onClick={() => { setNeedsCode(false); setRecovering(true); setCode(''); setCodeError(''); setResendNote(''); }}
+                  onClick={() => { setRecoverBack('code'); setCodeEmail(form.email); setStep('recover'); setCode(''); setCodeError(''); setResendNote(''); setResendWait(0); }}
                   style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
                            fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 700,
                            color: 'var(--blue-600)', alignSelf: 'center' }}>
@@ -295,7 +299,7 @@ export default function Signup() {
     );
   }
 
-  if (done) {
+  if (step === 'waiting') {
     return (
       <AuthLayout
         title="Request sent"
@@ -472,7 +476,7 @@ export default function Signup() {
           This system holds children&rsquo;s records. Requests are reviewed before
           any access is granted.
         </div>
-        <button type="button" onClick={() => setRecovering(true)}
+        <button type="button" onClick={() => { setRecoverBack('form'); setStep('recover'); }}
                 style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer',
                          fontFamily: 'var(--font-sans)', fontSize: 13, fontWeight: 700,
                          color: 'var(--blue-600)', alignSelf: 'center' }}>

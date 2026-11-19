@@ -18,6 +18,7 @@ export default function Survey() {
   const [survey, setSurvey] = useState(null);
   const [answers, setAnswers] = useState({});
   const [busy, setBusy] = useState(false);
+  const [sendError, setSendError] = useState('');
   const confirm = useConfirm();
 
   useEffect(() => {
@@ -42,12 +43,25 @@ export default function Survey() {
       confirmLabel: 'Yes, send my answers', cancelLabel: 'Not yet',
     }))) return;
     setBusy(true);
+    setSendError('');
     try {
       await axios.post(`${baseURL}/opinionnaire/${token}/submit/`, { answers });
       setState('done');
     } catch (err) {
-      setMessage(err.response?.data?.detail || 'Could not send your answers. Please ask for help.');
-      setState('error');
+      const code = err.response?.status;
+      if (code === 409) {
+        setState('done');
+      } else if (code === 410) {
+        setMessage(err.response?.data?.detail || 'This survey link has expired or was already answered.');
+        setState('error');
+      } else {
+        // Keep the form and the answers so nothing the child typed is lost.
+        const body = err.response?.data;
+        const refusal = code === 400 ? (body?.detail || body?.answers) : '';
+        setSendError(refusal
+          ? (Array.isArray(refusal) ? refusal[0] : refusal)
+          : 'Your answers were not sent. Check the connection and try again.');
+      }
     } finally { setBusy(false); }
   };
 
@@ -120,6 +134,9 @@ export default function Survey() {
           <div style={{ fontSize: 13, color: 'var(--text-muted)', textAlign: 'center' }}>
             {answered} of {survey.fields.length} answered
           </div>
+          {sendError && (
+            <div role="alert" style={{ fontSize: 14, color: 'var(--red-700, #b42318)', textAlign: 'center', fontWeight: 600 }}>{sendError}</div>
+          )}
           <button onClick={submit} disabled={busy || answered === 0}
             style={{ width: '100%', padding: '15px 0', fontSize: 17, fontWeight: 800, borderRadius: 'var(--radius-pill)', border: 'none', cursor: busy || answered === 0 ? 'default' : 'pointer', fontFamily: 'var(--font-sans)', background: busy || answered === 0 ? 'var(--divider-row)' : 'var(--blue-600)', color: busy || answered === 0 ? 'var(--text-faint)' : '#fff' }}>
             {busy ? 'Sending…' : 'I’m finished ✅'}

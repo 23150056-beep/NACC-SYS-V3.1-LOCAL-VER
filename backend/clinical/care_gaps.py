@@ -15,16 +15,17 @@ from django.utils import timezone
 
 from accounts.models import Role
 from accounts.scoping import role_of
-from children.models import AssignmentRequest, Child
+from children.models import AssignmentRequest, Child, live_open_pre_assessments
 from clinical.models import (CaseReferral, ConsentRecord, OpinionnaireInvite,
                              PreAssessment, PsychologicalReport, SelfReportFlag)
+from clinical.survey_lifecycle import INVITE_DAYS
 from scheduling.models import Appointment
 
 # Thresholds — confirm with RACCO I; kept here so they are easy to tune.
 FOLLOW_UP_OVERDUE_DAYS = 30      # no completed session in this long
 PRE_ASSESSMENT_LAG_DAYS = 14     # intake without a completed pre-assessment
 REPORT_LAG_DAYS = 14             # completed pre-assessment without a report
-SURVEY_UNANSWERED_DAYS = 7       # a survey link sent and not answered this long (links expire after 7, clinical/views.py)
+SURVEY_UNANSWERED_DAYS = INVITE_DAYS   # a link sent and not answered this long; it expires then too
 ASSIGNMENT_ANSWER_DAYS = 7       # a psychologist asked and silent this long
 
 SEVERITY_RANK = {"danger": 0, "warning": 1, "info": 2}
@@ -117,7 +118,8 @@ def compute_alerts(children_qs):
     for c in children:
         pas = list(c.pre_assessments.all())
         completed_pas = [p for p in pas if p.status == PreAssessment.COMPLETED]
-        open_pas = [p for p in pas if p.status != PreAssessment.COMPLETED]
+        # An open row older than the newest completed one is abandoned.
+        open_pas = live_open_pre_assessments(pas)
 
         # 1. Consent missing on an open pre-assessment (no signed consent on file).
         if open_pas and c.id not in signed_consent:

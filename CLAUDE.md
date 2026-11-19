@@ -402,13 +402,40 @@ and still counted as held.
     reactivated account's old one. Until then the temporary password kept
     working with nothing forcing a change.
   - Deactivating an account twice answers 400, not 500.
-- **Not yet covered** (found, verified, left for later rounds):
-  PreAssessment (a completed one can still be edited; `complete()` is not
-  atomic), OpinionnaireInvite (single use is check-then-write), document
-  summaries (a
-  re-summarise destroys the confirmed text), and frontend flows held in
-  several booleans (the pre-assessment wizard prints "step 5.5 of 6" on
-  Review). Bring each onto a table the same way.
+- **Round two** (19 Nov 2026), the same pattern on four more:
+  - **PreAssessment** (`clinical/lifecycle.py`: in_progress -> completed,
+    completed is terminal; pending is legacy, nothing writes it). `complete()`
+    locks the consent, moves, then re-checks the consent is still signed and
+    the instruments are still there, rolling back if not - one rule,
+    `completion_problems(pa)`, which the demo seeder's completed rows are
+    tested against. A completed one keeps its consent and instruments
+    (notes stay editable) and cannot be deleted; the consent it was completed
+    with cannot be deleted or un-signed. Everyone, the ISA included.
+    The abandoned-open-row rule lives once, `live_open_pre_assessments()` in
+    `children/models.py`, read by the progress, the care gaps and resume.
+    The wizard: Review is step 6 of 6 (it printed "5.5"), going back to the
+    picker starts over (asking first if notes are unsaved), resume loads the
+    problems on file, and a resumed re-assessment is not called "new".
+  - **Survey links** (`clinical/survey_lifecycle.py`, `INVITE_DAYS` = 7 is
+    the expiry AND the unanswered gap). Submit is a conditional UPDATE on
+    pending and unexpired - the one move not through `move()`, because it
+    filters on expiry too. Already sent is 409 (thank-you screen), expired
+    mid-submit is 410, questions changed under the page is 400 and the link
+    stays open. A lost race flags nothing. An answered survey cannot be
+    deleted (it would take the child's flags with it). Survey.jsx keeps the
+    answers on a failed send. First acknowledgement of a flag wins.
+  - **Document summaries** (`assistant/summary_state.py`): none / draft /
+    confirmed. A draft is stored only if the summary is still what it was
+    before the model call; a confirm that landed meanwhile wins (409, the
+    page reloads). A deliberate re-summarise still replaces, after the
+    screen's warning. Left open: the server reads "what was seen" just
+    before the call, not from the page. A legacy report read for the first
+    time is now checked too (`report_check.check_as_author`).
+  - **Pages**: ChildProgressReport clears the old child on an id change and
+    drops a late reply (sequence number), and the "assistant off" flag no
+    longer sticks across children. Signup is one `step` value (form / code /
+    recover / waiting), so an unconfirmed address cannot reach "Request
+    sent", and Change it -> Back restores the address the code went to.
 
 ## Booking and the calendar
 

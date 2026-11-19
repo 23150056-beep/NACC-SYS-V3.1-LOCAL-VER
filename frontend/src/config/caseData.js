@@ -239,6 +239,12 @@ export const PA_STATUSES = [
   'Completed',
 ];
 
+// Named picks of the list above, so a screen never compares a raw string.
+export const PA_STATUS_IN_PROGRESS = 'In Progress';
+export const PA_STATUS_COMPLETED = 'Completed';
+// The stored status of one pre-assessment row (clinical PreAssessment.COMPLETED).
+export const PA_ROW_COMPLETED = 'completed';
+
 // Badge tone per pipeline status (ui Badge tones).
 export const PA_STATUS_TONES = {
   'No Consent Yet': 'danger',

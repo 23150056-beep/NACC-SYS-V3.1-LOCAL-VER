@@ -78,6 +78,49 @@ class SummaryTest(SummaryTestBase):
         self.assertEqual(self.report.ai_summary, "New.")
         self.assertFalse(self.report.ai_summary_confirmed)
 
+    def test_resummarizing_a_confirmed_summary_still_replaces_it(self):
+        PsychologicalReport.objects.filter(pk=self.report.pk).update(
+            ai_summary="Mine", ai_summary_confirmed=True)
+        self.client.force_authenticate(self.psy)
+        with patch.object(services.OllamaClient, "generate", return_value="New."):
+            res = self.client.post(f"/api/assistant/summarize-report/{self.report.id}/")
+        self.assertEqual(res.status_code, 200)
+        self.report.refresh_from_db()
+        self.assertEqual(self.report.ai_summary, "New.")
+
+    def test_a_draft_is_not_stored_over_a_summary_confirmed_meanwhile(self):
+        self.client.force_authenticate(self.psy)
+
+        def confirmed_during_the_call(*args, **kwargs):
+            PsychologicalReport.objects.filter(pk=self.report.pk).update(
+                ai_summary="Typed by hand", ai_summary_confirmed=True)
+            return "Late draft."
+
+        with patch.object(services.OllamaClient, "generate",
+                          side_effect=confirmed_during_the_call):
+            res = self.client.post(f"/api/assistant/summarize-report/{self.report.id}/")
+        self.assertEqual(res.status_code, 409)
+        self.assertIn("Reload", res.data["detail"])
+        self.report.refresh_from_db()
+        self.assertEqual(self.report.ai_summary, "Typed by hand")
+        self.assertTrue(self.report.ai_summary_confirmed)
+
+    def test_a_referral_draft_is_not_stored_over_one_changed_meanwhile(self):
+        self.client.force_authenticate(self.staff)
+
+        def changed_during_the_call(*args, **kwargs):
+            CaseReferral.objects.filter(pk=self.referral.pk).update(
+                ai_summary="Other draft")
+            return "Late draft."
+
+        with patch.object(services.OllamaClient, "generate",
+                          side_effect=changed_during_the_call):
+            res = self.client.post(
+                f"/api/assistant/summarize-case-referral/{self.referral.id}/")
+        self.assertEqual(res.status_code, 409)
+        self.referral.refresh_from_db()
+        self.assertEqual(self.referral.ai_summary, "Other draft")
+
     def test_503_when_the_assistant_is_off(self):
         cfg = AssistantSetting.load()
         cfg.enabled = False

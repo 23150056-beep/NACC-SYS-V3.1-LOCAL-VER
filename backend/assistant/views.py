@@ -15,7 +15,7 @@ from accounts.scoping import (role_of as _role, role_of_user as _role_of,
                               visible_children)
 from accounts.permissions import (IsAdministrator, IsAdminOrStaff, is_admin_or_assignee,
                                   writes_case_referrals)
-from assistant import evaluation, guards, prompts, retention, tools
+from assistant import evaluation, guards, prompts, retention, summary_state, tools
 from assistant.brief_facts import brief_facts, brief_kind
 from assistant.models import AssistantJob, AssistantSetting
 from assistant.redact import Masker
@@ -545,6 +545,8 @@ class DocumentSummaryView(AssistantBaseView):
         # A long report is read in part; the draft says which part, so the
         # psychologist confirming it knows what it could not have seen.
         fitted, coverage = prompts.fit_document(doc.extracted_text)
+        # What the summary was before the model call; see summary_state.
+        seen = (doc.ai_summary, doc.ai_summary_confirmed)
         draft, job = run_job(
             "doc_intelligence",
             prompts.build_summary_prompt(doc.extracted_text, label),
@@ -559,9 +561,11 @@ class DocumentSummaryView(AssistantBaseView):
                 guards.checked_draft("doc_intelligence", draft, fitted)
             except guards.DraftRefused as refusal:
                 return _refuse_the_draft(job, refusal)
-        doc.ai_summary = draft
-        doc.ai_summary_confirmed = False
-        doc.save(update_fields=["ai_summary", "ai_summary_confirmed"])
+        if not summary_state.store_draft(doc, draft, *seen):
+            return Response(
+                {"detail": "The summary was confirmed or changed while this "
+                           "draft was being written. Reload to see it."},
+                status=status.HTTP_409_CONFLICT)
         return Response({"draft": draft, "job_id": job.id, "coverage": coverage,
                          "disclaimer": DISCLAIMER})
 

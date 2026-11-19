@@ -409,7 +409,7 @@ class Command(BaseCommand):
                 timezone.datetime.combine(intake, timezone.datetime.min.time())))
             counts["children"] += 1
 
-            ConsentRecord.objects.create(
+            consent = ConsentRecord.objects.create(
                 child=child, signer_name=f"{rng.choice(FIRST_NAMES)} {last}",
                 signer_relationship=rng.choice(["Guardian", "Custodian", "Social Worker"]),
                 date=intake + timedelta(days=2),
@@ -421,6 +421,8 @@ class Command(BaseCommand):
             started = intake + timedelta(days=5)
             pa = PreAssessment.objects.create(
                 child=child, psychologist=psych, date=started, status="completed",
+                # What complete() requires, and the wizard's last step.
+                consent=consent, current_step="review",
                 completed_at=timezone.make_aware(timezone.datetime.combine(
                     started + timedelta(days=pace.randint(3, 21)),
                     timezone.datetime.min.time().replace(hour=15))))

@@ -69,6 +69,18 @@ def check_for(request, text, child, today=None):
                         today or timezone.localdate())
 
 
+def check_as_author(report):
+    """The findings for a stored report, from the viewpoint of its author (the
+    children THEY can see), or of the child's psychologist when the author is
+    gone. Shared by the backfill and by the lazy text read, so a report read
+    for the first time is checked the way an uploaded one is."""
+    from types import SimpleNamespace
+    viewer = report.author or report.child.assigned_psychologist
+    if viewer is None:
+        return []
+    return check_for(SimpleNamespace(user=viewer), report.extracted_text, report.child)
+
+
 def check_report(text, child, others, today):
     """[{kind, message}] for `text` filed against `child`. `others` are the
     other children the uploader can see. Empty when nothing needs a look."""
