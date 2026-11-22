@@ -8,3 +8,7 @@
 -r requirements.txt
 
 ruff==0.16.7
+
+# Without it a failure inside a --parallel worker can crash the runner with
+# "cannot pickle 'traceback' object" and the failing test's name is lost.
+tblib==3.2.2

@@ -1,0 +1,1892 @@
+{
+ "DELETE api/appointments/<pk>/": {
+  "anonymous": "refused",
+  "isa": "verb",
+  "norole": "refused",
+  "officer": "verb",
+  "psy": "verb",
+  "sw_other": "verb",
+  "sw_own": "verb"
+ },
+ "DELETE api/auth/me/phone/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "DELETE api/availability/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "DELETE api/case-referrals/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "refused",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "DELETE api/children/<pk>/": {
+  "anonymous": "refused",
+  "isa": "verb",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "verb",
+  "sw_own": "verb"
+ },
+ "DELETE api/consents/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "DELETE api/form-templates/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "DELETE api/instruments/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "DELETE api/interviews/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "DELETE api/opinionnaire-invites/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "DELETE api/pre-assessments/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "DELETE api/problems/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "DELETE api/remarks/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "DELETE api/report-files/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "DELETE api/result-entries/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "DELETE api/treatment-plans/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "DELETE api/unavailability/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "DELETE api/users/<pk>/": {
+  "anonymous": "refused",
+  "isa": "verb",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/activity/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "past:rows",
+  "psy": "past:rows",
+  "sw_other": "past:empty",
+  "sw_own": "past:rows"
+ },
+ "GET api/activity/trail/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "past:rows",
+  "psy": "past:rows",
+  "sw_other": "past:empty",
+  "sw_own": "past:rows"
+ },
+ "GET api/admin/overview/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/agency-profile/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/appointments/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "past:rows",
+  "psy": "past:rows",
+  "sw_other": "past:rows",
+  "sw_own": "past:rows"
+ },
+ "GET api/appointments/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/assignment-requests/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "past:empty",
+  "psy": "past:empty",
+  "sw_other": "past:empty",
+  "sw_own": "past:rows"
+ },
+ "GET api/assignment-requests/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "hidden",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/assistant/access-log/child/<child_id>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/assistant/brief/child/<child_id>/facts/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/assistant/brief/child/<child_id>/latest/": {
+  "anonymous": "refused",
+  "isa": "refused",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "hidden",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/assistant/capabilities/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/assistant/metrics/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/assistant/model-health/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/assistant/settings/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/assistant/unanswered/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/auth/google/config/": {
+  "anonymous": "past",
+  "isa": "past",
+  "norole": "past",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/auth/me/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/auth/me/email-notifications/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/auth/me/phone/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/auth/me/profile/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/availability/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "past:rows",
+  "psy": "past:rows",
+  "sw_other": "past:rows",
+  "sw_own": "past:rows"
+ },
+ "GET api/availability/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/availability/month/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/availability/next-slots/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/availability/openings/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/availability/psychologists/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/availability/slots/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/case-referrals/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "past:empty",
+  "psy": "past:rows",
+  "sw_other": "past:empty",
+  "sw_own": "past:rows"
+ },
+ "GET api/case-referrals/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/case-referrals/<pk>/download/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/children/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past:rows",
+  "sw_other": "past:rows",
+  "sw_own": "past:rows"
+ },
+ "GET api/children/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/children/<pk>/closure-reasons/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "refused"
+ },
+ "GET api/children/<pk>/presence/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/children/check-duplicate/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/consents/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past:rows",
+  "sw_other": "past:empty",
+  "sw_own": "past:rows"
+ },
+ "GET api/consents/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/consents/<pk>/download/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/form-templates/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past:rows",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/form-templates/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/instruments/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past:rows",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/instruments/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/interviews/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past:rows",
+  "sw_other": "past:empty",
+  "sw_own": "past:rows"
+ },
+ "GET api/interviews/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/locations/barangays/": {
+  "anonymous": "refused",
+  "isa": "past:empty",
+  "norole": "refused",
+  "officer": "past:empty",
+  "psy": "past:empty",
+  "sw_other": "past:empty",
+  "sw_own": "past:empty"
+ },
+ "GET api/locations/barangays/<psgc_code>/": {
+  "anonymous": "refused",
+  "isa": "hidden",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "hidden",
+  "sw_other": "hidden",
+  "sw_own": "hidden"
+ },
+ "GET api/locations/municipalities/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "past:rows",
+  "psy": "past:rows",
+  "sw_other": "past:rows",
+  "sw_own": "past:rows"
+ },
+ "GET api/locations/municipalities/<psgc_code>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/locations/provinces/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "past:rows",
+  "psy": "past:rows",
+  "sw_other": "past:rows",
+  "sw_own": "past:rows"
+ },
+ "GET api/locations/provinces/<psgc_code>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/opinionnaire-invites/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "past:empty",
+  "psy": "past:rows",
+  "sw_other": "past:empty",
+  "sw_own": "past:rows"
+ },
+ "GET api/opinionnaire-invites/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/opinionnaire-invites/templates/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "past:rows",
+  "sw_other": "hidden",
+  "sw_own": "past:rows"
+ },
+ "GET api/opinionnaire/<pk>/": {
+  "anonymous": "past",
+  "isa": "past",
+  "norole": "past",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/pre-assessments/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past:rows",
+  "sw_other": "past:empty",
+  "sw_own": "past:rows"
+ },
+ "GET api/pre-assessments/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/problems/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past:rows",
+  "sw_other": "past:empty",
+  "sw_own": "past:rows"
+ },
+ "GET api/problems/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/psychologists/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "past:rows",
+  "sw_own": "past:rows"
+ },
+ "GET api/remarks/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past:rows",
+  "sw_other": "past:empty",
+  "sw_own": "past:rows"
+ },
+ "GET api/remarks/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/report-files/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past:rows",
+  "sw_other": "past:empty",
+  "sw_own": "past:rows"
+ },
+ "GET api/report-files/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/report-files/<pk>/download/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/report-files/<pk>/text/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/reports/child/<child_id>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/reports/dashboard/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/reports/monitoring/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past:rows",
+  "sw_other": "past:rows",
+  "sw_own": "past:rows"
+ },
+ "GET api/reports/summary/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/result-entries/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past:rows",
+  "sw_other": "past:empty",
+  "sw_own": "past:rows"
+ },
+ "GET api/result-entries/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/roles/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/self-report-flags/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "past:empty",
+  "psy": "past:rows",
+  "sw_other": "past:empty",
+  "sw_own": "past:rows"
+ },
+ "GET api/sms-test/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/treatment-plans/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past:rows",
+  "sw_other": "past:empty",
+  "sw_own": "past:rows"
+ },
+ "GET api/treatment-plans/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "GET api/unavailability/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "past:rows",
+  "psy": "past:rows",
+  "sw_other": "past:rows",
+  "sw_own": "past:rows"
+ },
+ "GET api/unavailability/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "GET api/users/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/users/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/users/<pk>/activity/": {
+  "anonymous": "refused",
+  "isa": "past:rows",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "GET api/users/pending-count/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PATCH api/agency-profile/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PATCH api/appointments/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "past"
+ },
+ "PATCH api/auth/me/profile/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "PATCH api/availability/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PATCH api/case-referrals/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "refused",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "PATCH api/children/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "PATCH api/consents/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PATCH api/form-templates/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PATCH api/instruments/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PATCH api/interviews/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PATCH api/opinionnaire-invites/<pk>/": {
+  "anonymous": "refused",
+  "isa": "verb",
+  "norole": "refused",
+  "officer": "verb",
+  "psy": "verb",
+  "sw_other": "verb",
+  "sw_own": "verb"
+ },
+ "PATCH api/pre-assessments/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PATCH api/problems/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PATCH api/remarks/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PATCH api/report-files/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PATCH api/result-entries/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PATCH api/treatment-plans/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PATCH api/unavailability/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PATCH api/users/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/appointments/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/appointments/<pk>/cancel/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "past"
+ },
+ "POST api/appointments/<pk>/complete/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/appointments/<pk>/no_show/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/assignment-requests/<pk>/accept/": {
+  "anonymous": "refused",
+  "isa": "refused",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "hidden",
+  "sw_other": "hidden",
+  "sw_own": "refused"
+ },
+ "POST api/assignment-requests/<pk>/decline/": {
+  "anonymous": "refused",
+  "isa": "refused",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "hidden",
+  "sw_other": "hidden",
+  "sw_own": "refused"
+ },
+ "POST api/assignment-requests/<pk>/mail-answer/": {
+  "anonymous": "refused",
+  "isa": "refused",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "hidden",
+  "sw_other": "hidden",
+  "sw_own": "refused"
+ },
+ "POST api/assignment-requests/<pk>/withdraw/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "hidden",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "POST api/assistant/ask/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/assistant/brief/child/<child_id>/": {
+  "anonymous": "refused",
+  "isa": "refused",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "unavailable",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/assistant/census-narrative/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/assistant/check/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/assistant/confirm-case-referral-summary/<doc_id>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "refused",
+  "sw_other": "hidden",
+  "sw_own": "invalid"
+ },
+ "POST api/assistant/confirm-summary/<doc_id>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "invalid",
+  "sw_other": "hidden",
+  "sw_own": "refused"
+ },
+ "POST api/assistant/followup/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/assistant/jobs/<job_id>/feedback/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/assistant/polish-record/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/assistant/polish-remark/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/assistant/prefetch-briefs/": {
+  "anonymous": "refused",
+  "isa": "refused",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/assistant/summarize-case-referral/<doc_id>/": {
+  "anonymous": "refused",
+  "isa": "unavailable",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "refused",
+  "sw_other": "hidden",
+  "sw_own": "unavailable"
+ },
+ "POST api/assistant/summarize-report/<doc_id>/": {
+  "anonymous": "refused",
+  "isa": "unavailable",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "unavailable",
+  "sw_other": "hidden",
+  "sw_own": "refused"
+ },
+ "POST api/auth/change-password/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/auth/google/": {
+  "anonymous": "refused",
+  "isa": "refused",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/auth/login/": {
+  "anonymous": "invalid",
+  "isa": "invalid",
+  "norole": "invalid",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/auth/me/phone/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/auth/refresh/": {
+  "anonymous": "invalid",
+  "isa": "invalid",
+  "norole": "invalid",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/auth/signup/": {
+  "anonymous": "invalid",
+  "isa": "invalid",
+  "norole": "invalid",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/auth/signup/verify-email/": {
+  "anonymous": "invalid",
+  "isa": "invalid",
+  "norole": "invalid",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/auth/signup/verify-email/resend/": {
+  "anonymous": "past",
+  "isa": "past",
+  "norole": "past",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "POST api/availability/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/availability/combine/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/case-referrals/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/children/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/children/<pk>/presence/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "POST api/children/<pk>/remove-duplicate/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/children/<pk>/reopen/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "hidden",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "POST api/children/<pk>/terminate/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "invalid",
+  "sw_other": "hidden",
+  "sw_own": "refused"
+ },
+ "POST api/children/exported/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/children/transfer/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/consents/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/email-test/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/form-templates/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/form-templates/<pk>/deactivate/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/form-templates/import/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/instruments/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/instruments/<pk>/deactivate/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/interviews/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/opinionnaire-invites/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/opinionnaire/<pk>/submit/": {
+  "anonymous": "invalid",
+  "isa": "invalid",
+  "norole": "invalid",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/pre-assessments/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/pre-assessments/<pk>/complete/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/problems/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/remarks/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/report-files/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/report-files/<pk>/review-check/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/report-files/check/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/result-entries/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/self-report-flags/<pk>/acknowledge/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "POST api/sms-test/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/tasks/session-reminders/": {
+  "anonymous": "hidden",
+  "isa": "hidden",
+  "norole": "hidden",
+  "officer": "hidden",
+  "psy": "hidden",
+  "sw_other": "hidden",
+  "sw_own": "hidden"
+ },
+ "POST api/treatment-plans/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/unavailability/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "POST api/users/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/users/<pk>/approve/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/users/<pk>/archive/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/users/<pk>/decline/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/users/<pk>/reactivate/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "POST api/users/<pk>/reset-password/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PUT api/agency-profile/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PUT api/appointments/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "PUT api/assistant/settings/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PUT api/auth/me/email-notifications/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "PUT api/auth/me/phone/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "PUT api/auth/me/profile/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "past",
+  "psy": "past",
+  "sw_other": "past",
+  "sw_own": "past"
+ },
+ "PUT api/availability/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "PUT api/case-referrals/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "hidden",
+  "psy": "invalid",
+  "sw_other": "hidden",
+  "sw_own": "invalid"
+ },
+ "PUT api/children/<pk>/": {
+  "anonymous": "refused",
+  "isa": "past",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "past",
+  "sw_other": "hidden",
+  "sw_own": "past"
+ },
+ "PUT api/consents/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PUT api/form-templates/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PUT api/instruments/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PUT api/interviews/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PUT api/opinionnaire-invites/<pk>/": {
+  "anonymous": "refused",
+  "isa": "verb",
+  "norole": "refused",
+  "officer": "verb",
+  "psy": "verb",
+  "sw_other": "verb",
+  "sw_own": "verb"
+ },
+ "PUT api/pre-assessments/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PUT api/problems/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PUT api/remarks/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PUT api/report-files/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PUT api/result-entries/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PUT api/treatment-plans/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "invalid",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ },
+ "PUT api/unavailability/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "invalid",
+  "psy": "invalid",
+  "sw_other": "invalid",
+  "sw_own": "invalid"
+ },
+ "PUT api/users/<pk>/": {
+  "anonymous": "refused",
+  "isa": "invalid",
+  "norole": "refused",
+  "officer": "refused",
+  "psy": "refused",
+  "sw_other": "refused",
+  "sw_own": "refused"
+ }
+}
