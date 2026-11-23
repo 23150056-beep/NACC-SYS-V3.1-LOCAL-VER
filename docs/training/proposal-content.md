@@ -51,7 +51,7 @@ By the end of the training, the participants will be able to:
 
 | Topic / System | Date / Time | Venue | Speaker | Audience |
 |---|---|---|---|---|
-| Pre-training set-up of computers and demo data | Dec 2, 2026 (Wed), 1:00–5:00 PM | Conference Room | L. J. Carmelo | Training team |
+| Pre-training set-up of computers and demo data | Dec 2, 2026 (Wed), 1:00–5:00 PM | Conference Room | P. B. Lopez | Training team |
 | Registration and pre-test | Dec 3, 2026 (Thu), 8:00–8:30 AM | Conference Room | P. A. Pasco | All participants |
 | Opening prayer, national anthem and welcome remarks | Dec 3, 8:30–8:45 AM | Conference Room | Head of Office | All participants |
 | Session 1: Orientation to NACC SYS | Dec 3, 8:45–10:00 AM | Conference Room | J. R. Peñamora | All participants |
@@ -61,9 +61,9 @@ By the end of the training, the participants will be able to:
 | Day 1 recap, questions and exit slip | Dec 3, 4:30–5:00 PM | Conference Room | J. R. Peñamora | All participants |
 | Session 5: Clinical Workspace | Dec 4, 2026 (Fri), 8:30–10:30 AM | Conference Room | V. A. Cacdac | Psychologists |
 | Session 6: The Assistant and Data Privacy | Dec 4, 10:45 AM–12:00 NN | Conference Room | J. R. Peñamora | All participants |
-| Session 7A: System Administration | Dec 4, 1:00–2:30 PM | ISA Workstation Area | L. J. Carmelo | ISA |
+| Session 7A: System Administration | Dec 4, 1:00–2:30 PM | ISA Workstation Area | P. B. Lopez | ISA |
 | Session 7B: Integrated Case Simulation | Dec 4, 1:00–2:30 PM | Conference Room | J. R. Peñamora; V. A. Cacdac | Social Workers, Psychologists |
-| Session 8: User Support | Dec 4, 2:45–3:45 PM | Conference Room | L. J. Carmelo | All participants |
+| Session 8: User Support | Dec 4, 2:45–3:45 PM | Conference Room | P. B. Lopez | All participants |
 | Post-test and training evaluation | Dec 4, 3:45–4:30 PM | Conference Room | P. A. Pasco | All participants |
 | Awarding of certificates and closing remarks | Dec 4, 4:30–5:00 PM | Conference Room | Head of Office; J. R. Peñamora | All participants |
 
@@ -109,13 +109,13 @@ Session 8 — User Support. Describing a problem, the issue log form, the suppor
 | Time | Activity | Person in Charge | Method |
 |---|---|---|---|
 | 8:00–8:30 AM | Registration; Day 1 review | P. A. Pasco | Recap quiz |
-| 8:30–10:30 AM | Session 5: Clinical Workspace (Psychologists); review and practice of Day 1 topics (Social Workers and interns) | V. A. Cacdac; P. B. Lopez | Hands-on |
+| 8:30–10:30 AM | Session 5: Clinical Workspace (Psychologists); review and practice of Day 1 topics (Social Workers and interns) | V. A. Cacdac; L. J. Carmelo | Hands-on |
 | 10:30–10:45 AM | Morning snack | P. C. Valmonte | — |
 | 10:45 AM–12:00 NN | Session 6: The Assistant and Data Privacy | J. R. Peñamora | Demonstration; case discussion |
 | 12:00–1:00 PM | Lunch break | P. C. Valmonte | — |
-| 1:00–2:30 PM | Session 7A (ISA) and Session 7B (SWs and Psychologists), in parallel | L. J. Carmelo; J. R. Peñamora and V. A. Cacdac | Hands-on; return demonstration |
+| 1:00–2:30 PM | Session 7A (ISA) and Session 7B (SWs and Psychologists), in parallel | P. B. Lopez; J. R. Peñamora and V. A. Cacdac | Hands-on; return demonstration |
 | 2:30–2:45 PM | Afternoon snack | P. C. Valmonte | — |
-| 2:45–3:45 PM | Session 8: User Support | L. J. Carmelo | Lecture; troubleshooting drill |
+| 2:45–3:45 PM | Session 8: User Support | P. B. Lopez | Lecture; troubleshooting drill |
 | 3:45–4:30 PM | Post-test; training evaluation form | P. A. Pasco | Written test; survey |
 | 4:30–5:00 PM | Awarding of certificates; closing remarks | Head of Office; J. R. Peñamora | — |
 
@@ -131,8 +131,8 @@ A. People
 |---|---|---|
 | Lead Trainer: Peñamora, John Reynold C. | 1 | Sessions 1, 2, 4, 6 and 7B; Day 1 recap; overall program |
 | Co-Trainer: Cacdac, Vincent Adrian M. | 1 | Sessions 3, 5 and 7B |
-| Technical Support Lead: Carmelo, Levi Jedidiah N. | 1 | Set-up of computers, Sessions 7A and 8, on-the-day troubleshooting |
-| Facilitator: Lopez, Paul Benedict C. | 1 | Assisting during hands-on; Day 2 practice for social workers; return demonstration checklists |
+| Technical Support Lead: Lopez, Paul Benedict C. | 1 | Set-up of computers, Sessions 7A and 8, on-the-day troubleshooting |
+| Facilitator: Carmelo, Levi Jedidiah N. | 1 | Assisting during hands-on; Day 2 practice for social workers; return demonstration checklists |
 | Training Secretariat: Pasco, Paolo Antonio D. | 1 | Registration, attendance, tests, evaluation forms, documentation |
 | Logistics Coordinator: Valmonte, Prex Cairo A. | 1 | Venue, food and equipment, with the agency's staff |
 | Head of Office, NACC RACCO I | 1 | Opening and closing remarks; observer |
