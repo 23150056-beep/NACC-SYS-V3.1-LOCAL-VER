@@ -2,8 +2,8 @@
 
 **Date:** 2026-11-16
 **Status:** Being built on `claude/sweet-wozniak-9fzjme`, with the owner's
-decisions in. WP0 is in (`ae37c40`, 22 Nov 2026), WP1's backend half is in
-(`c7eae2c`, 23 Nov) and its browser half is being built. The
+decisions in. WP0 is in (`ae37c40`, 22 Nov 2026), WP1 is in (`c7eae2c`, `4d4416f`,
+23 Nov); WP2 is next. The
 case study removal is merged (`b6940c3`) and has been live on the demo since 22
 Nov; the lifecycle branch is not merged yet ("Before WP0"). An independent
 review read this note against the code on 22 Nov 2026. What it changed is
@@ -944,7 +944,16 @@ on a Sunday; the route table's six known columns did not move by one cell.
   design (availability and leave); and each closed door has a unit test, as
   the probe, that fails with the fix reverted.
 
-**WP1b, the browser.** `config/roles.js` gains the lists under the same
+**WP1b, the browser** (done, `4d4416f`, 23 Nov 2026). Built as below; the
+three roles' rail, screens and sign-up choices were identical in a browser
+before and after. Found on the way: the API's 401 carried only `detail`, so
+the sign-in page could not tell "role not set up" from a wrong password; the
+unknown-role and no-role refusals now carry `code` in the body. Left for
+later: `nav.js`'s Summary header tab is a single `['Staff']` (WP5 decides the
+Officer's), and the role-keyed tables, boolean chains and the inline
+works-record rule in `ChildDrawer.jsx` are WP5's inventory.
+
+`config/roles.js` gains the lists under the same
 names, as `export const NAME = ['...']` string literals, and `worksRecord`;
 `config/tests/test_cross_stack_roles.py` is extended to pin all of them (its
 `valid` set read from the capabilities); `nav.js`, `App.jsx` and the seven
@@ -956,6 +965,13 @@ console error and its content drawn.
 
 ### WP2. The role exists
 
+- **From WP1** (23 Nov): `seed_initial_data` and the console's people counts
+  read `EVERY_ROLE` today and move to `Role.NAMES`; the pin tests
+  (`test_cross_stack_roles.py`, `test_capabilities.py`) take their valid
+  role names from `Role.NAMES`, since a role row can exist before it is in
+  `EVERY_ROLE` (the Officer, from here to WP3); and the role-assigning doors
+  (`RoleListView`, approve, `UserWriteSerializer.role`) accept only a role
+  in `Role.NAMES`.
 - `Role.OFFICER`, and `Role.NAMES`, the rows that must exist;
   `accounts/migrations/0020_officer_role.py` (after the removal's `0019`), a
   data step that creates **only the Officer's** row if it is missing
@@ -967,10 +983,13 @@ console error and its content drawn.
   read anything. Tests always fetch the Officer's row with `get_or_create`,
   and "the row is there after migrate" runs in a `TestCase`, since a
   `TransactionTestCase` flush removes it.
-- `SIGNS_IN_WITH_GOOGLE` and `CLAIMABLE_AT_SIGNUP` take their
-  final members. The Google door's last check (`google_auth.py:218`) reads
-  `SIGNS_IN_WITH_GOOGLE`, not the claimable list: a Google-only account has
-  no password, so a promoted one would otherwise be locked out for good.
+- `CLAIMABLE_AT_SIGNUP` stays Psychologist and Staff, and a test says
+  "Officer" cannot be claimed. `SIGNS_IN_WITH_GOOGLE` gains the Officer in
+  WP3, with the other lists: until then the backstop refuses an Officer at
+  every door, so a Google sign-in would only be turned away. The Google
+  door's last check (`google_auth.py:218`) reads `SIGNS_IN_WITH_GOOGLE`, not
+  the claimable list: a Google-only account has no password, so a promoted
+  one would otherwise be locked out for good.
 - The role-change refusal for a Staff account holding active records
   (section 4: every change away from Staff, with the row locked); the queue
   that lists a holder who cannot hold records, and Transfer's *from* end
