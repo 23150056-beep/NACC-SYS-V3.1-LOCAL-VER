@@ -167,9 +167,10 @@ others are the plan's defaults, accepted with the rest.
 
 ### The planner's defaults (22 Nov 2026)
 
-The review asked seven questions and raised one more judgement call. None
-blocks WP1. Each is answered by the reading of the owner's decisions that fits
-them best, and the owner can overrule any of them:
+The two backend readers asked seven questions and raised one judgement call;
+the frontend reader asked five more. None blocks WP1. Each is answered by the
+reading of the owner's decisions that fits them best, and the owner can
+overrule any of them:
 
 | # | Question | Default |
 |---|---|---|
@@ -181,6 +182,11 @@ them best, and the owner can overrule any of them:
 | f | "What to do next" for an Officer | On any active record they open, like the record's social worker (rule 2), through `works_record`. |
 | g | "How many RACC Officers are there?" in the chat | Answered only within "everyone". Adding "officer" to `count_people` changes the tool list, which needs the owner's `ai_eval` run. |
 | h | `CHAT_SYSTEM` says the user is "a psychologist, a staff member or an administrator" | Left byte-identical on purpose (no prompt changes). Its comment in `prompts.py` is corrected, which is not a prompt byte. |
+| i | The Officer's dot colour | A new violet token. Red means an alert and green means healthy. Its text tokens are checked against white, `--ink-50` and `--ink-100`, as CLAUDE.md asks. |
+| j | The header chip's short form | "RACC Officer". The full "SWO IV/OIC (RACC Officer)" in the menu, the rail's card and Users. |
+| k | The ISA's "Clinical team this range" card on the Officer's Dashboard | Kept, as part of the agency layout. |
+| l | Should Records' social-worker filter, and the desk, list deactivated holders? | Only those still holding active records, marked "(inactive)". The Social Worker field never offers them. |
+| m | A warning when the ISA grants the role at Access Requests | Yes, as for Psychologist: "This account will see every child's record in the agency." |
 
 ## A day as the Officer
 
@@ -206,8 +212,8 @@ console, a psychologist's pre-assessment wizard, the instruments catalogue.
 
 ## How it is built: capabilities, not role names
 
-About 140 lines outside the tests name a role constant, and about 360 lines in
-46 frontend files branch on `role_name`. Adding `Role.OFFICER` to each by hand
+About 140 lines outside the tests name a role constant, and about 260 lines in
+35 frontend files branch on a role (review; an earlier count said 360 in 46). Adding `Role.OFFICER` to each by hand
 is how the twelfth call site gets written slightly differently. Instead every
 list of roles becomes a **named capability**, defined once.
 
@@ -264,11 +270,17 @@ the Officer that is WP3. It does not replace naming the branches: once the
 Officer is admitted, every `else` it could fall into must already name its
 role.
 
-**The browser's copy** is `frontend/src/config/roles.js`: the same lists under
-the same names, one per line, plus `worksRecord(user, child)`. A backend test
-reads the file and compares, the way `children/tests/test_intake.py` holds
-`caseData.js` to `children/intake.py`. `config/nav.js` and the route guards in
-`App.jsx` import from it instead of writing arrays.
+**The browser's copy** is `frontend/src/config/roles.js`, which already exists
+(review). It holds `INSTRUMENT_MANAGER_ROLES`, imported by `App.jsx:110` and
+pinned by `config/tests/test_cross_stack_roles.py`, whose `_js_list` reads an
+`export const NAME = ['...']` of string literals and nothing else. WP1b adds
+the same lists under the same names, in that form, plus
+`worksRecord(user, child)`, and extends that test rather than writing a second
+one. `config/nav.js`, the route guards in `App.jsx` and the seven screens
+that hold role arrays today (`Children.jsx:155`, `ChildProgressReport.jsx:165`
+and `:169`, `Schedule.jsx:247`, `Report.jsx:30`, `Signup.jsx:26`,
+`Login.jsx:14`) import from it instead of writing arrays, each a one-line swap
+with no behaviour change.
 
 **A guard against a second list:** a test reads the backend source and fails
 on a tuple, list or set holding two or more roles (`Role.` constants or the
@@ -277,7 +289,9 @@ from it. Management commands are included. Tests and migrations are left out
 (review): a migration freezes its own copy and a test builds fixtures. The
 test also reads `frontend/src` for an array literal holding two or more role
 names outside `config/roles.js`. A single `role == Role.X` is still allowed:
-that is a branch, not a list.
+that is a branch, not a list. So is an array holding one role name among
+other words, such as a table's headings (`AgencySummary.jsx:451`,
+`PsychReportPrint.jsx:108`; review).
 
 "Must be a Staff account" is written out in four places today
 (`children/serializers.py:139`, `children/transfer.py:121`,
@@ -295,7 +309,7 @@ review) and reads `HOLDS_RECORDS`.
 | Door | The Officer | Where |
 |---|---|---|
 | Records, a child's page, Monitoring, Results & Reports, the header search | every record | `accounts/scoping.py:60`, one edit |
-| Add record | yes. It belongs to the social worker picked in the form, or to nobody yet | `children/views.py:104` |
+| Add record | yes. It belongs to the social worker picked in the form, or to nobody yet. Picking is the Social Worker field (below), so from WP3 until WP4 an Officer's new record belongs to nobody (review) | `children/views.py:104`, `children/serializers.py:127`-`143` |
 | Edit any record | yes, SW rule. The name still cannot change; intake rules as they are | `accounts/permissions.py:20`, `:61` |
 | Custodian, number and consent to texts | yes | `children/custodian.py:83` |
 | The duplicate check at intake | every match, with its link, as the ISA gets | `children/views.py:456` |
@@ -308,8 +322,8 @@ review) and reads `HOLDS_RECORDS`.
 | Door | The Officer | Where |
 |---|---|---|
 | The record form's Social Worker field | sets or changes it. The target must be a social worker account | `children/serializers.py:125` |
-| Transfer records | yes. Both ends are social worker accounts, so an Officer is never an end | `children/views.py:383`, `children/transfer.py:119` |
-| No social worker yet / holder's account inactive / psychologist request stuck / possible duplicates | on the casework desk | `accounts/admin_overview.py:314`-`472` |
+| Transfer records | yes. The *to* end is an active social worker account, so an Officer is never one. The *from* end is any account holding active records, so a record stranded on a re-roled account can be moved (default a) | `children/views.py:383`, `children/transfer.py:119` |
+| No social worker yet / held by an account that cannot hold records / psychologist request stuck / possible duplicates | on the casework desk. The second queue was "holder's account inactive"; it also lists a holder that is no longer a social worker (default a) | `accounts/admin_overview.py:314`-`472` |
 | Remove a duplicate record | yes (decision 3) | `children/views.py:360` |
 | Hold a record | no (decision 1) | |
 
@@ -323,14 +337,19 @@ review) and reads `HOLDS_RECORDS`.
 | Accept or decline | never. Only the psychologist asked | `children/assignment_api.py:139` |
 | The psychologist picker with caseloads | yes | `accounts/views.py:947` |
 
+All of this opens in WP3, with the ask itself (review): the request list
+(`SEES_EVERY_RECORD`), withdraw and who-was-asked (`KEEPS_RECORDS`). Asking in
+WP3 and withdrawing only in WP4 would leave an Officer able to ask and not to
+take it back.
+
 ### How a case ends
 
 | Door | The Officer | Where |
 |---|---|---|
 | Terminate | by case outcome, any record (decision 4) | `children/views.py:253`, `children/termination.py:75` |
 | A psychologist's clinical reasons | never | |
-| Reopen | yes. The holder is unchanged | `children/views.py:304` |
-| Close or reopen by editing the record | never, for anyone: an edit refuses a status change | `children/lifecycle.py`, `config/lifecycle.py` (lifecycle branch) |
+| Reopen | yes. The holder is unchanged; a holder who cannot hold records puts it in the casework queue (default a). A `KEEPS_RECORDS` door, so it opens in WP3 (review) | `children/views.py:304` |
+| Close or reopen by editing the record | never, for anyone, **once the lifecycle branch is merged**: an edit refuses a status change. Until then both directions are open on this branch (section 5) | `children/lifecycle.py`, `config/lifecycle.py` (lifecycle branch) |
 
 On the lifecycle branch, Terminate and Reopen move the status through
 `CHILD_LIFECYCLE.move()`, a conditional update that answers 409 to the second
@@ -355,17 +374,18 @@ in them needs an Officer branch.
 
 | Door | The Officer | Where |
 |---|---|---|
-| See every session, with the child's name | yes | `scheduling/visibility.py:32` |
+| See every session, with the child's name | yes: `shows_name` reads `SEES_EVERY_RECORD`, the psychologist, or `works_record` | `scheduling/visibility.py:32` |
 | Book, move, cancel for any child | yes, inside availability like a social worker. On the lifecycle branch only a scheduled session moves or is cancelled, and a session never changes child | `scheduling/views.py:424`-`496` |
+| The booking drawer's psychologist picker (review) | yes, as a social worker: `KEEPS_RECORDS`. Refused, the drawer fails open, so the greyed names and their reasons would silently go | `scheduling/views.py:315`-`327` (current lines), `pages/schedule/psychologistPicker.js:31` |
 | Mark completed or no-show | no. The psychologist (and the ISA) | `scheduling/views.py:529` |
 | Read availability, leave, slots, the month, openings | yes | |
-| Write availability or leave | no (decision 5) | `scheduling/views.py:49`, `:320` |
+| Write availability or leave | no (decision 5). Decided in four places (review): the two write checks, combine, and the serializer's owner check | `scheduling/views.py:49`, `:320`; current `:60`, `:106`, `:448` and `scheduling/serializers.py:196`-`200` |
 
 ### Dashboard, summary, audit
 
 | Door | The Officer | Where |
 |---|---|---|
-| Dashboard | the agency's figures, with the casework desk on top | `clinical/reports_views.py:350` |
+| Dashboard | the agency's figures, with the casework desk on top, and today's sessions and availability across the agency, with names. In WP1 the ISA's branch is written as `SEES_EVERY_RECORD`, so WP3 reaches it. The Staff branch stays `== Role.STAFF`, because it filters on the records the user holds (review) | `clinical/reports_views.py:350` |
 | Care gaps | the social worker's rules, over every record. Not the psychologist's gaps: a gap nobody at that desk can close is noise | `clinical/care_gaps.py:234` |
 | Agency Summary, its CSV and its narrative | yes | `clinical/reports_views.py:282`, `assistant/views.py:619` |
 | The bell and `/activity` | every line in the RECORD category; the per-record transfer lines in the trail. **Never** the USER or SECURITY categories, whatever `?category=` says | `activity/views.py:35` |
@@ -374,7 +394,7 @@ in them needs an Officer branch.
 
 | Door | The Officer | Where |
 |---|---|---|
-| The chatbot | answers over every record. Names are masked the same way. **No prompt, tool description or `CHAT_SYSTEM` changes** | `assistant/tools.py:566` |
+| The chatbot | answers over every record, tool by tool below. Names are masked the same way. **No prompt, tool description or `CHAT_SYSTEM` changes** | `assistant/tools.py:566` |
 | Case brief facts, and "What to do next" on any active record | yes | `assistant/brief_facts.py:179` |
 | The written brief; remark polish | no | `assistant/views.py:55`, `:123` |
 | Record polish | yes | `assistant/views.py:178` |
@@ -382,13 +402,32 @@ in them needs an Officer branch.
 | Assistant settings, metrics, unanswered questions, the access log, model health | no | `IsAdministrator` |
 | `STAFF_DRAFTING` | applies to the Officer exactly as to Staff | `assistant/guards.py:150` |
 
+What each tool answers an Officer (review). Three of them carry a sentence
+written for a social worker behind a single `== Role.STAFF`, and mapping it to
+`SOCIAL_WORK` would tell an Officer "these are your own records".
+
+| Tool | The Officer |
+|---|---|
+| `list_my_appointments` | the agency's sessions, as the ISA's (`SEES_EVERY_RECORD`), with names |
+| `get_statistics` | no "these are your own records" note (`tools.py:908`-`915` stays `== Role.STAFF`) |
+| `list_care_gaps` | the social worker's rules over every record; its own empty sentence, "Nothing outstanding in any record." |
+| `list_unassigned_children` | the agency's sentence |
+| `find_availability` | every psychologist, as Staff |
+| `count_people` | Officers counted only within "anyone" (default g) |
+| the child summary, concern search, self-report flags | every record |
+
+The Officer's four starters are chosen from labels that are already
+`CHAT_CASES` and pass (review: several current starters are not cases). A
+starter never reaches the model anyway: chips run through
+`/assistant/followup/` (`StarterQuestionsTest`).
+
 ### Accounts
 
 | Door | The Officer | Where |
 |---|---|---|
 | Ask for the role at sign-up, by form or Google | impossible | `accounts/serializers.py:329`, `accounts/google_auth.py:52` |
-| Be given it | by the ISA: when approving a request, in Add user, or by changing a role | `accounts/views.py:826`, `accounts/serializers.py:154` |
-| Sign in with Google | yes, once the account exists and is active | `accounts/google_auth.py:218` |
+| Be given it | by the ISA: when approving a request, in Add user, or by changing a role. A Google applicant approved as one is emailed "as a Social Welfare Officer IV/OIC (RACC Officer)" (`_role_words`; review, default d) | `accounts/views.py:826`, `accounts/serializers.py:154`, `children/notifications.py:374` |
+| Sign in with Google | yes, once the account exists and is active, from WP3, when the role is admitted | `accounts/google_auth.py:218` |
 | My Profile: mobile number, password, profile links | yes. The PRC license fields are gone with the case study | `accounts/views.py` `MyProfileView` |
 | Emails | none yet (decision 9) | `accounts/email_notifications.py:75` |
 | Users, roles, access requests, credential hand-offs, Settings, test text and email, the admin console, Django admin | never | `IsAdministrator`, on 12 views |
@@ -402,10 +441,23 @@ list of social workers from `GET /users/` today. That is the user directory.
 It is IT's and stays `IsAdministrator`. So the Officer needs a narrower door,
 as `/api/psychologists/` already is for the psychologist picker.
 
-For `OVERSEES_CASEWORK`. Staff accounts that are active or still hold an
-active record: `[{id, name, active, records}]`, `records` being the count of
-active records held. No email, no status beyond `active`. The ISA's screens
-move to it too, so the ISA and the Officer cannot be shown different lists.
+For `SEES_EVERY_RECORD` (review: Records' filter needs the names, and it is
+a *sees every record* door; the Social Worker field and Transfer, which are
+`OVERSEES_CASEWORK`, read the same list). Staff accounts that are active, and
+any account that still holds an active record: `[{id, name, active, records,
+may_hold}]`, `records` being the count of active records held and `may_hold`
+whether it can be given more (default a: a re-roled holder is listed so its
+records can be moved, never as a target). No email, no status beyond
+`active`. The ISA's screens move to it too, so the ISA and the Officer cannot
+be shown different lists.
+
+Moving the screens off `/users/` changes every field they read (review):
+`role_name` and `status` give way to `may_hold` and `active`, and the name
+to `name`. Records' picker and filter keep showing active social workers
+only, as now (`Children.jsx:217`-`220`); the filter also lists a holder that
+still holds active records, marked "(inactive)" (default l). The Transfer
+drawer keeps counting from the `/children/` list it ticks, as CLAUDE.md
+requires, and never shows `records`.
 
 ### 2. `GET /api/casework/overview/` and the casework desk
 
@@ -419,12 +471,41 @@ carries people and sign-ins, health, the version, or the security log. A test
 plants a sentinel in each of those and searches the whole response, as
 `test_admin_overview.py` does.
 
+Three things the console's functions do that this view must not (review):
+
+- **Queues are picked by key**, `stuck_requests`, `no_social_worker`,
+  `archived_holder`, `duplicates`, never by `group`: `names_to_fix` carries
+  the group "records" but names accounts and links to `/users?edit=`.
+- **People are named with `accounts.display.display_name` or
+  `entered_name`, never the console's `_person`**, which falls back to the
+  email address on purpose because its answer is the administrator's alone
+  (`admin_overview.py:115`-`119`, and `_short` through it). The sentinel
+  test adds an account with no name and asserts its address appears nowhere.
+- **`_workload` takes the tally too** (`no_psychologist`), not only the
+  second and third queues. The view's query count is pinned in
+  `clinical/tests/test_endpoint_query_counts.py`, as the console's is.
+
 On screen it is `pages/dashboard/CaseworkDesk.jsx`, mounted for the Officer
 alone, with the queue tiles and Workload from the admin console and one
 button, **Transfer records**. The Transfer drawer moves out of
 `ConsoleActions.jsx` into its own file so both consoles use the one drawer.
 Explicitly routed paths, both: the deploy probe in CLAUDE.md can tell them
 from a 404.
+
+Lifting the tiles out is a refactor, not a move (review). `Tile`,
+`QueuePanel`, `NeedsYouNow` and `Workload` are private to `AdminConsole.jsx`.
+`NeedsYouNow` hard-codes the ISA's two groups (`:178`-`181`), always draws
+`ConsoleActions` as its footer (`:410`-`412`) and takes the assistant's
+health and the access count. Workload's "No social worker yet" row is read
+from `needs`, not from `workload` (`:1103`-`1104`). So: the shared parts go to
+`pages/dashboard/consoleParts.jsx`; `NeedsYouNow` takes `groups` and `footer`;
+the overview's load and sequence logic (`:1053`-`1093`) becomes one hook. The
+desk has one group of four tiles: the four queues above, with `needs`
+carrying `no_social_worker` so Workload's row works. The drawer leaves with
+its success path (`moved()`, `KeepRefs`, `NAMED`, `num`, `plural`, now in
+`ConsoleActions.jsx:536`-`560`) as `TransferDrawer({onClose, onMoved})` and a
+shared `useTransferDone`. **Done means the ISA's console is pixel-identical
+at 1440 and 1100, before and after.**
 
 ### 3. `may_close_case`
 
@@ -442,9 +523,23 @@ exists today for Staff changed to Psychologist.
 
 `UserWriteSerializer.validate_role` refuses a change **away from Staff** while
 the account holds active records: "This account still holds 20 active records.
-Move them first (Transfer records)." Closed records do not count: a closed
-case another worker finds at intake is already reopened and taken over by
-name.
+Move them first (Transfer records)." That includes Staff to Psychologist,
+which the ISA can do today, as a deliberate change (default b). The count is
+`Child.objects.filter(social_worker=instance, status=ACTIVE)`, imported inside
+the function (`accounts/scoping.py` says why). The account's row is locked
+(`select_for_update`) there and in Transfer's lookup of its *to* end, so a
+transfer racing the role change cannot slip a record past it (review).
+
+**Closed records do not count, and that leaves a way round it** (review).
+Reopening in place keeps the holder, for the ISA and for an Officer, so a
+promoted worker's closed case can come back active and theirs. Only a social
+worker reopening at intake takes it over. So the queue "held by an archived
+account" becomes "held by an account that cannot hold records" (inactive, or
+not in `HOLDS_RECORDS`), and Transfer's *from* end accepts any account that
+holds active records (default a). A record stranded this way, or by a Staff
+to Psychologist change made before this build, is then listed and can be
+moved. WP2 tests it: promote, reopen one of their closed records as the ISA,
+and the record is in the queue and moves.
 
 The psychologist's side of the same hole (a psychologist changed to another
 role while children are assigned) is not touched here. There is no bulk way to
@@ -464,8 +559,12 @@ on the record's serializer (`children/serializers.py:82`, not in
   The ISA's did the same.
 - `POST /api/children/` with `"status": "inactive"` answered 201 and stored a
   record that was closed from the start.
-- The way back is not open: an edit to an inactive record answers 404, so a
-  case closed this way returns only through `reopen`.
+- ~~The way back is not open~~ (review): it is. `get_queryset` keeps closed
+  records out of an edit only when `?include_archived=true` is absent
+  (`children/views.py:184`-`188`), so `PATCH
+  /api/children/<id>/?include_archived=true {"status": "active"}` answers 200
+  and reopens a case outside `reopen()`, with `case_status` still
+  "terminated" and no reopen line. Both directions are open.
 
 It becomes read-only for every role, on create and on edit: a case moves
 through `terminate` and `reopen` only. Its own commit, with a test written
@@ -487,6 +586,14 @@ read-only. **It is reverted** (19 Nov 2026), because the two cannot be merged
 together. They merge with no text conflict, but read-only drops `status`
 before the lifecycle's check can see it, so the lifecycle's refusals never
 fire and its tests fail. WP1 no longer carries this item.
+
+**WP3 waits for the lifecycle** (review). WP3 is where the Officer may save
+any record, and with this hole open that means the whole agency's statuses,
+both ways. If the lifecycle is still out when WP2 is done, the planner decides
+then between waiting and building WP3 with its Officer status test marked as
+an expected failure until the merge. Either way the lifecycle merge's
+acceptance check tries both directions as a social worker, the ISA and an
+Officer.
 
 ## Who is told
 
@@ -517,6 +624,14 @@ other than the record's social worker did this":
   is left as it is; see "Not done, suggested".
 - In the Officer's own bell the second copy of a transfer's sentence
   (`move_copy`) is left out, as it is for the ISA.
+- **Wording** (review): the `case_request` switch's description, "When a
+  social worker or the ISA asks you", becomes "a social worker, the RACC
+  Officer or the ISA" (`accounts/email_notifications.py:76`-`78`); the "No
+  social worker yet" queue's hint, "Only you can open them", becomes "Only
+  the ISA and the RACC Officer can open them" (`admin_overview.py:406`-`407`).
+- **The email limits** count by actor (`accounts/email_notifications.py:516`-`560`).
+  An Officer acting on every record meets them sooner than one social
+  worker. They stay as they are (default e).
 
 `KINDS` gets no Officer entries, so My Profile shows the Officer no email
 switches, and `wants()` already refuses a role the kind is not for.
@@ -530,17 +645,36 @@ or a screen that falls into another role's branch, is a defect.
   rail and tabs are the social worker's (Dashboard, Records, Monitor,
   Calendar, Reports, Summary), plus `/activity` and `/profile`. Never
   `/users`, `/settings`, `/instruments`, `/pre-assessment`.
-- **`ui/index.jsx`**: `ROLE_META.Officer`, `ROLE_ACCESS.Officer`, the
-  `RoleBadge` dot. Not red (alerts) and told apart from the other three at a
-  glance in the Users list.
+  From WP1b `nav.js` reads the named lists, so the rail follows the lists the
+  Officer joins in WP3 and WP4: check that they open what this bullet says
+  and nothing else.
+- **`ui/index.jsx`**: `ROLE_META.Officer` (with `short`, `color` and `tone`),
+  `ROLE_ACCESS.Officer`, and every other table keyed by role, which neither
+  the guard nor the pin can see (review): `RoleBadge`'s own `ROLES` map
+  (`ui/index.jsx:558`-`562`, which falls back to Staff's amber), the
+  console's `ROLE_CHIP` (`AdminConsole.jsx:701`-`705`), the avatar tones
+  (`Users.jsx:504`, `ConsoleActions.jsx:171`, `AdminConsole.jsx:658`) and the
+  audit trail's `SUBTITLE` (`AuditTrail.jsx:36`-`40`). They read one source,
+  `ROLE_META`, and a check fails on a role-keyed table that lacks a name in
+  `EVERY_ROLE`. The dot is a new violet token (default i). The icon is one
+  already in `ui/icons.js`, or lint's `check-icons.mjs` fails. The long form
+  goes in the role select's option text and as the first `ROLE_ACCESS` line,
+  since Users and Access Requests show those bullets, not a description.
+  Staff's bullet strings are reused word for word where the access is the
+  same, because `RoleAccessPanel` works out Gains and Loses by string
+  equality (review).
 - **The header**: the identity chip is sized against "ISA (Administrator)"
   with 30px in hand (CLAUDE.md, "The header search"). The new label is six
-  characters longer. Measure at 1280, 1366 and 1440 signed in as the Officer;
-  if it does not fit, the chip shows a short form ("RACC Officer") and menus
-  keep the full label.
-- **Dashboard**: the Officer gets the agency layout the ISA has, with
-  `CaseworkDesk` where `AdminConsole` is. Quick actions are the social
-  worker's three.
+  characters longer: about 40px in the chip's uppercase 9.5px with its
+  tracking. Its line has no `white-space: nowrap`, so it would wrap inside
+  the 38px pill rather than overflow (`AppHeader.jsx:545`; review). So the
+  chip reads `ROLE_META.Officer.short`, "RACC Officer" (default j), with
+  `nowrap`, and everything else keeps `roleLabel`. Measure the chip's height
+  as well as its width, and that no tab sits under the search bar, at 1280,
+  1366 and 1440.
+- **Dashboard**: the Officer gets the agency layout the ISA has, the
+  "Clinical team this range" card included (default k), with `CaseworkDesk`
+  where `AdminConsole` is. Quick actions are the social worker's three.
 - **Records** (`pages/Children.jsx`): `isAdmin` there means three things and
   is split: *sees every record* (the Social worker column, filter, "No social
   worker yet", the export's column); *oversees casework* (the Social Worker
@@ -548,12 +682,20 @@ or a screen that falls into another role's branch, is a defect.
   this screen). `canManage` becomes `KEEPS_RECORDS`.
 - **The record drawer and form**: the "Next step" line uses `worksRecord`;
   "Ask the ISA (Administrator) to transfer it to you" becomes "Ask the RACC
-  Officer or the ISA".
-- **The child's page**: referral upload, survey and referral summary follow
-  `KEEPS_RECORDS`; the Assistant log tab stays the ISA's; a report's summary
-  and its check (`canAdvance`) stay with the ISA and the assigned
-  psychologist. With no survey form set up, the Officer is told what a social
-  worker is told: ask the ISA to add one.
+  Officer or the ISA". Four more sentences become untrue (review) and read
+  "..., the RACC Officer or the ISA": the Social Worker field's hint
+  (`ChildForm.jsx:1045`), `Children.jsx:812`, `CustodianFields.jsx:52` and
+  `Schedule.jsx:1652`.
+- **The child's page**: referral upload and the referral summary follow
+  `KEEPS_RECORDS` (`ChildProgressReport.jsx:165`, `:229`, `:1149`). **The
+  survey does not** (review; as first written this broke psychologists): its
+  forms are fetched for psychologists too (`:169`, `canStartSurvey`), so that
+  fetch reads `EVERY_ROLE`, the survey card reads `KEEPS_RECORDS` or
+  `canWrite` (`:1101`, `:1115`), and the no-form toast asks `SOCIAL_WORK`,
+  not `=== 'Staff'` (`:277`), so the Officer is told what a social worker is
+  told: ask the ISA to add one. The Assistant log tab stays the ISA's; a
+  report's summary and its check (`canAdvance`) stay with the ISA and the
+  assigned psychologist.
 - **Results & Reports** (`pages/Report.jsx`): "Upload case referral" follows
   `KEEPS_RECORDS`. Reviewing a report's check stays the psychologist's and
   the ISA's.
@@ -561,22 +703,34 @@ or a screen that falls into another role's branch, is a defect.
   psychologist-only gap to the child's page instead of `/pre-assessment`
   asks "is this the ISA". It becomes "anyone but a psychologist", so no role
   is ever sent to a screen it cannot open.
-- **Calendar**: `canBook` includes the Officer. Add availability, record
-  leave, completed and no-show stay as they are.
+- **Calendar**: `canBook` includes the Officer, and so does the booking
+  drawer's psychologist picker (`psychologistPicker.js:31`, the backend's
+  `KEEPS_RECORDS`). Add availability, record leave, completed and no-show
+  stay as they are.
 - **Header search**: the social worker's actions, plus "No social worker yet"
   under Needs you. The colleague search reads `/users/` and stays the ISA's.
 - **My Profile**: the personal column only, as the ISA, because the
   right-hand lists would be the whole agency's; the email card is hidden for a
   role with no kinds, not for "the ISA".
 - **Audit trail and bell**: the Officer's sentence ("Every record event in the
-  agency") and the RECORD tab only.
+  agency") and the RECORD tab only. The bell's tabs are a ternary that gives
+  any role but the ISA and Staff the psychologist's "All" alone
+  (`AppHeader.jsx:285`; review). The Officer gets All and Records.
 - **Users and Access Requests**: both read `/api/roles/`, so the role appears
-  in their lists by itself. They need its label, its description and its tone.
-  Sign-up and the Google button keep offering two roles.
-- **The ISA's console**: the people card counts Officers; nothing else.
+  in their lists by itself. They need its label, its `ROLE_ACCESS` lines and
+  its tone. Granting it at Access Requests warns, as granting Psychologist
+  does (`AccessRequests.jsx:293`): "This account will see every child's
+  record in the agency" (default m). Sign-up and the Google button keep
+  offering two roles.
+- **The ISA's console**: the people card counts Officers, as "RACC Officer"
+  and "RACC Officers" (`ROLE_CHIP`); nothing else.
 
 Check each of the four roles in a browser at 1440, 1280 and 390, and run
-axe-core on every screen that changed.
+axe-core on every screen that changed. Until the demo seeds an Officer (WP3),
+the local one is made in Users: a Staff account holding nothing, changed to
+Officer. `worksRecord` has no JavaScript test runner to pin it (review), so
+the browser pass checks it: an Officer on another worker's record, a social
+worker on their own and on someone else's.
 
 ## What stays exactly as it is
 
@@ -584,14 +738,17 @@ axe-core on every screen that changed.
   sees only their assigned children, under the carry-history control.
 - The ISA loses nothing and gains nothing.
 - Only acceptance writes `assigned_psychologist`.
-- A status changes only through its lifecycle door (Terminate, Reopen, the
-  appointment actions, the account actions), for the Officer as for everyone.
+- Once the lifecycle branch is merged, a status changes only through its
+  lifecycle door (Terminate, Reopen, the appointment actions, the account
+  actions), for the Officer as for everyone. Until then it does not (section
+  5), which is why WP3 waits for it.
 - An Officer account is never `is_staff` or a superuser. Django admin is the
   ISA's.
 - No prompt, tool description or `CHAT_SYSTEM` byte changes, so nothing needs
   a new `ai_eval` run. The Officer's "what you can ask" sentence and starter
-  questions are server-side tables (`assistant/tools.py:477`, `:517`), and the
-  starters reuse labels already measured.
+  questions are server-side tables (`assistant/tools.py:477`, `:517`), and a
+  starter runs without the model (`/assistant/followup/`). `CHAT_SYSTEM`
+  still says the user is one of three roles, on purpose (default h).
 - No stored key is renamed: not a role, not an email kind.
 
 ## Handing it over
@@ -599,12 +756,13 @@ axe-core on every screen that changed.
 The owner's answers are in. A build session starts with three steps, in this
 order:
 
-1. **Before WP0** (below): land the case study removal and the lifecycle work
-   in `cloud-setup`, and branch from that.
+1. **Before WP0** (below): land the case study removal in `cloud-setup`, and
+   the lifecycle work once its session is done. The removal is in; the
+   lifecycle is still out, and WP3 waits for it (section 5).
 2. Have a reader who did not write this note try to break it against that
    code, one area at a time: accounts, clinical and scheduling; children and
-   the assistant; the frontend. That review never ran; see the last section.
-3. Then WP0.
+   the assistant; the frontend. Done on 22 Nov 2026 (the last section).
+3. Then WP0. Done (`ae37c40`).
 
 ### Before WP0: what landed (19 Nov 2026)
 
@@ -621,8 +779,8 @@ order:
   `99e26c6`) on behaviour, not text: the wizard's step numbering (Review 4.5
   and Done 5 there, Review 5 and Done 6 here) and how `complete()` records
   the last step (the lifecycle's `move()` against `step_times.finished`).
-  That is for that session or the owner to settle. The Officer does not wait
-  for it. When it lands, the Officer branch merges `cloud-setup` again, and
+  That is for that session or the owner to settle. WP0 to WP2 do not wait
+  for it; WP3 does (section 5). When it lands, the Officer branch merges `cloud-setup` again, and
   this note's rows for surveys and summaries are read again, since `e6beb21`
   changes those doors.
 
@@ -676,36 +834,49 @@ cd frontend && npm run lint && npm run build
 (Linux paths; on the owner's PC, `.venv\Scripts\python.exe`. Never pipe a test
 run through `tail`.)
 
-### WP0. Baseline, and a table of every route
+### WP0. Baseline, and a table of every route (done, `ae37c40`, 22 Nov 2026)
 
-- `backend/requirements-dev.txt`: add `tblib`. Without it a failure inside a
+- `backend/requirements-dev.txt`: `tblib`. Without it a failure inside a
   parallel worker can crash the runner with "cannot pickle 'traceback' object"
   and the failing test's name is lost. That happened once while this plan was
-  written.
-- `backend/config/tests/test_every_route_is_decided.py` and a data file
-  beside it. The test walks Django's URL resolver for everything under
-  `/api/`, and for each route and method asks as: nobody, the ISA, a social
-  worker on their own child, a social worker on someone else's, the assigned
-  psychologist, an account with no role, and an account whose role is a row
-  called "Officer" **made in the test database only**. Writes go with an
-  empty body inside a savepoint that is rolled back. Outcomes are four words:
-  *past* (2xx, or 400 from validation), *refused* (401/403), *hidden* (404),
-  *no such verb* (405); a list answer also records whether it had rows.
+  written, and not since.
+- `backend/config/tests/test_every_route_is_decided.py` and
+  `route_table.json` beside it. The test walks Django's URL resolver for
+  everything under `/api/` (210 route-methods) and asks each as: nobody, the
+  ISA, a social worker on their own child, a social worker on someone else's,
+  the assigned psychologist, an account with no role, and an account whose
+  role is a row called "Officer" **made in the test database only**. The
+  tokens are real, minted as sign-in mints them. Writes go with an empty body
+  inside a savepoint that is rolled back; the clock is pinned, the cache
+  cleared before each request, and texts, email, the model runtime and the
+  brief prefetch thread replaced.
+- The words: *past* (2xx: the request did something), *invalid* (400, 409,
+  415, 422: the gate let it through and the handler turned the empty body
+  down, which says nothing about a real body), *refused* (401/403), *hidden*
+  (404), *verb* (405), *unavailable* (503). A `past` list adds `:rows` or
+  `:empty`. Any other 5xx fails the test as a bug. The table covers
+  route-level gates only; a door that depends on the body (the Social Worker
+  field, the custodian, the edit's ask branch, closure reasons, transfer
+  ends, the chatbot's tools) is pinned by unit tests in the apps' own files.
 - **A route or verb that is not in the table fails the test** with "decide
-  what each role gets here". That is this codebase's guard for the twelfth
-  call site, like `STAFF_DRAFTING` and `KEEPS_IT`.
-- **Done when:** the suite is green; the table is committed as today's truth;
-  and the planner has compared its unknown-role column with the fail-open
-  list at the top of this note, and corrected whichever is wrong.
+  what every role gets here", and a changed cell fails naming both words.
+  That is this codebase's guard for the twelfth call site, like
+  `STAFF_DRAFTING` and `KEEPS_IT`.
+- Done: the suite is green (3,622 tests), and the comparison also passes with
+  the wall clock moved to Sat 23:58, Sun 00:02, Wed 09:30 and a day seven
+  months on. The unknown-role column was compared with the table at the top
+  of this note, which it bears out ("Measured again on 22 Nov 2026").
 
 ### WP1. Name the capabilities, close the `else` branches
 
 No behaviour changes for the three roles, and the lists do **not** contain
-the Officer yet.
+the Officer yet. In two halves (planner, 22 Nov 2026): the backend, WP1a,
+then the browser, WP1b, whose brief is written from the frontend review.
 
-- New `accounts/capabilities.py`; `frontend/src/config/roles.js`, `nav.js`
-  and `App.jsx` take their lists from the mirror; the pin test; the
-  second-list guard.
+**WP1a, the backend.**
+
+- New `accounts/capabilities.py` with the lists and the three functions; the
+  pin test and the second-list guard (`accounts/tests/test_capabilities.py`).
 - Every enumerated tuple becomes a named list, in: `accounts/scoping.py`,
   `permissions.py`, `serializers.py`, `google_auth.py`, `views.py`,
   `admin_overview.py`, `sms_notifications.py`; `children/views.py`,
@@ -714,85 +885,150 @@ the Officer yet.
   `care_gaps.py`; `scheduling/views.py`, `visibility.py`;
   `assistant/views.py`, `tools.py`, `brief_facts.py`,
   `management/commands/ai_eval.py`; `activity/views.py`.
-- The four "must be a Staff account" checks become `may_hold_records`.
-- Every `else` that meant "the Administrator" names the Administrator, and
-  what is left over is refused or sees nothing: the doors in the first table
-  of this note, and the five behind a gate.
+- The four "must be a Staff account" checks become `may_hold_records`, and
+  the console's Workload reads `HOLDS_RECORDS`.
+- Every `else` that meant "the Administrator" names its role, and what is
+  left over is refused or sees nothing: the doors in the first table of this
+  note, and the five behind a gate. **A branch that serves the ISA today is
+  written with the list whose question it answers** (review), so adding the
+  Officer to that list later reaches it: the Dashboard's agency branch and
+  the request list read `SEES_EVERY_RECORD`, the appointments list
+  `KEEPS_RECORDS`, Add Record's and the closure reasons' ISA branches
+  `OVERSEES_CASEWORK`. The ISA's full audit stream stays
+  `== Role.ADMINISTRATOR`; WP3 gives the Officer its own branch.
+- Two elses are kept on purpose, each with a comment saying so (review):
+  `brief_kind` (any non-psychologist means "case", pinned by
+  `test_case_brief.py`), and the assistant's `_CAN_ASK` and `_EXAMPLES`
+  defaults until WP3 adds the Officer's entries.
 - `may_close_case` replaces `is_admin_or_assignee` in `terminate` and
   `closure_reasons` only.
+- **The backstop** ("The door they all come through"): an unknown role is
+  refused at authentication, sign-in and refresh. `Role` becomes read-only
+  in Django admin.
+- **The route table gains an eighth account, the probe**: a role row that
+  the test patches into `EVERY_ROLE` and nothing else. With the backstop, the
+  unknown-role column can only say "refused"; the probe's column is what an
+  `else` that grants by default would show, now and for every door added
+  later.
 - ~~`status` read-only on create and on edit~~: done by the lifecycle branch,
   see section 5. The lifecycle's own tables (`config/lifecycle.py` and the
   three apps' `lifecycle.py`) are role-blind and stay so; where a door they
   guard also checks a role (Staff cancel only their own children's scheduled
   sessions), that check is the one that becomes a named list.
-- The availability and leave lists ask for `EVERY_ROLE`, not merely for a
-  sign-in.
-- **Done when:** every existing test passes unedited (imports for the renamed
-  permission class aside); the route table's known columns have not moved;
-  its unknown-role column is all *refused*, *hidden* or *no rows*, apart from
-  the doors every signed-in account has (their own profile, password, the
-  agency's name, what they can ask the assistant).
+- The availability and leave viewsets ask for `EVERY_ROLE` on every action,
+  slots and the month included, not merely for a sign-in (review).
+- **Done when:** every existing test passes unedited (imports for the
+  renamed permission class and the moved instrument list aside); the route
+  table's six known columns have not moved by one cell; the unknown-role
+  column is *refused* at every authenticated door; the probe's column is
+  *refused*, *hidden* or empty except at the doors every signed-in account
+  has (their own profile, password, phone and email switches, the agency's
+  name, what they can ask, the address lists) and what every role reads by
+  design (availability and leave); and each closed door has a unit test, as
+  the probe, that fails with the fix reverted.
+
+**WP1b, the browser.** `config/roles.js` gains the lists under the same
+names, as `export const NAME = ['...']` string literals, and `worksRecord`;
+`config/tests/test_cross_stack_roles.py` is extended to pin all of them (its
+`valid` set read from the capabilities); `nav.js`, `App.jsx` and the seven
+screens with role arrays swap to the named lists ("The browser's copy");
+the frontend half of the guard. `INSTRUMENT_MANAGER_ROLES` follows the
+backend's new name. **Done when:** lint and build pass, the pin test passes,
+and each changed screen loads for the three roles in a browser with no
+console error and its content drawn.
 
 ### WP2. The role exists
 
 - `Role.OFFICER`, and `Role.NAMES`, the rows that must exist;
   `accounts/migrations/0020_officer_role.py` (after the removal's `0019`), a
-  data step that creates the
-  row if it is missing and whose reverse does nothing (an account may hold
-  it); `seed_initial_data` seeds from `Role.NAMES`. That is not `EVERY_ROLE`:
-  one says which rows exist, the other who may read case files, and the
-  Officer's row exists a work package before the Officer may read anything.
+  data step that creates **only the Officer's** row if it is missing
+  (review: about 255 tests make the other three with `Role.objects.create`,
+  which a migrated row would break) and whose reverse does nothing (an
+  account may hold it); `seed_initial_data` seeds from `Role.NAMES`. That is
+  not `EVERY_ROLE`: one says which rows exist, the other who may read case
+  files, and the Officer's row exists a work package before the Officer may
+  read anything. Tests always fetch the Officer's row with `get_or_create`,
+  and "the row is there after migrate" runs in a `TestCase`, since a
+  `TransactionTestCase` flush removes it.
 - `SIGNS_IN_WITH_GOOGLE` and `CLAIMABLE_AT_SIGNUP` take their
   final members. The Google door's last check (`google_auth.py:218`) reads
   `SIGNS_IN_WITH_GOOGLE`, not the claimable list: a Google-only account has
   no password, so a promoted one would otherwise be locked out for good.
-- The role-change refusal for a Staff account holding active records.
+- The role-change refusal for a Staff account holding active records
+  (section 4: every change away from Staff, with the row locked); the queue
+  that lists a holder who cannot hold records, and Transfer's *from* end
+  (default a). `_role_words` gains the Officer (default d), and
+  `test_cross_stack_roles.py`'s `valid` set gains it.
 - The ISA console's people counts
   (`accounts/tests/test_admin_overview.py:82` lists the three roles and gains
   the fourth).
 - **Done when,** by test: the row is there after `migrate` on a database that
   already has accounts; "Officer" cannot be claimed at either sign-up door
   and the refusal reads like the Administrator's; the ISA can grant it at
-  approval and in Add user; an active Officer signs in by password and by
-  Google; Staff to Officer is refused with the count while records are held
-  and passes once they are moved; and in the route table
-  the Officer is *refused* or *no rows* everywhere except the doors every
-  signed-in account has.
+  approval and in Add user; Staff to Officer (and to Psychologist) is
+  refused with the count while records are held and passes once they are
+  moved; a promoted worker's reopened record is in the queue and moves; and
+  an Officer's sign-in and every authenticated door answer *unknown_role*
+  until WP3 (the backstop), as the route table's Officer column shows.
 
 ### WP3. Every record, and a social worker's work on any of them
 
-- `EVERY_ROLE`, `SEES_EVERY_RECORD`, `KEEPS_RECORDS` and `SOCIAL_WORK` gain
-  the Officer. `works_record` goes in at the survey rule
-  (`clinical/views.py:660`) and next steps (`assistant/brief_facts.py:179`).
-  `shows_name`. The Officer's branch of the activity scope. The Officer's
-  "what you can ask" and starters. Record polish. The export log.
-- **Done when,** by test, an Officer: sees another worker's child and an
-  unheld one at every door `children/tests/test_own_records.py` closes to a
-  social worker; edits a record and the edit **asks** a psychologist (extend
-  `test_a_pending_child_is_absent_from_every_door`); records a custodian;
-  files and deletes a referral; starts a survey; books, moves and cancels and
-  is refused completed and no-show; sees names on the calendar; gets the
-  social worker's care gaps over all records; is refused every clinical
-  write, the written brief and remark polish; gets `brief: "case"`; and has
-  no USER or SECURITY line in the feed or the trail, with `?category=security`
-  tried (a sentinel line of each kind is planted). `STAFF_DRAFTING`'s test
-  runs as an Officer too.
+- **Starts once the lifecycle branch is merged**, or on the planner's word
+  (section 5).
+- `EVERY_ROLE`, `SEES_EVERY_RECORD`, `KEEPS_RECORDS`, `SOCIAL_WORK` and
+  `SIGNS_IN_WITH_GOOGLE` gain the Officer, in `capabilities.py` and
+  `roles.js` alike, which also lets it past the backstop. `works_record`
+  goes in at the survey rule (`clinical/views.py:660`) and next steps
+  (`assistant/brief_facts.py:179`). `shows_name`. The Officer's branch of the
+  activity scope. The Officer's "what you can ask" and starters, and each
+  tool's answer as in the assistant's table. Record polish. The export log.
+  `seed_demo_data` gains one Officer account holding nothing (moved here from
+  WP6, review: WP3 to WP5 need one).
+- With those lists come (review): reopen, check-duplicate, the request list,
+  withdraw, who was asked and a decline's reason, and the booking drawer's
+  psychologist picker.
+- **Done when,** by test, an Officer: signs in by password and by Google;
+  sees another worker's child and an unheld one at every door
+  `children/tests/test_own_records.py` closes to a social worker; adds a
+  record without a social worker and it belongs to nobody; edits a record
+  and the edit **asks** a psychologist (extend
+  `test_a_pending_child_is_absent_from_every_door`), and withdraws a request
+  on another worker's record; reopens with the holder unchanged; records a
+  custodian; files and deletes a referral; starts a survey; books, moves and
+  cancels, with the psychologist picker answering, and is refused completed
+  and no-show; sees names on the calendar and the agency's sessions and
+  availability on the Dashboard; gets the social worker's care gaps over all
+  records; is refused every clinical write, the written brief and remark
+  polish; gets `brief: "case"`; has no USER or SECURITY line in the feed or
+  the trail, with `?category=security` tried (a sentinel line of each kind
+  is planted); and cannot change a record's status by an edit, either way.
+  `STAFF_DRAFTING`'s test runs as an Officer too, on a child another worker
+  holds. Each test that loops over exactly three roles takes the Officer
+  (review): in assistant `test_chat_panel.py` (`StarterQuestionsTest`),
+  `test_role_access.py`, `test_followups.py`, `test_case_brief.py`,
+  `test_record_polish.py`, `test_staff_drafting.py`; in children
+  `test_answer_email.py`, `test_assignment_requests.py`, `test_transfer.py`;
+  and `ai_eval`'s NOT MEASURED loop. The route table's Officer column is
+  rewritten, and each cell that moved is read against this note's tables.
 
 ### WP4. Oversight: who holds a record, how a case ends
 
 - `OVERSEES_CASEWORK` gains the Officer: the Social Worker field, Transfer,
-  Remove duplicate, `may_close_case`, the request list. `GET
-  /api/social-workers/` and `GET /api/casework/overview/`.
+  Remove duplicate, `may_close_case`. `GET /api/social-workers/` and
+  `GET /api/casework/overview/`, with section 2's three rules.
 - The sentences that send people to the ISA name the Officer first:
-  `children/duplicates.py:166`-`168`, `children/views.py:258`, `:337`,
-  `:374`, `:398`, `children/serializers.py:138`. `_ASKER_ROLE`, the fallback
-  name and the switch's description in `email_notifications.py`.
+  `children/duplicates.py:166`-`168`, `children/views.py:258`, `:299`,
+  `:337`, `:374`, `:398`, `:470`, `children/serializers.py:138`,
+  `children/assignment_api.py:163`-`164`, `children/custodian.py:91` (review:
+  four were missing), and the no-social-worker queue's hint. `_ASKER_ROLE`,
+  the fallback name, and the `case_request` and `records_transferred`
+  switches' descriptions in `email_notifications.py`.
 - **Done when,** by test, an Officer: sets and changes a record's social
   worker and is refused a non-Staff target; transfers in bulk and is refused
   as either end; closes with a case outcome and is refused a clinical reason,
-  with every reason offered accepted; reopens with the holder unchanged;
-  removes a duplicate; reads the casework overview, which the sentinel test
-  shows carries nothing of IT; and is refused `/api/admin/overview/`,
+  with every reason offered accepted; removes a duplicate; reads the casework
+  overview, which the sentinel test shows carries nothing of IT and no email
+  address; and is refused `/api/admin/overview/`,
   `/users/`, `/roles/`, both test senders, assistant settings and the rest of
   `IsAdministrator`. A social worker is still refused all of WP4.
 
@@ -802,14 +1038,19 @@ feature, and the packages after it moved up by one.)
 ### WP5. The screens
 
 Everything under "The screens", then the browser pass for all four roles.
+Every role-keyed table has its Officer entry (a check fails on a missing
+one), and the Officer's icon is in `ui/icons.js`.
 **Done when** lint and build pass, each changed screen has been loaded as
-each role at three widths, axe-core is clean on them, and the header fits.
+each role at three widths, axe-core is clean on them, the header fits (the
+chip's height measured, not only its width), and the ISA's console is
+pixel-identical at 1440 and 1100 to before the casework desk was lifted out
+of it.
 
 ### WP6. Demo account, documents
 
-- `seed_demo_data`: one Officer account, in the style of the others, holding
-  nothing. `demo_owners.active_staff` already deals only to Staff; a test
-  says an Officer present on the branch is never dealt a child.
+- The demo Officer arrives in WP3 (above). Here: `demo_owners.active_staff`
+  already deals only to Staff; a test says an Officer present on the branch
+  is never dealt a child.
 - `ai_eval`'s callers include the Officer, so the owner's next run says
   "NOT MEASURED" rather than nothing.
 - `docs/LOCAL-SETUP.md` (the sign-in), the access matrix in
@@ -841,9 +1082,10 @@ Local work only, as always. For the day it goes to the demo: the hosted API
 runs `migrate` on every start, and the old release keeps serving while the new
 one builds. If the row from WP2 landed while pre-WP1 code was still answering,
 an account made an Officer in that window would be read by the old `else`
-branches as the ISA. So WP1 ships and is verified as deployed **before** any
-push that carries the migration. Two pushes, not one. The migration itself is
-additive and safe for a release still serving.
+branches as the ISA. So WP1 ships and is verified as deployed, on both
+`nacc-v3-demo-api` and `nacc-v3-demo-web` (they deploy independently;
+review), **before** any push that carries the migration. Two pushes, not
+one. The migration itself is additive and safe for a release still serving.
 
 **And the Officer does not reach `cloud-setup` before the lifecycle does.**
 Until the lifecycle lands, a record's `status` can be set by an ordinary save
@@ -864,9 +1106,10 @@ would hand that hole to one more account over the whole agency.
   and their counterparts in clinical, scheduling (with
   `test_appointment_lifecycle`), assistant, activity and accounts (with
   `test_user_lifecycle`).
-- Fixtures: tests make roles with `Role.objects.get_or_create(role_name=...)`
-  (`children/tests/test_child_collab.py:10`), so an Officer in a test is one
-  more call. No test reads the wall clock.
+- Fixtures: most tests make the three roles with `Role.objects.create`, some
+  with `get_or_create` (`children/tests/test_child_collab.py:10`). The
+  Officer's row is always `get_or_create`, because from WP2 the migration has
+  made it already (review). No test reads the wall clock.
 
 ## Not done, suggested
 
@@ -880,6 +1123,11 @@ would hand that hole to one more account over the whole agency.
   ISA's superuser can set a holder or a psychologist outside every rule.
 - **The psychologist's side of "a promotion must not strand a caseload".**
 - **An Officer who also carries cases** (decision 1's other answer).
+- **The demo import rehomes an Officer's actions** onto the child's
+  psychologist (`import_demo_data.rehome_people`: "anyone else falls to the
+  child's psychologist"), so an Officer's closure or request in an exported
+  fixture shows as the psychologist's. It is the same for the ISA today
+  (review).
 
 ## What was checked for this plan, and what was not
 
@@ -888,11 +1136,16 @@ would hand that hole to one more account over the whole agency.
   The children and case-study apps were also mapped by an independent reader,
   whose 44 sites agreed with this note and supplied several of its traps.
 - The other independent readers, and the review pass meant to try to break
-  this plan, did not run. They were started twice, and both times the
-  account's usage limit stopped them within minutes; only the children and
-  case-study reader above ever reported. So this note has been checked by one
-  reader, not several. **The first thing a build session should do with it is
-  have somebody else try to break it.**
+  this plan, did not run before 22 Nov: the account's usage limit stopped
+  them twice within minutes.
+- **Reviewed, 22 Nov 2026**, by three readers who did not write it, one area
+  each, against the merged code: accounts, activity, clinical and
+  scheduling; children, the assistant and the work packages; the frontend.
+  All three found it sound with fixes. The one blocker (gating the survey on
+  `KEEPS_RECORDS` would have broken psychologists), 18 major findings and 35
+  doors it had missed are written in above where they apply, marked
+  "(review)"; the questions they raised are answered under "The planner's
+  defaults".
 - **Measured, 17 Nov 2026:** the doors in the first table of this note (all
   but the assistant's schedule answer) and the `status` hole, with a throwaway
   test of about forty requests as five accounts. It was not committed; WP0's
