@@ -5,6 +5,7 @@ import AuthLayout, { AuthLink } from '../components/AuthLayout';
 import GoogleSignInButton from '../components/GoogleSignInButton';
 import { useAuth } from '../context/AuthContext';
 import { useConfirm } from '../context/ConfirmContext';
+import { CLAIMABLE_AT_SIGNUP } from '../config/roles';
 import api, { wakeServer } from '../api/client';
 
 /* Requesting access, which is not the same as getting it.
@@ -19,11 +20,11 @@ import api, { wakeServer } from '../api/client';
  * again, and end up with a second request in the queue.
  */
 
-// What a person may say they are. Administrator is absent on purpose: that
-// account is the agency's recovery path and is created only by another
-// administrator, so a public queue for it is not a queue but a target. The
-// server refuses it too — this list is the explanation, not the enforcement.
-const REQUESTABLE = ['Staff', 'Psychologist'];
+// What a person may say they are is CLAIMABLE_AT_SIGNUP. Administrator is
+// absent on purpose: that account is the agency's recovery path and is created
+// only by another administrator, so a public queue for it is not a queue but a
+// target. The server refuses it too — the list is the explanation, not the
+// enforcement.
 
 // How long "Send a new code" stays disabled. The server allows one a minute
 // (accounts/email_verification.py RESEND_SECONDS), and the sign-up's own mail
@@ -364,7 +365,7 @@ export default function Signup() {
             <span style={{ fontWeight: 600, color: 'var(--text-faint)' }}>(optional)</span>
           </legend>
           <div className="racco-auth-duo" style={{ gap: 8 }}>
-            {REQUESTABLE.map((name) => {
+            {CLAIMABLE_AT_SIGNUP.map((name) => {
               const meta = ROLE_META[name];
               const on = role === name;
               return (

@@ -8,6 +8,7 @@ lists, a decision was a tuple or an if/else at each call site, and an account
 whose role the code did not name fell into whichever branch came last.
 """
 import ast
+import re
 import textwrap
 from pathlib import Path
 from types import SimpleNamespace
@@ -298,6 +299,211 @@ class RoleListsAreNotWrittenAnywhereElse(SimpleTestCase):
         self.assertEqual([2, 1], counts)
 
 
+FRONTEND_SRC = BACKEND.parent / "frontend" / "src"
+ROLES_JS_PATH = FRONTEND_SRC / "config" / "roles.js"
+
+
+def _js_role_arrays(source, role_names=None):
+    return _js_scan(source, role_names)[0]
+
+
+def _js_role_strings(source, role_names=None):
+    """Every string literal in this JavaScript that is a role name, wherever it
+    sits: a list of (line, text). Same scanner as _js_role_arrays."""
+    return _js_scan(source, role_names)[1]
+
+
+def _js_scan(source, role_names=None):
+    """Where an array literal in this JavaScript holds two or more strings that
+    are role names: a list of (line of its `[`, the role names it holds).
+
+    A scanner, not a parser: it follows quotes, template literals, comments
+    and regular expressions well enough to count the string literals sitting
+    directly inside each `[ ]` (never those in a call or an object inside it).
+    A quote that is not closed on its own line is not a string - an apostrophe
+    in JSX text must not swallow the rest of the file. Multi-line arrays count.
+    An array holding one role name among other words (a table heading) passes.
+    Role names are read from capabilities.EVERY_ROLE when called, so a role
+    added there is counted at once.
+
+    What it does NOT see (WP5 inventory): a spread of single-role arrays
+    (`[...['Staff'], ...['Administrator']]`), a template literal with `${}`,
+    role-keyed objects, `||` chains of role comparisons, `!==` negations, and
+    arrays assembled from constants.
+    """
+    role_names = set(capabilities.EVERY_ROLE) if role_names is None else set(role_names)
+    found = []
+    strings = []          # (line, text) of every role-name string literal
+    stack = []            # frames: [kind, line, role strings]
+    i, n, line = 0, len(source), 1
+    last = ""             # last significant character, to tell a regex from a division
+
+    def top_string(text):
+        if text in role_names:
+            strings.append((line, text))
+            if stack and stack[-1][0] == "[":
+                stack[-1][2].append(text)
+
+    while i < n:
+        c = source[i]
+        if c == "\n":
+            line += 1
+            i += 1
+        elif c.isspace():
+            i += 1
+        elif source.startswith("//", i):
+            while i < n and source[i] != "\n":
+                i += 1
+        elif source.startswith("/*", i):
+            end = source.find("*/", i + 2)
+            end = n if end < 0 else end + 2
+            line += source.count("\n", i, end)
+            i = end
+        elif c in "'\"":
+            j = i + 1
+            while j < n and source[j] != c and source[j] != "\n":
+                j += 2 if source[j] == "\\" else 1
+            if j < n and source[j] == c:
+                top_string(source[i + 1:j])
+                i, last = j + 1, c
+            else:
+                i += 1    # an apostrophe in text, not a string
+        elif c == "`":
+            j = i + 1
+            while j < n and source[j] != "`":
+                j += 2 if source[j] == "\\" else 1
+            if "${" not in source[i + 1:j]:
+                top_string(source[i + 1:j])    # a plain template literal is a string
+            line += source.count("\n", i, j)
+            i, last = j + 1, c
+        elif c == "/" and (last in ("", "(", ",", "=", ":", "[", "!", "&", "|", "?", "{", "}", ";")
+                           or re.search(r"\b(?:return|typeof|case|in|of|delete|void|throw)\s*$",
+                                        source[max(0, i - 12):i])):
+            j = i + 1
+            in_class = False
+            while j < n and source[j] != "\n" and (in_class or source[j] != "/"):
+                if source[j] == "\\":
+                    j += 1
+                elif source[j] == "[":
+                    in_class = True
+                elif source[j] == "]":
+                    in_class = False
+                j += 1
+            i, last = (j + 1 if j < n and source[j] == "/" else j), "/"
+        else:
+            if c in "[({":
+                stack.append([c, line, []])
+            elif c in "])}" and stack:
+                kind, start, roles = stack.pop()
+                if kind == "[" and len(roles) >= 2:
+                    found.append((start, roles))
+            last = c
+            i += 1
+    return found, strings
+
+
+_ROLES_JS_SHAPE = re.compile(r"^export const [A-Z][A-Z_]* = \['[A-Za-z ]+'(?:, '[A-Za-z ]+')*\];$")
+
+
+def _roles_js_off_shape(source, role_names=None):
+    """What in roles.js holds a role name outside the one statement shape the
+    pin reads: (line, what) for every role array of two or more that starts on
+    a line the shape does not match, and every role-name string literal on such
+    a line - so a single-role list in another shape is seen too."""
+    lines = source.split("\n")
+    on_shape = lambda n: bool(_ROLES_JS_SHAPE.match(lines[n - 1]))
+    off = [(n, roles) for n, roles in _js_role_arrays(source, role_names) if not on_shape(n)]
+    off += [(n, text) for n, text in _js_role_strings(source, role_names) if not on_shape(n)]
+    return off
+
+
+def _frontend_files():
+    for path in sorted(FRONTEND_SRC.rglob("*")):
+        if path.suffix in (".js", ".jsx") and path != ROLES_JS_PATH and "node_modules" not in path.parts:
+            yield path
+
+
+class RoleListsAreNotWrittenInTheBrowserEither(SimpleTestCase):
+    """The frontend half of the guard: a screen reads a list from
+    frontend/src/config/roles.js and never types a role array of its own."""
+
+    def test_no_array_in_the_frontend_holds_two_or_more_roles(self):
+        found = []
+        for path in _frontend_files():
+            for line, roles in _js_role_arrays(path.read_text(encoding="utf-8-sig")):
+                found.append(f"{path.relative_to(FRONTEND_SRC.parent).as_posix()}:{line} {roles}")
+        self.assertEqual([], found,
+                         "name the list once in accounts/capabilities.py and "
+                         "frontend/src/config/roles.js and read it from there")
+
+    def test_roles_js_holds_no_list_but_the_pinned_statement_shape(self):
+        """roles.js is exempt from the scan above, so it is held to the one
+        shape the pin reads: a role list there in any other shape (Set,
+        Object.freeze, let, a non-exported const, a camelCase name, a single
+        role written some other way) is a list the pin cannot see."""
+        source = ROLES_JS_PATH.read_text(encoding="utf-8-sig")
+        self.assertEqual([], _roles_js_off_shape(source),
+                         "a role list in roles.js must be one "
+                         "`export const NAME = ['Administrator', 'Staff'];` statement")
+
+    def test_the_roles_js_shape_check_does_catch_another_shape(self):
+        roles = {"Administrator", "Psychologist", "Staff"}
+        source = textwrap.dedent("""\
+            export const GOOD = ['Administrator', 'Staff'];
+            export const ONE = ['Staff'];
+            // a comment naming 'Staff' and 'Administrator' is not a list
+            export const SETTY = new Set(['Administrator', 'Staff']);
+            export const FROZEN = Object.freeze(['Administrator', 'Staff']);
+            export let LET_LIST = ['Administrator', 'Staff'];
+            const HIDDEN = ['Administrator', 'Staff'];
+            export const officeRoles = ['Administrator', 'Staff'];
+            export const LONE = Object.freeze(['Psychologist']);
+            export const SPLIT = [
+              'Administrator', 'Staff'];
+            export function f(u) { return u.role_name === 'Staff'; }
+            """)
+        self.assertEqual(
+            [4, 5, 6, 7, 8, 9, 10, 11, 12],
+            sorted({n for n, _ in _roles_js_off_shape(source, roles)}))
+
+    def test_the_frontend_guard_has_files_to_scan(self):
+        self.assertTrue(ROLES_JS_PATH.exists())
+        self.assertGreater(len(list(_frontend_files())), 20)
+
+    def test_the_frontend_guard_does_catch_a_list(self):
+        source = textwrap.dedent("""\
+            const a = ['Administrator', 'Staff'];
+            const b = [
+              "Staff",
+              // a comment, then another
+              'Psychologist',
+            ];
+            const c = ['Psychologist', child.psychologist_name];
+            const d = ['Date', 'Status', 'Psychologist'].map((h) => h);
+            const e = [f('Staff', 'Psychologist')];
+            const g = [{ role: 'Staff' }, { role: 'Psychologist' }];
+            const h = { roles: ['Staff', 'Administrator', 'Psychologist'] };
+            const i = x['Staff'];
+            const j = [/['"]/, 'Staff'];
+            const k = ['SW (Staff)', 'Psychologist'];
+            const l = <p>Don't use 'Staff' here, it's ['Administrator']</p>;
+            // const m = ['Staff', 'Administrator'];
+            const n = `['Staff', 'Administrator']`;
+            function o(s) { return /[",]/.test(s) ? 1 : 2; }
+            const p = ['Staff', 'Administrator'];
+            const q = [`Staff`, `Administrator`];
+            const r = [`Staff`, `${x}`];
+            """)
+        self.assertEqual(
+            [(1, ["Administrator", "Staff"]), (2, ["Staff", "Psychologist"]),
+             (11, ["Staff", "Administrator", "Psychologist"]),
+             (19, ["Staff", "Administrator"]), (20, ["Staff", "Administrator"])],
+            sorted(_js_role_arrays(source, {"Administrator", "Psychologist", "Staff"})))
+        # a role the capabilities gain later counts the moment it is there
+        self.assertEqual([(1, ["Officer", "Staff"])],
+                         _js_role_arrays("const s = ['Officer', 'Staff'];", {"Officer", "Staff"}))
+
+
 def _user(role_name, pk=1):
     role = SimpleNamespace(role_name=role_name) if role_name else None
     return SimpleNamespace(id=pk, role=role)
@@ -376,6 +582,7 @@ class AnAccountWhoseRoleTheCodeDoesNotKnow(APITestCase):
         self.assertEqual(401, res.status_code)
         self.assertEqual("unknown_role", res.data["detail"].code)
         self.assertIn("not set up in this version", str(res.data["detail"]))
+        self.assertEqual("unknown_role", res.json()["code"])
 
     def test_an_unknown_role_cannot_sign_in(self):
         self._account("Probe", "probe@racco1.gov.ph")
@@ -384,6 +591,29 @@ class AnAccountWhoseRoleTheCodeDoesNotKnow(APITestCase):
         self.assertNotIn("access", res.data)
         self.assertNotIn("refresh", res.data)
         self.assertEqual("unknown_role", res.data["detail"].code)
+
+    def test_the_sign_in_refusal_carries_its_code_in_the_body(self):
+        """The sign-in page reads `code` from the body to show the server's
+        sentence instead of "Invalid username or password."."""
+        from accounts.token_claims import UNKNOWN_ROLE
+        self._account("Probe", "bodycode@racco1.gov.ph")
+        res = self._login("bodycode@racco1.gov.ph")
+        self.assertEqual(401, res.status_code)
+        body = res.json()
+        self.assertEqual({"detail": UNKNOWN_ROLE, "code": "unknown_role"}, body)
+
+    def test_a_wrong_password_body_is_unchanged(self):
+        self._account(S, "wrongpw@racco1.gov.ph")
+        res = self.client.post("/api/auth/login/", {"email": "wrongpw@racco1.gov.ph",
+                                                   "password": "not-the-password"})
+        self.assertEqual(401, res.status_code)
+        body = res.json()
+        self.assertEqual(["detail"], list(body))
+        self.assertNotIn("code", body)
+        # the same answer an address nobody holds gets
+        other = self.client.post("/api/auth/login/", {"email": "nobody@racco1.gov.ph",
+                                                     "password": "not-the-password"})
+        self.assertEqual(body, other.json())
 
     def test_an_unknown_role_cannot_renew_a_session(self):
         user = self._account(S, "renew@racco1.gov.ph")
@@ -411,6 +641,8 @@ class AnAccountWhoseRoleTheCodeDoesNotKnow(APITestCase):
         res = self.client.get("/api/auth/me/")
         self.assertEqual(401, res.status_code)
         self.assertEqual("no_role", res.data["detail"].code)
+        from accounts.authentication import NO_ROLE
+        self.assertEqual({"detail": NO_ROLE, "code": "no_role"}, res.json())
 
 
 GOOGLE_CLIENT_ID = "test-client-id.apps.googleusercontent.com"

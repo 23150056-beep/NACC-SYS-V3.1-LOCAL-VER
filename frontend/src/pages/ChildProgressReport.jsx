@@ -11,6 +11,7 @@ import {
   Alert, Avatar, Badge, Button, Card, ConfirmDialog, FormField, Icon, iconBtn, LiveStatus, Modal, Note, PAGE, Select, Tabs,
 } from '../ui';
 import { SPECIAL_NEEDS, caseDate, reportTypeLabel } from '../config/caseData';
+import { EVERY_ROLE, KEEPS_RECORDS } from '../config/roles';
 import { loadAll } from '../utils/load';
 import { useOpenFromLink } from '../utils/links';
 import { clock } from '../utils/time';
@@ -162,11 +163,11 @@ export default function ChildProgressReport() {
   // the psychologist off to Results & Reports and leaving them there.
   const [upload, setUpload] = useState(null); // 'report' | 'case_referral'
   const [viewing, setViewing] = useState(null); // the report being read on screen
-  const isStaffOrAdmin = ['Administrator', 'Staff'].includes(user?.role_name);
+  const isStaffOrAdmin = KEEPS_RECORDS.includes(user?.role_name);
   // The ISA's log of who had the assistant read this record; nobody else sees it.
   const isAdmin = user?.role_name === 'Administrator';
   // Whoever may start a survey asks the invite endpoint which forms it may use.
-  const canStartSurvey = ['Administrator', 'Staff', 'Psychologist'].includes(user?.role_name);
+  const canStartSurvey = EVERY_ROLE.includes(user?.role_name);
 
   const load = () => api.get(`/reports/child/${id}/`).then((r) => setData(r.data)).catch(() => setData('error'));
 

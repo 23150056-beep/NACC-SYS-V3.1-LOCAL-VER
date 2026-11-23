@@ -17,6 +17,10 @@ _ALLOWED_WHILE_MUST_CHANGE_PASSWORD = {
 }
 
 
+NO_ROLE = ("This account has no role assigned. Ask an administrator to "
+           "set one before signing in.")
+
+
 class ForcePasswordChangeJWTAuthentication(JWTAuthentication):
     """JWTAuthentication with three server-side gates the client cannot skip:
     a token minted under a password that has since changed, an outstanding
@@ -68,9 +72,10 @@ class ForcePasswordChangeJWTAuthentication(JWTAuthentication):
         # roles that take each branch and refuses the rest, but this is the
         # single door they all come through, so it fails closed here too.
         if getattr(user, "role_id", None) is None:
+            # Dict detail: the body carries the code beside the sentence, as
+            # refuse_unknown_role's does.
             raise AuthenticationFailed(
-                "This account has no role assigned. Ask an administrator to "
-                "set one before signing in.",
+                {"detail": NO_ROLE, "code": "no_role"},
                 code="no_role",
             )
         refuse_unknown_role(user)

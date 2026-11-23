@@ -7,11 +7,14 @@ import { Button, FormField, Input, PasswordInput, Alert, Icon, Modal, ROLE_META,
 import AuthLayout, { AuthLink } from '../components/AuthLayout';
 import PasswordChangeGate from '../components/PasswordChangeGate';
 import GoogleSignInButton from '../components/GoogleSignInButton';
+// What a first-time Google user may say about themselves is
+// CLAIMABLE_AT_SIGNUP. Administrator is absent on purpose: that account is
+// created by an existing administrator and never through this door.
+import { CLAIMABLE_AT_SIGNUP } from '../config/roles';
 
-// What a first-time Google user may say about themselves. Administrator is
-// absent on purpose: that account is created by an existing administrator and
-// never through this door.
-const REQUESTABLE = ['Staff', 'Psychologist'];
+// Refusal codes for an account whose role is not set up (accounts/token_claims.py,
+// accounts/authentication.py).
+const ACCOUNT_NOT_SET_UP = ['unknown_role', 'no_role'];
 
 // What the sign-in says when it takes a while. On the hosted demo the server
 // sleeps when nobody has used it for a while and waking it takes up to a
@@ -132,6 +135,14 @@ export default function Login() {
         const message = err.response.data?.detail || 'Too many failed login attempts. Try again later.';
         setError(message);
         failed(message);
+      } else if (err.response?.status === 401 && ACCOUNT_NOT_SET_UP.includes(err.response.data?.code)
+                 && err.response.data?.detail) {
+        // The server raises these only AFTER the password was accepted
+        // (LoginSerializer.get_token), so its sentence tells nothing to
+        // someone who does not know the password. Every other refusal keeps
+        // the one sentence that does not say which half was wrong.
+        setError(err.response.data.detail);
+        failed(err.response.data.detail);
       } else {
         setError('Invalid username or password.');
         failed('Sign-in failed. Check your credentials.');
@@ -353,7 +364,7 @@ export default function Login() {
           width={470}
         >
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {REQUESTABLE.map((roleName) => {
+            {CLAIMABLE_AT_SIGNUP.map((roleName) => {
               const meta = ROLE_META[roleName];
               return (
                 <button

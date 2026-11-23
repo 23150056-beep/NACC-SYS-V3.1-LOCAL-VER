@@ -20,6 +20,7 @@ import { useOpenFromLink } from '../utils/links';
 import { useSearchParams } from 'react-router-dom';
 import { firstError } from '../utils/errors';
 import { useSingleFlight } from '../utils/singleFlight';
+import { EVERY_ROLE } from '../config/roles';
 import BookingMonth from './schedule/MonthSlots';
 import { spokenDays, useMonthSlots } from './schedule/monthSlots';
 import { usePsychologistPicker, pickerOption } from './schedule/psychologistPicker';
@@ -244,7 +245,7 @@ export default function Schedule() {
   const [once, saving] = useSingleFlight();
   const role = user?.role_name || 'Staff';
   const isPsych = role === 'Psychologist';
-  const canBook = ['Administrator', 'Staff', 'Psychologist'].includes(role);
+  const canBook = EVERY_ROLE.includes(role);
   const [appointments, setAppointments] = useState([]);
   const [blocks, setBlocks] = useState([]);
   const { children: allChildren, revalidate: revalidateChildren } = useChildren();

@@ -10,6 +10,7 @@ import {
 import { useOpenFromLink } from '../utils/links';
 import ReportViewer from '../components/ReportViewer';
 import { reportTypeLabel } from '../config/caseData';
+import { KEEPS_RECORDS } from '../config/roles';
 import ReportCheckNote from '../components/ReportCheckNote';
 import UploadDrawer from '../components/UploadDrawer';
 import { hasCheckNote } from '../utils/reportCheck';
@@ -27,7 +28,7 @@ export default function Report() {
   const navigate = useNavigate();
   const role = user?.role_name || 'Staff';
   const isPsych = role === 'Psychologist';
-  const isStaffOrAdmin = ['Administrator', 'Staff'].includes(role);
+  const isStaffOrAdmin = KEEPS_RECORDS.includes(role);
   const [tab, setTab] = useState('results');
   const [entries, setEntries] = useState([]);
   const [files, setFiles] = useState([]);

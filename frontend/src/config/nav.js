@@ -7,27 +7,27 @@
  * This list decides what is OFFERED; the route decides what is ALLOWED, and
  * the route is the one that matters.
  */
-export const ALL_ROLES = ['Administrator', 'Psychologist', 'Staff'];
+import { EVERY_ROLE, INSTRUMENT_MANAGERS, KEEPS_RECORDS } from './roles';
 
 export const SCREENS = [
-  { id: 'dashboard', to: '/', end: true, label: 'Dashboard', icon: 'layout-dashboard', section: 'Overview', roles: ALL_ROLES },
+  { id: 'dashboard', to: '/', end: true, label: 'Dashboard', icon: 'layout-dashboard', section: 'Overview', roles: EVERY_ROLE },
 
-  { id: 'records', to: '/children', label: 'Records', icon: 'folder-heart', section: 'Casework', roles: ALL_ROLES },
+  { id: 'records', to: '/children', label: 'Records', icon: 'folder-heart', section: 'Casework', roles: EVERY_ROLE },
   // Same route, role-scoped label: administrators govern the whole catalog,
   // psychologists only their own agency form templates (their instrument
   // titles live inside the Pre-Assessment wizard, step 4).
   {
     id: 'instruments', to: '/instruments', label: 'Instruments & Agency Forms',
     altLabel: { Psychologist: 'Pre-Assessment Instruments' },
-    icon: 'clipboard-pen', roles: ['Administrator', 'Psychologist'],
+    icon: 'clipboard-pen', roles: INSTRUMENT_MANAGERS,
   },
 
   { id: 'preassess', to: '/pre-assessment', label: 'Pre-Assessment', icon: 'clipboard-list', section: 'Clinical', roles: ['Psychologist'] },
-  { id: 'monitor', to: '/monitoring', label: 'Progress Monitoring', icon: 'activity', roles: ALL_ROLES },
-  { id: 'calendar', to: '/schedule', label: 'Calendar & booking', icon: 'calendar-days', roles: ALL_ROLES },
-  { id: 'reports', to: '/reports', label: 'Results & Reports', icon: 'clipboard-check', roles: ALL_ROLES },
+  { id: 'monitor', to: '/monitoring', label: 'Progress Monitoring', icon: 'activity', roles: EVERY_ROLE },
+  { id: 'calendar', to: '/schedule', label: 'Calendar & booking', icon: 'calendar-days', roles: EVERY_ROLE },
+  { id: 'reports', to: '/reports', label: 'Results & Reports', icon: 'clipboard-check', roles: EVERY_ROLE },
 
-  { id: 'summary', to: '/reports/summary', label: 'Agency Summary', icon: 'bar-chart-3', section: 'Governance', roles: ['Administrator', 'Staff'] },
+  { id: 'summary', to: '/reports/summary', label: 'Agency Summary', icon: 'bar-chart-3', section: 'Governance', roles: KEEPS_RECORDS },
   // Credential Handoffs and the access queue are tabs inside this screen.
   { id: 'users', to: '/users', label: 'User Management', icon: 'user-cog', badge: 'pendingAccess', roles: ['Administrator'] },
   { id: 'settings', to: '/settings', label: 'Settings', icon: 'settings', roles: ['Administrator'] },
@@ -42,12 +42,12 @@ export const SCREENS = [
  * get Summary in its place.
  */
 export const TOP_TABS = [
-  { id: 'dashboard', label: 'Dashboard', roles: ALL_ROLES },
-  { id: 'records', label: 'Records', roles: ALL_ROLES },
+  { id: 'dashboard', label: 'Dashboard', roles: EVERY_ROLE },
+  { id: 'records', label: 'Records', roles: EVERY_ROLE },
   { id: 'preassess', label: 'Pre-Assess', roles: ['Psychologist'] },
-  { id: 'monitor', label: 'Monitor', roles: ALL_ROLES },
-  { id: 'calendar', label: 'Calendar', roles: ALL_ROLES },
-  { id: 'reports', label: 'Reports', roles: ALL_ROLES },
+  { id: 'monitor', label: 'Monitor', roles: EVERY_ROLE },
+  { id: 'calendar', label: 'Calendar', roles: EVERY_ROLE },
+  { id: 'reports', label: 'Reports', roles: EVERY_ROLE },
   { id: 'summary', label: 'Summary', roles: ['Staff'] },
   { id: 'users', label: 'Admin', roles: ['Administrator'] },
 ];

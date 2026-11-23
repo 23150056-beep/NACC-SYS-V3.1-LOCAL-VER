@@ -46,7 +46,12 @@ def refuse_unknown_role(user):
 
     role = getattr(user, "role", None)
     if role is not None and role.role_name not in capabilities.EVERY_ROLE:
-        raise AuthenticationFailed(UNKNOWN_ROLE, code="unknown_role")
+        # A dict detail puts the code in the 401 body beside the sentence, so
+        # the sign-in page can tell this refusal from a wrong password (it is
+        # raised only after the password was accepted). response.data["detail"]
+        # is still the sentence, and still carries .code.
+        raise AuthenticationFailed({"detail": UNKNOWN_ROLE, "code": "unknown_role"},
+                                   code="unknown_role")
 
 
 def stamp(token, user):

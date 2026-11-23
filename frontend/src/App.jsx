@@ -8,7 +8,7 @@ import { LayoutProvider, useLayout } from './context/LayoutContext';
 import { CensusProvider } from './context/CensusContext';
 import { ChildrenProvider } from './context/ChildrenContext';
 import { ConfirmProvider } from './context/ConfirmContext';
-import { INSTRUMENT_MANAGER_ROLES } from './config/roles';
+import { EVERY_ROLE, INSTRUMENT_MANAGERS, KEEPS_RECORDS } from './config/roles';
 import ProtectedRoute from './components/ProtectedRoute';
 import Sidebar from './components/Sidebar';
 import AppHeader from './components/AppHeader';
@@ -106,21 +106,21 @@ export default function App() {
           <Route path="/survey/:token" element={<Survey />} />
           <Route path="/" element={<ProtectedRoute><Shell><Dashboard /></Shell></ProtectedRoute>} />
           {/* Terminated-case archive lives inside Records (Archived filter) — no separate route. */}
-          <Route path="/children" element={<ProtectedRoute roles={['Administrator', 'Staff', 'Psychologist']}><Shell><Children /></Shell></ProtectedRoute>} />
-          <Route path="/instruments" element={<ProtectedRoute roles={INSTRUMENT_MANAGER_ROLES}><Shell><Instruments /></Shell></ProtectedRoute>} />
+          <Route path="/children" element={<ProtectedRoute roles={EVERY_ROLE}><Shell><Children /></Shell></ProtectedRoute>} />
+          <Route path="/instruments" element={<ProtectedRoute roles={INSTRUMENT_MANAGERS}><Shell><Instruments /></Shell></ProtectedRoute>} />
           <Route path="/pre-assessment" element={<ProtectedRoute roles={['Psychologist']}><Shell><PreAssessment /></Shell></ProtectedRoute>} />
-          <Route path="/schedule" element={<ProtectedRoute roles={['Administrator', 'Psychologist', 'Staff']}><Shell><Schedule /></Shell></ProtectedRoute>} />
+          <Route path="/schedule" element={<ProtectedRoute roles={EVERY_ROLE}><Shell><Schedule /></Shell></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute><Shell><Report /></Shell></ProtectedRoute>} />
           <Route path="/report/child/:id" element={<ProtectedRoute><Shell><ChildProgressReport /></Shell></ProtectedRoute>} />
-          <Route path="/monitoring" element={<ProtectedRoute roles={['Administrator', 'Staff', 'Psychologist']}><Shell><Monitoring /></Shell></ProtectedRoute>} />
-          <Route path="/reports/summary" element={<ProtectedRoute roles={['Administrator', 'Staff']}><Shell><AgencySummary /></Shell></ProtectedRoute>} />
-          <Route path="/activity" element={<ProtectedRoute roles={['Administrator', 'Staff', 'Psychologist']}><Shell><AuditTrail /></Shell></ProtectedRoute>} />
+          <Route path="/monitoring" element={<ProtectedRoute roles={EVERY_ROLE}><Shell><Monitoring /></Shell></ProtectedRoute>} />
+          <Route path="/reports/summary" element={<ProtectedRoute roles={KEEPS_RECORDS}><Shell><AgencySummary /></Shell></ProtectedRoute>} />
+          <Route path="/activity" element={<ProtectedRoute roles={EVERY_ROLE}><Shell><AuditTrail /></Shell></ProtectedRoute>} />
           <Route path="/users" element={<ProtectedRoute roles={['Administrator']}><Shell><Users /></Shell></ProtectedRoute>} />
           <Route path="/settings" element={<ProtectedRoute roles={['Administrator']}><Shell><Settings /></Shell></ProtectedRoute>} />
           {/* Your own profile. The ISA gets it too (1 Oct 2026): it holds the
               mobile number the Settings test text goes to, and without it an
               administrator could never verify one. */}
-          <Route path="/profile" element={<ProtectedRoute roles={['Staff', 'Psychologist', 'Administrator']}><Shell><MyProfile /></Shell></ProtectedRoute>} />
+          <Route path="/profile" element={<ProtectedRoute roles={EVERY_ROLE}><Shell><MyProfile /></Shell></ProtectedRoute>} />
           {/* Anything unmatched — a stale bookmark, a typo, a link to a page a
               role cannot reach — lands on sign-in rather than rendering nothing. */}
           <Route path="*" element={<Navigate to="/login" replace />} />

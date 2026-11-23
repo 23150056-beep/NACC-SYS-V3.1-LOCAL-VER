@@ -11,6 +11,7 @@ import { useToast } from '../context/ToastContext';
 import { useConfirm, useNotice } from '../context/ConfirmContext';
 import { useLayout } from '../context/LayoutContext';
 import { ALL_CLOSURE_REASONS, unaskedAnswers } from '../config/caseData';
+import { KEEPS_RECORDS } from '../config/roles';
 import { loadAll } from '../utils/load';
 import { useChildren } from '../context/ChildrenContext';
 import { firstError } from '../utils/errors';
@@ -152,7 +153,7 @@ export default function Children() {
   const notice = useNotice();
   const navigate = useNavigate();
   const layout = useLayout();
-  const canManage = ['Administrator', 'Staff'].includes(user?.role_name);
+  const canManage = KEEPS_RECORDS.includes(user?.role_name);
   const isAdmin = user?.role_name === 'Administrator';
   const isPsych = user?.role_name === 'Psychologist';
   // The shared list (context/ChildrenContext), closed cases included. Every
