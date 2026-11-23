@@ -2,7 +2,8 @@
 
 **Date:** 2026-11-16
 **Status:** Being built on `claude/sweet-wozniak-9fzjme`, with the owner's
-decisions in. WP0 is in (`ae37c40`, 22 Nov 2026) and WP1 is being built. The
+decisions in. WP0 is in (`ae37c40`, 22 Nov 2026), WP1's backend half is in
+(`c7eae2c`, 23 Nov) and its browser half is being built. The
 case study removal is merged (`b6940c3`) and has been live on the demo since 22
 Nov; the lifecycle branch is not merged yet ("Before WP0"). An independent
 review read this note against the code on 22 Nov 2026. What it changed is
@@ -232,6 +233,7 @@ list of roles becomes a **named capability**, defined once.
 | `WRITES_CLINICAL` (review) | Administrator, Psychologist | writes a clinical record; remark polish |
 | `MANAGES_AVAILABILITY` (review) | Administrator, Psychologist | combines availability windows (writing one is two single checks) |
 | `INSTRUMENT_MANAGERS` (review) | Administrator, Psychologist | `INSTRUMENT_MANAGER_ROLES`, moved here unchanged |
+| `RECORDS_OWN_SESSION_OUTCOMES` (WP1a) | Administrator, Psychologist, Staff | records completed or no-show on a session the account holds as its psychologist, whatever its role is now. The Officer never joins it (rule 6) |
 
 `SEES_EVERY_RECORD` and `OVERSEES_CASEWORK` have the same members and are
 different questions: one is what is read, the other what may be decided. A
@@ -377,7 +379,7 @@ in them needs an Officer branch.
 | See every session, with the child's name | yes: `shows_name` reads `SEES_EVERY_RECORD`, the psychologist, or `works_record` | `scheduling/visibility.py:32` |
 | Book, move, cancel for any child | yes, inside availability like a social worker. On the lifecycle branch only a scheduled session moves or is cancelled, and a session never changes child | `scheduling/views.py:424`-`496` |
 | The booking drawer's psychologist picker (review) | yes, as a social worker: `KEEPS_RECORDS`. Refused, the drawer fails open, so the greyed names and their reasons would silently go | `scheduling/views.py:315`-`327` (current lines), `pages/schedule/psychologistPicker.js:31` |
-| Mark completed or no-show | no. The psychologist (and the ISA) | `scheduling/views.py:529` |
+| Mark completed or no-show | no. The psychologist (and the ISA): `RECORDS_OWN_SESSION_OUTCOMES`, which the Officer never joins | `scheduling/views.py:529` |
 | Read availability, leave, slots, the month, openings | yes | |
 | Write availability or leave | no (decision 5). Decided in four places (review): the two write checks, combine, and the serializer's owner check | `scheduling/views.py:49`, `:320`; current `:60`, `:106`, `:448` and `scheduling/serializers.py:196`-`200` |
 
@@ -873,7 +875,17 @@ No behaviour changes for the three roles, and the lists do **not** contain
 the Officer yet. In two halves (planner, 22 Nov 2026): the backend, WP1a,
 then the browser, WP1b, whose brief is written from the frontend review.
 
-**WP1a, the backend.**
+**WP1a, the backend** (done, `c7eae2c`, 23 Nov 2026). Built as below, then
+read by three reviewers, fixed and read again. Three things changed on the
+way, by the planner: recording a session's outcome reads its own list,
+`RECORDS_OWN_SESSION_OUTCOMES` (the session's own psychologist, whatever
+their role is now, but never an Officer); the Google door's two claim sites
+read `CLAIMABLE_AT_SIGNUP` and only its last sign-in check
+`SIGNS_IN_WITH_GOOGLE` (the first mapping had all three on the sign-in list,
+which from WP3 would have let a stranger ask for Officer through Google, and
+no reviewer caught it); and an unknown role refused at sign-in counts toward
+the lockout like any refused sign-in. 3,699 tests pass, also with the clock
+on a Sunday; the route table's six known columns did not move by one cell.
 
 - New `accounts/capabilities.py` with the lists and the three functions; the
   pin test and the second-list guard (`accounts/tests/test_capabilities.py`).
@@ -893,9 +905,14 @@ then the browser, WP1b, whose brief is written from the frontend review.
   written with the list whose question it answers** (review), so adding the
   Officer to that list later reaches it: the Dashboard's agency branch and
   the request list read `SEES_EVERY_RECORD`, the appointments list
-  `KEEPS_RECORDS`, Add Record's and the closure reasons' ISA branches
-  `OVERSEES_CASEWORK`. The ISA's full audit stream stays
-  `== Role.ADMINISTRATOR`; WP3 gives the Officer its own branch.
+  `KEEPS_RECORDS`, the closure reasons' ISA branch `OVERSEES_CASEWORK`. Add
+  Record is a `KEEPS_RECORDS` door, at its gate and at its record keeper's
+  branch, while naming the record's social worker stays the serializer's
+  `OVERSEES_CASEWORK` rule (planner, 23 Nov: the first brief said
+  `OVERSEES_CASEWORK` for both, which would have refused an Officer's Add
+  Record from WP3 to WP4, against the Records table). The ISA's full audit
+  stream stays `== Role.ADMINISTRATOR`; WP3 gives the Officer its own
+  branch.
 - Two elses are kept on purpose, each with a comment saying so (review):
   `brief_kind` (any non-psychologist means "case", pinned by
   `test_case_brief.py`), and the assistant's `_CAN_ASK` and `_EXAMPLES`
@@ -987,6 +1004,11 @@ console error and its content drawn.
 - With those lists come (review): reopen, check-duplicate, the request list,
   withdraw, who was asked and a decline's reason, and the booking drawer's
   psychologist picker.
+- **To decide here** (WP1a): an Officer's Add Record that sends
+  `"social_worker": null` is refused (400) until WP4, because the serializer
+  lets only `OVERSEES_CASEWORK` (or a social worker's own new record) send the
+  key at all. The record form never sends it, so the screen is not affected;
+  an API client is. Decide whether a null should pass for `KEEPS_RECORDS`.
 - **Done when,** by test, an Officer: signs in by password and by Google;
   sees another worker's child and an unheld one at every door
   `children/tests/test_own_records.py` closes to a social worker; adds a
@@ -1146,6 +1168,13 @@ would hand that hole to one more account over the whole agency.
   doors it had missed are written in above where they apply, marked
   "(review)"; the questions they raised are answered under "The planner's
   defaults".
+- **Two clock faults, found while building WP1a** (23 Nov 2026). WP0's
+  brief fixture took its date from the real clock, so one cell of the
+  committed table would have failed on exactly the pinned day, which none of
+  the four travel dates was. And one of WP1a's new tests would have failed
+  the whole suite every Sunday, and every Monday before 08:00. Both are
+  fixed. The travel runs now include the pinned day itself, a Sunday just
+  after midnight and a Monday before eight.
 - **Measured, 17 Nov 2026:** the doors in the first table of this note (all
   but the assistant's schedule answer) and the `status` hole, with a throwaway
   test of about forty requests as five accounts. It was not committed; WP0's
