@@ -144,7 +144,7 @@ A. People
 | Participants: Psychologists | 3 (est.) | Training audience |
 | Participant: ISA | 1 | Training audience; first line of support afterwards |
 
-Participant numbers are estimates, to be confirmed with the Head of Office a week before. Food and materials are computed for 18 persons (11 participants, the Head of Office and the 6 members of the development team).
+Participant numbers are estimates, to be confirmed with the Head of Office a week before. Printed materials are computed for the 11 participants.
 
 B. Infrastructure and Equipment
 
@@ -157,11 +157,11 @@ B. Infrastructure and Equipment
 
 C. Training Materials
 
-A printed, ring-bound user manual for each role (Social Worker, Psychologist, ISA); a laminated one-page quick reference card per role; exercise sheets and return demonstration checklists; the pre-test, post-test and evaluation form; the issue log form and support contact card; and certificates of completion.
+The user manual for each role (Social Worker, Psychologist, ISA), given to every participant as a PDF, with one printed copy per role kept in the office; a one-page quick reference card per role, printed on bond paper; exercise sheets and return demonstration checklists; the pre-test, post-test and evaluation form; the issue log form and support contact card; and certificates of completion.
 
 D. Food
 
-Morning and afternoon snacks and lunch for 18 persons on both training days, arranged by the Logistics Coordinator with a local caterer.
+Morning and afternoon snacks and lunch on both training days are provided by the agency at no cost to the program. The Logistics Coordinator confirms the head count with the agency a week before.
 
 E. Financial Requirements
 
@@ -169,21 +169,17 @@ E. Financial Requirements
 
 | Item | Computation | Amount (PHP) |
 |---|---|---|
-| Lunch | 18 persons × 2 days × ₱200 | 7,200.00 |
-| AM and PM snacks | 18 persons × 2 days × 2 × ₱75 | 5,400.00 |
-| User manuals (printed, ring-bound) | 18 copies × ₱150 | 2,700.00 |
-| Quick reference cards (laminated) | 18 × ₱30 | 540.00 |
-| Training kits (notepad, pen, ID) | 18 × ₱60 | 1,080.00 |
-| Certificates | 18 × ₱20 | 360.00 |
-| Tests and evaluation forms | lump sum | 300.00 |
-| Tarpaulin | 1 × ₱450 | 450.00 |
-| USB flash drives for the backup exercise | 2 × ₱350 | 700.00 |
-| Transportation of the training team and equipment | lump sum | 1,500.00 |
-| Subtotal | | 20,230.00 |
-| Contingency (10%) | | 2,023.00 |
-| TOTAL | | 22,253.00 |
+| Food (snacks and lunch) | provided by the agency | 0.00 |
+| Printed user manuals (office copies) | 3 copies (one per role) × ₱100 | 300.00 |
+| Quick reference cards (bond paper) | 11 × ₱5 | 55.00 |
+| Certificates | 11 × ₱10 | 110.00 |
+| Tests, exercise sheets and evaluation forms | printed in the office, lump sum | 150.00 |
+| Transportation of the development team | 6 members × 2 days × ₱50 | 600.00 |
+| Subtotal | | 1,215.00 |
+| Contingency (10%) | | 121.50 |
+| TOTAL | | 1,336.50 |
 
-Computers, projector, venue and power are provided in kind at no cost. Proposed source of funds: the agency's training and development allocation, subject to the Head of Office's approval.
+No cost is needed for the venue, computers, projector, power, internet or software: the training uses the agency's own conference room and equipment and the team's laptops, the system needs no internet, and its software is free. The USB drive for the backup exercise is the agency's existing one, and a projected title slide replaces a tarpaulin. The remaining amount is shared by the development team.
 
 F. Contingency Plan
 
