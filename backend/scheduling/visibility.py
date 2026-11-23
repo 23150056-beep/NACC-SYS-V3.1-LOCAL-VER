@@ -19,6 +19,8 @@ It is applied where the data leaves the server - the appointments API, the
 assistant's schedule answers, the booking refusal - not in the screen, because
 a name hidden by the screen is still in the response.
 """
+from accounts import capabilities
+from accounts.capabilities import works_record
 from accounts.display import display_name
 from accounts.models import Role
 from accounts.scoping import role_of_user
@@ -33,11 +35,9 @@ def shows_name(user, child):
     """True when `user` may see this child's name on a schedule. Anyone without
     a role - which should never reach here - sees none."""
     role = role_of_user(user)
-    if role in (Role.ADMINISTRATOR, Role.PSYCHOLOGIST):
-        return True
-    if role != Role.STAFF:
-        return False
-    return child.social_worker_id is not None and child.social_worker_id == getattr(user, "id", None)
+    return (role in capabilities.SEES_EVERY_RECORD
+            or role == Role.PSYCHOLOGIST
+            or works_record(user, child))
 
 
 def who(user, child):

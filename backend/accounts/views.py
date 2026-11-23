@@ -22,7 +22,7 @@ from accounts.lockout import (ADDRESS_LOCK_LABEL, client_ip, clear_failures, is_
                               readable_sign_in_name, register_failure)
 from accounts.models import AgencyProfile, EmailOptOut, Role, UserProfile
 from accounts import signup_limit
-from accounts.permissions import IsAdministrator, IsAdminOrStaff
+from accounts.permissions import IsAdministrator, KeepsRecords
 from children.models import Child
 from accounts.serializers import (
     LoginSerializer, UserSerializer, UserWriteSerializer, RoleSerializer,
@@ -983,7 +983,7 @@ class RoleListView(generics.ListAPIView):
 class PsychologistListView(generics.GenericAPIView):
     """Active psychologists + current caseload (active assigned children).
     Admin + Staff so Staff can populate the assign picker and gauge workload."""
-    permission_classes = [IsAdminOrStaff]
+    permission_classes = [KeepsRecords]
     pagination_class = None
 
     def get(self, request):

@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 import re
 
+from accounts import capabilities
 from accounts.display import display_name
 from accounts.scoping import visible_children
 from config.clock import clock
@@ -502,6 +503,9 @@ _CAN_ASK = {
         "needs follow-up, and which children have flagged something in their "
         "own words"),
 }
+# Deliberate else: a role with no entry above reads the psychologist's wording
+# (WP3 adds the Officer's entries). What it may actually ask is the tools' own
+# scoping, not this sentence.
 _CAN_ASK_DEFAULT = _CAN_ASK["Psychologist"]
 
 # Shown in the empty panel. Questions, not features — someone who arrives by
@@ -553,6 +557,8 @@ def capability_examples(role):
     """[{label, tool, args}] for the empty panel, the args as the validator
     returns them (defaults filled), exactly what a chip sends back."""
     out = []
+    # Deliberate default: a role with no entry gets the psychologist's starters
+    # (WP3 adds the Officer's entries); each is still validated below.
     for label, tool, args in _EXAMPLES.get(role, _EXAMPLES["Psychologist"]):
         call = validate(tool, args)
         if not call.ok:             # a bad table entry is a bug, never a quiet gap
@@ -578,8 +584,13 @@ def _scope_appointments(request, qs):
         return qs.filter(psychologist=request.user), True
     if role == Role.STAFF:
         # A social worker's own children, as on their Dashboard (24 Sep 2026).
+        # A single comparison on purpose: a role that holds no records must
+        # not be narrowed by this branch.
         return qs.filter(child__social_worker=request.user), True
-    return qs, False
+    if role in capabilities.SEES_EVERY_RECORD:
+        return qs, False
+    # A role no branch names is answered nothing.
+    return qs.none(), True
 
 
 def _when(start):
@@ -697,7 +708,6 @@ _SUMMARY = {"label": "Agency Summary", "path": "/reports/summary"}
 
 def _stat_screen(measure, by, role):
     """The screen that shows this number, if the caller can open it."""
-    from accounts.models import Role
     summary = ((measure == "children" and by in ("age_band", "sex", "psychologist"))
                or (measure == "closures" and by == "reason")
                or measure in ("sessions", "first_session_wait", "pre_assessment_duration"))
@@ -705,7 +715,7 @@ def _stat_screen(measure, by, role):
         return _DASHBOARD
     # The Agency Summary is Administrators and Staff only. A link somebody
     # cannot open is worse than no link.
-    return None if role == Role.PSYCHOLOGIST else _SUMMARY
+    return _SUMMARY if role in capabilities.KEEPS_RECORDS else None
 
 
 def _stat_subject(measure, status, by, span, total):
@@ -1303,8 +1313,13 @@ def _resolve_availability(request, args):
     start, end = period_range(args["when"])
     people = get_user_model().objects.filter(
         role__role_name=Role.PSYCHOLOGIST, status="active")
-    if _role(request) == Role.PSYCHOLOGIST:
+    role = _role(request)
+    if role == Role.PSYCHOLOGIST:
         people = people.filter(pk=request.user.pk)
+    elif role in capabilities.EVERY_ROLE:
+        pass  # every active psychologist
+    else:
+        people = people.none()
 
     items = []
     for person in people.order_by("last_name", "first_name"):
@@ -1368,8 +1383,10 @@ def _resolve_unassigned_children(request, args):
                  "unassigned. The ISA assigns new children.")
     elif role == Role.STAFF:
         empty = "Every active child in your records has a psychologist assigned."
-    else:
+    elif role in capabilities.SEES_EVERY_RECORD:
         empty = "Every active child has a psychologist assigned."
+    else:
+        empty = ""      # a role no branch names gets no claim about the agency
     return {"kind": "children", "concern": "no assigned psychologist",
             "empty": empty,
             "items": [{"id": c.id, "name": c.fullname} for c in qs[:40]]}

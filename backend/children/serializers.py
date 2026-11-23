@@ -3,6 +3,8 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 from accounts.display import display_name
 from accounts.names import refuse_unreadable
+from accounts import capabilities
+from accounts.capabilities import may_hold_records
 from accounts.models import Role
 from accounts.phone import as_typed as phone_as_typed
 from children import assignment, custodian, duplicates, intake
@@ -131,14 +133,14 @@ class ChildSerializer(serializers.ModelSerializer):
         unchanged = self.instance is not None and value == self.instance.social_worker
         if unchanged:
             return value
-        if role != Role.ADMINISTRATOR:
+        if role not in capabilities.OVERSEES_CASEWORK:
             # A staff member's own new record is set in perform_create, which
             # overrides whatever arrives here; anything else is a transfer.
             if self.instance is None and role == Role.STAFF:
                 return value
             raise serializers.ValidationError(
                 "Only an administrator can move a record to another social worker.")
-        if value is not None and getattr(value.role, "role_name", None) != Role.STAFF:
+        if value is not None and not may_hold_records(value):
             raise serializers.ValidationError("Choose a social worker (SW) account.")
         return value
 
@@ -178,7 +180,7 @@ class ChildSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         role = getattr(getattr(getattr(request, "user", None), "role", None),
                        "role_name", None) if request else None
-        return role in (Role.ADMINISTRATOR, Role.STAFF)
+        return role in capabilities.KEEPS_RECORDS
 
     @staticmethod
     def _requests(obj):

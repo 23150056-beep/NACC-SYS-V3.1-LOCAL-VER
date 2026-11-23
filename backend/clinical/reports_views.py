@@ -6,11 +6,12 @@ from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts import capabilities
 from accounts.display import display_name
 from accounts.models import Role
 from accounts.scoping import (hide_earlier_history, role_of as _role, scope_to_visible,
                               visible_pre_assessments)
-from accounts.permissions import CanViewResults, IsAdminOrStaff
+from accounts.permissions import CanViewResults, KeepsRecords
 from children.models import Child, TerminationRecord
 from children.serializers import ChildSerializer
 from clinical import reports
@@ -336,7 +337,7 @@ def _summary_csv(data):
 
 class SummaryReportView(generics.GenericAPIView):
     """Agency Summary (admin + staff): census KPIs over a date range."""
-    permission_classes = [IsAdminOrStaff]
+    permission_classes = [KeepsRecords]
 
     def get(self, request):
         rng = request.query_params.get("range", "monthly")
@@ -440,7 +441,15 @@ class DashboardView(generics.GenericAPIView):
             # The Dashboard is a social worker's own caseload (owner's
             # decision, 24 Sep 2026); the Calendar is where the agency's
             # sessions are, with other workers' children as case references.
+            # A single comparison on purpose: whoever else holds records
+            # (WP3's Officer holds none) must not be narrowed by this branch.
             appts_today = appts_today.filter(child__social_worker=request.user)
+        elif role in capabilities.SEES_EVERY_RECORD:
+            pass  # agency-wide
+        else:
+            # A role no branch names sees no sessions and no availability.
+            appts_today = appts_today.none()
+            blocks = blocks.none()
         pas = list(pas.order_by("date", "id"))
 
         # Fetched once and kept. This is the endpoint CensusContext calls on

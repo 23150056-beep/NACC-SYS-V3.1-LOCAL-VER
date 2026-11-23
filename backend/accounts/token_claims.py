@@ -27,6 +27,28 @@ CLAIM = "pwd"
 STALE = "This session ended when the password was changed. Please sign in again."
 
 
+UNKNOWN_ROLE = ("This account's role is not set up in this version of NACC SYS. "
+                "Ask an administrator.")
+
+
+def refuse_unknown_role(user):
+    """Refuse an account whose role row the code does not know.
+
+    One rule for every door: the authentication class, the token minted at
+    sign-in (password and Google both go through LoginSerializer.get_token)
+    and the refresh. An account with NO role is a different refusal, made in
+    the authentication class and left as it was. Imported inside the function
+    because this module is read at settings-load time, before the apps are.
+    """
+    from rest_framework.exceptions import AuthenticationFailed
+
+    from accounts import capabilities
+
+    role = getattr(user, "role", None)
+    if role is not None and role.role_name not in capabilities.EVERY_ROLE:
+        raise AuthenticationFailed(UNKNOWN_ROLE, code="unknown_role")
+
+
 def stamp(token, user):
     """Put the current password hash on a freshly minted token."""
     token[CLAIM] = user.get_session_auth_hash()

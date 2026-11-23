@@ -1,6 +1,6 @@
 """Role lists that exist on both sides of the wire, pinned to each other.
 
-`INSTRUMENT_MANAGER_ROLES` is written twice - once in accounts/permissions.py,
+`INSTRUMENT_MANAGER_ROLES` is written twice - once in accounts/capabilities.py,
 once in frontend/src/config/roles.js - because the browser cannot import a
 Python tuple. That duplication is unavoidable. What is avoidable is nobody
 noticing when the two stop agreeing.
@@ -23,7 +23,7 @@ from pathlib import Path
 from django.test import SimpleTestCase
 
 from accounts.models import Role
-from accounts.permissions import INSTRUMENT_MANAGER_ROLES
+from accounts import capabilities
 
 ROLES_JS = Path(__file__).resolve().parents[3] / "frontend" / "src" / "config" / "roles.js"
 
@@ -51,10 +51,10 @@ class InstrumentManagerRolesAgreeAcrossTheWireTest(SimpleTestCase):
 
     def test_both_sides_name_the_same_roles(self):
         frontend = _js_list(self.source, "INSTRUMENT_MANAGER_ROLES")
-        backend = list(INSTRUMENT_MANAGER_ROLES)
+        backend = list(capabilities.INSTRUMENT_MANAGERS)
         self.assertEqual(
             sorted(backend), sorted(frontend),
-            "accounts/permissions.py and frontend/src/config/roles.js disagree "
+            "accounts/capabilities.py and frontend/src/config/roles.js disagree "
             "about who may manage instruments. Whichever was edited, the other "
             "needs the same edit: the frontend decides what is OFFERED and the "
             "API decides what is ALLOWED, so a mismatch is either a menu entry "

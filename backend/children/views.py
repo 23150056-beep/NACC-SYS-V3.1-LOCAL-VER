@@ -5,14 +5,14 @@ from django.db.models import Prefetch, Q
 from django.http import Http404
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from accounts import email_notifications, sms_notifications
+from accounts import capabilities, email_notifications, sms_notifications
+from accounts.capabilities import may_close_case
 from accounts.display import display_name
 from accounts.models import Role
-from accounts.permissions import (ChildRecordAccess,
-                                  is_admin_or_assignee)
+from accounts.permissions import ChildRecordAccess
 from accounts.scoping import role_of, scope_to_visible, visible_pre_assessments
 from activity.models import ActivityLog
 from activity.services import log_activity
@@ -103,12 +103,21 @@ class ChildViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         # A record a social worker adds is theirs (accounts/scoping.py), and
-        # nothing they send can make it someone else's. An administrator may
-        # name a social worker, or leave it for later.
+        # nothing they send can make it someone else's. Anyone else who keeps
+        # records takes the administrator's path: the record belongs to the
+        # social worker the request names, or to nobody until one is assigned.
+        # Naming one is a separate question, decided by validate_social_worker
+        # (OVERSEES_CASEWORK), so a record keeper who oversees nothing adds a
+        # record that belongs to nobody.
         #
         # The psychologist picked is ASKED, not assigned (children/
         # assignment.py): the record is saved with nobody, and the child joins
         # their records when they accept.
+        role = role_of(self.request)
+        if role not in capabilities.KEEPS_RECORDS:
+            # Refused before anything is read or written: no other role adds
+            # a record.
+            raise PermissionDenied("You do not have permission to add records.")
         asked = serializer.validated_data.pop("assigned_psychologist", None)
         # One record per child, whoever adds it. A new record for a child who
         # already has one is refused here and told where the first is; only
@@ -120,10 +129,12 @@ class ChildViewSet(viewsets.ModelViewSet):
             data.get("birth_date"))
         if refused:
             raise ValidationError({"detail": refused})
-        if role_of(self.request) == Role.STAFF:
+        if role == Role.STAFF:
             obj = duplicates.save_new(serializer, social_worker=self.request.user)
-        else:
+        elif role in capabilities.KEEPS_RECORDS:
             obj = duplicates.save_new(serializer)
+        else:
+            raise PermissionDenied("You do not have permission to add records.")
         self._log(obj, ActivityLog.CREATED)
         self._tell_custodian(custodian.agreement_snapshot(None), obj)
         if asked is not None:
@@ -145,6 +156,11 @@ class ChildViewSet(viewsets.ModelViewSet):
         """
         data = serializer.validated_data
         instance = serializer.instance
+        role = role_of(self.request)
+        if role not in capabilities.KEEPS_RECORDS and role != Role.PSYCHOLOGIST:
+            # Who reaches a plain edit today: the people who keep records and
+            # the child's psychologist. Any other role is refused.
+            raise PermissionDenied("You do not have permission to edit records.")
         before = custodian.agreement_snapshot(instance)
         # The carry-history choice belongs to a request and is applied when it
         # is accepted - never by an edit. Saved here it changed what the
@@ -152,7 +168,7 @@ class ChildViewSet(viewsets.ModelViewSet):
         # untick it, pick the holder back, and the holder lost the history.
         # Absent means unchanged (request_assignment), not "carry it".
         carry = data.pop("assignee_sees_history", None)
-        if (role_of(self.request) not in (Role.ADMINISTRATOR, Role.STAFF)
+        if (role not in capabilities.KEEPS_RECORDS
                 or "assigned_psychologist" not in data):
             obj = serializer.save()
             self._log(obj, ActivityLog.UPDATED)
@@ -254,7 +270,7 @@ class ChildViewSet(viewsets.ModelViewSet):
         """Archive a case with a required reason (V2). Sets the child inactive
         and writes a TerminationRecord. Admin or assigned psychologist only."""
         child = self.get_object()
-        if not is_admin_or_assignee(request, child):
+        if not may_close_case(request, child):
             return Response({"detail": "Only the assigned psychologist or an administrator can terminate this case."},
                             status=status.HTTP_403_FORBIDDEN)
         if child.status == Child.INACTIVE:
@@ -295,7 +311,7 @@ class ChildViewSet(viewsets.ModelViewSet):
         say why it is or is not open. The terminate endpoint refuses by the
         same function (children/termination.py)."""
         child = self.get_object()
-        if not is_admin_or_assignee(request, child):
+        if not may_close_case(request, child):
             return Response({"detail": "Only the assigned psychologist or an administrator can terminate this case."},
                             status=status.HTTP_403_FORBIDDEN)
         reasons, facts = termination.reasons_for(role_of(request), child)
@@ -333,7 +349,7 @@ class ChildViewSet(viewsets.ModelViewSet):
             if child is None:
                 raise
             taking_over, previous = True, child.social_worker
-        if role not in (Role.ADMINISTRATOR, Role.STAFF):
+        if role not in capabilities.KEEPS_RECORDS:
             return Response({"detail": "Only staff or an administrator can reopen a terminated case."},
                             status=status.HTTP_403_FORBIDDEN)
         if child.status != Child.INACTIVE:
@@ -370,7 +386,7 @@ class ChildViewSet(viewsets.ModelViewSet):
 
         Checked before the record is looked up, so anyone else is told no
         whether or not the id exists."""
-        if role_of(request) != Role.ADMINISTRATOR:
+        if role_of(request) not in capabilities.OVERSEES_CASEWORK:
             return Response({"detail": "Only the ISA (Administrator) can remove a duplicate record."},
                             status=status.HTTP_403_FORBIDDEN)
         try:
@@ -394,7 +410,7 @@ class ChildViewSet(viewsets.ModelViewSet):
 
         The role is checked before the body is read, so anyone else is told no
         whatever they send."""
-        if role_of(request) != Role.ADMINISTRATOR:
+        if role_of(request) not in capabilities.OVERSEES_CASEWORK:
             return Response({"detail": "Only the ISA (Administrator) can move records between social workers."},
                             status=status.HTTP_403_FORBIDDEN)
         try:
@@ -432,7 +448,7 @@ class ChildViewSet(viewsets.ModelViewSet):
         Any role that can read the list may say so; the line is about the
         caller, so it carries nobody else's name.
         """
-        if role_of(request) not in (Role.ADMINISTRATOR, Role.STAFF, Role.PSYCHOLOGIST):
+        if role_of(request) not in capabilities.EVERY_ROLE:
             return Response({"detail": "Not allowed."}, status=status.HTTP_403_FORBIDDEN)
         data = request.data if hasattr(request.data, "get") else {}
         rows = data.get("rows")
@@ -466,7 +482,7 @@ class ChildViewSet(viewsets.ModelViewSet):
         psychologist. The searcher typed the name; the holder is who to ask.
         """
         role = role_of(request)
-        if role not in (Role.ADMINISTRATOR, Role.STAFF):
+        if role not in capabilities.KEEPS_RECORDS:
             return Response({"detail": "Staff or administrators only."},
                             status=status.HTTP_403_FORBIDDEN)
         q = _intake_match(request.query_params.get("first_name"),

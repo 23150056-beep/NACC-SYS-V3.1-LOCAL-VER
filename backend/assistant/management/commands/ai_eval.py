@@ -208,6 +208,7 @@ def eval_callers():
     out and the report says so, rather than skipping the whole feature.
     """
     from django.contrib.auth import get_user_model
+    from accounts import capabilities
     from accounts.models import Role
 
     User = get_user_model()
@@ -216,7 +217,9 @@ def eval_callers():
            .values_list("assigned_psychologist", flat=True).first())
     if psy is not None:
         callers.append((Role.PSYCHOLOGIST, _EvalRequest(User.objects.get(pk=psy))))
-    for role in (Role.STAFF, Role.ADMINISTRATOR):
+    # Every other role a person may be, social workers first as before.
+    for role in sorted((r for r in capabilities.EVERY_ROLE if r != Role.PSYCHOLOGIST),
+                       key=lambda r: r != Role.STAFF):
         user = (User.objects.filter(role__role_name=role, status=User.ACTIVE)
                 .order_by("pk").first())
         if user is not None:
@@ -359,12 +362,12 @@ def case_brief_sample(limit):
     """
     from django.contrib.auth import get_user_model
 
-    from accounts.models import Role
+    from accounts import capabilities
     from clinical.models import CaseReferral
 
     User = get_user_model()
     candidates = (Child.objects
-                  .filter(status=Child.ACTIVE, social_worker__role__role_name=Role.STAFF,
+                  .filter(status=Child.ACTIVE, social_worker__role__role_name__in=capabilities.HOLDS_RECORDS,
                           social_worker__status=User.ACTIVE)
                   .select_related("social_worker").order_by("id"))
     with_summary, without = [], []
@@ -800,6 +803,7 @@ class Command(BaseCommand):
         scope, so "found nothing" is measured rather than assumed — for staff
         and administrators as well as psychologists. See eval_callers().
         """
+        from accounts import capabilities
         from accounts.models import Role
 
         callers = eval_callers()
@@ -812,7 +816,8 @@ class Command(BaseCommand):
         for role, req in callers:
             self.stdout.write(f"Caller: {role:<14} {req.user.email}")
         present = {role for role, _ in callers}
-        for role in (Role.PSYCHOLOGIST, Role.STAFF, Role.ADMINISTRATOR):
+        for role in sorted(capabilities.EVERY_ROLE,
+                           key=lambda r: (r != Role.PSYCHOLOGIST, r != Role.STAFF)):
             if role not in present:
                 self.stdout.write(f"Caller: {role:<14} none — NOT MEASURED")
 

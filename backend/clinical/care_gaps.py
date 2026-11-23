@@ -13,6 +13,7 @@ children.
 from django.db.models import Count
 from django.utils import timezone
 
+from accounts import capabilities
 from accounts.models import Role
 from accounts.scoping import role_of
 from children.models import AssignmentRequest, Child
@@ -242,8 +243,7 @@ def alerts_for(request, children_qs, active_children=None):
 
     The Dashboard's card and the assistant's list_care_gaps both call this, so
     they name the same children. A psychologist keeps the clinical rules and the
-    ISA keeps them agency-wide; a user with no role is scoped to nothing
-    upstream and gets [].
+    ISA keeps them agency-wide; a role no branch names gets [].
 
     `active_children` lets a caller that already holds the active rows hand
     them over. It is used for a social worker (the rules read no
@@ -252,8 +252,11 @@ def alerts_for(request, children_qs, active_children=None):
     rules must still see, so theirs is read again.
     """
     role = role_of(request)
-    if role == Role.STAFF:
+    if role in capabilities.SOCIAL_WORK:
         return compute_staff_alerts(children_qs, active_children)
     if role == Role.PSYCHOLOGIST:
-        active_children = None
-    return compute_alerts(children_qs, active_children)
+        return compute_alerts(children_qs, None)
+    if role in capabilities.SEES_EVERY_RECORD:
+        return compute_alerts(children_qs, active_children)
+    # A role no branch names has no care gaps to act on.
+    return []

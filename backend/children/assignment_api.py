@@ -18,7 +18,7 @@ from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from accounts import email_notifications
+from accounts import capabilities, email_notifications
 from accounts.display import display_name
 from accounts.models import Role
 from accounts.scoping import role_of, visible_pre_assessments
@@ -115,7 +115,9 @@ class AssignmentRequestViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
             qs = qs.filter(psychologist=self.request.user)
         elif role == Role.STAFF:
             qs = qs.filter(child__social_worker=self.request.user)
-        elif role != Role.ADMINISTRATOR:
+        elif role in capabilities.SEES_EVERY_RECORD:
+            pass
+        else:
             return qs.none()
         if self.action != "list":
             # The filters narrow the queue, never which request an answer
@@ -159,7 +161,7 @@ class AssignmentRequestViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin,
         req = self.get_object()
         # The ISA, or the social worker whose record it is - get_object has
         # already narrowed a social worker to their own records.
-        if role_of(request) not in (Role.ADMINISTRATOR, Role.STAFF):
+        if role_of(request) not in capabilities.KEEPS_RECORDS:
             return Response({"detail": "Only the ISA or the record's social worker "
                                        "can withdraw a request."},
                             status=status.HTTP_403_FORBIDDEN)

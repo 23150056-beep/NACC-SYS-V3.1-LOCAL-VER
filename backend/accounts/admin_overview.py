@@ -35,6 +35,7 @@ from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts import capabilities
 from accounts.lockout import ADDRESS_LOCK_LABEL, NOT_AN_EMAIL, readable_sign_in_name
 from accounts.models import Role, SmsSend, User
 from accounts.names import REPLACEMENT
@@ -702,8 +703,11 @@ def _people(now, holders):
 
     counts = dict(User.objects.filter(status=User.ACTIVE, role__isnull=False)
                   .values_list("role__role_name").annotate(n=Count("id")))
+    # Every role the code knows, in the order the console has always drawn
+    # them: administrators, social workers, then the rest.
     roles = {name: counts.get(name, 0)
-             for name in (Role.ADMINISTRATOR, Role.STAFF, Role.PSYCHOLOGIST)}
+             for name in sorted(capabilities.EVERY_ROLE,
+                                key=lambda n: (n != Role.ADMINISTRATOR, n != Role.STAFF))}
 
     # Distinct people, latest sign-in each. The sign-in line is the only
     # record of one: User.last_login is stamped by the Google door alone.
@@ -764,7 +768,7 @@ def _workload(now, tally):
     # bars are for comparing loads, which a list by surname hides.
     psychologist_rows = sorted(psychologists, key=lambda u: (-(u.active + u.pending), -u.active))
 
-    social_workers = (User.objects.filter(role__role_name=Role.STAFF)
+    social_workers = (User.objects.filter(role__role_name__in=capabilities.HOLDS_RECORDS)
                       .annotate(active=Count("social_work_records",
                                              filter=Q(social_work_records__status=Child.ACTIVE)))
                       .filter(Q(status=User.ACTIVE) | Q(active__gt=0))

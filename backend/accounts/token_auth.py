@@ -10,7 +10,7 @@ from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import RefreshToken, UntypedToken
 from rest_framework_simplejwt.views import TokenRefreshView
 
-from accounts.token_claims import CLAIM, STALE, matches, stamp
+from accounts.token_claims import CLAIM, STALE, matches, refuse_unknown_role, stamp
 
 
 class PasswordBoundTokenRefreshSerializer(TokenRefreshSerializer):
@@ -18,9 +18,11 @@ class PasswordBoundTokenRefreshSerializer(TokenRefreshSerializer):
         # Signature and expiry first - an unreadable token has no claims worth
         # comparing, and UntypedToken raising here is the correct answer.
         token = UntypedToken(attrs["refresh"])
-        user = get_user_model().objects.filter(pk=token.get("user_id")).first()
+        user = get_user_model().objects.select_related("role").filter(pk=token.get("user_id")).first()
         if user is None or not matches(user, token.get(CLAIM)):
             raise InvalidToken(STALE)
+        # An unknown role cannot renew a session any more than start one.
+        refuse_unknown_role(user)
 
         data = super().validate(attrs)
         # The reissued access token carries the claim forward, otherwise the

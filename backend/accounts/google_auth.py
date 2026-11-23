@@ -29,7 +29,7 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 from rest_framework.exceptions import AuthenticationFailed
 
-from accounts import signup_limit
+from accounts import capabilities, signup_limit
 from accounts.models import Role, User
 
 logger = logging.getLogger(__name__)
@@ -47,9 +47,18 @@ _GENERIC_DENIAL = (
 )
 
 
-# Roles a person may ask for. Administrator is absent deliberately — that
-# account is created by an existing administrator and never through this door.
-_REQUESTABLE_ROLES = (Role.PSYCHOLOGIST, Role.STAFF)
+# Two lists decide this door, and they answer different questions:
+#
+# * capabilities.CLAIMABLE_AT_SIGNUP - what a stranger may ASK FOR. It is read
+#   where a new or pending request records its requested role: a claim, never
+#   a grant, and the same list the typed sign-up form reads.
+# * capabilities.SIGNS_IN_WITH_GOOGLE - who may SIGN IN here once approved
+#   (resolve_google_user's last check). It may hold a role nobody may claim:
+#   an account promoted to it may be Google-only, with no password to fall
+#   back on, and must still get in.
+#
+# Administrator is in neither, deliberately: that account is created by an
+# existing administrator and never through this door.
 
 
 class GoogleAuthUnavailable(AuthenticationFailed):
@@ -139,7 +148,7 @@ def _record_requested_role(user, requested_role_name):
     code that reads it is the approval endpoint, to pre-fill a dropdown."""
     if not requested_role_name or user.requested_role_id:
         return
-    if requested_role_name not in _REQUESTABLE_ROLES:
+    if requested_role_name not in capabilities.CLAIMABLE_AT_SIGNUP:
         return
     role = Role.objects.filter(role_name=requested_role_name).first()
     if role:
@@ -215,7 +224,7 @@ def resolve_google_user(claims, requested_role_name=None, ip=None):
         _record_requested_role(user, requested_role_name)
         _pending_response(user)
 
-    if role_name not in _REQUESTABLE_ROLES:
+    if role_name not in capabilities.SIGNS_IN_WITH_GOOGLE:
         raise AuthenticationFailed(_GENERIC_DENIAL)
 
     if user.status != User.ACTIVE or not user.is_active:
@@ -232,7 +241,7 @@ def _register_access_request(claims, requested_role_name=None):
     """
     email = claims["email"].strip().lower()
     role = None
-    if requested_role_name in _REQUESTABLE_ROLES:
+    if requested_role_name in capabilities.CLAIMABLE_AT_SIGNUP:
         role = Role.objects.filter(role_name=requested_role_name).first()
 
     user = User(

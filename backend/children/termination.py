@@ -18,6 +18,7 @@ endpoint refuses by the same function, so the two cannot disagree about which
 reasons exist. Design:
 docs/superpowers/specs/2026-09-28-interview-upload-and-closure-reasons-design.md
 """
+from accounts import capabilities
 from accounts.models import Role
 from children.models import Child, TerminationRecord
 
@@ -80,14 +81,21 @@ def reasons_for(role, child):
         return [{"value": r, "hint": HINTS.get(r, ""), "why": _why_not(r, facts),
                  "available": not _why_not(r, facts)}
                 for r in TerminationRecord.CLINICAL], facts
-    return [{"value": r, "hint": "", "why": "", "available": True}
-            for r in TerminationRecord.CASE_OUTCOMES], None
+    if role in capabilities.OVERSEES_CASEWORK:
+        return [{"value": r, "hint": "", "why": "", "available": True}
+                for r in TerminationRecord.CASE_OUTCOMES], None
+    # A role no branch names is offered nothing.
+    return [], None
 
 
 def refusal(role, child, reason):
     """Why this reason cannot close this case, or None when it can."""
-    listed = (TerminationRecord.CLINICAL if role == Role.PSYCHOLOGIST
-              else TerminationRecord.CASE_OUTCOMES)
+    if role == Role.PSYCHOLOGIST:
+        listed = TerminationRecord.CLINICAL
+    elif role in capabilities.OVERSEES_CASEWORK:
+        listed = TerminationRecord.CASE_OUTCOMES
+    else:
+        listed = ()
     if reason not in listed:
         return "Select a termination reason."
     if role == Role.PSYCHOLOGIST:

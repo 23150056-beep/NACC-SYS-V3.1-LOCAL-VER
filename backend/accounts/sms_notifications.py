@@ -21,6 +21,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts import sms_catalogue
+from accounts.capabilities import may_hold_records
 from accounts.models import PhoneVerification
 from accounts.sms import SmsResult, limit_reason, queue_sms, send_sms
 from config.clock import clock
@@ -127,7 +128,7 @@ def notify_case_answer(req, kind, when=None):
         recipient = child.social_worker or req.requested_by
         if (recipient is None or not recipient.is_active
                 or recipient.pk == req.psychologist_id
-                or getattr(getattr(recipient, "role", None), "role_name", None) != "Staff"):
+                or not may_hold_records(recipient)):
             return False
         number = _deliverable(recipient)
         if not number:
@@ -168,7 +169,7 @@ def notify_session_booked(appointment, by):
         if (worker is None or not worker.is_active
                 or (by is not None and worker.pk == by.pk)
                 or worker.pk == appointment.psychologist_id
-                or getattr(getattr(worker, "role", None), "role_name", None) != "Staff"):
+                or not may_hold_records(worker)):
             return False
         number = _deliverable(worker)
         if not number:

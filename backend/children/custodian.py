@@ -22,6 +22,7 @@ a psychologist cannot change it.
 """
 from django.utils import timezone
 
+from accounts import capabilities
 from accounts.models import Role
 from accounts.phone import InvalidPhilippineMobile, normalise_ph_mobile
 from children import intake
@@ -80,10 +81,13 @@ def apply(attrs, instance, user, role):
     before["custodian_contact"] = before["custodian_contact"] or ""
     before["custodian_sms_consent"] = bool(before["custodian_sms_consent"])
 
-    if role not in (Role.ADMINISTRATOR, Role.STAFF):
+    if role not in capabilities.KEEPS_RECORDS:
+        # Only the psychologist has the one exception below; any other role
+        # that gets here is refused outright.
         changed = [f for f in FIELDS if f in attrs and attrs[f] != before[f]]
-        if changed and _leaves_custodian_behind(attrs, instance) and not any(
-                attrs.get(f) for f in FIELDS):
+        if (role == Role.PSYCHOLOGIST and changed
+                and _leaves_custodian_behind(attrs, instance) and not any(
+                    attrs.get(f) for f in FIELDS)):
             attrs.update(custodian_name="", custodian_contact="", custodian_sms_consent=False,
                          custodian_sms_consent_at=None, custodian_sms_consent_by=None)
             return {}

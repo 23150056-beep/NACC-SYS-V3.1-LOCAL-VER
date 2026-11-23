@@ -77,8 +77,9 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
                 | Q(recipient=self.request.user),
                 category=ActivityLog.RECORD,
             )
-        else:
-            # Administrator: the full audit stream, except the second copy of a
+        elif role == Role.ADMINISTRATOR:
+            # Administrator: the full audit stream (the security audit is
+            # IT's, so this is a comparison and not a list), except the second copy of a
             # move's sentence, which is addressed to the worker who gave the
             # records up (they already have the receiving worker's), and the
             # line that an account reached the email limit. That one is written
@@ -89,6 +90,9 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             # what the line is but its words, and those are not read back.
             qs = qs.exclude(kind__in=[ActivityLog.KIND_MOVE_COPY,
                                       ActivityLog.KIND_EMAIL_LIMIT])
+        else:
+            # A role no branch above names sees nothing.
+            qs = qs.none()
         return qs
 
     def get_queryset(self):

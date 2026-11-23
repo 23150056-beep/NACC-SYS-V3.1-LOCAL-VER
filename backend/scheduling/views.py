@@ -10,7 +10,9 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts import capabilities
 from accounts.display import display_name
+from accounts.permissions import UsesTheSystem
 from accounts.sms_notifications import notify_custodian
 from accounts.models import Role
 from accounts.scoping import role_of as _role, scope_to_visible
@@ -34,7 +36,9 @@ MONTHS_AHEAD = booking.MONTHS_AHEAD
 class AvailabilityBlockViewSet(viewsets.ModelViewSet):
     """Psychologists manage their own availability; admin manages all;
     staff read (to book against)."""
-    permission_classes = [IsAuthenticated]
+    # Every action - list, detail, slots, month, openings, next-slots,
+    # combine, psychologists - needs a role the code lists.
+    permission_classes = [IsAuthenticated, UsesTheSystem]
     pagination_class = None
     serializer_class = AvailabilityBlockSerializer
 
@@ -103,7 +107,7 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
         are untouched - removing a window never cancels what is agreed.
         """
         role = _role(request)
-        if role not in (Role.ADMINISTRATOR, Role.PSYCHOLOGIST):
+        if role not in capabilities.MANAGES_AVAILABILITY:
             raise PermissionDenied("You can only manage your own availability.")
         ids = request.data.get("ids") if hasattr(request.data, "get") else None
         if (not isinstance(ids, list) or len(ids) < 2
@@ -322,7 +326,7 @@ class AvailabilityBlockViewSet(viewsets.ModelViewSet):
         child `exclude` is ignored. Explicitly routed (`/psychologists/`), so
         the router's detail route cannot swallow it as a pk.
         """
-        if _role(request) not in (Role.STAFF, Role.ADMINISTRATOR):
+        if _role(request) not in capabilities.KEEPS_RECORDS:
             return Response({"detail": "You do not have permission to do this."},
                             status=403)
         today = timezone.localdate()
@@ -431,7 +435,7 @@ class UnavailabilityViewSet(viewsets.ModelViewSet):
     many are caught, so the screen can warn rather than silently cancel.
     """
 
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, UsesTheSystem]
     pagination_class = None
     serializer_class = UnavailabilitySerializer
 
@@ -538,6 +542,13 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         role = _role(self.request)
         if role == Role.PSYCHOLOGIST:
             qs = qs.filter(psychologist=self.request.user)
+        elif role in capabilities.KEEPS_RECORDS:
+            # The whole calendar: a booking needs the psychologist's real day.
+            # Names are still masked by shows_name for a social worker.
+            pass
+        else:
+            # A role no branch names sees no sessions.
+            qs = qs.none()
         frm = self.request.query_params.get("from")
         to = self.request.query_params.get("to")
         if frm:
@@ -582,10 +593,12 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         role = _role(self.request)
         if role == Role.PSYCHOLOGIST:
             psychologist = self.request.user
-        else:
+        elif role in capabilities.KEEPS_RECORDS:
             psychologist = serializer.validated_data.get("psychologist")
             if psychologist is None:
                 raise ValidationError({"psychologist": "Select the psychologist."})
+        else:
+            raise PermissionDenied("You do not have permission to book sessions.")
         self._require_own_child(serializer.validated_data.get("child"), "book")
         self._validate_booking(psychologist,
                                serializer.validated_data.get("child"),
@@ -615,8 +628,15 @@ class AppointmentViewSet(viewsets.ModelViewSet):
         # A social worker changes only their own children's sessions. A
         # psychologist's own calendar is theirs to edit even for a child since
         # reassigned; the child a session is moved TO is checked for everyone.
-        if _role(self.request) == Role.STAFF:
+        role = _role(self.request)
+        if role == Role.PSYCHOLOGIST:
+            pass
+        elif role in capabilities.KEEPS_RECORDS:
+            # scope_to_visible gives the ISA every child and a social worker
+            # their own, so this is "any" for the one and "own" for the other.
             self._require_own_child(instance.child, "change")
+        else:
+            raise PermissionDenied("You do not have permission to change sessions.")
         if "child" in data and data["child"] != instance.child:
             self._require_own_child(data["child"], "change")
         psychologist = data.get("psychologist") or instance.psychologist
@@ -657,12 +677,21 @@ class AppointmentViewSet(viewsets.ModelViewSet):
     def _set_status(self, request, pk, new_status):
         obj = self.get_object()
         role = _role(request)
-        allowed = role == Role.ADMINISTRATOR or obj.psychologist_id == request.user.id \
-            or (role == Role.STAFF and new_status == Appointment.CANCELLED)
+        # Any outcome on any session is the ISA's (a comparison, not a read
+        # list). Whoever holds the session as its psychologist records its
+        # outcome, a Staff account that holds one included (a psychologist
+        # whose role was changed); the list leaves the Officer out, because
+        # the Officer is never a psychologist. A social worker may otherwise
+        # only cancel, and only their own child's (below).
+        allowed = (role == Role.ADMINISTRATOR
+                   or (role in capabilities.RECORDS_OWN_SESSION_OUTCOMES
+                       and obj.psychologist_id == request.user.id)
+                   or (role in capabilities.SOCIAL_WORK
+                       and new_status == Appointment.CANCELLED))
         if not allowed:
             return Response({"detail": "You cannot update this appointment."},
                             status=status.HTTP_403_FORBIDDEN)
-        if role == Role.STAFF:
+        if role in capabilities.SOCIAL_WORK:
             self._require_own_child(obj.child, "cancel")
         # Cancelling stays available at any time - a session called off on the
         # day, or a no-show written up late, are both normal. Recording an

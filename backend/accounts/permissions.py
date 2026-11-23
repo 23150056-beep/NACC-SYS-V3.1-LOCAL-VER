@@ -1,4 +1,5 @@
 from rest_framework.permissions import BasePermission, SAFE_METHODS
+from accounts import capabilities
 from accounts.models import Role
 # The one definition, shared with every viewset that scopes by role. This file
 # held the fifth hand-written copy.
@@ -11,10 +12,20 @@ class IsAdministrator(BasePermission):
                     and _role_name(request) == Role.ADMINISTRATOR)
 
 
-class IsAdminOrStaff(BasePermission):
+class UsesTheSystem(BasePermission):
+    """Signed in with a role the code lists as allowed to use the system at
+    all (capabilities.EVERY_ROLE). For a whole viewset whose rows are not
+    narrowed by role."""
+
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated
-                    and _role_name(request) in (Role.ADMINISTRATOR, Role.STAFF))
+                    and _role_name(request) in capabilities.EVERY_ROLE)
+
+
+class KeepsRecords(BasePermission):
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated
+                    and _role_name(request) in capabilities.KEEPS_RECORDS)
 
 
 class RecordsAccess(BasePermission):
@@ -31,31 +42,26 @@ class RecordsAccess(BasePermission):
             return False
         role = _role_name(request)
         if request.method in SAFE_METHODS:
-            return role in (Role.ADMINISTRATOR, Role.STAFF, Role.PSYCHOLOGIST)
-        return role in (Role.ADMINISTRATOR, Role.STAFF)
+            return role in capabilities.EVERY_ROLE
+        return role in capabilities.KEEPS_RECORDS
 
 
-# Roles allowed to manage assessment instruments (questionnaires).
-# Capstone RBAC matrix = Admin-only; Psychologist added per product decision 2026-06-27.
-# TO REVERT to the capstone rule: remove Role.PSYCHOLOGIST from this tuple.
-INSTRUMENT_MANAGER_ROLES = (Role.ADMINISTRATOR, Role.PSYCHOLOGIST)
-
-
+# Roles allowed to manage assessment instruments: capabilities.INSTRUMENT_MANAGERS.
 class CanManageInstruments(BasePermission):
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated
-                    and _role_name(request) in INSTRUMENT_MANAGER_ROLES)
+                    and _role_name(request) in capabilities.INSTRUMENT_MANAGERS)
 
 
-# Roles allowed to VIEW assessment results (read-only). Staff is included for
-# case coordination. V2: in-app assessment administration was removed entirely.
-RESULT_VIEWER_ROLES = (Role.ADMINISTRATOR, Role.PSYCHOLOGIST, Role.STAFF)
+# Everyone who may use the system may VIEW assessment results (read-only).
+# Staff is included for case coordination. V2: in-app assessment administration
+# was removed entirely.
 
 
 class CanViewResults(BasePermission):
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated
-                    and _role_name(request) in RESULT_VIEWER_ROLES)
+                    and _role_name(request) in capabilities.EVERY_ROLE)
 
 
 class ChildRecordAccess(RecordsAccess):
@@ -74,7 +80,7 @@ class ChildRecordAccess(RecordsAccess):
         if request.method in SAFE_METHODS:
             return True
         role = _role_name(request)
-        if role in (Role.ADMINISTRATOR, Role.STAFF):
+        if role in capabilities.KEEPS_RECORDS:
             return True
         return (role == Role.PSYCHOLOGIST
                 and request.method in ("PUT", "PATCH")
@@ -107,7 +113,7 @@ def writes_case_referrals(request):
     serializer's draft summary apply it too - three copies of a write rule is
     how the summary endpoints came to check a read rule instead. A social
     worker is further limited to their own records by scope_to_visible."""
-    return _role_name(request) in (Role.ADMINISTRATOR, Role.STAFF)
+    return _role_name(request) in capabilities.KEEPS_RECORDS
 
 
 class ProgressRecordAccess(BasePermission):
@@ -120,13 +126,15 @@ class ProgressRecordAccess(BasePermission):
             return False
         role = _role_name(request)
         if request.method in SAFE_METHODS:
-            return role in (Role.ADMINISTRATOR, Role.STAFF, Role.PSYCHOLOGIST)
-        return role in (Role.ADMINISTRATOR, Role.PSYCHOLOGIST)
+            return role in capabilities.EVERY_ROLE
+        return role in capabilities.WRITES_CLINICAL
 
     def has_object_permission(self, request, view, obj):
         if request.method in SAFE_METHODS:
             return True
         role = _role_name(request)
+        # The ISA writes any child's record, as clinical/views.py
+        # _assert_can_write does; a write is not a read-scope question.
         if role == Role.ADMINISTRATOR:
             return True
         return obj.child.assigned_psychologist_id == request.user.id

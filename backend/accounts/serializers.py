@@ -4,10 +4,11 @@ from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
+from accounts import capabilities
 from accounts.models import AgencyProfile, Role, UserProfile
 from accounts.names import refuse_unreadable
 from activity.models import ActivityLog
-from accounts.token_claims import stamp
+from accounts.token_claims import refuse_unknown_role, stamp
 from activity.services import log_activity
 
 User = get_user_model()
@@ -340,6 +341,8 @@ class LoginSerializer(TokenObtainPairSerializer):
 
     @classmethod
     def get_token(cls, user):
+        # No token is minted for a role the code does not know.
+        refuse_unknown_role(user)
         token = super().get_token(user)
         token["role"] = user.role.role_name if user.role else None
         # Both doors mint tokens through here, so binding the token to the
@@ -373,10 +376,10 @@ class SignupSerializer(serializers.Serializer):
     password = serializers.CharField(write_only=True)
     requested_role = serializers.CharField(required=False, allow_blank=True)
 
-    # The two roles a person may ask to be. Administrator is absent on
-    # purpose: that account is the agency's recovery path and is created only
-    # by another administrator, so a queue for it is not a queue but a target.
-    REQUESTABLE = (Role.PSYCHOLOGIST, Role.STAFF)
+    # The roles a person may ask to be are capabilities.CLAIMABLE_AT_SIGNUP.
+    # Administrator is absent on purpose: that account is the agency's
+    # recovery path and is created only by another administrator, so a queue
+    # for it is not a queue but a target.
 
     # One message for every refusal that involves an existing address —
     # taken, archived, or otherwise spoken for. Saying which would turn this
@@ -399,9 +402,9 @@ class SignupSerializer(serializers.Serializer):
     def validate_requested_role(self, value):
         if not value:
             return ""
-        if value not in self.REQUESTABLE:
+        if value not in capabilities.CLAIMABLE_AT_SIGNUP:
             raise serializers.ValidationError(
-                f"Choose one of: {', '.join(self.REQUESTABLE)}.")
+                f"Choose one of: {', '.join(capabilities.CLAIMABLE_AT_SIGNUP)}.")
         return value
 
     def validate_password(self, value):

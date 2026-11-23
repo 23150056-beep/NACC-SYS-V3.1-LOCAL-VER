@@ -10,10 +10,11 @@ from rest_framework import generics, status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts import capabilities
 from accounts.models import Role, User
 from accounts.scoping import (role_of as _role, role_of_user as _role_of,
                               visible_children)
-from accounts.permissions import (IsAdministrator, IsAdminOrStaff, is_admin_or_assignee,
+from accounts.permissions import (IsAdministrator, KeepsRecords, is_admin_or_assignee,
                                   writes_case_referrals)
 from assistant import evaluation, guards, prompts, retention, tools
 from assistant.brief_facts import brief_facts, brief_kind
@@ -120,7 +121,6 @@ class AssistantSettingView(AssistantBaseView):
 # account could have the model rewrite any text they sent and be handed
 # whatever it produced; the screen simply never showed them the button. Found
 # when assistant/guards.py STAFF_DRAFTING was checked against the code.
-POLISH_ROLES = (Role.PSYCHOLOGIST, Role.ADMINISTRATOR)
 POLISH_REFUSED = "Polishing is for the people who write case notes."
 
 
@@ -132,7 +132,7 @@ class RemarkPolishView(AssistantBaseView):
     def post(self, request):
         # Before the gate, like the briefs: nothing reaches the model and no job
         # is written for a request that was refused for who is asking.
-        if _role(request) not in POLISH_ROLES:
+        if _role(request) not in capabilities.WRITES_CLINICAL:
             return Response({"detail": POLISH_REFUSED}, status=status.HTTP_403_FORBIDDEN)
         gate()
         raw = request.data.get("text")
@@ -175,7 +175,6 @@ class RemarkPolishView(AssistantBaseView):
 # assigned psychologist may edit theirs and close it (ChildRecordAccess,
 # is_admin_or_assignee). Remark polish stays as it was; this is a second door
 # with its own job type so the usage table can tell the two apart.
-RECORD_POLISH_ROLES = (Role.STAFF, Role.ADMINISTRATOR, Role.PSYCHOLOGIST)
 RECORD_POLISH_REFUSED = "Polishing is for the people who write the child's record."
 
 
@@ -189,7 +188,7 @@ class RecordPolishView(AssistantBaseView):
     def post(self, request):
         # Before the gate: nothing reaches the model and no job is written for
         # a request that was refused for who is asking.
-        if _role(request) not in RECORD_POLISH_ROLES:
+        if _role(request) not in capabilities.EVERY_ROLE:
             return Response({"detail": RECORD_POLISH_REFUSED}, status=status.HTTP_403_FORBIDDEN)
         gate()
         raw = request.data.get("text")
@@ -616,7 +615,7 @@ class CensusNarrativeView(AssistantBaseView):
     names, dates or counts something they do not hold.
     """
     throttle_scope = "assistant_draft"
-    permission_classes = [IsAdminOrStaff]
+    permission_classes = [KeepsRecords]
 
     def post(self, request):
         gate()

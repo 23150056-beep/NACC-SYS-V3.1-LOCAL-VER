@@ -227,12 +227,12 @@ class PsychologicalReportSerializer(_DraftSummaryForWritersOnly, serializers.Mod
         """None for "every child"; else the ids this request may see. Worked
         out once per response, however many reports it lists."""
         if "_visible_child_ids" not in self.context:
-            from accounts.models import Role
+            from accounts import capabilities
             from accounts.scoping import role_of, visible_children
             request = self.context.get("request")
             if request is None:
                 ids = set()
-            elif role_of(request) == Role.ADMINISTRATOR:
+            elif role_of(request) in capabilities.SEES_EVERY_RECORD:
                 ids = None
             else:
                 # Psychologists and, since 24 Sep 2026, social workers see only

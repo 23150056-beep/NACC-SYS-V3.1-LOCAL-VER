@@ -4,7 +4,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken
 from rest_framework_simplejwt.settings import api_settings
 
-from accounts.token_claims import CLAIM, STALE, matches
+from accounts.token_claims import CLAIM, STALE, matches, refuse_unknown_role
 
 # Paths a user with an outstanding forced password change is still allowed to
 # hit — everything else is blocked. This is what makes an admin-issued
@@ -20,7 +20,7 @@ _ALLOWED_WHILE_MUST_CHANGE_PASSWORD = {
 class ForcePasswordChangeJWTAuthentication(JWTAuthentication):
     """JWTAuthentication with three server-side gates the client cannot skip:
     a token minted under a password that has since changed, an outstanding
-    forced password change, and an account with no role."""
+    forced password change, and an account whose role is missing or unknown."""
 
     def get_user(self, validated_token):
         """SimpleJWT's lookup, with the role joined in. Every request reads
@@ -59,23 +59,21 @@ class ForcePasswordChangeJWTAuthentication(JWTAuthentication):
         if not matches(user, validated_token.get(CLAIM)):
             raise AuthenticationFailed(STALE, code="password_changed")
 
-        # An active account with no role has no defined access, and the
-        # codebase reads roles as "if psychologist ... else everything" in a
-        # dozen places — written when every active account had one. A roleless
-        # user therefore lands in the *else* branch of each, which on the
-        # activity stream means the full audit trail, child names included.
-        #
-        # Rather than audit and invert a dozen call sites, fail closed at the
-        # single door they all come through. Two paths could produce this
-        # state: approving nothing but reactivating a declined request, and
-        # creating a user without choosing a role. Both are now blocked at
-        # source as well — this is the backstop for whatever comes next.
+        # An account whose role the code cannot place has no defined access.
+        # Two ways to get there. No role at all: approving nothing but
+        # reactivating a declined request, or creating a user without choosing
+        # a role (both blocked at source now). Or a role row the code does not
+        # know, which can reach a database through Django admin or a migration
+        # that runs ahead of the code. Each decision in the code names the
+        # roles that take each branch and refuses the rest, but this is the
+        # single door they all come through, so it fails closed here too.
         if getattr(user, "role_id", None) is None:
             raise AuthenticationFailed(
                 "This account has no role assigned. Ask an administrator to "
                 "set one before signing in.",
                 code="no_role",
             )
+        refuse_unknown_role(user)
 
         if getattr(user, "must_change_password", False) and request.path not in _ALLOWED_WHILE_MUST_CHANGE_PASSWORD:
             raise AuthenticationFailed(

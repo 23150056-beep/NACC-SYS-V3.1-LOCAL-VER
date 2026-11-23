@@ -19,6 +19,7 @@ The rule is deliberately narrow:
 children app imports `accounts.permissions`, and a top-level import here would
 close that circle.
 """
+from accounts import capabilities
 from accounts.models import Role
 
 
@@ -63,17 +64,17 @@ def scope_to_visible(qs, request, path="child"):
     `path` is the lookup from the queryset's model to Child — "child" for a
     remark or a consent, and None for a queryset of children themselves.
 
-    Returns the queryset untouched for Administrators, which is why this is
+    Returns the queryset untouched for roles in capabilities.SEES_EVERY_RECORD, which is why this is
     safe to apply unconditionally at every call site: the caller no longer has
     to remember to write the role check as well. Anyone else - a role this
     does not know, or none - sees nothing.
     """
     role = role_of(request)
-    if role == Role.ADMINISTRATOR:
+    if role in capabilities.SEES_EVERY_RECORD:
         return qs
     if role == Role.PSYCHOLOGIST:
         owner = "assigned_psychologist"
-    elif role == Role.STAFF:
+    elif role in capabilities.HOLDS_RECORDS:
         owner = "social_worker"
     else:
         return qs.none()

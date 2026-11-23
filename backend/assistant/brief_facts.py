@@ -79,7 +79,9 @@ _SAID_IN_NEXT_STEPS = set().union(*_NEXT_STEP_GAPS.values())
 def brief_kind(role):
     """Which brief this role gets: the psychologist's clinical one, or the
     case brief of facts alone. Anyone who is not a psychologist gets the
-    latter, a role this does not know included."""
+    latter, a role this does not know included. A deliberate else (pinned by
+    assistant/tests/test_case_brief.py): the case brief is facts alone, from
+    plain queries the role's own scope narrows."""
     return CLINICAL if role == Role.PSYCHOLOGIST else CASE
 
 

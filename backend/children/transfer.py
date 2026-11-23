@@ -39,8 +39,8 @@ from django.db import OperationalError, transaction
 from django.utils import timezone
 
 from accounts import email_notifications
+from accounts.capabilities import may_hold_records
 from accounts.display import display_name
-from accounts.models import Role
 from activity.models import ActivityLog
 from children.models import Child
 from scheduling.visibility import case_ref
@@ -118,7 +118,7 @@ def parse(data):
 
 def _social_worker(pk, field):
     user = User.objects.select_related("role").filter(pk=pk).first()
-    if user is None or getattr(user.role, "role_name", None) != Role.STAFF:
+    if user is None or not may_hold_records(user):
         raise Refused({field: NOT_A_SOCIAL_WORKER})
     return user
 

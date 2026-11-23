@@ -38,7 +38,22 @@ the brief prefetch thread) is replaced by a no-op or an unreachable runtime.
 
 The "Officer" role row is made here, in the test database only (`OFFICER`):
 the role does not exist yet, and this table is what shows what it would get
-the day it does.
+the day it does. Since the authentication door refuses an account whose role
+the code does not know (accounts/authentication.py), that column is "refused"
+at every authenticated door until the role is added to
+`accounts.capabilities.EVERY_ROLE`.
+
+The "probe" identity is a role row called "Probe" with `EVERY_ROLE` patched,
+for that identity's class only, to include it: an account the code admits
+and has put in no other list. It is the detector for an `else` that grants by
+default - any cell of its column that is not refused, hidden or empty is a
+door that hands an unlisted role somebody else's access, and is explained in
+the diff that makes it so.
+
+**What the table does not cover.** Route-level gates only. Field-level and
+tool-level doors (the Social Worker field, the custodian, the edit's ask
+branch, closure reasons, transfer ends, the chatbot's tools) are pinned by
+unit tests in the apps' own test files.
 
 **Rewriting the table.** After a deliberate change:
 
@@ -69,6 +84,7 @@ from django.urls import URLResolver, get_resolver
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from accounts import capabilities
 from accounts.models import Role, User
 from accounts.serializers import LoginSerializer
 from activity.models import ActivityLog
@@ -82,12 +98,14 @@ from locations.models import Barangay, Municipality, Province
 from scheduling.models import AvailabilityBlock, Appointment, Unavailability
 
 OFFICER = "Officer"
+PROBE = "Probe"
 
 TABLE_PATH = Path(__file__).with_name("route_table.json")
 WRITE = bool(os.environ.get("ROUTE_TABLE_WRITE"))
 TIMING = bool(os.environ.get("ROUTE_TABLE_TIMING"))
 
-IDENTITIES = ("anonymous", "isa", "sw_own", "sw_other", "psy", "norole", "officer")
+IDENTITIES = ("anonymous", "isa", "sw_own", "sw_other", "psy", "norole", "officer",
+              "probe")
 
 # Mon 23 Nov 2026, 08:00 in TIME_ZONE. Never the wall clock.
 NOW = timezone.make_aware(datetime(2026, 11, 23, 8, 0))
@@ -254,7 +272,7 @@ def _outcome(method, response):
 
 
 class _Column:
-    """One identity's pass over every door. A mixin, so the seven classes
+    """One identity's pass over every door. A mixin, so the eight classes
     share the fixtures and `--parallel` can spread them."""
 
     identity = None
@@ -264,9 +282,9 @@ class _Column:
     def setUpTestData(cls):
         user = User.objects.create_user
         role = lambda name: Role.objects.get_or_create(role_name=name)[0]    # noqa: E731
-        admin_r, staff_r, psy_r, officer_r = (
+        admin_r, staff_r, psy_r, officer_r, probe_r = (
             role(Role.ADMINISTRATOR), role(Role.STAFF), role(Role.PSYCHOLOGIST),
-            role(OFFICER))
+            role(OFFICER), role(PROBE))
 
         def make(name, role_row, **extra):
             return user(email=f"{name}@racco1.gov.ph", username=name,
@@ -280,6 +298,7 @@ class _Column:
             "psy": make("psy", psy_r),
             "norole": make("norole", None),
             "officer": make("officer", officer_r),
+            "probe": make("probe", probe_r),
         }
         sw_own, sw_other, psy, isa = (
             cls.people[k] for k in ("sw_own", "sw_other", "psy", "isa"))
@@ -373,6 +392,11 @@ class _Column:
         job = AssistantJob.objects.create(
             job_type="brief", input_ref=f"child:{a.id}", output_text="Brief.",
             model_used="stub", created_by=psy, child=a)
+        # setUpTestData runs before setUp patches the clock, so the row was
+        # stamped with the real time and "today's brief" (latest/) was answered
+        # from whatever day the suite ran on. Pinned to the day before the
+        # frozen NOW: a brief that exists, and is not today's.
+        AssistantJob.objects.filter(pk=job.pk).update(created_at=NOW - timedelta(days=1))
 
         province = Province.objects.create(psgc_code="0102800000", name="Ilocos Norte")
         municipality = Municipality.objects.create(
@@ -410,6 +434,13 @@ class _Column:
             p.start()
             self.addCleanup(p.stop)
 
+        if self.identity == "probe":
+            # Admitted by the code, in no other list.
+            p = patch.object(capabilities, "EVERY_ROLE",
+                             capabilities.EVERY_ROLE + (PROBE,))
+            p.start()
+            self.addCleanup(p.stop)
+
         def unreachable(*args, **kwargs):
             raise urllib.error.URLError("no model runtime in this test")
 
@@ -425,7 +456,12 @@ class _Column:
         if self.identity != "anonymous":
             user = User.objects.select_related("role").get(
                 pk=self.people[self.identity].pk)
-            token = str(LoginSerializer.get_token(user).access_token)
+            # Minted as if the role were known: an account the code does not
+            # know is refused at the door, and the door is what is measured
+            # (a token issued before the role stopped being known).
+            with patch.object(capabilities, "EVERY_ROLE",
+                              capabilities.EVERY_ROLE + ((user.role.role_name,) if user.role else ())):
+                token = str(LoginSerializer.get_token(user).access_token)
             client.credentials(HTTP_AUTHORIZATION=f"Bearer {token}")
         return client
 
@@ -514,6 +550,7 @@ RouteColumn_sw_other = _column("sw_other")
 RouteColumn_psy = _column("psy")
 RouteColumn_norole = _column("norole")
 RouteColumn_officer = _column("officer")
+RouteColumn_probe = _column("probe")
 
 
 class TheTableHasNoStrangers(SimpleTestCase):
