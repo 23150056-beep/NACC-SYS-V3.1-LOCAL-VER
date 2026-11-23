@@ -15,8 +15,12 @@ Training Dates: December 3–4, 2026
 Venue: NACC RACCO I Conference Room
 
 Submitted by:
-Reynold Canedo
-Proponent and System Developer
+Cacdac, Vincent Adrian M.
+Carmelo, Levi Jedidiah N.
+Lopez, Paul Benedict C.
+Pasco, Paolo Antonio D.
+Peñamora, John Reynold C.
+Valmonte, Prex Cairo A.
 
 Date Submitted: November 23, 2026
 
@@ -54,17 +58,17 @@ Success targets: at least 80% of participants score 80% or higher on the post-te
 
 | Topic / System | Date / Time | Venue | Speaker | Audience |
 |---|---|---|---|---|
-| Pre-training set-up of computers and demo data | Dec 2, 2026 (Wed), 1:00–5:00 PM | Conference Room | Technical Support Lead | Training team |
-| Session 1: Orientation to NACC SYS V3.1 | Dec 3, 2026 (Thu), 8:45–10:00 AM | Conference Room | R. Canedo, Lead Trainer | All participants |
-| Session 2: Child Records | Dec 3, 10:15 AM–12:00 NN | Conference Room | R. Canedo, Lead Trainer | Social Workers, ISA |
-| Session 3: Scheduling and the Calendar | Dec 3, 1:00–2:45 PM | Conference Room | Co-Trainer | All participants |
-| Session 4: Case Study (SCSR) and QR self-report survey | Dec 3, 3:00–4:30 PM | Conference Room | R. Canedo, Lead Trainer | Social Workers |
-| Session 5: Clinical Workspace | Dec 4, 2026 (Fri), 8:30–10:30 AM | Conference Room | Co-Trainer | Psychologists |
-| Session 6: The Assistant and Data Privacy | Dec 4, 10:45 AM–12:00 NN | Conference Room | R. Canedo, Lead Trainer | All participants |
-| Session 7A: System Administration | Dec 4, 1:00–2:30 PM | ISA Workstation Area | Technical Support Lead | ISA |
-| Session 7B: Integrated Case Simulation | Dec 4, 1:00–2:30 PM | Conference Room | Lead and Co-Trainer | Social Workers, Psychologists |
-| Session 8: User Support | Dec 4, 2:45–3:45 PM | Conference Room | Technical Support Lead | All participants |
-| Post-test, evaluation and closing program | Dec 4, 3:45–5:00 PM | Conference Room | Training team | All participants |
+| Pre-training set-up of computers and demo data | Dec 2, 2026 (Wed), 1:00–5:00 PM | Conference Room | L. J. Carmelo | Training team |
+| Session 1: Orientation to NACC SYS V3.1 | Dec 3, 2026 (Thu), 8:45–10:00 AM | Conference Room | J. R. Peñamora | All participants |
+| Session 2: Child Records | Dec 3, 10:15 AM–12:00 NN | Conference Room | J. R. Peñamora | Social Workers, ISA |
+| Session 3: Scheduling and the Calendar | Dec 3, 1:00–2:45 PM | Conference Room | V. A. Cacdac | All participants |
+| Session 4: Case Study (SCSR) and QR self-report survey | Dec 3, 3:00–4:30 PM | Conference Room | J. R. Peñamora | Social Workers |
+| Session 5: Clinical Workspace | Dec 4, 2026 (Fri), 8:30–10:30 AM | Conference Room | V. A. Cacdac | Psychologists |
+| Session 6: The Assistant and Data Privacy | Dec 4, 10:45 AM–12:00 NN | Conference Room | J. R. Peñamora | All participants |
+| Session 7A: System Administration | Dec 4, 1:00–2:30 PM | ISA Workstation Area | L. J. Carmelo | ISA |
+| Session 7B: Integrated Case Simulation | Dec 4, 1:00–2:30 PM | Conference Room | J. R. Peñamora; V. A. Cacdac | Social Workers, Psychologists |
+| Session 8: User Support | Dec 4, 2:45–3:45 PM | Conference Room | L. J. Carmelo | All participants |
+| Post-test, evaluation and closing program | Dec 4, 3:45–5:00 PM | Conference Room | Development team | All participants |
 | Post-training support | Dec 7, 2026 – Jan 8, 2027, 8:00 AM–5:00 PM | Office; phone or chat | ISA; development team | All users |
 
 Session content
@@ -96,11 +100,11 @@ Session 8 — User Support. Describing a problem (screen, time, what was pressed
 | 8:00–8:30 AM | Registration; pre-test | Training Secretariat | Written pre-test |
 | 8:30–8:45 AM | Opening prayer, national anthem, welcome remarks | Head of Office | — |
 | 8:45–10:00 AM | Session 1: Orientation | Lead Trainer | Lecture and live demonstration |
-| 10:00–10:15 AM | Morning snack | Logistics Officer | — |
+| 10:00–10:15 AM | Morning snack | Logistics Coordinator | — |
 | 10:15 AM–12:00 NN | Session 2: Child Records | Lead Trainer | Demonstration, then guided hands-on |
-| 12:00–1:00 PM | Lunch break | Logistics Officer | — |
+| 12:00–1:00 PM | Lunch break | Logistics Coordinator | — |
 | 1:00–2:45 PM | Session 3: Scheduling | Co-Trainer | Hands-on in SW–psychologist pairs |
-| 2:45–3:00 PM | Afternoon snack | Logistics Officer | — |
+| 2:45–3:00 PM | Afternoon snack | Logistics Coordinator | — |
 | 3:00–4:30 PM | Session 4: Case Study and Survey | Lead Trainer | Hands-on with demo records |
 | 4:30–5:00 PM | Day 1 recap; questions; exit slip | Lead Trainer | Open forum |
 
@@ -110,11 +114,11 @@ Session 8 — User Support. Describing a problem (screen, time, what was pressed
 |---|---|---|---|
 | 8:00–8:30 AM | Registration; Day 1 review | Training Secretariat | Recap quiz |
 | 8:30–10:30 AM | Session 5: Clinical Workspace (SWs: practice clinic on Day 1 topics) | Co-Trainer; Facilitator | Hands-on |
-| 10:30–10:45 AM | Morning snack | Logistics Officer | — |
+| 10:30–10:45 AM | Morning snack | Logistics Coordinator | — |
 | 10:45 AM–12:00 NN | Session 6: The Assistant and Data Privacy | Lead Trainer | Demonstration; case discussion |
-| 12:00–1:00 PM | Lunch break | Logistics Officer | — |
+| 12:00–1:00 PM | Lunch break | Logistics Coordinator | — |
 | 1:00–2:30 PM | Session 7A (ISA) and Session 7B (SWs and Psychologists), in parallel | Technical Support Lead; Lead Trainer and Co-Trainer | Hands-on; return demonstration |
-| 2:30–2:45 PM | Afternoon snack | Logistics Officer | — |
+| 2:30–2:45 PM | Afternoon snack | Logistics Coordinator | — |
 | 2:45–3:45 PM | Session 8: User Support | Technical Support Lead | Lecture; troubleshooting drill |
 | 3:45–4:30 PM | Post-test; training evaluation form | Training Secretariat | Written test; survey |
 | 4:30–5:00 PM | Awarding of certificates; closing remarks | Head of Office; Lead Trainer | — |
@@ -129,17 +133,18 @@ A. People
 
 | Role | Number | Responsibility |
 |---|---|---|
-| Lead Trainer (Reynold Canedo, System Developer) | 1 | Sessions 1, 2, 4, 6 and 7B; overall program |
-| Co-Trainer | 1 | Sessions 3, 5 and 7B |
-| Technical Support Lead | 1 | Set-up of computers, Sessions 7A and 8, on-the-day troubleshooting |
-| Facilitator / Training Secretariat | 1 | Attendance, tests, evaluation forms, assisting during hands-on |
-| Logistics Officer (from the agency) | 1 | Venue, food, equipment |
+| Lead Trainer: Peñamora, John Reynold C. | 1 | Sessions 1, 2, 4, 6 and 7B; overall program |
+| Co-Trainer: Cacdac, Vincent Adrian M. | 1 | Sessions 3, 5 and 7B |
+| Technical Support Lead: Carmelo, Levi Jedidiah N. | 1 | Set-up of computers, Sessions 7A and 8, on-the-day troubleshooting |
+| Facilitator: Lopez, Paul Benedict C. | 1 | Assisting during hands-on; return demonstration checklists |
+| Training Secretariat: Pasco, Paolo Antonio D. | 1 | Attendance, tests, evaluation forms, documentation |
+| Logistics Coordinator: Valmonte, Prex Cairo A. | 1 | Venue, food and equipment, with the agency's staff |
 | Head of Office, NACC RACCO I | 1 | Opening and closing remarks; observer |
 | Participants: Social Workers | 7 (est.) | Training audience |
 | Participants: Psychologists | 3 (est.) | Training audience |
 | Participant: ISA | 1 | Training audience; first line of support afterwards |
 
-Participant numbers are estimates, to be confirmed with the Head of Office a week before. Food and materials are computed for 17 persons (11 participants, the Head of Office and 5 members of the training team).
+Participant numbers are estimates, to be confirmed with the Head of Office a week before. Food and materials are computed for 18 persons (11 participants, the Head of Office and the 6 members of the development team).
 
 B. Infrastructure and Equipment
 
@@ -156,7 +161,7 @@ A printed, ring-bound user manual for each role (Social Worker, Psychologist, IS
 
 D. Food
 
-Morning and afternoon snacks and lunch for 17 persons on both training days, coordinated by the Logistics Officer with a local caterer.
+Morning and afternoon snacks and lunch for 18 persons on both training days, arranged by the Logistics Coordinator with a local caterer.
 
 E. Financial Requirements
 
@@ -164,19 +169,19 @@ E. Financial Requirements
 
 | Item | Computation | Amount (PHP) |
 |---|---|---|
-| Lunch | 17 persons × 2 days × ₱200 | 6,800.00 |
-| AM and PM snacks | 17 persons × 2 days × 2 × ₱75 | 5,100.00 |
-| User manuals (printed, ring-bound) | 17 copies × ₱150 | 2,550.00 |
-| Quick reference cards (laminated) | 17 × ₱30 | 510.00 |
-| Training kits (notepad, pen, ID) | 17 × ₱60 | 1,020.00 |
-| Certificates | 17 × ₱20 | 340.00 |
+| Lunch | 18 persons × 2 days × ₱200 | 7,200.00 |
+| AM and PM snacks | 18 persons × 2 days × 2 × ₱75 | 5,400.00 |
+| User manuals (printed, ring-bound) | 18 copies × ₱150 | 2,700.00 |
+| Quick reference cards (laminated) | 18 × ₱30 | 540.00 |
+| Training kits (notepad, pen, ID) | 18 × ₱60 | 1,080.00 |
+| Certificates | 18 × ₱20 | 360.00 |
 | Tests and evaluation forms | lump sum | 300.00 |
 | Tarpaulin | 1 × ₱450 | 450.00 |
 | USB flash drives for the backup exercise | 2 × ₱350 | 700.00 |
 | Transportation of the training team and equipment | lump sum | 1,500.00 |
-| Subtotal | | 19,270.00 |
-| Contingency (10%) | | 1,927.00 |
-| TOTAL | | 21,197.00 |
+| Subtotal | | 20,230.00 |
+| Contingency (10%) | | 2,023.00 |
+| TOTAL | | 22,253.00 |
 
 Computers, projector, venue and power are provided in kind at no cost. Proposed source of funds: the agency's training and development allocation, subject to the Head of Office's approval.
 
@@ -208,10 +213,7 @@ Every problem is written on the issue log form (date, user, screen, what was don
 3. Training evaluation form (5-point scale) on content, speakers, materials, venue and food; and, after 30 days, the number and kind of requests in the issue log.
 The results are summarized in a post-training report submitted to the Head of Office within one week after the training.
 
-Prepared by:
-
-Reynold Canedo
-Proponent and System Developer
+Prepared by: the NACC SYS V3.1 Development Team
 
 Noted by:
 
