@@ -1,15 +1,20 @@
 # The RACC Officer: a Fourth Role, Above the Social Worker
 
 **Date:** 2026-11-16
-**Status:** Being built on `claude/sweet-wozniak-9fzjme` from 19 Nov 2026,
-with the owner's decisions in. The case study removal is merged into that
-branch (`b6940c3`); the lifecycle branch is not yet ("Before WP0").
+**Status:** Being built on `claude/sweet-wozniak-9fzjme`, with the owner's
+decisions in. WP0 is in (`ae37c40`, 22 Nov 2026) and WP1 is being built. The
+case study removal is merged (`b6940c3`) and has been live on the demo since 22
+Nov; the lifecycle branch is not merged yet ("Before WP0"). An independent
+review read this note against the code on 22 Nov 2026. What it changed is
+marked "(review)", and where it asked a question, the planner's answer is
+under "The planner's defaults".
 **Read at:** commit `ab447f2` (`main`), so line numbers are that commit's. On
 19 Nov the claims were checked again against `cloud-setup` (`48124fc`) and two
 branches not yet merged into it: `claude/bold-carson-4oq44s` (the case study,
 PRC license and Head of Office removed) and `claude/amazing-fermat-8hity4` (one
 door for every status). Where those change what this note says, it says so.
-Search by the symbol named; the line will have moved.
+Search by the symbol named; the line will have moved. Each work package's
+brief carries the current lines.
 **Owner's request:** "we're adding a new type of user and its: Social Welfare
 Officer IV/OIC - RACC Officer ... this role is the above level of the social
 worker and what this account can do is able to access all the child record of
@@ -49,12 +54,27 @@ last row was read from the code, not run:
 | Moving an appointment | `PATCH` answered 200, for the notes and for a new time. The own-child check asks Staff only | `scheduling/views.py:490` |
 | The Dashboard | today's sessions and availability, unfiltered | `clinical/reports_views.py:379` |
 | Availability and leave | every psychologist's hours, and their leave with its reason. These two lists ask only that somebody is signed in | `scheduling/views.py:40`, `:310` |
+| Slots and the month, asked without a child (review) | any psychologist's bookable times | `scheduling/views.py:203`-`209`, `:262`-`268` (current lines) |
 | The assistant's schedule answers | the agency's | `assistant/tools.py:566` |
+| The assistant's availability answer (review) | every active psychologist's free windows, with their email addresses | `assistant/tools.py:1306` (current line) |
 
 The same account was refused or shown nothing everywhere else it was tried:
 Records, a child's page, Monitoring, the clinical records, the Agency Summary,
 Users, roles, the admin console, booking, cancelling, closing, reopening,
 Transfer, Remove duplicate.
+
+**Measured again on 22 Nov 2026 by WP0's route table** (`ae37c40`): every
+route and method under `/api/`, as seven accounts. The table bears out every
+row above that a route can show, and adds the detail routes behind them: one
+appointment (`GET`, and `PUT` as well as `PATCH`), one availability window,
+one leave entry. Booking, filing a referral, starting a survey and writing
+availability or leave let the unknown role through the gate, but its empty
+body was refused. Read in the code, each of those then checks the child
+against the caller's scope or names its roles, so a real body is refused too.
+Everywhere else an authenticated door refused it or answered an empty list,
+and the account with no role was refused at every authenticated door. The two
+rows marked "(review)" need a query string or a tool call, which the table
+does not send.
 
 And these sit behind a gate today but would open the moment the gate admits a
 new role: Add Record's `else` is the ISA's path (`children/views.py:123`); an
@@ -71,10 +91,14 @@ an account with **no** role at the one door they all come through. That
 backstop asks whether there is a role at all. An Officer has one, so it does
 not catch an Officer.
 
-No such account can exist today, because the only Role rows are the three. It
-becomes real the day a fourth row is added. So the first thing the build does
-is the audit that comment put off: close those branches, before the role
-exists (work package 1).
+No screen can make such an account, because the only Role rows are the
+three. It can be made, though (review): `Role` is registered in Django admin
+(`accounts/admin.py:5`), where the ISA's superuser can add or rename a row,
+and Users then accepts any role but the Administrator's. It becomes real the
+day a fourth row is added. So the first thing the build does is the audit
+that comment put off: close those branches, before the role exists (work
+package 1). WP1 also makes `Role` read-only in Django admin, and widens the
+backstop above to refuse any role the code does not know.
 
 ## The idea in one line
 
@@ -130,7 +154,7 @@ single named list or function, so changing one later is a small change.
 | 2 | ~~What may the Officer do with a social worker's case study?~~ | **Does not apply.** The case study is removed. | - |
 | 3 | May the Officer remove a duplicate record? It is the only delete of a child. | **Yes**, with the same typed case number. | One list entry less. |
 | 4 | May the Officer close a case by outcome? | **Yes**, the ISA's list (`CASE_OUTCOMES`), any record. The ISA keeps it too. | One list entry less. Taking it from the ISA is a later decision. |
-| 5 | May the Officer record a psychologist's leave or availability? | **No.** The ISA for anybody, a psychologist for themselves, as now. | Two checks in `scheduling/views.py`. |
+| 5 | May the Officer record a psychologist's leave or availability? | **No.** The ISA for anybody, a psychologist for themselves, as now. | Four checks (review): the two write checks and combine in `scheduling/views.py`, and the serializer's owner check. |
 | 6 | The words on screen | **"SWO IV/OIC (RACC Officer)"** | Display only; one line. |
 | 7 | How many Officers at once? | **Any number.** An OIC designation changes hands and can overlap. No hand-over rule like the single administrator's. | - |
 | 8 | Who edits the agency details (name, address, contact)? | **Still the ISA**, in Settings. The Head of Office fields went with the case study. | One permission. |
@@ -140,6 +164,23 @@ single named list or function, so changing one later is a small change.
 
 Decisions 1, 3, 4 and 6 were explained to the owner one by one first; the
 others are the plan's defaults, accepted with the rest.
+
+### The planner's defaults (22 Nov 2026)
+
+The review asked seven questions and raised one more judgement call. None
+blocks WP1. Each is answered by the reading of the owner's decisions that fits
+them best, and the owner can overrule any of them:
+
+| # | Question | Default |
+|---|---|---|
+| a | A promoted worker's **closed** records come back active, still theirs, when the ISA or an Officer reopens them in place. Who holds them then? | Whoever held them, but they are **listed and can be moved**. The queue "held by an archived account" becomes "held by an account that cannot hold records" (inactive, or no longer a social worker), and Transfer's *from* end takes any account that holds active records; only the *to* end must be an active social worker. This also covers today's hole, a Staff account changed to Psychologist. |
+| b | Decision 11 refuses a change **away** from Staff while records are held. Does that include Staff to Psychologist, which the ISA can do today? | Yes. Decision 11's words cover every change away from Staff, and a psychologist cannot hold records either. It is a deliberate change to what the ISA can do. |
+| c | May the Officer read a psychologist's leave **reason**? | Yes, as a social worker does today (rule 2). |
+| d | The approval email when a Google applicant is made an Officer | "approved ... as a Social Welfare Officer IV/OIC (RACC Officer)". Today it would say "as Officer". |
+| e | The per-account email limits (60 an hour, 150 a day), for an Officer acting on every record | Unchanged, and raised only if an Officer actually meets them. A transfer is one email however many records move. |
+| f | "What to do next" for an Officer | On any active record they open, like the record's social worker (rule 2), through `works_record`. |
+| g | "How many RACC Officers are there?" in the chat | Answered only within "everyone". Adding "officer" to `count_people` changes the tool list, which needs the owner's `ai_eval` run. |
+| h | `CHAT_SYSTEM` says the user is "a psychologist, a staff member or an administrator" | Left byte-identical on purpose (no prompt changes). Its comment in `prompts.py` is corrected, which is not a prompt byte. |
 
 ## A day as the Officer
 
@@ -182,6 +223,9 @@ list of roles becomes a **named capability**, defined once.
 | `HOLDS_RECORDS` | Staff | may be `Child.social_worker` |
 | `CLAIMABLE_AT_SIGNUP` | Psychologist, Staff | what a stranger may say they are |
 | `SIGNS_IN_WITH_GOOGLE` | Officer, Psychologist, Staff | the Google door, for an account that already exists |
+| `WRITES_CLINICAL` (review) | Administrator, Psychologist | writes a clinical record; remark polish |
+| `MANAGES_AVAILABILITY` (review) | Administrator, Psychologist | combines availability windows (writing one is two single checks) |
+| `INSTRUMENT_MANAGERS` (review) | Administrator, Psychologist | `INSTRUMENT_MANAGER_ROLES`, moved here unchanged |
 
 `SEES_EVERY_RECORD` and `OVERSEES_CASEWORK` have the same members and are
 different questions: one is what is read, the other what may be decided. A
@@ -205,6 +249,21 @@ child:
 `IsAdminOrStaff` is renamed `KeepsRecords` (three call sites), so its name
 does not lie once the Officer passes it.
 
+**The lists are tuples, read through the module** (`capabilities.KEEPS_RECORDS`,
+never `from accounts.capabilities import KEEPS_RECORDS`) and never copied into
+a constant at import time, so a test can widen one list for one test (WP1).
+
+**The door they all come through** (WP1, planner, 22 Nov 2026).
+`accounts/authentication.py` already refuses an account with no role. It also
+refuses one whose role is not in `EVERY_ROLE`, at every authenticated door, at
+sign-in and at refresh: "This account's role is not set up in this version of
+NACC SYS." A role row that reaches a database before the code names it (a
+migration that runs ahead, a row added in Django admin, a fifth role one day)
+then reaches nothing until someone deliberately puts it in `EVERY_ROLE`; for
+the Officer that is WP3. It does not replace naming the branches: once the
+Officer is admitted, every `else` it could fall into must already name its
+role.
+
 **The browser's copy** is `frontend/src/config/roles.js`: the same lists under
 the same names, one per line, plus `worksRecord(user, child)`. A backend test
 reads the file and compares, the way `children/tests/test_intake.py` holds
@@ -212,16 +271,20 @@ reads the file and compares, the way `children/tests/test_intake.py` holds
 `App.jsx` import from it instead of writing arrays.
 
 **A guard against a second list:** a test reads the backend source and fails
-on a tuple or list holding two or more `Role.` constants outside
-`capabilities.py` (management commands included, migrations left out: a
-migration freezes its own copy), and reads `frontend/src` for an array
-literal holding two or more role names outside `config/roles.js`. A single
-`role == Role.X` is still allowed: that is a branch, not a list.
+on a tuple, list or set holding two or more roles (`Role.` constants or the
+role-name strings) outside `capabilities.py`, and on a list imported by name
+from it. Management commands are included. Tests and migrations are left out
+(review): a migration freezes its own copy and a test builds fixtures. The
+test also reads `frontend/src` for an array literal holding two or more role
+names outside `config/roles.js`. A single `role == Role.X` is still allowed:
+that is a branch, not a list.
 
 "Must be a Staff account" is written out in four places today
 (`children/serializers.py:139`, `children/transfer.py:121`,
 `accounts/sms_notifications.py:130` and `:171`). All four become
-`may_hold_records`, so decision 1 is one line whichever way it goes.
+`may_hold_records`, so decision 1 is one line whichever way it goes. A fifth
+picks the console's Workload by `role=Staff` (`accounts/admin_overview.py:767`,
+review) and reads `HOLDS_RECORDS`.
 
 ## What the Officer can do, door by door
 
