@@ -246,14 +246,21 @@ function TransferDrawer({ onClose, onMoved }) {
     for (const rows of map.values()) rows.sort((a, b) => a.id - b.id);
     return map;
   }, [lists]);
-  // Who can be moved FROM: anybody holding an active record. An account that can
-  // no longer sign in comes first, since that is the usual reason to be here.
+  // Who can be moved FROM: anybody holding an active record, whatever their role
+  // or status - a social worker promoted or changed to another role still holds
+  // what they held, and the server's Transfer accepts them. Only social workers
+  // are ever offered in To. An account that can no longer sign in comes first,
+  // since that is the usual reason to be here.
+  const holderPool = useMemo(
+    () => (lists?.users || []).filter((u) => u.role_name === 'Staff' || byHolder.has(u.id)),
+    [lists, byHolder],
+  );
   const holders = useMemo(
-    () => socialWorkers.filter((u) => byHolder.has(u.id))
+    () => holderPool.filter((u) => byHolder.has(u.id))
       .sort((a, b) => (a.status === 'active') - (b.status === 'active')
         || byHolder.get(b.id).length - byHolder.get(a.id).length
         || nameOf(a).localeCompare(nameOf(b))),
-    [socialWorkers, byHolder],
+    [holderPool, byHolder],
   );
   const receivers = useMemo(
     () => socialWorkers.filter((u) => u.status === 'active' && String(u.id) !== from)
@@ -261,7 +268,7 @@ function TransferDrawer({ onClose, onMoved }) {
     [socialWorkers, from],
   );
   const records = byHolder.get(Number(from)) || [];
-  const fromUser = socialWorkers.find((u) => String(u.id) === from);
+  const fromUser = holderPool.find((u) => String(u.id) === from);
   const toUser = socialWorkers.find((u) => String(u.id) === to);
   const chosen = records.filter((c) => ticked.has(c.id));
   // "All" is everything one move can take: the whole list, or its first 1,000.
@@ -409,7 +416,7 @@ function TransferDrawer({ onClose, onMoved }) {
                 // the checklist counts the same records.
                 return (
                   <option key={u.id} value={u.id}>
-                    {nameOf(u)}{u.status === 'active' ? '' : ' (inactive)'} — {num(n)} {plural(n, 'record', 'records')}
+                    {nameOf(u)}{u.status !== 'active' ? ' (inactive)' : u.role_name !== 'Staff' ? ' (not a social worker)' : ''} — {num(n)} {plural(n, 'record', 'records')}
                   </option>
                 );
               })}

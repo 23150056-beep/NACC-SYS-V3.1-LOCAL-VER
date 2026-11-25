@@ -10,6 +10,11 @@ class Role(models.Model):
     ADMINISTRATOR = "Administrator"
     PSYCHOLOGIST = "Psychologist"
     STAFF = "Staff"
+    OFFICER = "Officer"
+    # The role rows that must exist. Not who may use the system: that is
+    # accounts.capabilities.EVERY_ROLE, which gains the Officer in a later
+    # work package.
+    NAMES = (ADMINISTRATOR, PSYCHOLOGIST, STAFF, OFFICER)
 
     role_name = models.CharField(max_length=50, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)

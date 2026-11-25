@@ -721,6 +721,14 @@ class UserViewSet(viewsets.ModelViewSet):
         data["sms_queued"] = sms_queued
         return Response(data, status=status.HTTP_201_CREATED)
 
+    def update(self, request, *args, **kwargs):
+        # One transaction around the check and the save: a change of role locks
+        # the account's row while it counts the records it holds
+        # (UserWriteSerializer.validate_role), and the lock must last until the
+        # save, or a transfer could move a record in between.
+        with transaction.atomic():
+            return super().update(request, *args, **kwargs)
+
     def perform_update(self, serializer):
         # What the form sent and what was held, so the log can tell a change of
         # role from an edit. A change of role writes its own line, which names
@@ -885,7 +893,7 @@ class UserViewSet(viewsets.ModelViewSet):
             if not role_id:
                 return Response({"role": "Choose the role this account should have."},
                                 status=status.HTTP_400_BAD_REQUEST)
-            role = Role.objects.filter(pk=role_id).first()
+            role = Role.objects.filter(pk=role_id, role_name__in=Role.NAMES).first()
             if role is None:
                 return Response({"role": "Unknown role."},
                                 status=status.HTTP_400_BAD_REQUEST)
@@ -977,7 +985,9 @@ class RoleListView(generics.ListAPIView):
     serializer_class = RoleSerializer
 
     def get_queryset(self):
-        return Role.objects.all().order_by("role_name")
+        # Only the rows the code knows (Role.NAMES): a row added by hand is not
+        # a role anybody can be given.
+        return Role.objects.filter(role_name__in=Role.NAMES).order_by("role_name")
 
 
 class PsychologistListView(generics.GenericAPIView):

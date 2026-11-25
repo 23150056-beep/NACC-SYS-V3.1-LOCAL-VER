@@ -163,7 +163,7 @@ const QUEUES = {
   temp_passwords: { icon: 'key-round', label: ['Temp password unchanged', 'Temp passwords unchanged'] },
   stuck_requests: { icon: 'hourglass', label: ['Psychologist request stuck', 'Psychologist requests stuck'], open: 'Open Records' },
   no_social_worker: { icon: 'user-x', label: ['No social worker yet', 'No social worker yet'], open: 'Open Records' },
-  archived_holder: { icon: 'archive', label: ['Held by an archived account', 'Held by an archived account'], open: 'Open Records' },
+  archived_holder: { icon: 'archive', label: ['Held by an unavailable account', 'Held by an unavailable account'], open: 'Open Records' },
   names_to_fix: { icon: 'type', label: ['Name to fix', 'Names to fix'] },
   duplicates: { icon: 'copy', label: ['Possible duplicate', 'Possible duplicates'], open: 'Open Records' },
 };

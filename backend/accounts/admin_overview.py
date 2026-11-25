@@ -387,17 +387,32 @@ def _stuck_requests(now):
 
 # Who holds a record, for the active ones: the three counts below read the same
 # rows, so they are taken in one query.
-_SOCIAL_GONE = Q(social_worker__isnull=False) & ~Q(social_worker__status=User.ACTIVE)
+_SOCIAL_INACTIVE = Q(social_worker__isnull=False) & ~Q(social_worker__status=User.ACTIVE)
+# An active account whose role cannot hold records (a social worker promoted or
+# changed to Psychologist). Read at call time: a list may be widened in a test.
+def _social_wrong_role():
+    return (Q(social_worker__isnull=False) & Q(social_worker__status=User.ACTIVE)
+            & ~Q(social_worker__role__role_name__in=capabilities.HOLDS_RECORDS))
+
+
+def _social_gone():
+    """A social worker who cannot hold records: inactive, or no longer in a
+    role that may."""
+    return _SOCIAL_INACTIVE | _social_wrong_role()
+
+
 _PSYCH_GONE = Q(assigned_psychologist__isnull=False) & ~Q(
     assigned_psychologist__status=User.ACTIVE)
 
 
 def _active_children_tally():
+    gone = _social_gone()
     return Child.objects.filter(status=Child.ACTIVE).aggregate(
         no_social_worker=Count("id", filter=Q(social_worker__isnull=True)),
         no_psychologist=Count("id", filter=Q(assigned_psychologist__isnull=True)),
-        stranded=Count("id", distinct=True, filter=_SOCIAL_GONE | _PSYCH_GONE),
-        social_gone=Count("social_worker", distinct=True, filter=_SOCIAL_GONE),
+        stranded=Count("id", distinct=True, filter=gone | _PSYCH_GONE),
+        social_gone=Count("social_worker", distinct=True, filter=_SOCIAL_INACTIVE),
+        social_role=Count("social_worker", distinct=True, filter=_social_wrong_role()),
         psych_gone=Count("assigned_psychologist", distinct=True, filter=_PSYCH_GONE))
 
 
@@ -414,23 +429,35 @@ def _no_social_worker(now, tally):
 
 
 def _archived_holder(now, tally):
-    """Records whose social worker or psychologist can no longer sign in.
+    """Records whose social worker or psychologist can no longer hold them.
     Archiving an account moves nothing (CLAUDE.md, "Each social worker's own
-    records"), so these sit with a holder nobody can reach until the ISA
-    transfers them. A psychologist's caseload is the same case: the child
-    stays "assigned" to an account that cannot open a single page."""
-    stranded = Child.objects.filter(status=Child.ACTIVE).filter(_SOCIAL_GONE | _PSYCH_GONE)
+    records"), and neither does a change of role, so these sit with a holder
+    nobody can reach until the ISA transfers them: a deactivated account, or
+    an active one that is no longer a social worker (a closed record of a
+    promoted worker, reopened in place, comes back to them). A psychologist's
+    caseload is the same case: the child stays "assigned" to an account that
+    cannot open a single page. The key stays `archived_holder`."""
+    stranded = Child.objects.filter(status=Child.ACTIVE).filter(_social_gone() | _PSYCH_GONE)
     count = tally["stranded"]
-    holders = tally["social_gone"] + tally["psych_gone"]
-    hint = (f"Held by {_plural(holders, 'deactivated account', 'deactivated accounts')}"
-            if count else "No record is held by a deactivated account")
+    inactive = tally["social_gone"] + tally["psych_gone"]
+    wrong_role = tally["social_role"]
+    parts = []
+    if inactive:
+        parts.append(f"{_plural(inactive, 'deactivated account', 'deactivated accounts')}")
+    if wrong_role:
+        parts.append(f"{_plural(wrong_role, 'account', 'accounts')} no longer a social worker")
+    hint = ("Held by " + " · ".join(parts)) if count else \
+        "No record is held by a deactivated account"
     items = []
-    rows = (stranded.select_related("social_worker", "assigned_psychologist")
+    rows = (stranded.select_related("social_worker__role", "assigned_psychologist")
             .order_by("id")[:QUEUE_ITEMS])
     for c in rows:
         held = []
-        if c.social_worker_id and c.social_worker.status != User.ACTIVE:
-            held.append(f"Social worker {_person(c.social_worker)} (inactive)")
+        if c.social_worker_id:
+            if c.social_worker.status != User.ACTIVE:
+                held.append(f"Social worker {_person(c.social_worker)} (inactive)")
+            elif not capabilities.may_hold_records(c.social_worker):
+                held.append(f"{_person(c.social_worker)} (no longer a social worker)")
         if c.assigned_psychologist_id and c.assigned_psychologist.status != User.ACTIVE:
             held.append(f"Psychologist {_person(c.assigned_psychologist)} (inactive)")
         items.append(_item(_child_label(c), " · ".join(held), _child_link(c.pk)))
@@ -703,11 +730,12 @@ def _people(now, holders):
 
     counts = dict(User.objects.filter(status=User.ACTIVE, role__isnull=False)
                   .values_list("role__role_name").annotate(n=Count("id")))
-    # Every role the code knows, in the order the console has always drawn
-    # them: administrators, social workers, then the rest.
+    # Every role row there is, in the order the console has always drawn
+    # them: administrators, social workers, psychologists, then the Officer.
     roles = {name: counts.get(name, 0)
-             for name in sorted(capabilities.EVERY_ROLE,
-                                key=lambda n: (n != Role.ADMINISTRATOR, n != Role.STAFF))}
+             for name in sorted(Role.NAMES,
+                                key=lambda n: (n != Role.ADMINISTRATOR, n != Role.STAFF,
+                                               n == Role.OFFICER))}
 
     # Distinct people, latest sign-in each. The sign-in line is the only
     # record of one: User.last_login is stamped by the Google door alone.

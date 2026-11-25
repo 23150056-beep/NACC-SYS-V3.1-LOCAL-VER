@@ -10,9 +10,14 @@ same move for many at once, and the ISA's alone (`POST /api/children/transfer/`)
 The rules, all of them checked before anything is written:
 
 * Who may HOLD a record is the record form's rule (`validate_social_worker`): a
-  Staff account. The one the records leave may be any status - an archived
-  account is the usual reason to do this - but the one they go to must be
-  active, or the records would be handed to somebody who cannot open them.
+  Staff account. The one the records leave may be any status AND any role, as
+  long as it holds an active record - an archived account is the usual reason
+  to do this, and a social worker promoted (or changed to Psychologist) with a
+  closed record reopened in place is the other. The one they go to must be an
+  active social worker, or the records would be handed to somebody who cannot
+  open them; its row is locked while it is checked, so a change of its role
+  (accounts' UserWriteSerializer.validate_role locks the same row) cannot slip
+  between the check and the move.
 * Every id must be an ACTIVE record held by the one they leave. If any is not
   - closed, gone, already moved, or someone else's - the whole request is
   refused and NOTHING moves, with the case numbers that are the problem. A
@@ -116,9 +121,23 @@ def parse(data):
     return from_id, to_id, ids
 
 
-def _social_worker(pk, field):
-    user = User.objects.select_related("role").filter(pk=pk).first()
+def _social_worker(pk, field, lock=False):
+    """The account that must be a social worker: the end the records go to."""
+    users = User.objects.select_for_update() if lock else User.objects.select_related("role")
+    user = users.filter(pk=pk).first()
     if user is None or not may_hold_records(user):
+        raise Refused({field: NOT_A_SOCIAL_WORKER})
+    return user
+
+
+def _holder(pk, field):
+    """The account the records leave: any role, any status, so long as it holds
+    an active record. A social worker promoted with a closed record reopened in
+    place, or a Staff account changed to Psychologist before roles were
+    checked, still holds records nobody else can reach."""
+    user = User.objects.select_related("role").filter(pk=pk).first()
+    if user is None or not (may_hold_records(user) or Child.objects.filter(
+            social_worker=user, status=Child.ACTIVE).exists()):
         raise Refused({field: NOT_A_SOCIAL_WORKER})
     return user
 
@@ -217,16 +236,19 @@ def move(by, from_id, to_id, ids):
 
     Written to the audit trail inside the same transaction (`_lines`); a move
     whose lines could not be written is not made."""
-    source = _social_worker(from_id, "from_social_worker")
-    target = _social_worker(to_id, "to_social_worker")
-    if target.status != User.ACTIVE:
-        raise Refused({"to_social_worker": f"{display_name(target)}'s account is not active, "
-                                           "so records cannot be moved to it."})
-    if source.pk == target.pk:
-        raise Refused({"to_social_worker": "Choose a different social worker to move them to."})
+    source = _holder(from_id, "from_social_worker")
 
     try:
         with transaction.atomic():
+            # The receiving account's row is locked while its role and status
+            # are judged: a change of its role locks the same row, so one of
+            # the two waits for the other and then sees the result.
+            target = _social_worker(to_id, "to_social_worker", lock=True)
+            if target.status != User.ACTIVE:
+                raise Refused({"to_social_worker": f"{display_name(target)}'s account is not active, "
+                                                   "so records cannot be moved to it."})
+            if source.pk == target.pk:
+                raise Refused({"to_social_worker": "Choose a different social worker to move them to."})
             # Locked, so a record closed or moved while this checks is not moved
             # unseen, and in id order, so two moves that overlap queue up behind
             # each other instead of each holding what the other wants. No

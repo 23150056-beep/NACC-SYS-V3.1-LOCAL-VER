@@ -25,6 +25,7 @@ from pathlib import Path
 from django.test import SimpleTestCase
 
 from accounts import capabilities
+from accounts.models import Role
 
 ROLES_JS = Path(__file__).resolve().parents[3] / "frontend" / "src" / "config" / "roles.js"
 
@@ -99,7 +100,7 @@ class RoleListsAgreeAcrossTheWireTest(SimpleTestCase):
             "A second list is a second answer; name it in capabilities.py first.")
 
     def test_every_backend_list_holds_real_roles(self):
-        valid = set(capabilities.EVERY_ROLE)
+        valid = set(Role.NAMES)
         for list_name, members in _backend_lists().items():
             for name in members:
                 self.assertIn(name, valid, f"capabilities.{list_name}: {name!r} is not a role this system has")
@@ -107,7 +108,7 @@ class RoleListsAgreeAcrossTheWireTest(SimpleTestCase):
     def test_the_names_are_real_roles(self):
         """Guards a typo on either side: 'Psychologists' would pass an
         equality check against itself and match nobody."""
-        valid = set(capabilities.EVERY_ROLE)
+        valid = set(Role.NAMES)
         for list_name, items in self.frontend.items():
             for name in items:
                 self.assertIn(name, valid, f"{list_name}: {name!r} is not a role this system has")

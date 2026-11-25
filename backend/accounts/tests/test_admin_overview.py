@@ -1055,12 +1055,12 @@ class PeopleTest(ConsoleCase):
         self.person("gone@t.ph", "Gone", "Away", Role.STAFF, status=User.ARCHIVED)
         self.pending("wait@t.ph", "Wait", "Ing", Role.STAFF)
         self.assertEqual(self.overview()["people"]["roles"],
-                         {"Administrator": 1, "Staff": 2, "Psychologist": 2})
+                         {"Administrator": 1, "Staff": 2, "Psychologist": 2, "Officer": 0})
 
-    def test_roles_are_always_all_three(self):
+    def test_roles_are_always_all_four(self):
         User.objects.exclude(pk=self.admin.pk).delete()
         self.assertEqual(self.overview()["people"]["roles"],
-                         {"Administrator": 1, "Staff": 0, "Psychologist": 0})
+                         {"Administrator": 1, "Staff": 0, "Psychologist": 0, "Officer": 0})
 
     def test_signed_in_today_is_judged_on_the_manila_date_not_the_utc_one(self):
         # 23:59 the evening before, and 00:01 this morning: the latter is still

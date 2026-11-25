@@ -4,7 +4,7 @@ from django.contrib.auth import get_user_model
 from django.db.models import Q
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
-from accounts import capabilities
+from accounts import capabilities, role_change
 from accounts.models import AgencyProfile, Role, UserProfile
 from accounts.names import refuse_unreadable
 from activity.models import ActivityLog
@@ -201,7 +201,7 @@ class UserWriteSerializer(serializers.ModelSerializer):
         return user
 
     def validate_role(self, value):
-        """A role can be corrected, but not in the two directions that would
+        """Only a role row the code knows can be assigned; then: a role can be corrected, but not in the two directions that would
         break something the rest of the system depends on.
 
         Roles used to be frozen once assigned (adviser's rule). That left an
@@ -218,6 +218,8 @@ class UserWriteSerializer(serializers.ModelSerializer):
         * An Administrator's role cannot be changed away. It is the agency's
           recovery account, and there may be only one.
         """
+        if value is not None and value.role_name not in Role.NAMES:
+            raise serializers.ValidationError("Unknown role.")
         instance = self.instance
         if instance is None or instance.role_id == getattr(value, "id", None):
             return value
@@ -229,6 +231,12 @@ class UserWriteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 "An Administrator's role cannot be changed. Create the "
                 "replacement administrator first.")
+        # Away from Staff only while no active record is held (role_change).
+        # Locks the account's row; UserViewSet.update keeps the transaction
+        # open through the save.
+        refusal = role_change.refusal_for(instance, value)
+        if refusal:
+            raise serializers.ValidationError(refusal)
         return value
 
     def update(self, instance, validated_data):

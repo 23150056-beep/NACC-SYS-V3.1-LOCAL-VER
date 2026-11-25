@@ -27,8 +27,28 @@ from accounts.tests.probe import PROBE
 User = get_user_model()
 
 BACKEND = Path(__file__).resolve().parents[2]
-ROLE_NAMES = {Role.ADMINISTRATOR, Role.PSYCHOLOGIST, Role.STAFF}
-ROLE_ATTRS = {"ADMINISTRATOR", "PSYCHOLOGIST", "STAFF"}
+ROLE_NAMES = set(Role.NAMES)
+ROLE_ATTRS = {"ADMINISTRATOR", "PSYCHOLOGIST", "STAFF", "OFFICER"}
+
+# The one place besides capabilities.py that enumerates roles: Role.NAMES,
+# "the role rows that must exist" (not who may use the system, which is
+# capabilities.EVERY_ROLE). Exempted by name and place, nothing else is.
+ROLE_NAMES_TUPLE = ("accounts/models.py", "Role", "NAMES")
+
+
+def _is_role_names_tuple(rel, tree, node):
+    """Is this literal the value of `NAMES = (...)` inside `class Role` in
+    accounts/models.py?"""
+    if rel.as_posix() != ROLE_NAMES_TUPLE[0]:
+        return False
+    for cls in ast.walk(tree):
+        if isinstance(cls, ast.ClassDef) and cls.name == ROLE_NAMES_TUPLE[1]:
+            for stmt in cls.body:
+                if (isinstance(stmt, ast.Assign) and stmt.value is node
+                        and any(isinstance(t, ast.Name) and t.id == ROLE_NAMES_TUPLE[2]
+                                for t in stmt.targets)):
+                    return True
+    return False
 
 A, P, S = Role.ADMINISTRATOR, Role.PSYCHOLOGIST, Role.STAFF
 
@@ -221,10 +241,26 @@ class RoleListsAreNotWrittenAnywhereElse(SimpleTestCase):
             for node in ast.walk(tree):
                 if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
                     refs = _role_refs(node)
+                    if _is_role_names_tuple(rel, tree, node):
+                        continue
                     if len(refs) >= 2:
                         found.append(f"{rel}:{node.lineno} {refs}")
         self.assertEqual([], found,
                          "name the list once in accounts/capabilities.py and read it from there")
+
+    def test_role_names_is_the_four_rows_and_not_who_may_sign_in(self):
+        self.assertEqual((A, P, S, "Officer"), Role.NAMES)
+        self.assertEqual("Officer", Role.OFFICER)
+        # The rows that exist are not who may use the system (until WP3).
+        self.assertNotIn(Role.OFFICER, capabilities.EVERY_ROLE)
+
+    def test_the_exemption_is_only_role_names(self):
+        src = "class Role:\n    NAMES = (A, B)\n    OTHER = (A, B)\n"
+        tree = ast.parse(src)
+        tuples = [n for n in ast.walk(tree) if isinstance(n, ast.Tuple)]
+        rel = Path("accounts/models.py")
+        self.assertEqual([True, False], [_is_role_names_tuple(rel, tree, n) for n in tuples])
+        self.assertFalse(_is_role_names_tuple(Path("accounts/other.py"), tree, tuples[0]))
 
     def test_lists_are_read_through_the_module(self):
         found = []

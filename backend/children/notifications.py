@@ -378,6 +378,8 @@ def _role_words(role):
         return "a Social Worker (SW)"
     if name == "Psychologist":
         return "a Psychologist"
+    if name == "Officer":
+        return "a Social Welfare Officer IV/OIC (RACC Officer)"
     return name
 
 

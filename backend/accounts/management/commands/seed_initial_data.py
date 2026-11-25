@@ -1,6 +1,5 @@
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
-from accounts import capabilities
 from accounts.models import Role
 
 User = get_user_model()
@@ -10,7 +9,7 @@ class Command(BaseCommand):
     help = "Seed default roles and an initial administrator account."
 
     def handle(self, *args, **options):
-        for name in capabilities.EVERY_ROLE:
+        for name in Role.NAMES:
             Role.objects.get_or_create(role_name=name)
         self.stdout.write(self.style.SUCCESS("Roles seeded."))
 
