@@ -3,7 +3,7 @@
 **Date:** 2026-11-16
 **Status:** Being built on `claude/sweet-wozniak-9fzjme`, with the owner's
 decisions in. WP0 is in (`ae37c40`, 22 Nov 2026), WP1 is in (`c7eae2c`, `4d4416f`,
-23 Nov); WP2 is next. The
+23 Nov) and WP2 is in (25 Nov); WP3 waits for the lifecycle branch. The
 case study removal is merged (`b6940c3`) and has been live on the demo since 22
 Nov; the lifecycle branch is not merged yet ("Before WP0"). An independent
 review read this note against the code on 22 Nov 2026. What it changed is
@@ -965,6 +965,26 @@ console error and its content drawn.
 
 ### WP2. The role exists
 
+**Done (25 Nov 2026).** Built as below, reviewed two ways (no blocker, no
+major), fixed and read again; 3,739 tests pass and the route table did not
+move. The migration was rehearsed on a database with accounts: it adds the
+Officer's row and touches nothing else. Decided by the planner on the way:
+
+- **WP2 never deploys without WP3.** From WP2 the ISA can grant the Officer
+  in Users and Access Requests, and until WP3 such an account is refused at
+  every door (a Google applicant would be emailed that access was approved).
+  Harmless locally; on the demo it would be a role that does nothing.
+- **Workload** still lists social workers by role, so a promoted account
+  that holds a reopened record is in the queue but not in the Workload
+  column (the total is not short). WP4's casework desk lists every holder.
+- **The empty queue's hint** still says "deactivated account"; WP5's wording
+  pass renames it. The tile reads "Held by an unavailable account".
+- **Only Transfer locks the account it gives records to.** The Social Worker
+  field, a worker's own new record and a reopen at intake do not, so a
+  record could reach an account in the instant its role changes. Accepted:
+  the queue lists it and Transfer moves it.
+
+
 - **From WP1** (23 Nov): `seed_initial_data` and the console's people counts
   read `EVERY_ROLE` today and move to `Role.NAMES`; the pin tests
   (`test_cross_stack_roles.py`, `test_capabilities.py`) take their valid
@@ -1127,6 +1147,9 @@ branches as the ISA. So WP1 ships and is verified as deployed, on both
 `nacc-v3-demo-api` and `nacc-v3-demo-web` (they deploy independently;
 review), **before** any push that carries the migration. Two pushes, not
 one. The migration itself is additive and safe for a release still serving.
+
+**WP2 and WP3 go together** (25 Nov): WP2 alone lets the ISA grant a role
+that reaches nothing.
 
 **And the Officer does not reach `cloud-setup` before the lifecycle does.**
 Until the lifecycle lands, a record's `status` can be set by an ordinary save
