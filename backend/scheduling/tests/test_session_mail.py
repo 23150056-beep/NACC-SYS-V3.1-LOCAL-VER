@@ -89,6 +89,10 @@ class SessionMailBase(TestCase):
         self.admin = make("admin@t.ph", "Ada", "Admin", Role.ADMINISTRATOR)
         self.psy = make("psy@t.ph", "Marivic", "Bulan", Role.PSYCHOLOGIST)
         self.psy2 = make("psy2@t.ph", "Jose", "Rizal", Role.PSYCHOLOGIST)
+        # The RACC Officer holds nothing and gets no email of its own; its row
+        # is the migration's, so it is fetched, not created.
+        roles[Role.OFFICER] = Role.objects.get_or_create(role_name=Role.OFFICER)[0]
+        self.officer = make("officer@t.ph", "Corazon", "Dizon", Role.OFFICER)
         self.child = self._child(self.sw)
         for person in (self.psy, self.psy2):
             AvailabilityBlock.objects.create(

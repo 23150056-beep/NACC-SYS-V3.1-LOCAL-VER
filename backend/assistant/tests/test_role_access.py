@@ -57,6 +57,11 @@ class RoleFixture(APITestCase):
             email="s@racco1.gov.ph", username="s", password="pass1234", role=staff_role)
         self.admin = User.objects.create_user(
             email="a@racco1.gov.ph", username="a", password="pass1234", role=admin_role)
+        # The RACC Officer holds no record and works every one; its row is the
+        # migration's, so it is fetched.
+        self.officer = User.objects.create_user(
+            email="o@racco1.gov.ph", username="o", password="pass1234",
+            role=Role.objects.get_or_create(role_name=Role.OFFICER)[0])
         self.child = Child.objects.create(
             fullname="Maria Santos", assigned_psychologist=self.psy,
             social_worker=self.sw, assignee_sees_history=False)
@@ -225,6 +230,20 @@ class SummaryIsAWriteToTheDocumentTest(RoleFixture):
         self.assertEqual(self._confirm(
             self.sw, "confirm-case-referral-summary", self.referral).status_code, 200)
 
+    def test_the_officer_summarises_a_referral_on_any_record_and_never_a_report(self):
+        """The Officer follows the social worker's rule on the referral and has
+        no claim on the psychologist's report (is_admin_or_assignee is not
+        widened: the two rules only look alike)."""
+        self.assertEqual(
+            self._summarize(self.officer, "case-referral", self.referral).status_code, 200)
+        self.assertEqual(self._confirm(
+            self.officer, "confirm-case-referral-summary", self.referral).status_code, 200)
+        self.assertEqual(self._summarize(self.officer, "report", self.report).status_code, 403)
+        self.assertEqual(self._confirm(
+            self.officer, "confirm-summary", self.report).status_code, 403)
+        self.report.refresh_from_db()
+        self.assertEqual(self.report.ai_summary, self.CONFIRMED)
+
     def test_confirming_honours_the_carry_history_control_too(self):
         """Summarising already refused a report the psychologist did not
         author when history is hidden; confirming did not, so they could
@@ -261,6 +280,7 @@ class SummaryIsAWriteToTheDocumentTest(RoleFixture):
             ai_summary="REFERRAL DRAFT", ai_summary_confirmed=False)
         expected = {
             self.sw: ("REFERRAL DRAFT", None),
+            self.officer: ("REFERRAL DRAFT", None),
             self.psy: (None, "REPORT DRAFT"),
             self.admin: ("REFERRAL DRAFT", "REPORT DRAFT"),
         }
@@ -273,7 +293,7 @@ class SummaryIsAWriteToTheDocumentTest(RoleFixture):
                 self.assertEqual(seen["chart referral"], referral)
 
     def test_a_confirmed_summary_is_for_every_reader(self):
-        for user in (self.sw, self.psy, self.admin):
+        for user in (self.sw, self.psy, self.admin, self.officer):
             seen = self._summaries_seen_by(user)
             with self.subTest(user=user.email):
                 self.assertEqual(seen["report"], self.CONFIRMED)
@@ -306,7 +326,7 @@ class OnlyTheChatbotIsHostedTest(RoleFixture):
     def test_capabilities_say_drafting_is_off_for_every_role(self):
         # The screens hide the brief's prose, polish, summary and narrative
         # buttons on this one answer; the chatbot is still described.
-        for user in (self.psy, self.sw, self.admin):
+        for user in (self.psy, self.sw, self.admin, self.officer):
             with self.subTest(user=user.email):
                 self.client.force_authenticate(user)
                 res = self.client.get("/api/assistant/capabilities/")

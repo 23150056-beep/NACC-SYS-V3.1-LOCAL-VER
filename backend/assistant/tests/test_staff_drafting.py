@@ -75,6 +75,10 @@ class StaffDraftingFixture(APITestCase):
         self.sw = User.objects.create_user(
             email="s@racco1.gov.ph", username="s", password="pass1234",
             role=roles[Role.STAFF])
+        # The RACC Officer holds nothing; its row is the migration's.
+        self.officer = User.objects.create_user(
+            email="o@racco1.gov.ph", username="o", password="pass1234",
+            role=Role.objects.get_or_create(role_name=Role.OFFICER)[0])
         self.child = Child.objects.create(
             fullname="Maria Santos", first_name="Maria", last_name="Santos",
             social_worker=self.sw, assigned_psychologist=self.psy)
@@ -309,3 +313,25 @@ class EveryEntryHoldsForAStaffAccountTest(StaffDraftingFixture):
             with self.subTest(check), patch.dict(guards.CHECKS, {"_probe": (check,)}):
                 with self.assertRaises(guards.DraftRefused):
                     guards.checked_draft("_probe", INVENTED, "Nothing of the kind.")
+
+
+class EveryEntryHoldsForAnOfficerTest(StaffDraftingFixture):
+    """The Officer is treated exactly as Staff (it is in SOCIAL_WORK), on a
+    child another worker holds: every exercise, as the Officer, observes what
+    the table claims for a Staff account."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_authenticate(self.officer)
+        self.assertNotEqual(self.officer.pk, self.child.social_worker_id)
+
+    def test_each_job_type_behaves_as_its_entry_says(self):
+        for job_type, treatment in guards.STAFF_DRAFTING.items():
+            with self.subTest(job_type=job_type, claims=treatment):
+                AssistantJob.objects.all().delete()
+                observed = EXERCISES[job_type](self)
+                self.assertEqual(
+                    treatment, observed,
+                    f"STAFF_DRAFTING says {job_type!r} is {treatment!r}; as the RACC "
+                    f"Officer observed {observed!r}. 'open' means model text reached "
+                    "them unchecked.")

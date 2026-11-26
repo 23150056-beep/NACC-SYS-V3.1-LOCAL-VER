@@ -9,17 +9,20 @@
 // This browser file decides what is OFFERED; the API decides what is ALLOWED.
 
 // May use the system at all; the authentication door refuses any other role.
-export const EVERY_ROLE = ['Administrator', 'Psychologist', 'Staff'];
+export const EVERY_ROLE = ['Administrator', 'Officer', 'Psychologist', 'Staff'];
 
 // Scope: sees every record, no narrowing.
-export const SEES_EVERY_RECORD = ['Administrator'];
+export const SEES_EVERY_RECORD = ['Administrator', 'Officer'];
 
 // Writes a child's record; every place that said "Admin or Staff".
-export const KEEPS_RECORDS = ['Administrator', 'Staff'];
+export const KEEPS_RECORDS = ['Administrator', 'Officer', 'Staff'];
 
 // Follows the social worker's rule where it differs from the ISA's (care gaps,
 // next steps, the drafting table, cancel-only).
-export const SOCIAL_WORK = ['Staff'];
+export const SOCIAL_WORK = ['Officer', 'Staff'];
+
+// Follows the social worker's rule on any record, not only the ones it holds.
+export const WORKS_ANY_RECORD = ['Officer'];
 
 // Chooses holders, transfers records, closes by outcome, removes a duplicate.
 export const OVERSEES_CASEWORK = ['Administrator'];
@@ -33,7 +36,7 @@ export const CLAIMABLE_AT_SIGNUP = ['Staff', 'Psychologist'];
 
 // Who may sign in through the Google door once approved; not what may be
 // claimed there, which is CLAIMABLE_AT_SIGNUP.
-export const SIGNS_IN_WITH_GOOGLE = ['Staff', 'Psychologist'];
+export const SIGNS_IN_WITH_GOOGLE = ['Officer', 'Staff', 'Psychologist'];
 
 // Writes clinical records, and may polish a remark.
 export const WRITES_CLINICAL = ['Administrator', 'Psychologist'];
@@ -52,10 +55,13 @@ export const RECORDS_OWN_SESSION_OUTCOMES = ['Administrator', 'Psychologist', 'S
 export const INSTRUMENT_MANAGERS = ['Administrator', 'Psychologist'];
 
 // capabilities.works_record: does this user follow the social worker's rule for
-// this child - their role is in SOCIAL_WORK and they are the child's social
-// worker? `child.social_worker` is the holder's user id (ChildSerializer).
+// this child - their role is in WORKS_ANY_RECORD (any record), or in SOCIAL_WORK
+// and they are the child's social worker? `child.social_worker` is the holder's
+// user id (ChildSerializer).
 export function worksRecord(user, child) {
-  return SOCIAL_WORK.includes(user?.role_name)
-    && child?.social_worker != null
-    && child.social_worker === user?.id;
+  const role = user?.role_name;
+  return WORKS_ANY_RECORD.includes(role)
+    || (SOCIAL_WORK.includes(role)
+      && child?.social_worker != null
+      && child.social_worker === user?.id);
 }

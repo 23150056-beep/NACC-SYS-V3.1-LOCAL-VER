@@ -24,6 +24,7 @@ relationships; nothing here reaches a model.
 """
 from django.utils import timezone
 
+from accounts import capabilities
 from accounts.display import display_name
 from accounts.models import Role
 from accounts.scoping import (hide_earlier_history, role_of, scope_to_visible,
@@ -173,11 +174,11 @@ def _survey(request, child):
 
 
 def _is_the_social_worker(request, child):
-    """The signed-in Staff account that holds this record. The ISA, a
-    psychologist and another social worker are not."""
-    return (role_of(request) == Role.STAFF
-            and child.social_worker_id is not None
-            and child.social_worker_id == request.user.pk)
+    """Does this account follow the social worker's rule on this record: the
+    Staff account that holds it, or the RACC Officer on any record
+    (capabilities.works_record). The ISA, a psychologist and another social
+    worker are not."""
+    return capabilities.works_record(request.user, child)
 
 
 # --- what to do next (a social worker's) ------------------------------------

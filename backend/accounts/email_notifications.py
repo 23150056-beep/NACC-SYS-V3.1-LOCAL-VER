@@ -737,9 +737,10 @@ def _never_raises(send):
 
 
 # How a lead sentence names the person who asked, by the role they hold. A
-# social worker or the ISA is who asks (children/assignment.py); a role that is
-# not here is simply not named.
-_ASKER_ROLE = {Role.STAFF: "a social worker", Role.ADMINISTRATOR: "the ISA"}
+# social worker, the RACC Officer or the ISA is who asks (children/assignment.py);
+# a role that is not here is simply not named.
+_ASKER_ROLE = {Role.STAFF: "a social worker", Role.ADMINISTRATOR: "the ISA",
+               Role.OFFICER: "the RACC Officer"}
 
 
 @_never_raises

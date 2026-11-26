@@ -43,7 +43,8 @@ class WrittenBriefIsThePsychologistsTest(FactsFixture):
 
     def setUp(self):
         super().setUp()
-        self.refused = (self.sw, self.admin)
+        self.officer = self.make_officer()
+        self.refused = (self.sw, self.admin, self.officer)
 
     def test_staff_and_administrators_are_refused_at_all_three_doors(self):
         with patch.object(services.OllamaClient, "generate") as generate:
@@ -104,7 +105,8 @@ class WrittenBriefIsThePsychologistsTest(FactsFixture):
         self.assertEqual(AssistantJob.objects.filter(job_type="brief").count(), 1)
 
     def test_capabilities_say_which_brief_each_role_gets(self):
-        expected = {self.psy: "clinical", self.sw: "case", self.admin: "case"}
+        expected = {self.psy: "clinical", self.sw: "case", self.admin: "case",
+                    self.officer: "case"}
         for user, kind in expected.items():
             self.client.force_authenticate(user)
             res = self.client.get("/api/assistant/capabilities/")
@@ -156,6 +158,17 @@ class CaseBriefFactsTest(FactsFixture):
         self.assertIn("case_referral", data)
         self.assertIn("psychologist", data)
 
+    def test_the_officer_gets_the_case_brief_on_any_record_with_next_steps(self):
+        officer = self.make_officer()
+        for child in (self.child, self.other_child):
+            data = self._case(officer, child)
+            self.assertEqual(data["kind"], "case", child.fullname)
+            self.assertIn("case_referral", data)
+            self.assertIn("psychologist", data)
+            # The Officer follows the social worker's rule, so it is told what
+            # to do next on a record it does not hold.
+            self.assertIn("next_steps", data)
+
     def test_the_psychologist_gets_the_clinical_kind_and_none_of_the_case_rows(self):
         data = self._case(self.psy)
         self.assertEqual(data["kind"], "clinical")
@@ -164,7 +177,7 @@ class CaseBriefFactsTest(FactsFixture):
             self.assertNotIn(key, data)
 
     def test_no_job_is_written_for_facts(self):
-        for user in (self.sw, self.admin, self.psy):
+        for user in (self.sw, self.admin, self.psy, self.make_officer()):
             self._case(user)
         self.assertFalse(AssistantJob.objects.exists())
 
@@ -195,7 +208,7 @@ class CaseBriefFactsTest(FactsFixture):
 
     def test_an_unconfirmed_summary_is_never_returned(self):
         self._referral(ai_summary="UNCONFIRMED MODEL DRAFT", ai_summary_confirmed=False)
-        for user in (self.sw, self.admin):
+        for user in (self.sw, self.admin, self.make_officer()):
             res = self._facts(user)
             with self.subTest(user=user.email):
                 self.assertIsNone(res.data["case_referral"]["summary"])
@@ -295,7 +308,7 @@ class CaseBriefFactsTest(FactsFixture):
         Child.objects.filter(pk=self.child.pk).update(
             case_type="Foster Care", custodian_name="Lola Cora Dizon",
             custodian_contact="+639171234567", custodian_sms_consent=True)
-        for user in (self.sw, self.admin):
+        for user in (self.sw, self.admin, self.make_officer()):
             body = json.dumps(self._facts(user).json())
             with self.subTest(user=user.email):
                 for leaked in ("Lola", "Cora", "Dizon", "639171234567", "9171234567",
@@ -360,7 +373,7 @@ class CaseBriefFactsTest(FactsFixture):
         self._invite(status=OpinionnaireInvite.SUBMITTED, submitted_at=NOW,
                      expires_at=NOW + timedelta(days=1),
                      answers={"Who do you talk to when you are sad?": "Nobody"})
-        for user in (self.sw, self.admin):
+        for user in (self.sw, self.admin, self.make_officer()):
             res = self._facts(user)
             body = json.dumps(res.json())
             with self.subTest(user=user.email):

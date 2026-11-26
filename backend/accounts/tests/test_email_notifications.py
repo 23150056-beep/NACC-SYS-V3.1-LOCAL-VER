@@ -1153,6 +1153,17 @@ class CaseRequestEmailTest(MailBase):
         self.assertIn(f"Ada Admin, the ISA, {self.LEAD_END.format(ref=self._ref(self.child))}",
                       payload["textContent"])
 
+    def test_the_lead_names_the_racc_officer_as_the_racc_officer(self):
+        officer = User.objects.create_user(
+            email="officer@t.ph", username="officer", password="pass12345",
+            first_name="Corazon", last_name="Dizon",
+            role=Role.objects.get_or_create(role_name=Role.OFFICER)[0])
+        payload = self._sent(by=officer)
+        self.assertIn(
+            f"Corazon Dizon, the RACC Officer, {self.LEAD_END.format(ref=self._ref(self.child))}",
+            payload["textContent"])
+        self.assertIn("Asked by: Corazon Dizon", payload["textContent"])
+
     def test_a_nameless_asker_is_a_colleague_with_a_role_and_never_an_address(self):
         nameless = User.objects.create_user(
             email="noname@gmail.com", username="noname@gmail.com", password="pass12345",

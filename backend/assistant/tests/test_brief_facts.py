@@ -58,6 +58,13 @@ class FactsFixture(APITestCase):
         cfg.save()
         self._flag_count = 0
 
+    def make_officer(self, email="o@racco1.gov.ph", username="o"):
+        """An active RACC Officer, who holds no record. Made on demand: the
+        Officer's row is the migration's, so it is fetched, never created."""
+        role, _ = Role.objects.get_or_create(role_name=Role.OFFICER)
+        return User.objects.create_user(
+            email=email, username=username, password="pass1234", role=role)
+
     def _facts(self, user, child=None):
         self.client.force_authenticate(user)
         return self.client.get(

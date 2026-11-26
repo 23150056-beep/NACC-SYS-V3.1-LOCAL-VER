@@ -99,19 +99,15 @@ class AddRecord(_Base):
         self.assertEqual([self.SW_REFUSAL], res.data["social_worker"])
         self.assertEqual(1, Child.objects.count())
 
-    def test_an_explicit_null_social_worker_is_refused_the_same_way(self):
-        """Today's answer, pinned so a change to it is a decision: an explicit
-        null reaches validate_social_worker as a value (an absent key does
-        not), and only OVERSEES_CASEWORK or a Staff account's own new record
-        may send one. The record form sends no social_worker key unless the
-        ISA's Social Worker field set it (Children.jsx save, recordForm.js
-        EMPTY has none)."""
+    def test_an_explicit_null_social_worker_passes_for_a_record_keeper(self):
+        """WP3 decision: on a NEW record an explicit null is the same as leaving
+        the key out - the record belongs to nobody. Naming a holder (the test
+        above) and any change on an edit stay with OVERSEES_CASEWORK."""
         admit(self, "KEEPS_RECORDS")
         res = self.as_(self.probe).post(
             "/api/children/", complete(social_worker=None), format="json")
-        self.assertEqual(400, res.status_code)
-        self.assertEqual([self.SW_REFUSAL], res.data["social_worker"])
-        self.assertEqual(1, Child.objects.count())
+        self.assertEqual(201, res.status_code, res.data)
+        self.assertIsNone(Child.objects.get(pk=res.data["id"]).social_worker)
 
     def test_the_control_the_social_worker_and_the_isa_can(self):
         self.assertEqual(201, self.as_(self.sw).post(

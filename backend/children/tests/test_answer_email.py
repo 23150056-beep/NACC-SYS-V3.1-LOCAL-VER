@@ -258,7 +258,7 @@ class BookingTheFirstSessionTest(AnswerMailBase):
         appointment = Appointment.objects.create(
             child=self.child, psychologist=self.psy, start=self.start,
             status=Appointment.SCHEDULED)
-        for other in (self.admin, self.sw, self.psy2):
+        for other in (self.admin, self.sw, self.psy2, self.officer):
             self.assertIs(False, accepted_with_first_session(appointment, by=other))
         self.assertTrue(self.owed(req))
 
@@ -553,6 +553,7 @@ class MailAnswerTest(AnswerMailBase):
         other_psychologist = self.mail_answer(req, self.psy2)
         holder = self.mail_answer(req, self.sw)
         isa = self.mail_answer(req, self.admin)
+        officer = self.mail_answer(req, self.officer)
         stranger = self.mail_answer(req, self.other_sw)
         anonymous = APIClient().post(f"/api/assignment-requests/{req.pk}/mail-answer/")
         # Another psychologist is outside the queue entirely, as for accept and
@@ -561,6 +562,7 @@ class MailAnswerTest(AnswerMailBase):
         self.assertEqual(404, other_psychologist.status_code)
         self.assertEqual(403, holder.status_code)
         self.assertEqual(403, isa.status_code)
+        self.assertEqual(403, officer.status_code)      # sees every request, answers none
         self.assertEqual(404, stranger.status_code)
         self.assertEqual(401, anonymous.status_code)
         self.assertTrue(self.owed(req))
@@ -568,7 +570,7 @@ class MailAnswerTest(AnswerMailBase):
     def test_nothing_is_sent_to_anyone_who_may_not_ask(self):
         req = self.accepted()
         with self.outbox() as sent:
-            for user in (self.psy2, self.sw, self.admin, self.other_sw):
+            for user in (self.psy2, self.sw, self.admin, self.other_sw, self.officer):
                 self.mail_answer(req, user)
         self.assertEqual([], sent)
 

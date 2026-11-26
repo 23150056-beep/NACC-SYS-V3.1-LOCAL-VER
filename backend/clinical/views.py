@@ -11,6 +11,7 @@ from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from accounts import capabilities
 from accounts.models import Role
 from accounts.scoping import hide_earlier_history, role_of as _role, scope_to_visible
 from accounts.permissions import CanManageInstruments, ProgressRecordAccess, writes_case_referrals
@@ -717,8 +718,9 @@ class OpinionnaireInviteViewSet(viewsets.ModelViewSet):
         role = _role(self.request)
         if role == Role.ADMINISTRATOR:
             return
-        # A social worker, for their own records (accounts/scoping.py).
-        if role == Role.STAFF and child.social_worker_id == self.request.user.id:
+        # A social worker, for their own records (accounts/scoping.py); the
+        # RACC Officer, for any record (capabilities.works_record).
+        if capabilities.works_record(self.request.user, child):
             return
         if role == Role.PSYCHOLOGIST and child.assigned_psychologist_id == self.request.user.id:
             return

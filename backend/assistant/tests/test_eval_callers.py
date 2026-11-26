@@ -30,6 +30,41 @@ class EvalCallersTest(TestCase):
         roles = [role for role, _ in eval_callers()]
         self.assertEqual([Role.PSYCHOLOGIST, Role.STAFF, Role.ADMINISTRATOR], roles)
 
+    def test_the_officer_is_asked_when_it_has_an_account(self):
+        psy = self._user(Role.PSYCHOLOGIST, "p@racco1.gov.ph")
+        Child.objects.create(fullname="Maria Santos", assigned_psychologist=psy)
+        self._user(Role.STAFF, "s@racco1.gov.ph")
+        self._user(Role.OFFICER, "o@racco1.gov.ph")
+        self.assertEqual([Role.PSYCHOLOGIST, Role.STAFF, Role.OFFICER],
+                         [role for role, _ in eval_callers()])
+
+    def test_the_report_says_which_role_was_not_measured(self):
+        """EVERY_ROLE drives the "NOT MEASURED" lines, so the Officer is named
+        when no Officer account exists to ask as."""
+        from io import StringIO
+
+        from assistant.management.commands.ai_eval import Command
+        from assistant.services import AIUnavailable
+
+        psy = self._user(Role.PSYCHOLOGIST, "p@racco1.gov.ph")
+        Child.objects.create(fullname="Maria Santos", assigned_psychologist=psy)
+
+        class Down:
+            def choose_tool(self, *args, **kwargs):
+                raise AIUnavailable("down")
+
+        def report(command):
+            command.stdout = StringIO()
+            command.client = Down()
+            command._chat(1)
+            return command.stdout.getvalue()
+
+        self.assertIn("Officer        none — NOT MEASURED", report(Command()))
+        self._user(Role.OFFICER, "o@racco1.gov.ph")
+        out = report(Command())
+        self.assertNotIn("Officer        none", out)
+        self.assertIn("Caller: Officer        o@racco1.gov.ph", out)
+
     def test_the_psychologist_is_one_with_a_caseload(self):
         # Otherwise "found nothing" measures an empty caseload, not the tool.
         self._user(Role.PSYCHOLOGIST, "idle@racco1.gov.ph")

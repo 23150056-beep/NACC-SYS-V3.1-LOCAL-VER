@@ -138,6 +138,12 @@ class ChildSerializer(serializers.ModelSerializer):
             # overrides whatever arrives here; anything else is a transfer.
             if self.instance is None and role == Role.STAFF:
                 return value
+            # An explicit null on a new record is the same as leaving the key
+            # out: the record belongs to nobody. Naming a holder, and any
+            # change on an edit, stay with OVERSEES_CASEWORK.
+            if (self.instance is None and value is None
+                    and role in capabilities.KEEPS_RECORDS):
+                return value
             raise serializers.ValidationError(
                 "Only an administrator can move a record to another social worker.")
         if value is not None and not may_hold_records(value):
@@ -347,6 +353,18 @@ class ChildSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         role = getattr(getattr(getattr(request, "user", None), "role", None),
                        "role_name", None) if request else None
+        # The status hole (design note section 5): a record's status is writable
+        # here, so a save could close a case with no reason, or reopen one
+        # outside Reopen. Closed for the RACC Officer, who may save any record,
+        # and ONLY for them: the lifecycle branch replaces this for every role.
+        # The record's own status sent back passes (the form resends it).
+        if role == Role.OFFICER and "status" in attrs:
+            if self.instance is not None and attrs["status"] != self.instance.status:
+                raise serializers.ValidationError(
+                    {"status": "A case is closed with Terminate and reopened with Reopen."})
+            if self.instance is None and attrs["status"] != Child.ACTIVE:
+                raise serializers.ValidationError(
+                    {"status": "A new record is always open."})
         if self.instance:
             # The token belongs to the submission that made the record; no
             # edit moves or sets it.

@@ -257,6 +257,7 @@ class Command(BaseCommand):
     def _ensure_staff(self, rng):
         psych_role, _ = Role.objects.get_or_create(role_name=Role.PSYCHOLOGIST)
         staff_role, _ = Role.objects.get_or_create(role_name=Role.STAFF)
+        officer_role, _ = Role.objects.get_or_create(role_name=Role.OFFICER)
         people = [
             ("Marivic", "Bulan", "m.bulan@racco1.gov.ph", psych_role),
             ("Rogelio", "Tolentino", "r.tolentino@racco1.gov.ph", psych_role),
@@ -265,6 +266,9 @@ class Command(BaseCommand):
             # A second social worker, so the demo shows two sets of records
             # rather than one worker holding everything (24 Sep 2026).
             ("Rosa", "Santos", "r.santos@racco1.gov.ph", staff_role),
+            # The RACC Officer holds no records: they see every one and are
+            # never dealt a child (children/demo_owners.py deals to Staff only).
+            ("Corazon", "Dizon", "c.dizon@racco1.gov.ph", officer_role),
         ]
         made = []
         for first, last, email, role in people:

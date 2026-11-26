@@ -2,8 +2,8 @@
 nobody can claim it, a change away from Staff cannot strand a caseload, and a
 holder who cannot hold records is listed and can be moved.
 
-The Officer is in no capability list yet, so the backstop still refuses an
-Officer everywhere (last class). Its row is always fetched with get_or_create
+The Officer joined the capability lists in WP3, so the backstop admits it (last
+class). Its row is always fetched with get_or_create
 here: the migration made it, and a TransactionTestCase flush would remove it.
 """
 import importlib
@@ -345,8 +345,10 @@ class NobodyCanClaimTheOfficer(APITestCase):
             role(name)
 
     def test_it_is_not_claimable(self):
+        # Not claimable; once approved by the ISA the account may sign in with
+        # Google, like the other roles (WP3).
         self.assertNotIn("Officer", capabilities.CLAIMABLE_AT_SIGNUP)
-        self.assertNotIn("Officer", capabilities.SIGNS_IN_WITH_GOOGLE)
+        self.assertIn("Officer", capabilities.SIGNS_IN_WITH_GOOGLE)
 
     def test_the_typed_form_refuses_officer_as_it_refuses_administrator(self):
         def ask(asked, email):
@@ -374,29 +376,30 @@ class NobodyCanClaimTheOfficer(APITestCase):
         self.assertEqual(answers[Role.ADMINISTRATOR], answers["Officer"])
 
 
-class TheBackstopHoldsForARealOfficer(APITestCase):
-    """The row exists and the account is active, but the Officer is in no list
-    until WP3: refused at sign-in, at /me/ and at refresh."""
+class TheOfficerIsAdmitted(APITestCase):
+    """The row exists, the account is active and the role is in EVERY_ROLE (WP3):
+    sign-in, /me/ and refresh answer; a role in no list is still refused (see
+    accounts/tests/test_unknown_role.py)."""
 
     def test_sign_in_me_and_refresh(self):
-        staff = person("later@racco1.gov.ph", Role.STAFF)
+        person("later@racco1.gov.ph", Role.OFFICER)
         ok = self.client.post("/api/auth/login/", {"email": "later@racco1.gov.ph", "password": PASSWORD})
         self.assertEqual(200, ok.status_code)
-        staff.role = role("Officer")
-        staff.save(update_fields=["role"])
 
         self.client.credentials(HTTP_AUTHORIZATION="Bearer " + ok.data["access"])
         me = self.client.get("/api/auth/me/")
-        self.assertEqual(401, me.status_code)
-        self.assertEqual("unknown_role", me.data["detail"].code)
+        self.assertEqual(200, me.status_code)
+        self.assertEqual("Officer", me.data["role_name"])
         self.client.credentials()
 
         refreshed = self.client.post("/api/auth/refresh/", {"refresh": ok.data["refresh"]})
-        self.assertEqual(401, refreshed.status_code)
-        self.assertNotIn("access", refreshed.data)
-        self.assertEqual("unknown_role", refreshed.data["detail"].code)
+        self.assertEqual(200, refreshed.status_code)
+        self.assertIn("access", refreshed.data)
 
-        res = self.client.post("/api/auth/login/", {"email": "later@racco1.gov.ph", "password": PASSWORD})
-        self.assertEqual(401, res.status_code)
-        self.assertEqual("unknown_role", res.data["detail"].code)
-        self.assertNotIn("access", res.data)
+    @override_settings(GOOGLE_OAUTH_CLIENT_ID=GOOGLE_CLIENT_ID, GOOGLE_ALLOWED_DOMAINS=[])
+    def test_an_approved_officer_signs_in_with_google(self):
+        person("officer@gmail.com", Role.OFFICER, google_sub="sub-officer", email_verified=True)
+        with mock.patch(VERIFY, return_value=claims("officer@gmail.com", sub="sub-officer")):
+            res = self.client.post("/api/auth/google/", {"credential": "tok"}, format="json")
+        self.assertEqual(200, res.status_code, res.data)
+        self.assertIn("access", res.data)

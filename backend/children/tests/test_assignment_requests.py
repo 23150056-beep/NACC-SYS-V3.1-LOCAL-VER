@@ -88,6 +88,9 @@ class NotInTheirRecordsUntilAcceptedTest(AssignmentBase):
         self.assertIsNone(self.child.assigned_psychologist)
 
     def test_a_pending_child_is_absent_from_every_door(self):
+        # The Officer's edit is checked at the same doors by
+        # TheOfficerAsksTest.test_a_pending_child_is_absent_from_every_door_when_the_officer_asked:
+        # a door added to one list belongs in the other.
         self._ask(self.psy)
         client = self._as(self.psy)
         self.assertNotIn(self.child.id, {c["id"] for c in client.get("/api/children/").data})
@@ -203,7 +206,11 @@ class AcceptTest(AssignmentBase):
         """No psychologist in the edit at all: still nobody asked."""
         self.child.assigned_psychologist = self.psy
         self.child.save()
-        for user in (self.sw, self.admin):
+        officer = User.objects.create_user(
+            email="officer-h@t.ph", username="officer-h", password="pass12345",
+            first_name="Corazon", last_name="Dizon",
+            role=Role.objects.get_or_create(role_name=Role.OFFICER)[0])
+        for user in (self.sw, self.admin, officer):
             res = self._as(user).patch(f"/api/children/{self.child.id}/",
                                        {"assignee_sees_history": False}, format="json")
             self.assertEqual(200, res.status_code, res.data)
@@ -593,3 +600,93 @@ class RequestListQueryCountTest(AssignmentBase):
         small = count_for(2)
         large = count_for(8)
         self.assertEqual(small, large)
+
+
+class TheOfficerAsksTest(AssignmentBase):
+    """The RACC Officer works any record as its social worker would: it asks,
+    asks someone else and withdraws on a record another worker holds - and
+    never answers for the psychologist."""
+
+    def setUp(self):
+        super().setUp()
+        self.officer = User.objects.create_user(
+            email="officer@t.ph", username="officer", password="pass12345",
+            first_name="Corazon", last_name="Dizon",
+            role=Role.objects.get_or_create(role_name=Role.OFFICER)[0])
+
+    def test_an_officers_edit_asks_and_assigns_nobody(self):
+        req = self._ask(self.psy, by=self.officer)
+        self.child.refresh_from_db()
+        self.assertIsNone(self.child.assigned_psychologist)
+        self.assertEqual((self.psy, AssignmentRequest.PENDING, self.officer),
+                         (req.psychologist, req.status, req.requested_by))
+        # The record is still the social worker's.
+        self.assertEqual(self.sw, self.child.social_worker)
+
+    def test_a_pending_child_is_absent_from_every_door_when_the_officer_asked(self):
+        # Counterpart of NotInTheirRecordsUntilAcceptedTest's door test: keep
+        # the two lists of doors the same.
+        self._ask(self.psy, by=self.officer)
+        client = self._as(self.psy)
+        self.assertNotIn(self.child.id, {c["id"] for c in client.get("/api/children/").data})
+        self.assertEqual(404, client.get(f"/api/children/{self.child.id}/").status_code)
+        self.assertEqual(404, client.get(f"/api/reports/child/{self.child.id}/").status_code)
+        self.assertEqual(404, client.get(
+            f"/api/availability/next-slots/?child={self.child.id}").status_code)
+        self.assertEqual(404, client.get(
+            f"/api/availability/openings/?child={self.child.id}").status_code)
+        self.assertEqual(404, client.get(
+            f"/api/assistant/brief/child/{self.child.id}/facts/").status_code)
+        # ... and the request is in their queue, naming who asked.
+        row = client.get("/api/assignment-requests/").data[0]
+        self.assertEqual("Corazon Dizon", row["requested_by_name"])
+
+    def test_an_officer_asking_someone_else_withdraws_the_first_request(self):
+        first = self._ask(self.psy)
+        second = self._ask(self.psy2, by=self.officer)
+        first.refresh_from_db()
+        self.assertEqual(AssignmentRequest.WITHDRAWN, first.status)
+        self.assertEqual(AssignmentRequest.PENDING, second.status)
+
+    def test_an_officer_withdraws_a_request_on_another_workers_record(self):
+        req = self._ask(self.psy)
+        res = self._as(self.officer).post(f"/api/assignment-requests/{req.id}/withdraw/")
+        self.assertEqual(200, res.status_code, res.data)
+        self.assertEqual("withdrawn", res.data["status"])
+        self.assertTrue(ActivityLog.objects.filter(
+            action=ActivityLog.WITHDRAWN, recipient=self.psy).exists())
+
+    def test_an_officer_sees_every_request_and_who_was_asked(self):
+        req = self._ask(self.psy)
+        other = Child.objects.create(
+            first_name="Ben", last_name="Lim", fullname="Ben Lim", social_worker=self.other_sw,
+            birth_date=timezone.localdate() - timedelta(days=9 * 366))
+        self._ask(self.psy2, by=self.other_sw, child=other)
+        client = self._as(self.officer)
+        self.assertEqual({self.child.id, other.id},
+                         {r["child"] for r in client.get("/api/assignment-requests/").data})
+        self.assertEqual(200, client.get(f"/api/assignment-requests/{req.id}/").status_code)
+        record = client.get(f"/api/children/{self.child.id}/").data
+        self.assertEqual(self.psy.id, record["pending_assignment"]["psychologist"])
+
+    def test_an_officer_reads_a_declines_reason(self):
+        req = self._ask(self.psy)
+        self._answer(req, "decline", reason="Full caseload.")
+        record = self._as(self.officer).get(f"/api/children/{self.child.id}/").data
+        self.assertEqual("Full caseload.", record["declined_assignment"]["reason"])
+
+    def test_an_officer_never_answers_for_the_psychologist(self):
+        req = self._ask(self.psy)
+        client = self._as(self.officer)
+        for verb, body in (("accept", {}), ("decline", {"reason": "No."}), ("mail-answer", {})):
+            res = client.post(f"/api/assignment-requests/{req.id}/{verb}/", body, format="json")
+            self.assertEqual(403, res.status_code, verb)
+        req.refresh_from_db()
+        self.assertEqual(AssignmentRequest.PENDING, req.status)
+        self.child.refresh_from_db()
+        self.assertIsNone(self.child.assigned_psychologist)
+
+    def test_the_psychologist_picker_answers_the_officer(self):
+        res = self._as(self.officer).get("/api/availability/psychologists/",
+                                         {"child": self.child.id})
+        self.assertEqual(200, res.status_code, res.data)

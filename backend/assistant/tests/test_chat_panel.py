@@ -29,6 +29,10 @@ CAPS = "/api/assistant/capabilities/"
 
 
 class PanelFixture(FactsFixture):
+    def setUp(self):
+        super().setUp()
+        self.officer = self.make_officer()
+
     def _follow(self, user, tool, args, label="A question"):
         self.client.force_authenticate(user)
         return self.client.post(FOLLOWUP, {"tool": tool, "args": args, "label": label},
@@ -43,7 +47,8 @@ class PanelFixture(FactsFixture):
 
 class SummaryFactsTest(PanelFixture):
     def test_the_summary_is_the_briefs_facts_per_role(self):
-        for user, kind in ((self.psy, "clinical"), (self.sw, "case"), (self.admin, "case")):
+        for user, kind in ((self.psy, "clinical"), (self.sw, "case"), (self.admin, "case"),
+                           (self.officer, "case")):
             with self.subTest(user=user.email):
                 result = self._summary(user)
                 self.assertEqual("one", result["match"])
@@ -54,6 +59,12 @@ class SummaryFactsTest(PanelFixture):
                     f"/api/assistant/brief/child/{self.child.id}/facts/").json()
                 self.assertEqual(facts, result["facts"])
                 self.assertEqual(f"/report/child/{self.child.id}", result["link"]["path"])
+
+    def test_what_to_do_next_is_also_the_officers_on_any_record(self):
+        # The Officer follows the social worker's rule on every record
+        # (capabilities.works_record), the one it does not hold included.
+        self.assertIn("next_steps", self._summary(self.officer)["facts"])
+        self.assertIn("next_steps", self._summary(self.officer, self.other_child)["facts"])
 
     def test_what_to_do_next_is_only_the_record_s_own_social_workers(self):
         self.assertIn("next_steps", self._summary(self.sw)["facts"])
@@ -196,7 +207,7 @@ class FollowupToolsTest(PanelFixture):
 class StarterQuestionsTest(PanelFixture):
     def test_every_example_validates_and_resolves_for_its_role(self):
         factory = APIRequestFactory()
-        for user in (self.psy, self.sw, self.admin):
+        for user in (self.psy, self.sw, self.admin, self.officer):
             role = user.role.role_name
             self.client.force_authenticate(user)
             examples = self.client.get(CAPS).data["examples"]
@@ -225,6 +236,30 @@ class StarterQuestionsTest(PanelFixture):
         self.assertEqual(("What do I need to do?", "list_care_gaps"),
                          (first["label"], first["tool"]))
 
+    def test_the_officers_starters_are_ai_eval_cases_and_answer_over_every_record(self):
+        """Each label is a question already in ai_eval's CHAT_CASES (a starter
+        that routes wrong when typed is worse than none), and each answers the
+        Officer over every record, with no model."""
+        from assistant.management.commands.ai_eval import CHAT_CASES
+        cases = {q: (tool, args) for _, q, tool, _, args in CHAT_CASES}
+        self.client.force_authenticate(self.officer)
+        examples = self.client.get(CAPS).data["examples"]
+        self.assertEqual(
+            ["Who still needs a follow-up?", "Which children have no psychologist?",
+             "What's on this week?", "Active children by case type?"],
+            [e["label"] for e in examples])
+        for ex in examples:
+            tool, expected_args = cases[ex["label"]]
+            self.assertEqual(tool, ex["tool"], ex["label"])
+            for key, value in (expected_args or {}).items():
+                self.assertEqual(value, ex["args"][key], ex["label"])
+
+    def test_the_officers_capability_text_is_its_own(self):
+        text = tools.capability_text("Officer")
+        self.assertIn("every record", text)
+        self.assertIn("own words", text)
+        self.assertNotEqual(tools.capability_text("Psychologist"), text)
+
     def test_a_bad_table_entry_is_a_loud_error_not_a_quiet_gap(self):
         with patch.dict(tools._EXAMPLES, {"Staff": [("x", "get_statistics", {"measure": "salaries"})]}):
             with self.assertRaises(ValueError):
@@ -236,13 +271,13 @@ class StarterQuestionsTest(PanelFixture):
 
 class CapabilitiesEnabledTest(PanelFixture):
     def test_enabled_follows_the_administrators_switch_for_everyone(self):
-        for user in (self.psy, self.sw, self.admin):
+        for user in (self.psy, self.sw, self.admin, self.officer):
             self.client.force_authenticate(user)
             self.assertIs(True, self.client.get(CAPS).data["enabled"])
         cfg = AssistantSetting.load()
         cfg.enabled = False
         cfg.save()
-        for user in (self.psy, self.sw, self.admin):
+        for user in (self.psy, self.sw, self.admin, self.officer):
             self.client.force_authenticate(user)
             res = self.client.get(CAPS)
             self.assertEqual(200, res.status_code)

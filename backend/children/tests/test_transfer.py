@@ -45,6 +45,10 @@ class TransferCase(TestCase):
         self.tomas = make("tomas@t.ph", "Tomas", "Gone", Role.STAFF, status=User.ARCHIVED)
         self.admin = make("admin@t.ph", "Ada", "Admin", Role.ADMINISTRATOR)
         self.psy = make("psy@t.ph", "Marivic", "Bulan", Role.PSYCHOLOGIST)
+        # The RACC Officer holds no record and (until WP4) moves none; its row is
+        # the migration's, so it is fetched, not created.
+        roles[Role.OFFICER] = Role.objects.get_or_create(role_name=Role.OFFICER)[0]
+        self.officer = make("officer@t.ph", "Corazon", "Dizon", Role.OFFICER)
 
         self.ana = self.child("Ana", "Cruz", self.rosa)
         self.ben = self.child("Ben", "Lim", self.rosa)
@@ -83,7 +87,7 @@ class TransferCase(TestCase):
 class WhoMayTest(TransferCase):
     def test_social_workers_and_psychologists_are_refused(self):
         before = self.holders()
-        for user in (self.rosa, self.editha, self.psy):
+        for user in (self.rosa, self.editha, self.psy, self.officer):
             r = self.transfer([self.ana], user=user)
             self.assertEqual(403, r.status_code, user.email)
             self.assertIn("ISA", r.data["detail"])
@@ -127,7 +131,7 @@ class AccountRulesTest(TransferCase):
 
     def test_both_must_be_social_workers(self):
         before = self.holders()
-        for other in (self.psy, self.admin):
+        for other in (self.psy, self.admin, self.officer):
             self.assertEqual("Choose a social worker (SW) account.",
                              self.refused(self.transfer([self.ana], target=other), "to_social_worker"))
             self.assertEqual("Choose a social worker (SW) account.",

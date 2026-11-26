@@ -26,8 +26,9 @@ HOSTED = {
 
 class RecordPolishTest(APITestCase):
     def setUp(self):
-        roles = {n: Role.objects.create(role_name=n)
-                 for n in (Role.ADMINISTRATOR, Role.PSYCHOLOGIST, Role.STAFF)}
+        # get_or_create: the Officer's row is the migration's.
+        roles = {n: Role.objects.get_or_create(role_name=n)[0]
+                 for n in (Role.ADMINISTRATOR, Role.PSYCHOLOGIST, Role.STAFF, Role.OFFICER)}
         self.users = {
             n: User.objects.create_user(
                 email=f"{n[:1].lower()}@racco1.gov.ph", username=n.lower(),
@@ -46,7 +47,7 @@ class RecordPolishTest(APITestCase):
         return res, generate
 
     def test_the_people_who_write_a_record_get_a_draft_and_a_job(self):
-        for role in (Role.STAFF, Role.ADMINISTRATOR, Role.PSYCHOLOGIST):
+        for role in (Role.STAFF, Role.ADMINISTRATOR, Role.PSYCHOLOGIST, Role.OFFICER):
             with self.subTest(role=role):
                 res, _ = self._post(self.users[role])
                 self.assertEqual(200, res.status_code)
@@ -56,6 +57,20 @@ class RecordPolishTest(APITestCase):
                 self.assertEqual("record_polish", job.job_type)
                 self.assertEqual("record:draft", job.input_ref)
                 self.assertIsNone(job.child)
+
+    def test_the_officer_may_polish_a_record_but_not_a_remark(self):
+        """Record polish follows EVERY_ROLE; remark polish is WRITES_CLINICAL,
+        which the Officer is not in (it is not a psychologist)."""
+        officer = self.users[Role.OFFICER]
+        self.assertEqual(200, self._post(officer)[0].status_code)
+        AssistantJob.objects.all().delete()
+        res, generate = self._post(officer)
+        self.client.force_authenticate(officer)
+        with patch.object(services.OllamaClient, "generate") as generate:
+            refused = self.client.post("/api/assistant/polish-remark/",
+                                       {"text": "Umiiyak si bata."}, format="json")
+        self.assertEqual(403, refused.status_code)
+        generate.assert_not_called()
 
     def test_an_account_with_no_role_is_refused_before_the_model_and_the_job(self):
         res, generate = self._post(self.norole)
@@ -85,7 +100,7 @@ class RecordPolishTest(APITestCase):
 
     def test_a_draft_that_invents_a_name_date_and_number_is_refused_for_every_role(self):
         invented = "it was reported by Villanueva on 14 March that 77 children were seen"
-        for role in (Role.STAFF, Role.ADMINISTRATOR, Role.PSYCHOLOGIST):
+        for role in (Role.STAFF, Role.ADMINISTRATOR, Role.PSYCHOLOGIST, Role.OFFICER):
             with self.subTest(role=role):
                 AssistantJob.objects.all().delete()
                 res, _ = self._post(self.users[role], model=invented)
@@ -146,7 +161,7 @@ class RecordPolishTest(APITestCase):
     @override_settings(**HOSTED)
     def test_a_hosted_deployment_polishes_with_the_hosted_model(self):
         # Owner's decision, 29 Oct 2026: record polish may use the hosted model.
-        for role in (Role.STAFF, Role.ADMINISTRATOR, Role.PSYCHOLOGIST):
+        for role in (Role.STAFF, Role.ADMINISTRATOR, Role.PSYCHOLOGIST, Role.OFFICER):
             with self.subTest(role=role):
                 res, hosted, local = self._post_hosted(self.users[role])
                 self.assertEqual(200, res.status_code)

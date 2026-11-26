@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework import mixins, viewsets, permissions
-from accounts import email_notifications
+from accounts import capabilities, email_notifications
 from accounts.models import Role
 from activity.models import ActivityLog
 from activity.serializers import ActivityLogSerializer
@@ -90,6 +90,14 @@ class ActivityLogViewSet(mixins.ListModelMixin, viewsets.GenericViewSet):
             # what the line is but its words, and those are not read back.
             qs = qs.exclude(kind__in=[ActivityLog.KIND_MOVE_COPY,
                                       ActivityLog.KIND_EMAIL_LIMIT])
+        elif role in capabilities.SEES_EVERY_RECORD:
+            # The RACC Officer (the Administrator is above): every line in the
+            # RECORD category, any child, any entity type there. NEVER the USER
+            # or SECURITY categories - those are IT's - whatever ?category=
+            # says: the category filter is applied after this scope, so it can
+            # only narrow it. Same two exclusions as the Administrator's.
+            qs = qs.filter(category=ActivityLog.RECORD).exclude(
+                kind__in=[ActivityLog.KIND_MOVE_COPY, ActivityLog.KIND_EMAIL_LIMIT])
         else:
             # A role no branch above names sees nothing.
             qs = qs.none()

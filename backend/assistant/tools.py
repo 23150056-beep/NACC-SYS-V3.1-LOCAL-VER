@@ -502,10 +502,20 @@ _CAN_ASK = {
         "children with a particular concern, a summary of one child, who "
         "needs follow-up, and which children have flagged something in their "
         "own words"),
+    # The RACC Officer works every record, so the agency's schedule and the
+    # numbers for every record; the same questions the others have.
+    "Officer": (
+        "the agency's schedule, the numbers for every record — children by "
+        "case type, stage, age, sex or psychologist, new intakes, closures "
+        "and why, "
+        "attendance and no-shows, the wait for a first session, and time in "
+        "pre-assessment — "
+        "children with a particular concern, a summary of one child, who "
+        "needs follow-up, and which children have flagged something in their "
+        "own words"),
 }
-# Deliberate else: a role with no entry above reads the psychologist's wording
-# (WP3 adds the Officer's entries). What it may actually ask is the tools' own
-# scoping, not this sentence.
+# Deliberate else: a role with no entry above reads the psychologist's wording.
+# What it may actually ask is the tools' own scoping, not this sentence.
 _CAN_ASK_DEFAULT = _CAN_ASK["Psychologist"]
 
 # Shown in the empty panel. Questions, not features — someone who arrives by
@@ -538,6 +548,12 @@ _EXAMPLES = {
                {"concern": "anxiety"}),
               ("What's on this week?", "list_my_appointments", {"when": "this_week"}),
               ("Caseload per psychologist?", "get_statistics", {"by": "psychologist"})],
+    # The RACC Officer: every label is a question already in ai_eval's
+    # CHAT_CASES, and each tool answers the Officer over every record.
+    "Officer": [("Who still needs a follow-up?", "list_care_gaps", {}),
+                ("Which children have no psychologist?", "list_unassigned_children", {}),
+                ("What's on this week?", "list_my_appointments", {"when": "this_week"}),
+                ("Active children by case type?", "get_statistics", {"by": "case_type"})],
 }
 
 GREETING_REPLY = "Hello — what would you like to look up?"
@@ -557,8 +573,8 @@ def capability_examples(role):
     """[{label, tool, args}] for the empty panel, the args as the validator
     returns them (defaults filled), exactly what a chip sends back."""
     out = []
-    # Deliberate default: a role with no entry gets the psychologist's starters
-    # (WP3 adds the Officer's entries); each is still validated below.
+    # Deliberate default: a role with no entry gets the psychologist's starters;
+    # each is still validated below.
     for label, tool, args in _EXAMPLES.get(role, _EXAMPLES["Psychologist"]):
         call = validate(tool, args)
         if not call.ok:             # a bad table entry is a bug, never a quiet gap
@@ -1277,6 +1293,10 @@ def _resolve_care_gaps(request, args):
            "groups": groups[:CARE_GAP_CHILDREN]}
     if role_of(request) == Role.STAFF:
         out["empty"] = "Nothing outstanding in your records."
+    elif role_of(request) == Role.OFFICER:
+        # The Officer is answered over every record, so "your records" would
+        # be wrong for them.
+        out["empty"] = "Nothing outstanding in any record."
     return out
 
 

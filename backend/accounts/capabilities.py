@@ -17,17 +17,20 @@ closing a circle.
 from accounts.models import Role
 
 # May use the system at all; the authentication door refuses any other role.
-EVERY_ROLE = (Role.ADMINISTRATOR, Role.PSYCHOLOGIST, Role.STAFF)
+EVERY_ROLE = (Role.ADMINISTRATOR, Role.OFFICER, Role.PSYCHOLOGIST, Role.STAFF)
 
 # Scope: sees every record, no narrowing.
-SEES_EVERY_RECORD = (Role.ADMINISTRATOR,)
+SEES_EVERY_RECORD = (Role.ADMINISTRATOR, Role.OFFICER)
 
 # Writes a child's record; every place that said "Admin or Staff".
-KEEPS_RECORDS = (Role.ADMINISTRATOR, Role.STAFF)
+KEEPS_RECORDS = (Role.ADMINISTRATOR, Role.OFFICER, Role.STAFF)
 
 # Follows the social worker's rule where it differs from the ISA's (care gaps,
 # next steps, the drafting table, cancel-only).
-SOCIAL_WORK = (Role.STAFF,)
+SOCIAL_WORK = (Role.OFFICER, Role.STAFF)
+
+# Follows the social worker's rule on any record, not only the ones it holds.
+WORKS_ANY_RECORD = (Role.OFFICER,)
 
 # Chooses holders, transfers records, closes by outcome, removes a duplicate.
 OVERSEES_CASEWORK = (Role.ADMINISTRATOR,)
@@ -41,7 +44,7 @@ CLAIMABLE_AT_SIGNUP = (Role.PSYCHOLOGIST, Role.STAFF)
 
 # Who may sign in through the Google door once approved; not what may be
 # claimed there, which is CLAIMABLE_AT_SIGNUP.
-SIGNS_IN_WITH_GOOGLE = (Role.PSYCHOLOGIST, Role.STAFF)
+SIGNS_IN_WITH_GOOGLE = (Role.OFFICER, Role.PSYCHOLOGIST, Role.STAFF)
 
 # Writes clinical records, and may polish a remark.
 WRITES_CLINICAL = (Role.ADMINISTRATOR, Role.PSYCHOLOGIST)
@@ -66,10 +69,13 @@ def _role_name(user):
 
 def works_record(user, child):
     """Does this user follow the social worker's rule for this child: their
-    role is in SOCIAL_WORK and they are the child's social worker?"""
-    return (_role_name(user) in SOCIAL_WORK
-            and child.social_worker_id is not None
-            and child.social_worker_id == getattr(user, "id", None))
+    role is in WORKS_ANY_RECORD (any record), or in SOCIAL_WORK and they are
+    the child's social worker?"""
+    role = _role_name(user)
+    return (role in WORKS_ANY_RECORD
+            or (role in SOCIAL_WORK
+                and child.social_worker_id is not None
+                and child.social_worker_id == getattr(user, "id", None)))
 
 
 def may_hold_records(user):

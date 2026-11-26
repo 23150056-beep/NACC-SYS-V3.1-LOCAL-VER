@@ -100,7 +100,7 @@ class OffersTest(SimpleTestCase):
             ("list_self_report_flags", {"period": "this_month"}, {"kind": "self_report_flags"}),
         ]
         for tool, args, result in cases:
-            for role in (Role.ADMINISTRATOR, Role.STAFF, Role.PSYCHOLOGIST):
+            for role in (Role.ADMINISTRATOR, Role.STAFF, Role.PSYCHOLOGIST, Role.OFFICER):
                 offers = self._offers(tool, args, result, role)
                 self.assertLessEqual(len(offers), tools.FOLLOWUP_LIMIT)
                 for o in offers:

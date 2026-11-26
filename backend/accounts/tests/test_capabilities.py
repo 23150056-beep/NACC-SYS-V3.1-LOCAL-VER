@@ -50,20 +50,21 @@ def _is_role_names_tuple(rel, tree, node):
                     return True
     return False
 
-A, P, S = Role.ADMINISTRATOR, Role.PSYCHOLOGIST, Role.STAFF
+A, P, S, O = Role.ADMINISTRATOR, Role.PSYCHOLOGIST, Role.STAFF, Role.OFFICER
 
 
 class TheListsHoldExactlyTheirMembers(SimpleTestCase):
     def test_members(self):
         c = capabilities
-        self.assertEqual((A, P, S), c.EVERY_ROLE)
-        self.assertEqual((A,), c.SEES_EVERY_RECORD)
-        self.assertEqual((A, S), c.KEEPS_RECORDS)
-        self.assertEqual((S,), c.SOCIAL_WORK)
+        self.assertEqual((A, O, P, S), c.EVERY_ROLE)
+        self.assertEqual((A, O), c.SEES_EVERY_RECORD)
+        self.assertEqual((A, O, S), c.KEEPS_RECORDS)
+        self.assertEqual((O, S), c.SOCIAL_WORK)
+        self.assertEqual((O,), c.WORKS_ANY_RECORD)
         self.assertEqual((A,), c.OVERSEES_CASEWORK)
         self.assertEqual((S,), c.HOLDS_RECORDS)
         self.assertEqual((P, S), c.CLAIMABLE_AT_SIGNUP)
-        self.assertEqual((P, S), c.SIGNS_IN_WITH_GOOGLE)
+        self.assertEqual((O, P, S), c.SIGNS_IN_WITH_GOOGLE)
         self.assertEqual((A, P), c.WRITES_CLINICAL)
         self.assertEqual((A, P), c.MANAGES_AVAILABILITY)
         self.assertEqual((A, P), c.INSTRUMENT_MANAGERS)
@@ -251,8 +252,9 @@ class RoleListsAreNotWrittenAnywhereElse(SimpleTestCase):
     def test_role_names_is_the_four_rows_and_not_who_may_sign_in(self):
         self.assertEqual((A, P, S, "Officer"), Role.NAMES)
         self.assertEqual("Officer", Role.OFFICER)
-        # The rows that exist are not who may use the system (until WP3).
-        self.assertNotIn(Role.OFFICER, capabilities.EVERY_ROLE)
+        # The rows that exist are one list and who may use the system another;
+        # from WP3 the Officer is in both.
+        self.assertIn(Role.OFFICER, capabilities.EVERY_ROLE)
 
     def test_the_exemption_is_only_role_names(self):
         src = "class Role:\n    NAMES = (A, B)\n    OTHER = (A, B)\n"
@@ -564,9 +566,23 @@ class TheFunctions(SimpleTestCase):
             self.assertTrue(works_record(_user("Probe", 7), child))
         self.assertFalse(works_record(_user("Probe", 7), child))
 
+    def test_the_officer_works_any_record_held_or_not(self):
+        self.assertTrue(works_record(_user(O, 3), SimpleNamespace(social_worker_id=7)))
+        self.assertTrue(works_record(_user(O, 3), SimpleNamespace(social_worker_id=None)))
+        self.assertTrue(works_record(_user(O, 3), SimpleNamespace(social_worker_id=3)))
+
+    def test_works_any_record_follows_its_own_list(self):
+        child = SimpleNamespace(social_worker_id=7)
+        with patch.object(capabilities, "WORKS_ANY_RECORD", (O, "Probe")):
+            self.assertTrue(works_record(_user("Probe", 3), child))
+        self.assertFalse(works_record(_user("Probe", 3), child))
+        # SOCIAL_WORK alone is not "any record": the Probe holds none.
+        with patch.object(capabilities, "SOCIAL_WORK", (O, S, "Probe")):
+            self.assertFalse(works_record(_user("Probe", 3), child))
+
     def test_may_hold_records(self):
         self.assertTrue(may_hold_records(_user(S)))
-        for name in (A, P, "Probe", None):
+        for name in (A, O, P, "Probe", None):
             self.assertFalse(may_hold_records(_user(name)), name)
         self.assertFalse(may_hold_records(SimpleNamespace(role=None)))
         self.assertFalse(may_hold_records(None))
