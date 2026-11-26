@@ -3,7 +3,7 @@
 **Date:** 2026-11-16
 **Status:** Being built on `claude/sweet-wozniak-9fzjme`, with the owner's
 decisions in. WP0 is in (`ae37c40`, 22 Nov 2026), WP1 is in (`c7eae2c`, `4d4416f`,
-23 Nov) and WP2 is in (25 Nov); WP3 waits for the lifecycle branch. The
+23 Nov) WP2 is in (25 Nov) and WP3 is in (`afa0935`, 26 Nov); WP4 is next. The
 case study removal is merged (`b6940c3`) and has been live on the demo since 22
 Nov; the lifecycle branch is not merged yet ("Before WP0"). An independent
 review read this note against the code on 22 Nov 2026. What it changed is
@@ -1028,6 +1028,32 @@ Officer's row and touches nothing else. Decided by the planner on the way:
   until WP3 (the backstop), as the route table's Officer column shows.
 
 ### WP3. Every record, and a social worker's work on any of them
+
+**Done (`afa0935`, 26 Nov 2026), on the owner's word without the lifecycle.**
+The owner asked for WP3 before the lifecycle branch landed, so the status
+hole is closed for the Officer alone: an Officer's edit whose status differs
+from the record's, and an Officer's create with any status but "active",
+are refused with the lifecycle's own sentences. The other roles keep the
+hole until the lifecycle merges. **At that merge,**
+`children/tests/test_officer_records.py`
+`test_the_other_roles_are_not_changed_by_it` fails by design: flip its 200
+and 201 assertions to 400, or delete it. Also decided: an explicit
+`"social_worker": null` on Add Record passes for `KEEPS_RECORDS` (it means
+the same as leaving the key out), and `works_record` reads a new list,
+`WORKS_ANY_RECORD` (the Officer). Reviewed three ways (no blocker, no major),
+fixed, read again; 3,827 tests pass. In the route table only the Officer's
+column moved (103 cells, all from *refused*), and at no door is it open
+where a social worker on their own child is not. In a browser the demo
+Officer (`c.dizon@racco1.gov.ph`) drew every screen with no error; the
+wording on them is still the social worker's or the ISA's (WP5).
+
+Left for WP5: every role's "what you can ask" sentence still offers a
+breakdown by "stage", removed on 2 Nov (all four drop it together); the
+duplicate check calls every match "yours" for the Officer and the ISA; and
+`test_a_pending_child_is_absent_from_every_door` asserts a 404 on
+`/api/appointments/next-slots/`, a route that does not exist (the Officer's
+copy uses the real one).
+
 
 - **Starts once the lifecycle branch is merged**, or on the planner's word
   (section 5).
